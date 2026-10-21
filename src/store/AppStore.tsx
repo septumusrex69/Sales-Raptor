@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
+import { refreshNavCounts } from '../lib/navCounts'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
@@ -11,6 +12,7 @@ import type {
   Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, Handover, ID, Lead,
   ProductService, Proposal, RejectionReason, Target, TargetMetric, Task, TaskType, Team, TeamKind, User,
 } from '../types'
+import { clockNowMs } from '../lib/clock.ts'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -37,10 +39,26 @@ function appToRow<T extends object>(patch: T): Record<string, unknown> {
   return out
 }
 
-async function fetchTable<T>(table: string, orderBy: string): Promise<T[]> {
+/**
+ * One table, or an empty list and a note of which table it was.
+ *
+ * A TABLE THAT FAILS TO LOAD USED TO LOOK EXACTLY LIKE A TABLE WITH NOTHING IN IT. The error went
+ * to the console -- which nobody has open, least of all on the iPad the firm works on -- and the
+ * empty array went to the screen. The firm met this as "when I load a user, I can't add it to a
+ * team": `teams` had come back empty, so every team picker in Settings collapsed to its one
+ * hard-coded "No team" option and the seven teams in the database were simply not offered. The
+ * app looked like it had been built without teams rather than like something had gone wrong.
+ *
+ * So `failed` collects the tables that did not load and the caller says so. Still an empty array
+ * rather than a throw: one table failing must not take the other eleven down with it -- that is
+ * the whole reason the errors were swallowed in the first place, and it was right. What was wrong
+ * was swallowing them SILENTLY.
+ */
+async function fetchTable<T>(table: string, orderBy: string, failed?: string[]): Promise<T[]> {
   const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false })
   if (error) {
     console.error(`[AppStore] failed to load ${table}:`, error.message)
+    failed?.push(table)
     return []
   }
   return (data ?? []).map((row) => rowToApp<T>(row as Record<string, unknown>))
@@ -259,6 +277,8 @@ interface AppActions {
   updateContact: (id: ID, patch: Partial<Contact>) => void
   addCompany: (input: Partial<Company> & { name: string }) => Company
   updateCompany: (id: ID, patch: Partial<Company>) => void
+  /** The screen's copy only, for a change the SERVER already wrote (the welcome route, S8): no second write. */
+  showCompanyChange: (id: ID, patch: Partial<Company>) => void
   deleteCompany: (id: ID) => void
   addTask: (input: Partial<Task> & { title: string; dueDate: string }) => Task
   updateTask: (id: ID, patch: Partial<Task>) => void
@@ -435,19 +455,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
     let active = true
     setDataLoading(true)
+    /* Which tables did not load. Collected rather than thrown -- see fetchTable. */
+    const failed: string[] = []
     Promise.all([
-      fetchTable<Lead>('leads', 'created_at'),
-      fetchTable<Deal>('deals', 'created_at'),
-      fetchTable<Contact>('contacts', 'created_at'),
-      fetchTable<Company>('companies', 'created_at'),
-      fetchTable<Task>('tasks', 'created_at'),
-      fetchTable<Activity>('activities', 'activity_date'),
-      fetchTable<Proposal>('proposals', 'created_at'),
-      fetchTable<Handover>('handovers', 'received_at'),
-      fetchTable<User>('profiles', 'created_at'),
-      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
-      fetchTable<AppNotification>('notifications', 'created_at'),
-      fetchTable<Target>('targets', 'created_at'),
+      fetchTable<Lead>('leads', 'created_at', failed),
+      fetchTable<Deal>('deals', 'created_at', failed),
+      fetchTable<Contact>('contacts', 'created_at', failed),
+      fetchTable<Company>('companies', 'created_at', failed),
+      fetchTable<Task>('tasks', 'created_at', failed),
+      fetchTable<Activity>('activities', 'activity_date', failed),
+      fetchTable<Proposal>('proposals', 'created_at', failed),
+      fetchTable<Handover>('handovers', 'received_at', failed),
+      fetchTable<User>('profiles', 'created_at', failed),
+      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at', failed),
+      fetchTable<AppNotification>('notifications', 'created_at', failed),
+      fetchTable<Target>('targets', 'created_at', failed),
     ])
       .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg]) => {
         if (!active) return
@@ -466,6 +488,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setNotifications(nt)
         setTargets(tg)
         setDataLoading(false)
+        /*
+         * SAID, NOT LOGGED. Named tables rather than "something went wrong", because the whole
+         * failure is that the screen shows an empty list and looks correct -- the person needs to
+         * know WHICH list is lying to them before they act on it.
+         */
+        if (failed.length > 0) {
+          showError(
+            `Some of your data did not load: ${failed.join(', ')}. Those lists are showing as empty `
+            + 'rather than showing what is there. Reload the page before changing anything on them.',
+          )
+        }
       })
       .catch((err: unknown) => {
         if (!active) return
@@ -490,6 +523,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
    * until something re-fetches — previously only a full page reload did, which
    * is why a synced email wouldn't appear on the client until you refreshed.
    */
+  const showCompanyChange = useCallback<AppActions['showCompanyChange']>((id, patch) => {
+    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+  }, [])
+
   const refreshSyncedData = useCallback<AppActions['refreshSyncedData']>(async () => {
     const [ac, nt] = await Promise.all([fetchTable<Activity>('activities', 'activity_date'), fetchTable<AppNotification>('notifications', 'created_at')])
     setActivities(ac)
@@ -637,7 +674,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         kind: kindForService(def.service),
         value: def.value,
         probability: DEAL_STAGE_PROBABILITY['New Deal'],
-        expectedCloseDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        expectedCloseDate: new Date(clockNowMs() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         service: def.service,
         handoverAmount: def.handoverAmount,
         accountsCount: def.accountsCount,
@@ -1002,7 +1039,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const proposal: Proposal = {
         id: crypto.randomUUID(),
         status: 'Draft',
-        validityDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        validityDate: new Date(clockNowMs() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         createdAt: nowIso(),
         ...input,
       }
@@ -1130,6 +1167,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         showError(message)
       })
       addActivity({ type: 'Task', subject: `Task created: ${task.title}`, leadId: task.leadId, dealId: task.dealId, companyId: task.companyId })
+      // A task due today changes the sidebar count the moment it is created.
+      refreshNavCounts()
       return task
     },
     [ownerId, addActivity],
@@ -1160,6 +1199,38 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           companyId: previous.companyId,
         })
       }
+
+      /*
+       * AND A CANCELLATION IS WRITTEN DOWN WHERE THE FIRM LOOKS FOR IT.
+       *
+       * THE FIRM: "this client has a meeting on the 15th -- schedule the meeting, goes onto the
+       * notes of the client. Email received: the client has cancelled the meeting -- and then it
+       * will also be on the notes of the client, the place where the client lives. So all the data
+       * is captured there."
+       *
+       * Creating a task already wrote to the client's file and completing one did; CANCELLING did
+       * not, so a meeting a client called off left no trace anywhere except a row quietly leaving a
+       * list. That is the single most informative thing a client file can carry about a client who
+       * keeps moving appointments, and it was the one event that went unrecorded.
+       *
+       * THE REASON IS IN THE SUBJECT, not in a second field nobody reads. A client's activity feed
+       * is read as a column of sentences, and "Meeting cancelled: Quarterly review" without the
+       * why is the same sentence for a client who postponed and a firm that gave up.
+       */
+      if (previous && patch.status === 'Cancelled' && previous.status !== 'Cancelled') {
+        const why = (patch.cancelReason ?? '').trim()
+        addActivity({
+          type: taskCompletionActivityType(previous.type),
+          subject: `${previous.type} cancelled: ${previous.title}${why ? ` — ${why}` : ''}`,
+          leadId: previous.leadId,
+          dealId: previous.dealId,
+          companyId: previous.companyId,
+        })
+      }
+
+      // Status and due date both move the Tasks badge, so refresh on any edit rather than
+      // trying to work out which fields mattered.
+      refreshNavCounts()
     },
     [showError, addActivity],
   )
@@ -1578,6 +1649,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateContact,
       addCompany,
       updateCompany,
+      showCompanyChange,
       deleteCompany,
       addTask,
       updateTask,
@@ -1637,6 +1709,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateContact,
       addCompany,
       updateCompany,
+      showCompanyChange,
       deleteCompany,
       addTask,
       updateTask,

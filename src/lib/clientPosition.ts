@@ -1,0 +1,541 @@
+/**
+ * What the firm tells a client an account is doing.
+ *
+ * TWO VOCABULARIES, ONE MAPPING. This file is the mapping, and it exists because the two lists
+ * cannot be the same list.
+ *
+ * An INTERNAL status has to let an agent record the truth, however awkward. Make that list
+ * client-friendly and an agent with an awkward truth picks something untrue instead, and then
+ * both the queue and the report are wrong. The diary already taught the firm this: "Review"
+ * meant nothing, so everything went into it, and 308 of 375 entries ended up in the catch-all.
+ *
+ * A CLIENT-FACING position has to be short, stable and answer the client's four questions -- is
+ * anyone working it, is money coming, what is stuck, what do you need from me. A client shown
+ * the internal vocabulary reads "No Contact Yet" against four hundred accounts and concludes
+ * nothing is happening.
+ *
+ * So the internal vocabulary stays as rich as agents need, and this one function turns it into
+ * ten positions. Rename an internal status and a client's historical reports are unaffected;
+ * change this mapping and you have changed what the firm reports, deliberately, in one place.
+ *
+ * THE WORDS ARE THE FIRM'S OWN, lifted from the client-facing document its legal department
+ * already maintains. They were written to be read by a client and they read better than anything
+ * invented here would.
+ *
+ * NO FLAG LAYER. A catalogue of thirty flags underneath these positions was built and then
+ * removed, at the firm's instruction to "forget about the flags, let's just keep to main
+ * sub-statuses to make it simple". One status per account, and the richer breakdown becomes the
+ * paid analysis a client subscribes to rather than a second vocabulary everybody has to maintain.
+ * The descriptions from that catalogue survive here, on the positions that absorbed them.
+ *
+ * Pure on purpose: every input is passed in, nothing is fetched, no clock of its own. The report
+ * that has to be reproducible three months later cannot depend on a function that reads today.
+ */
+
+export type ClientPosition =
+  | 'paying'
+  | 'arranged'
+  | 'broken_arrangement'
+  | 'refusing'
+  | 'cannot_pay'
+  | 'negotiating'
+  | 'in_progress'
+  | 'tracing'
+  | 'disputed'
+  | 'legal'
+  | 'under_administration'
+  | 'frozen'
+  | 'closed'
+
+/**
+ * The four-state indicator beside a status: does anyone need to act?
+ *
+ * THREE OF THE FOUR ARE DERIVED, one is stored. Reading the firm's own table, every sub-status
+ * maps to a fixed tone -- Paying is always progressing, Tracing is always attention, Frozen is
+ * always inactive. A field whose value is a pure function of another field is not a second field;
+ * it is presentation, and storing it only creates a way for the two to disagree.
+ *
+ * 'client_action' is the exception and the reason the indicator is worth having at all. It cannot
+ * be derived from the status, because "we are waiting on YOU" is true of a disputed account, a
+ * frozen one and a legal one alike. It is the flag that turns "why have you not collected" into
+ * "here are eleven you can unblock today".
+ */
+export type ClientFlag = 'progressing' | 'attention' | 'client_action' | 'inactive'
+
+export const CLIENT_FLAGS: Record<ClientFlag, { label: string; dot: string }> = {
+  progressing: { label: 'Progressing', dot: '\u{1F7E2}' },
+  attention: { label: 'Attention', dot: '\u{1F7E0}' },
+  client_action: { label: 'Client action required', dot: '\u{1F534}' },
+  inactive: { label: 'Inactive', dot: '\u26AA' },
+}
+
+interface PositionMeta {
+  /** What the client reads. The firm's words, not the database's. */
+  label: string
+  /** One line under it on the dashboard, in the client's terms rather than the collector's. */
+  meaning: string
+  /**
+   * Is somebody expected to be working this account?
+   *
+   * The dashboard's most useful single number is how much of the book is actually in play.
+   * Frozen, closed and legal are not idle -- they are elsewhere -- and lumping them in with the
+   * accounts an agent rings makes a book look busier than it is.
+   */
+  inPlay: boolean
+  /**
+   * How it is going, when nothing is owed by the client.
+   *
+   * Separate from inPlay, which asks whether anybody is expected to be ringing. Legal is not in
+   * play -- it sits with attorneys -- but it is progressing. Under administration is neither.
+   */
+  tone: Exclude<ClientFlag, 'client_action'>
+}
+
+export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
+  paying: {
+    label: 'Paying',
+    meaning: 'Money received from this debtor during the period.',
+    inPlay: true,
+    tone: 'progressing',
+  },
+  arranged: {
+    label: 'Arranged',
+    meaning: 'The debtor has arranged instalments, or a settlement, to clear the account.',
+    inPlay: true,
+    tone: 'progressing',
+  },
+  broken_arrangement: {
+    label: 'Broken arrangement',
+    /* The firm's own words: speed is what recovers a defaulted payment. */
+    meaning: 'An arranged instalment was not paid. We make contact immediately — speed is what recovers a defaulted payment.',
+    inPlay: true,
+    tone: 'attention',
+  },
+  refusing: {
+    /*
+     * WILL NOT, as against CANNOT below. Avoiding contact belongs here, at the firm's
+     * instruction -- "a guy that's avoiding contact is avoiding" -- which is the right call: a
+     * debtor dodging a working number has answered, just not in words.
+     *
+     * Kept apart from `cannot_pay` because the client's decision turns on exactly this. You
+     * litigate a refuser and you cycle back to a pensioner, and one label covering both would
+     * put an unemployed debtor in hospital on a list headed "consider legal action".
+     */
+    label: 'Refusing to pay',
+    meaning: 'The debtor will not pay, or is avoiding us on details that work. Usually a legal decision.',
+    inPlay: true,
+    tone: 'attention',
+  },
+  cannot_pay: {
+    /*
+     * CANNOT, as against WILL NOT above. The firm's own client documentation is unambiguous
+     * here: unemployed, pensioner, hospitalised, business closed -- and its Pensioner note says
+     * "cannot make payments mainly due to financial restraints ... we continue to attempt to
+     * procure payment". That is not a refusal and must not be reported as one.
+     */
+    label: 'Cannot pay',
+    meaning: 'The debtor is unable to pay — unemployed, a pensioner, in hospital, or the business has closed. We check back.',
+    inPlay: true,
+    tone: 'attention',
+  },
+  negotiating: {
+    label: 'Negotiating',
+    meaning: 'We have reached the debtor and are working towards an arrangement.',
+    inPlay: true,
+    tone: 'progressing',
+  },
+  in_progress: {
+    /*
+     * NOT "BEING WORKED", at the firm's instruction that "the word work will not work" -- and
+     * they were right for a better reason than wording.
+     *
+     * "Being worked" described what the FIRM is doing, while every other position describes
+     * what the ACCOUNT is. That is two axes on one list, which is the exact fault this model was
+     * built to avoid: an account that is refusing to pay is also being worked, so the two were
+     * never alternatives and could not sit on the same ladder.
+     *
+     * Read as the account's own state, this is simply the one with no conclusion yet. Ordinary
+     * collection is under way and nothing has come of it. The moment something does -- a
+     * promise, a refusal, a dispute, a dead number -- the account leaves for the position that
+     * says so.
+     *
+     * AND THE SENTENCE NO LONGER NAMES THE SECTION 129, which is the firm's correction on reading
+     * it over a handover made that morning: "the section 129 has not been issued. The handover
+     * notice has been issued. And initial contact and initial negotiations is underway."
+     *
+     * They were describing the fault exactly. "including where a Section 129 demand has been
+     * issued" was written about the CATEGORY -- a reminder that a served demand still reports here
+     * rather than as Legal, which remains true and is argued at length in clientPosition() below.
+     * On a screen it reads as a description of THE ACCOUNT IN FRONT OF YOU, and 279 accounts carry
+     * a section 129 against a book of nineteen thousand that does not. A client told their debtor
+     * had been served a statutory demand when nothing of the kind had gone out is the most
+     * expensive possible version of showing somebody a column instead of an answer.
+     *
+     * So the meaning says what is true of every account on this rung and nothing more: the
+     * notices went out, somebody is working it, nothing has come back. WHICH notices, on what
+     * dates, is a fact about one account and belongs where the facts are -- the narrative sentence
+     * underneath it reads the workflow's own sends, so a served section 129 is still reported, by
+     * the only thing that knows whether it happened.
+     *
+     * NOT "we are in talks", which is `negotiating` one rung up and the distinction this rung
+     * exists for: reaching the debtor is what moves an account off here.
+     */
+    label: 'In progress',
+    meaning: 'Collection is under way \u2014 the handover notices have gone out and we are making '
+      + 'contact. Nothing has come of it yet.',
+    inPlay: true,
+    tone: 'progressing',
+  },
+  tracing: {
+    label: 'Tracing',
+    meaning: 'We could not reach the debtor on the details supplied. A trace is lodged with the credit and information bureaus.',
+    inPlay: true,
+    tone: 'attention',
+  },
+  disputed: {
+    label: 'Disputed',
+    meaning: 'The debtor disputes the account. We are establishing the dispute in writing and resolving it with our legal team.',
+    inPlay: true,
+    tone: 'attention',
+  },
+  legal: {
+    label: 'Legal',
+    meaning: 'The matter has been handed to attorneys, or summons has been issued, on your instruction.',
+    inPlay: false,
+    tone: 'progressing',
+  },
+  under_administration: {
+    /*
+     * ONE POSITION FOR FIVE PROCESSES, at the firm's instruction to "find one category for all
+     * of that stuff".
+     *
+     * Debt review, business rescue, liquidation, sequestration and a deceased estate look
+     * unalike until you ask what the firm actually DOES about them, and then they are the same
+     * thing: somebody else is administering the debtor's affairs, we deal with that person
+     * rather than with the debtor, ordinary collection is restricted by law, and what we can
+     * recover usually goes through a claim.
+     *
+     * Kept apart from `legal` because the two are opposites. `legal` is a step WE took --
+     * Section 129, summons, attorneys. This is a process the DEBTOR is under, which constrains
+     * what we may do. Putting them together would report the firm as taking action on accounts
+     * where it is in fact being held back.
+     *
+     * Beats `legal` in the precedence for that reason: an account we served with Section 129
+     * that then went under debt review is governed by the debt review, whatever we did first.
+     */
+    label: 'Under administration',
+    meaning: 'A practitioner, liquidator, trustee or executor is administering the debtor. We deal with them, not the debtor.',
+    inPlay: false,
+    tone: 'attention',
+  },
+  frozen: {
+    label: 'Frozen',
+    meaning: 'Work is stopped. See the reason and who asked for it.',
+    inPlay: false,
+    tone: 'inactive',
+  },
+  closed: {
+    label: 'Closed',
+    meaning: 'Back with you — settled, withdrawn, prescribed, untraceable, or recommended for write-off.',
+    inPlay: false,
+    tone: 'inactive',
+  },
+}
+
+/** Dashboard order: money first, then the work, then the ones that are elsewhere. */
+export const CLIENT_POSITION_ORDER: ClientPosition[] = [
+  'paying', 'arranged', 'broken_arrangement', 'refusing', 'cannot_pay', 'negotiating', 'in_progress',
+  'tracing', 'disputed', 'legal', 'under_administration', 'frozen', 'closed',
+]
+
+export interface PositionInput {
+  /** debtor_accounts.status, as inherited. 'Active: Activated', 'Frozen', 'Written-off', ... */
+  status?: string | null
+  /** debtor_accounts.sub_status. 'Delinquent Payer', 'Promise To Pay', 'Tracing', ... */
+  subStatus?: string | null
+  /**
+   * debtor_accounts.bucket — Swordfish's own filing: 'Diary', 'PTPs', 'Failed PTPs'.
+   *
+   * READ ONLY WHERE THE SUB-STATUS IS SILENT, and that is the whole care needed here. Half the
+   * inherited book carries no sub-status at all, and for 426 of those the bucket is the firm's
+   * own record that a promise was made or broken — evidence that was being thrown away in favour
+   * of reporting them as "In progress", which tells a client nothing.
+   *
+   * It never overrides a sub-status. 'Delinquent Payer' sitting in the Failed PTPs bucket is a
+   * refusal, not a broken arrangement: one is somebody who will not pay at all, the other is
+   * somebody who committed and came up short. That distinction is already the subject of a note
+   * below and it is not going to be undone by a coarser field.
+   */
+  bucket?: string | null
+  /** Money received inside the reporting period. Not "ever" -- a client report is about a month. */
+  paidInPeriod?: boolean
+  /**
+   * The debtor was actually REACHED in the period: a call they answered, a reply, a consultation.
+   * It is the whole difference between Negotiating and Being worked, and it cannot be read off
+   * a status -- only off what happened.
+   */
+  reachedInPeriod?: boolean
+  /** An open dispute on the account. */
+  disputed?: boolean
+  /** A legal step has been taken BY US: Section 129, summons, attorneys. */
+  inLegal?: boolean
+  /**
+   * The DEBTOR is under a formal process — debt review, business rescue, liquidation,
+   * sequestration, a deceased estate. The opposite of inLegal: it restrains us rather than
+   * being something we did.
+   */
+  underAdministration?: boolean
+  /** True once the account is off the book, whatever the inherited status says. */
+  closed?: boolean
+  /**
+   * A SETTLEMENT IS AN ARRANGEMENT, and the firm said to call it one: "just say arranged ... keep it
+   * simple". HTH/4004 went from an offer to paid in full and the client was told "In progress" the
+   * whole way, because nothing here knew a settlement existed. The live offer's state, as
+   * `account_settlement` derives it (lapsed included). Paid and closed are the account's `closed`.
+   */
+  settlement?: 'proposed' | 'approved' | 'lapsed' | 'declined' | 'withdrawn' | 'paid' | null
+}
+
+/**
+ * The single rung an account is reported on.
+ *
+ * PRECEDENCE IS STRUCTURAL FIRST, MONEY SECOND, and that is a deliberate choice rather than an
+ * accident of ordering. An account in summons that also paid something is reported as Legal: the
+ * client needs to know a legal process is running, and "Paying" would hide it. The money is not
+ * lost by this -- every report carries collections per position alongside the count, so Legal
+ * reads "14 accounts, R38 000 collected" and says both things at once. One label was never going
+ * to carry both, so the label says where it is and the column says what it is doing.
+ */
+export function clientPosition(input: PositionInput): ClientPosition {
+  const status = (input.status ?? '').trim()
+  const sub = (input.subStatus ?? '').trim()
+
+  // Off the book beats everything: nothing else is true of an account that is finished.
+  if (input.closed || /^written[- ]off/i.test(status) || /^closed/i.test(status)) return 'closed'
+  if (/^frozen/i.test(status)) return 'frozen'
+
+  /*
+   * Somebody else is in charge of the debtor's affairs, which governs whatever we had started.
+   * Above `legal` deliberately — see the note on the position.
+   */
+  /*
+   * TWO VOCABULARIES MATCH HERE, and the second one is the one that bit.
+   *
+   * The first half of this pattern is Swordfish's inherited wording, which is what the imported
+   * book carries. The second is the wording RAPTOR ITSELF WRITES: the finish box has an "Under
+   * administration" outcome, and recordOutcome stores that phrase as the sub-status. It matched
+   * nothing here, so an agent who ended a call by saying the debtor was in liquidation produced
+   * an account that reported to the client as "In progress" — the exact fault of showing somebody
+   * a column instead of an answer, reintroduced by our own write path.
+   *
+   * Anything this app writes into sub_status has to read back out of it. See check-call-outcome.
+   */
+  if (input.underAdministration
+      || /debt\s*review|business\s*rescue|liquidat|sequestrat|deceased|estate|curator/i.test(sub)
+      || /under\s*administration|administration\s*order/i.test(sub)) {
+    return 'under_administration'
+  }
+
+  /*
+   * SECTION 129 IS NOT HERE, at the firm's instruction, and it belongs nowhere near this rung.
+   *
+   * A section 129 letter of demand is the statutory step a credit provider must take BEFORE it
+   * may go to court. It is not legal action; it is ordinary collection carried out in the form
+   * the Act requires, and the firm telephones the debtor the day it goes out. So it falls
+   * through to `in_progress` with everything else that is simply being collected.
+   *
+   * It is 279 accounts on the book — 38% — and reporting them as Legal would have told clients a
+   * third of their book was in court when none of it was.
+   *
+   * What is left here is the real thing: summons issued, or the matter handed to attorneys.
+   */
+  if (input.inLegal || /summons|attorney|litigat/i.test(sub)) return 'legal'
+  if (input.disputed || /defended|dispute/i.test(sub)) return 'disputed'
+  if (/tracing|trace/i.test(sub)) return 'tracing'
+
+  /*
+   * ABOVE MONEY, like a promise would be if it were a stronger fact than a payment: a payment made
+   * towards an agreed settlement is the settlement working, and "Arranged" is what the client
+   * approved. An offer waiting on the client is a negotiation -- the debtor has put a figure up
+   * and the client has to answer it. One not paid by its date is broken, exactly as a promise is.
+   */
+  if (input.settlement === 'approved') return 'arranged'
+  if (input.settlement === 'proposed') return 'negotiating'
+  if (input.settlement === 'lapsed') return 'broken_arrangement'
+
+  if (input.paidInPeriod) return 'paying'
+  if (/promise\s*to\s*pay|\bptp\b/i.test(sub)) return 'arranged'
+
+  /*
+   * TWO DIFFERENT FACTS, and they were briefly read as one.
+   *
+   * A payment default is an arrangement that came up short: they committed, and an instalment
+   * did not arrive. "Delinquent Payer" -- the firm's inherited Swordfish term -- is somebody who
+   * does not pay at all and refuses to, which is not a default because nothing was ever agreed.
+   * Collapsing them would have reported 90 refusals as broken arrangements and told the client
+   * the wrong thing about the biggest active group on their book.
+   */
+  if (/payment\s*default/i.test(sub)) return 'broken_arrangement'
+
+  /*
+   * CANNOT is tested before WILL NOT, so that a stated hardship is never swallowed by a general
+   * "not paying" label. Only words that actually name a hardship qualify; nothing is inferred.
+   */
+  /*
+   * The second alternative is OUR OWN wording again. The finish box's "Cannot pay" outcome stores
+   * exactly that phrase, which named no hardship and so fell through to "In progress" — putting a
+   * pensioner who said they have nothing onto the same list as an account nobody has rung yet.
+   * The firm's rule is that refusing to pay and cannot pay never share a list; this was quietly
+   * breaking it from the other side.
+   */
+  if (/unemploy|pension|hospital|business\s*closed|deceased|incapacit/i.test(sub)
+      || /cannot\s*pay|can.?t\s*pay|no\s*income/i.test(sub)) return 'cannot_pay'
+  /*
+   * "Delinquent Payer" is the firm's inherited term and its own definition is a refusal --
+   * "somebody that just doesn't pay at all, he refuses to pay". Avoiding contact is read the
+   * same way, on the same instruction.
+   */
+  if (/delinquent|refus|non.?cooperative|avoid/i.test(sub)) return 'refusing'
+
+  /*
+   * THE BUCKET IS EVIDENCE, and only now — after every sub-status has had its say. Swordfish
+   * filed accounts into Diary, PTPs and Failed PTPs, and where nothing richer was ever recorded
+   * that filing is the only thing the firm knows about the arrangement. Reporting those as
+   * "In progress" threw away a fact the client cares about most: a promise was made, or broken.
+   */
+  const bucket = (input.bucket ?? '').trim()
+  if (/failed\s*ptp/i.test(bucket)) return 'broken_arrangement'
+  if (/^ptps?$/i.test(bucket)) return 'arranged'
+
+  /*
+   * THE FIRM WRITES IT DOWN, SO READ IT. `reachedInPeriod` was the only route to this rung, which
+   * is right for a report built from what happened in a month — but the inherited book also
+   * carries 'Negotiating' as a sub-status somebody typed on purpose, and ignoring it reported
+   * those accounts as "In progress". A collector who recorded that they are in talks should not
+   * have to have the conversation logged in the right period for the client to be told so.
+   */
+  if (/negotiat/i.test(sub)) return 'negotiating'
+
+  if (input.reachedInPeriod) return 'negotiating'
+
+  /*
+   * The floor, and deliberately the honest one. An unrecognised status lands here rather than
+   * in an 'unknown' bucket: "collection is under way, nothing has come of it" is true of every
+   * active account by definition, and a position no client can interpret is worse than a modest
+   * one.
+   */
+  return 'in_progress'
+}
+
+/**
+ * Is this account waiting on the CLIENT rather than on the firm?
+ *
+ * Kept off the position ladder on purpose: an account can be waiting for a statement AND be
+ * actively worked, and collapsing the two loses whichever is not shown. It is the single most
+ * useful column on a client report -- the one that turns "why have you not collected" into
+ * "here are eleven you can unblock today" -- so it is reported as its own named list.
+ *
+ * Derived, never stored: a dispute already carries `with_client` as a state, and a second copy
+ * of the same fact is a second copy to keep in step.
+ */
+export function needsClient(input: { openQueryWithClient?: boolean; settlement?: PositionInput['settlement'] }): boolean {
+  /* AN OFFER WAITING ON THE CLIENT IS THE CLIENT'S TO ANSWER -- nothing moves until they approve. */
+  return input.openQueryWithClient === true || input.settlement === 'proposed'
+}
+
+export type FrozenBy = 'firm' | 'client'
+
+/**
+ * How a freeze reads to a client.
+ *
+ * The distinction is the whole point of recording who: an account the CLIENT asked to stop and
+ * one BREDELL FERREIRA stopped are opposite facts, and 150 accounts currently say only "Frozen".
+ */
+export function frozenByLabel(by: FrozenBy | null | undefined, firmName = 'Bredell Ferreira'): string {
+  if (by === 'client') return 'Frozen at your request'
+  if (by === 'firm') return `Frozen by ${firmName}`
+  return 'Frozen — no reason recorded'
+}
+
+/**
+ * The indicator shown beside the status.
+ *
+ * A client request beats everything, including a closed or frozen account -- especially those.
+ * "The account remains frozen pending your instruction" is precisely the case a client needs to
+ * see, and a grey dot saying "inactive" would bury it.
+ */
+export function clientFlag(position: ClientPosition, clientActionRequired = false): ClientFlag {
+  if (clientActionRequired) return 'client_action'
+  return CLIENT_POSITIONS[position].tone
+}
+
+/** Everything a client needs said about one account's position, in one place. */
+export interface PositionReport {
+  position: ClientPosition
+  label: string
+  needsClient: boolean
+  flag: ClientFlag
+  flagLabel: string
+}
+
+export function positionReport(
+  input: PositionInput & { openQueryWithClient?: boolean },
+): PositionReport {
+  const position = clientPosition(input)
+  const needs = needsClient(input)
+  const flag = clientFlag(position, needs)
+  return {
+    position,
+    label: CLIENT_POSITIONS[position].label,
+    needsClient: needs,
+    flag,
+    flagLabel: CLIENT_FLAGS[flag].label,
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * ONE MORE RUNG, AND ONLY WE SEE IT.
+ *
+ * The firm's thirteen are the client's vocabulary and they have been stable; adding a word to
+ * that list changes what every historical report means. But a brand-new account and one that has
+ * been worked for six months without getting anywhere both report as "In progress", and inside
+ * the firm those are not the same thing at all — one needs a first call, the other needs a
+ * different approach.
+ *
+ * So the firm's decision: NEW, but internal only. A collector, a team leader and the account
+ * screen see it. positionReport() — the thing a client reads — does not, and goes on deriving
+ * exactly thirteen rungs from clientPosition(). Two vocabularies stay two, which is the rule this
+ * file exists to hold.
+ *
+ * It only ever displaces `in_progress`. An account that has never been worked but is frozen, or
+ * disputed, or under administration, is frozen, disputed or under administration — those are
+ * facts about the account, not about whether we have got to it yet.
+ * ------------------------------------------------------------------------------------------- */
+
+export type DeskPosition = ClientPosition | 'new'
+
+export const DESK_POSITIONS: Record<DeskPosition, PositionMeta> = {
+  ...CLIENT_POSITIONS,
+  new: {
+    label: 'New',
+    meaning: 'Handed over and not worked yet. Nobody has made the first call.',
+    tone: 'attention',
+    /* Very much in play — it is the most collectable thing on the book, not a dormant account. */
+    inPlay: true,
+  },
+}
+
+/**
+ * The rung a collector sees, which is the client's one plus New.
+ *
+ * `everWorked` is the whole difference and it is passed in rather than read: this file has no
+ * clock and no database, for the same reason clientPosition() has none — a report that has to be
+ * reproducible three months later cannot depend on a function that looks things up.
+ */
+export function deskPosition(
+  input: PositionInput & { everWorked?: boolean },
+): DeskPosition {
+  const position = clientPosition(input)
+  if (position === 'in_progress' && input.everWorked === false) return 'new'
+  return position
+}

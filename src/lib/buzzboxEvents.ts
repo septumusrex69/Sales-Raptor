@@ -13,10 +13,10 @@
  *    "internalId":"0513f5d5-…",            <- this LEG
  *    "externalId":"e6bea85d-…",            <- this CALL, shared by both legs
  *    "eventAvps":[{"att":"state","val":"answered"},
- *                 {"att":"b-channel-name","val":"sofia/external/0832573344"}]}
+ *                 {"att":"b-channel-name","val":"sofia/external/0835550344"}]}
  *
  * A click-to-dial call is two legs. BuzzBox rings the collector's extension first
- * (sofia/internal/141@…) and, once they lift it, dials the debtor (sofia/external/0832573344).
+ * (sofia/internal/141@…) and, once they lift it, dials the debtor (sofia/external/0835550344).
  * That matters for reading "answered": CHANNEL_ANSWER fires on the INTERNAL leg when the
  * collector picks up their own handset, which is not the debtor answering anything. The two
  * events that actually mean a conversation are CHANNEL_BRIDGE, where the legs are joined, and
@@ -57,7 +57,7 @@ const avp = (avps: Avp[], att: string): string | null => {
   return hit?.val ?? null
 }
 
-/** `sofia/external/0832573344` -> `0832573344`. Anything else -> null. */
+/** `sofia/external/0835550344` -> `0835550344`. Anything else -> null. */
 export function externalLegNumber(channelName: string | null): string | null {
   if (!channelName) return null
   const m = /^sofia\/external\/(\+?\d+)/.exec(channelName)
@@ -74,7 +74,7 @@ export function internalLegExtension(channelName: string | null): string | null 
 /**
  * The last nine digits of a phone number, which is how two spellings of one number are matched.
  *
- * We dial E.164 without the plus (27832573344) and BuzzBox reports the local form (0832573344),
+ * We dial E.164 without the plus (27835550344) and BuzzBox reports the local form (0835550344),
  * so comparing the strings finds nothing. Nine digits is the South African subscriber number
  * without its leading zero or country code -- short enough that every spelling agrees on it,
  * long enough that two different debtors will not collide.

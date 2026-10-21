@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -8,6 +8,12 @@ import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
 import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
+import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
+import { localDay, meetingWith } from '../../lib/dayPlan.ts'
+import { MeetingModal } from '../../components/calendar/MeetingModal'
+
+/* A meeting is neither a task nor a deal date, so it does not borrow either one's colour. */
+const MEETING_EVENT_COLOR = 'var(--c-steel)'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import type { Task } from '../../types'
 
@@ -16,12 +22,34 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 interface CalEvent {
   id: string
+  /**
+   * THE MEETING THIS CHIP IS, where it is one.
+   *
+   * THE FIRM: "if I click on the 8th where it says call centre discussion, it takes me to the
+   * emails... I don't want it to take me to the email at all -- rather to call centre discussion."
+   *
+   * A task chip and a deal chip go somewhere; a meeting chip OPENS something, because the meeting
+   * is not a page in this app -- it is a row, and MeetingModal is the reading of it. Carried on
+   * the event so the three kinds can sit in one list and still behave as themselves.
+   */
+  meeting?: CalendarEvent
   /** Client/company name — the primary thing shown, per the calendar's whole purpose of surfacing who a day's work is about. */
   primary: string
   /** Task type (e.g. "Follow-up") or "Expected Close" for a deal's close-date marker. */
   type: string
   /** Free-text detail (task title) — only set when distinct from `primary`, so we don't repeat the same string twice on cramped chips. */
   note?: string
+  /**
+   * WHO IT IS WITH. Meetings only.
+   *
+   * THE FIRM: "I see Bredell Ferreira partnership, and then call centre discussion. It's more
+   * important that... it's with this person. Simone Pretorius -- that's really important."
+   *
+   * A subject line names the SUBJECT. What somebody scanning a month wants is who they will be
+   * sitting with, because that is what decides whether a Tuesday is free. See meetingWith, which
+   * leaves US out: "with Stephan" on Stephan's own calendar says nothing.
+   */
+  who?: string | null
   date: Date
   color: string
   ownerId: string
@@ -32,13 +60,49 @@ function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
-/** Local YYYY-MM-DD — deliberately not toISOString(), which shifts to UTC and can land on the wrong day. */
-function ymd(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+/*
+ * THE SAME LOCAL-DAY FUNCTION THE TASKS PAGE USES, imported rather than written again.
+ *
+ * This page and that one each had their own copy. They have to agree EXACTLY: the link below
+ * carries a day built here, and the task list filters on a day built there, so two
+ * implementations drifting by an hour means clicking a square opens a list that is empty for a
+ * reason nobody can see. See dayPlan.localDay.
+ */
+function tasksUrlForDate(d: Date) {
+  return buildDrilldownUrl('/tasks', { date: localDay(d) })
 }
 
-function tasksUrlForDate(d: Date) {
-  return buildDrilldownUrl('/tasks', { date: ymd(d) })
+/**
+ * A CHIP IS A LINK OR A PRESS, AND THE EVENT DECIDES WHICH.
+ *
+ * A task chip and a deal chip go to a PAGE; a meeting chip opens a MEETING, which is not a page in
+ * this app -- it is a row, and MeetingModal is the reading of it. The three kinds sit in one list
+ * and have to behave as themselves, so the choice is made here rather than at each of the three
+ * places the calendar draws a chip. Written out three times it would be the Month view that kept
+ * working and the Day view that quietly still went to the mailbox.
+ *
+ * SAME CLASSES, SAME STYLE, SAME TITLE either way -- `type="button"` with no border of its own, so
+ * a chip is not two different-looking things depending on what it points at. `text-left` because a
+ * button centres its text and a link does not.
+ */
+function Chip({ event, onMeeting, className, style, title, children }: {
+  event: CalEvent
+  onMeeting: (m: CalendarEvent) => void
+  className: string
+  style?: React.CSSProperties
+  title?: string
+  children: React.ReactNode
+}) {
+  if (event.meeting) {
+    const m = event.meeting
+    return (
+      <button type="button" onClick={() => onMeeting(m)} className={`${className} text-left w-full`}
+        style={style} title={title}>
+        {children}
+      </button>
+    )
+  }
+  return <Link to={event.href} className={className} style={style} title={title}>{children}</Link>
 }
 
 export function CalendarPage() {
@@ -47,7 +111,36 @@ export function CalendarPage() {
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [owner, setOwner] = useDefaultOwnerFilter(undefined, currentUser)
   const [view, setView] = useState<ViewMode>('Month')
+  /* The meeting being read. Null is the ordinary state -- see MeetingModal for why a meeting is
+     opened rather than navigated to. */
+  const [openMeeting, setOpenMeeting] = useState<CalendarEvent | null>(null)
   const [cursor, setCursor] = useState(new Date(TODAY))
+
+  /*
+   * MEETINGS, which this page could not show until there was a table to keep them in.
+   *
+   * Their own fetch rather than AppStore's: a calendar event belongs to ONE person and RLS scopes
+   * it to them, where everything in the store is the firm's shared sales data. Loading it through
+   * the store would put one person's meetings behind a cache every other page also reads.
+   */
+  const [meetings, setMeetings] = useState<CalendarEvent[]>([])
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchCalendarEvents(currentUser.id)
+      .then((list) => { if (!cancelled) setMeetings(list) })
+      .catch(() => { /* a calendar we could not read costs the meetings, not the page. */ })
+    return () => { cancelled = true }
+  }, [currentUser])
+
+  /*
+   * The ones that could not be placed. Same test as the grid uses to place them, so the two
+   * cannot disagree about which meetings are missing.
+   */
+  const undated = useMemo(
+    () => meetings.filter((m) => (m.allDay ? m.startsOn : m.startsAt) === null),
+    [meetings],
+  )
 
   const events = useMemo<CalEvent[]>(() => {
     const taskEvents = tasks
@@ -79,8 +172,43 @@ export function CalendarPage() {
         ownerId: d.ownerId,
         href: `/deals/${d.id}`,
       }))
-    return [...taskEvents, ...closeEvents]
-  }, [tasks, deals, owner])
+    /*
+     * An accepted meeting, on the day it is actually on.
+     *
+     * UNDATED ONES ARE LEFT OFF, not placed at midnight. An invite that named no timezone has no
+     * hour anybody can stand behind -- see inviteInstant -- and a meeting shown on the wrong day
+     * is worse than one somebody has to open the mail to find.
+     */
+    const meetingEvents = meetings
+      /* Somebody else's meetings are not shown even to a manager: it is a personal calendar. */
+      .filter(() => owner === 'All' || owner === currentUser?.id)
+      /* flatMap, so an undated meeting is simply absent rather than a null the list has to
+         carry and then narrow back out — the narrowing is where the type lies get told. */
+      .flatMap((m): CalEvent[] => {
+        const when = m.allDay ? m.startsOn : m.startsAt
+        if (when === null) return []
+        return [{
+          id: `m-${m.id}`,
+          primary: m.title,
+          type: 'Meeting',
+          note: m.location ?? undefined,
+          who: meetingWith(m, [currentUser?.email ?? '']),
+          date: new Date(when),
+          color: MEETING_EVENT_COLOR,
+          ownerId: m.ownerId,
+          /*
+           * IT WENT TO THE MAILBOX. Not the message -- the mailbox: `href: '/mail'` on every
+           * meeting in the calendar, so the one thing a click could not tell you was anything
+           * about the meeting. The chip now opens the meeting, and the invitation is one press
+           * inside it.
+           */
+          href: '',
+          meeting: m,
+        }]
+      })
+
+    return [...taskEvents, ...closeEvents, ...meetingEvents]
+  }, [tasks, deals, owner, meetings, currentUser])
 
   function shift(amount: number) {
     const next = new Date(cursor)
@@ -131,9 +259,57 @@ export function CalendarPage() {
         </div>
       </div>
 
-      {view === 'Month' && <MonthView cursor={cursor} events={events} />}
-      {view === 'Week' && <WeekView cursor={cursor} events={events} />}
-      {view === 'Day' && <DayView cursor={cursor} events={events} />}
+      {/*
+        MEETINGS WITH NO HOUR, SAID OUT LOUD.
+        A meeting Raptor could not place has no square to sit in, and it used to be dropped from
+        the grid without a word -- so somebody who accepted an invitation, was told the organiser
+        had been notified, and then found nothing on their calendar had no way of telling whether
+        it had failed or they were looking in the wrong month. It happened for real, to an
+        ordinary Outlook invitation whose timezone name Raptor did not recognise. A line is not a
+        fix for that, but silence is a lie.
+      */}
+      {undated.length > 0 && (
+        <div className="rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+          <p className="text-xs font-medium text-[var(--c-gold-deep)]">
+            {undated.length === 1
+              ? 'One accepted meeting has no time Raptor could work out, so it is not on the grid:'
+              : `${undated.length} accepted meetings have no time Raptor could work out, so they are not on the grid:`}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {undated.map((m) => (
+              <li key={m.id} className="text-xs text-slate-700">
+                {m.title}
+                {m.organiserName && <span className="text-slate-500"> &middot; {m.organiserName}</span>}
+              </li>
+            ))}
+          </ul>
+          {/*
+            AND HOW TO FIX IT, because the first thing the firm asked on seeing this banner was
+            what they were supposed to do about it. A meeting stored before Raptor could read its
+            time keeps the nothing it was stored with -- nothing goes back and re-reads it -- so
+            the way out is to take it off and add it again from the message, which is two presses
+            on the card that is already there.
+          */}
+          <p className="text-[11px] text-slate-500 mt-1">
+            Open the message in Mail to see the time the organiser sent. If the card there now
+            shows an hour, take the meeting off and add it again and it will land on the grid.
+          </p>
+        </div>
+      )}
+
+      {view === 'Month' && <MonthView cursor={cursor} events={events} onMeeting={setOpenMeeting} />}
+      {view === 'Week' && <WeekView cursor={cursor} events={events} onMeeting={setOpenMeeting} />}
+      {view === 'Day' && <DayView cursor={cursor} events={events} onMeeting={setOpenMeeting} />}
+
+      {/*
+        THE MEETING, READ AS A MEETING. The chip used to go to `/mail` -- the mailbox, not even the
+        message -- so the one thing a click could not tell you was anything about the meeting. See
+        MeetingModal, which is a reading of a row that was already carrying every detail the firm
+        asked for.
+      */}
+      {openMeeting && (
+        <MeetingModal meeting={openMeeting} onClose={() => setOpenMeeting(null)} />
+      )}
     </div>
   )
 }
@@ -145,7 +321,12 @@ function startOfWeek(d: Date) {
   return x
 }
 
-function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
+function MonthView({ cursor, events, onMeeting }: {
+  cursor: Date
+  events: CalEvent[]
+  /** Opening a meeting is the page's job, not the view's -- see Chip. */
+  onMeeting: (m: CalendarEvent) => void
+}) {
   const firstOfMonth = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
   const gridStart = startOfWeek(firstOfMonth)
   const days = Array.from({ length: 42 }).map((_, i) => {
@@ -169,24 +350,69 @@ function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
           const isToday = sameDay(d, TODAY)
           const dayEvents = events.filter((e) => sameDay(e.date, d))
           return (
-            <div key={i} className={`min-h-[100px] border-b border-r border-slate-50 p-1.5 ${inMonth ? '' : 'bg-slate-50/40'}`}>
+            /*
+              THE WHOLE SQUARE OPENS THE DAY, not the date in the corner of it.
+              
+              THE FIRM: "if you click on a specific day in the calendar, it should take you to the
+              tasks and have that filter for that entire day" -- and it already did. The link was
+              on the DATE NUMBER, a 24-pixel circle in one corner, so a feature that was built and
+              working read as one that did not exist. A target nobody can hit is not a feature.
+              
+              AN OVERLAY RATHER THAN A WRAPPER, and this is the part that is not optional: the
+              cell already contains a Link per event chip, and an anchor inside an anchor is
+              invalid markup that browsers silently un-nest -- the chips would stop opening what
+              they point at. So the day's link is a sibling stretched across the cell underneath
+              them, and the chips sit above it.
+            */
+            <div key={i} className={`relative min-h-[100px] border-b border-r border-slate-50 p-1.5 ${inMonth ? '' : 'bg-slate-50/40'}`}>
               <Link
                 to={tasksUrlForDate(d)}
-                className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full hover:ring-2 hover:ring-brand-200 ${isToday ? 'bg-brand-600 text-white font-semibold' : inMonth ? 'text-slate-600' : 'text-slate-300'}`}
+                aria-label={`What is on ${d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long' })}`}
+                className="absolute inset-0 rounded-sm hover:bg-brand-50/60 focus:outline-none
+                  focus-visible:ring-2 focus-visible:ring-brand-300"
+              />
+              {/* Above the overlay so it still reads as the date, and still a target of its own. */}
+              <span
+                className={`relative pointer-events-none inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${isToday ? 'bg-brand-600 text-white font-semibold' : inMonth ? 'text-slate-600' : 'text-slate-300'}`}
               >
                 {d.getDate()}
-              </Link>
-              <div className="mt-1 space-y-1">
+              </span>
+              {/*
+                HOW MUCH IS ON THE DAY, as a number.
+
+                THE CHIPS DO NOT ANSWER THIS. The square fits three, so a day with three things on
+                it and a day with eleven look identical until you read the "+8 more" at the bottom
+                -- and scanning a month for the heavy days meant reading forty-two of those lines.
+                The firm asked to see a day's load before booking into it, and on a month grid the
+                load is one digit.
+
+                ABSENT AT ZERO rather than a nought on every empty square: forty-two noughts is
+                furniture, and the thing being looked for is the days that are not empty.
+              */}
+              {dayEvents.length > 0 && (
+                <span className="absolute top-1.5 right-1.5 pointer-events-none text-[10px] font-semibold
+                  tabular-nums text-slate-400">
+                  {dayEvents.length}
+                </span>
+              )}
+              <div className="relative mt-1 space-y-1">
                 {dayEvents.slice(0, 3).map((e) => (
-                  <Link
+                  <Chip
                     key={e.id}
-                    to={e.href}
+                    event={e}
+                    onMeeting={onMeeting}
                     className="block text-[10px] font-medium px-1.5 py-0.5 rounded truncate hover:brightness-95"
                     style={{ backgroundColor: `${e.color}1a`, color: e.color }}
-                    title={`${e.primary} — ${e.type}${e.note ? ` (${e.note})` : ''}`}
+                    title={`${e.primary} — ${e.type}${e.who ? ` with ${e.who}` : ''}${e.note ? ` (${e.note})` : ''}`}
                   >
-                    {e.primary}
-                  </Link>
+                    {/*
+                      WHO IT IS WITH, ON ITS OWN LINE. The firm's point, and it costs ten pixels on
+                      the one kind of chip that has somebody behind it: a task is yours and a deal
+                      date is a date, so only a meeting carries this.
+                    */}
+                    <span className="block truncate">{e.primary}</span>
+                    {e.who && <span className="block truncate opacity-70">with {e.who}</span>}
+                  </Chip>
                 ))}
                 {dayEvents.length > 3 && <div className="text-[10px] text-slate-400 px-1.5">+{dayEvents.length - 3} more</div>}
               </div>
@@ -198,7 +424,12 @@ function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
   )
 }
 
-function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
+function WeekView({ cursor, events, onMeeting }: {
+  cursor: Date
+  events: CalEvent[]
+  /** Opening a meeting is the page's job, not the view's -- see Chip. */
+  onMeeting: (m: CalendarEvent) => void
+}) {
   const start = startOfWeek(cursor)
   const days = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(start)
@@ -215,21 +446,33 @@ function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
             <Link to={tasksUrlForDate(d)} className="block px-3 py-2 border-b border-slate-100 text-center hover:bg-slate-50">
               <p className="text-[11px] text-slate-400">{WEEKDAYS[d.getDay()]}</p>
               <p className={`text-sm font-semibold ${isToday ? 'text-brand-600' : 'text-slate-700'}`}>{d.getDate()}</p>
+              {/* THE DAY'S LOAD, SPELT OUT. A week column is tall enough to show everything on it,
+                  so the number here is not telling you what is hidden -- it is what lets somebody
+                  pick the quiet day without counting rows in seven columns. Said in words rather
+                  than as a bare digit, because there is room for words. */}
+              <p className="text-[10px] text-slate-400 tabular-nums">
+                {dayEvents.length === 0 ? 'Clear'
+                  : dayEvents.length === 1 ? '1 thing' : `${dayEvents.length} things`}
+              </p>
             </Link>
             <div className="p-2 space-y-1.5 min-h-[220px]">
               {dayEvents.map((e) => (
-                <Link
+                <Chip
                   key={e.id}
-                  to={e.href}
+                  event={e}
+                  onMeeting={onMeeting}
                   className="block text-[11px] px-1.5 py-1 rounded hover:brightness-95"
                   style={{ backgroundColor: `${e.color}1a`, color: e.color }}
                   title={`${e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · ${e.type}${e.note ? ` · ${e.note}` : ''}`}
                 >
                   <span className="font-semibold">{e.primary}</span>
+                  {/* WITH WHOM BEATS WHAT KIND, because the colour already says what kind. On
+                      anything that is not a meeting the type is still the useful half. */}
                   <span className="block text-[10px] opacity-80 truncate">
-                    {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {e.type}
+                    {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
+                    {' · '}{e.who ? `with ${e.who}` : e.type}
                   </span>
-                </Link>
+                </Chip>
               ))}
             </div>
           </Card>
@@ -239,25 +482,34 @@ function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
   )
 }
 
-function DayView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
+function DayView({ cursor, events, onMeeting }: {
+  cursor: Date
+  events: CalEvent[]
+  /** Opening a meeting is the page's job, not the view's -- see Chip. */
+  onMeeting: (m: CalendarEvent) => void
+}) {
   const dayEvents = events.filter((e) => sameDay(e.date, cursor)).sort((a, b) => a.date.getTime() - b.date.getTime())
   return (
     <Card padded={false}>
-      <div className="divide-y divide-slate-50">
+      {/* The day as a list, one line an event at 12.5px -- the checking list's density, which
+          the firm asked for on every list. Who it is with and the note ride after the title. */}
+      <div>
         {dayEvents.length === 0 && <p className="text-center text-slate-400 text-sm py-10">No events scheduled for this day.</p>}
         {dayEvents.map((e) => (
-          <Link key={e.id} to={e.href} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
+          <Chip key={e.id} event={e} onMeeting={onMeeting}
+            className="flex items-center gap-3 px-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: e.color }} />
-            <span className="text-sm text-slate-500 w-16 shrink-0">{e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-700 truncate">{e.primary}</p>
-              <p className="text-xs text-slate-400">
-                {e.type}
+            <span className="text-slate-500 w-12 shrink-0 tabular-nums">{e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="min-w-0 flex-1 truncate" title={[e.primary, e.who ? `with ${e.who}` : e.type, e.note].filter(Boolean).join(' · ')}>
+              <span className="font-medium text-slate-700">{e.primary}</span>
+              <span className="text-slate-400">
+                {' · '}
+                {e.who ? `with ${e.who}` : e.type}
                 {e.note ? ` · ${e.note}` : ''}
-              </p>
-            </div>
-            <UserAvatar userId={e.ownerId} size={24} />
-          </Link>
+              </span>
+            </span>
+            <UserAvatar userId={e.ownerId} size={18} />
+          </Chip>
         ))}
       </div>
     </Card>

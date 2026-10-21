@@ -1,3 +1,4 @@
+import { clockNow } from './clock.js'
 /**
  * How a date reads in a list.
  *
@@ -15,14 +16,14 @@ export function relativeDayLabel(iso?: string): string {
   if (Number.isNaN(date.getTime())) return '—'
 
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const dayDiff = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86400000)
+  const dayDiff = Math.round((startOfDay(clockNow()) - startOfDay(date)) / 86400000)
 
   if (dayDiff === 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
   if (dayDiff > 1 && dayDiff < 7) return date.toLocaleDateString('en-ZA', { weekday: 'long' })
   if (dayDiff >= 7 && dayDiff < 14) return 'Last week'
 
-  const sameYear = date.getFullYear() === new Date().getFullYear()
+  const sameYear = date.getFullYear() === clockNow().getFullYear()
   return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: sameYear ? undefined : 'numeric' })
 }
 
@@ -39,7 +40,7 @@ export function dateGroupLabel(iso?: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return 'No date'
 
-  const now = new Date()
+  const now = clockNow()
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
   const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86400000)
 
@@ -56,4 +57,158 @@ export function dateGroupLabel(iso?: string): string {
 
   const sameYear = date.getFullYear() === now.getFullYear()
   return date.toLocaleDateString('en-ZA', { month: 'long', year: sameYear ? undefined : 'numeric' })
+}
+
+/**
+ * How long an account has been on the desk: "11 months on the desk".
+ *
+ * WHOLE MONTHS, ROUNDED DOWN, because that is how the work is talked about — a collector says
+ * "we have had this one eleven months", never "three hundred and thirty-four days". Under a
+ * month says so rather than reading "0 months", and past two years it switches to years, since
+ * by then the month is no longer the interesting part.
+ *
+ * The day-of-month comparison is the whole of the difference between right and nearly right.
+ * Handed over on the 20th of September and read on the 14th of the following September is
+ * ELEVEN months, not twelve: the anniversary has not come round yet. Without that line the
+ * account would claim to be a year old six days early, which on a book where prescription is
+ * counted in years is not a rounding error.
+ *
+ * A date in the future is a data error rather than an age, and comes back empty so the caller
+ * shows the date alone.
+ */
+export function timeOnDesk(iso?: string | null, now: Date = clockNow()): string {
+  if (!iso) return ''
+  const from = new Date(iso)
+  if (Number.isNaN(from.getTime())) return ''
+
+  let months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth())
+  if (now.getDate() < from.getDate()) months -= 1
+
+  if (months < 0) return ''
+  if (months === 0) return 'this month'
+  if (months === 1) return '1 month on the desk'
+  if (months < 24) return `${months} months on the desk`
+  const years = Math.floor(months / 12)
+  return `${years} years on the desk`
+}
+
+/**
+ * The time of day a message arrived, beside the day it arrived on.
+ *
+ * `relativeDayLabel` answers "which day", which is the right answer in a list. Open one message
+ * and "Today" stops being enough -- two emails from the same debtor an hour apart are a different
+ * story from two a week apart, and the hour is what tells them apart.
+ *
+ * 24-hour, because that is how South Africa writes a time and because "13:42" cannot be misread
+ * the way a stray am/pm can.
+ */
+export function timeOfDay(iso?: string): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+/**
+ * "14 Mar 2026" — a date short enough to sit on a workflow card.
+ *
+ * HAND-ROLLED, LIKE longDate, AND FOR THE SAME REASON. `toLocaleDateString('en-ZA')` renders
+ * September as "Sept" — four letters where every other month gets three — so a column of dates
+ * comes out visibly ragged one month in twelve. It also groups with a non-breaking space
+ * elsewhere in that locale, which is the other half of the same trap. Twelve strings written out
+ * are cheaper than either.
+ *
+ * The year is kept. A 160-day workflow dated from November closes in April, and a card reading
+ * "12 Apr" beside one reading "3 Nov" invites exactly the wrong reading.
+ */
+export function shortDate(date: string): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d || m < 1 || m > 12) return date
+  return `${d} ${months[m - 1]} ${y}`
+}
+
+/**
+ * THE FIRM'S OWN CALENDAR DAY, out of a stored instant.
+ *
+ * THE FIRM: "this is funny, I'm recording a payment on like 29th of September and it loads it on
+ * the 28th."
+ *
+ * AND THE STORAGE WAS RIGHT. `record_manual_payment` writes midnight Johannesburg -- a payment
+ * dated 29 September is stored as `2026-09-28 22:00:00+00`, which IS 29 September here. What was
+ * wrong was every reader that took `.slice(0, 10)` of that string: the first ten characters of a
+ * UTC timestamp are the UTC day, and for the two hours SAST runs ahead that is YESTERDAY. So the
+ * statement, the balance's date arithmetic and the summary letter all dated a payment a day early
+ * -- always, because midnight local is 22:00 the previous day, every time.
+ *
+ * NOT `new Date(iso).toISOString().slice(0, 10)` EITHER, which is the same mistake spelled longer,
+ * and not the browser's own zone: an iPad in the office gets SAST and a laptop travelling does not,
+ * and a ledger that reads differently on the aeroplane is not a ledger. The firm's books are kept
+ * in Johannesburg wherever the person is sitting.
+ *
+ * `en-CA` because it formats as YYYY-MM-DD, which is what every date in this codebase is.
+ */
+export function firmDay(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso.slice(0, 10)
+  return at.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+}
+
+/** Today, on the same calendar. */
+export function firmToday(now: Date = clockNow()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+}
+
+/**
+ * The time of day in Johannesburg, as "HH:MM" on a 24-hour clock.
+ *
+ * SAME ARGUMENT AS firmToday AND FOR A SHARPER REASON: this one is compared against the hours a
+ * debtor asked to be telephoned in. A collector working from home on a laptop still set to London
+ * would be told four in the afternoon was six, and the one thing the window exists to prevent is a
+ * call at the wrong hour.
+ *
+ * `en-GB` with hour12 false gives "16:05" rather than "4:05 pm", which is the shape the stored
+ * windows are in -- and `hourCycle: 'h23'` because en-GB midnight is "24:00" otherwise, which sorts
+ * after every window there is.
+ */
+export function firmClock(now: Date = clockNow()): string {
+  return now.toLocaleTimeString('en-GB', {
+    timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  })
+}
+
+/**
+ * HOW LONG AGO, IN THE FEWEST WORDS THAT ARE TRUE.
+ *
+ * THE FIRM, of the mailbox: "not having to go and sync and blah blah blah." The answer to that is
+ * not a better button, it is knowing you do not need one -- so the mailbox says when it was last
+ * read and the button becomes something you press when you are impatient rather than something
+ * you have to remember.
+ *
+ * ROUNDED DOWN AND NEVER FLATTERED. "Just now" is the minute it happened and not the four after
+ * it: a mailbox that says "just now" when it was last read twenty minutes ago is worse than a
+ * mailbox that says nothing, because somebody would stop pressing the button on the strength of
+ * it. Beyond a day it stops counting -- "2 days ago" is already the sentence that means something
+ * is wrong, and the exact number of days adds nothing to it.
+ *
+ * NO CLOCK OF ITS OWN: the time to compare against is passed in, so this can be checked without
+ * mocking one.
+ */
+export function agoLabel(iso?: string | null, now: Date = clockNow()): string {
+  if (!iso) return ''
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const seconds = Math.floor((now.getTime() - at.getTime()) / 1000)
+  /* A CLOCK A LITTLE AHEAD OF OURS IS STILL "NOW". Postgres stamps the row and the browser does
+     the subtraction, so a second or two of drift is ordinary and "in -1 minutes" is not. */
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes === 1) return '1 minute ago'
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours === 1) return '1 hour ago'
+  if (hours < 24) return `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  return days === 1 ? 'yesterday' : `${days} days ago`
 }

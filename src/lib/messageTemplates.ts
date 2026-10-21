@@ -1,0 +1,1923 @@
+/**
+ * What Raptor says to a debtor, kept apart from the machinery that says it.
+ *
+ * WHY A LIBRARY AT ALL. Everything the firm sends a debtor is currently written where it is sent:
+ * the SMS compose box, the mail composer, queryLetters.ts. That is survivable while a collector
+ * writes one message to one debtor. It stops being survivable the moment a campaign sends the
+ * same words to four hundred people, because then the words are no longer a collector's phrasing
+ * — they are the firm's position, in writing, four hundred times, and a sentence the attorney
+ * would not have approved is four hundred problems rather than one. queryLetters.ts says so in
+ * its own header: its letters "move into the letters/SMS/WhatsApp template system when that is
+ * built". This is that system.
+ *
+ * WHAT IS DELIBERATELY NOT HERE. Nothing in this file sends anything, charges anything or reads a
+ * clock. A template is content; a campaign is an instruction to use it. Keeping the two apart is
+ * what lets the wording be reviewed by somebody who does not read code, and lets this whole file
+ * be tested without a database.
+ *
+ * AND A STANDING RULE FROM THE FIRM, WRITTEN HERE BECAUSE THIS IS WHERE IT WILL BE FORGOTTEN:
+ * fees are raised on ACCOUNTS ONLY, never on a lead or a deal. A template is just words and costs
+ * nothing, but the campaign that uses it raises an Annexure B fee per send, and a campaign built
+ * over the sales side would raise fees the firm cannot bill.
+ */
+/* A .js specifier, against the house style in src/, because this module is reachable at runtime
+   from api/ through accountMergeValues -- and a .ts specifier does not survive Vercel's
+   transpile, which takes the route down before its first line runs. check-api-imports is what
+   holds this. */
+import { smsCost } from './smsSegments.js'
+/* A .js specifier for the same reason as the line above: this one is reached from api/ too. */
+import { PTP_FREQUENCY, type Arrangement } from './arrangements.js'
+import type { DeskPosition } from './clientPosition.ts'
+
+/**
+ * WHICH SIDE OF THE BUSINESS A TEMPLATE IS FOR.
+ *
+ * Two, not four. The firm's own reasoning, in their words: "a client can make a deal or a lead
+ * can make a deal" — so a deal is a STAGE of one relationship rather than a party of its own, and
+ * a separate deals library would be a third copy of the same editor over the same fields.
+ *
+ * Clients are absent for a different reason: what the firm wants for clients is a bulk newsletter
+ * rather than reusable wording, and a broadcast has exactly one audience and one send date. That
+ * is a campaign, not a library entry.
+ *
+ * This is not a folder. It decides which merge fields exist, whether sending raises a fee, and
+ * which workflow clock applies — see the column comment in schema.sql.
+ */
+export type TemplateScope = 'collections' | 'sales'
+
+export const TEMPLATE_SCOPES: Record<TemplateScope, { label: string; hint: string }> = {
+  collections: {
+    label: 'Collections',
+    hint: 'Written against a debtor account. Sending raises an Annexure B fee.',
+  },
+  sales: {
+    label: 'Sales',
+    hint: 'Written against a lead, a deal or a prospect. Nothing is charged.',
+  },
+}
+
+export type TemplateKind = 'sms' | 'email' | 'call_script' | 'letter'
+
+export const TEMPLATE_KINDS: Record<TemplateKind, { label: string; plural: string }> = {
+  sms: { label: 'SMS', plural: 'SMS templates' },
+  email: { label: 'Email', plural: 'Email templates' },
+  call_script: { label: 'Call script', plural: 'Call scripts' },
+  letter: { label: 'Letter', plural: 'Letters' },
+}
+
+/**
+ * Which kinds each side actually has.
+ *
+ * A LETTER IS A COLLECTIONS THING. The letters here are statutory notices — a section 129 demand
+ * goes by registered post because the Act says where and how it must be delivered. Nothing on the
+ * sales side is posted. Offering an empty "Letters" section on the sales library for ever is the
+ * furniture problem: a heading that never has anything under it teaches people to stop reading
+ * the ones that do.
+ */
+/*
+ * AND IN THIS ORDER, which is the firm's: "SMS templates, email templates, letters, and then call
+ * scripts." The three things that leave the building come first and in the order they escalate —
+ * a text, then an email, then something posted — and the script somebody reads aloud comes last,
+ * because it is the one that never goes anywhere.
+ */
+export const KINDS_FOR_SCOPE: Record<TemplateScope, TemplateKind[]> = {
+  collections: ['sms', 'email', 'letter', 'call_script'],
+  sales: ['sms', 'email', 'call_script'],
+}
+
+export interface MessageTemplate {
+  id: string
+  /** Which library it is in, and therefore which fields it may use. See TemplateScope. */
+  scope: TemplateScope
+  kind: TemplateKind
+  /** What the firm calls it on a list: "First demand", "Broken promise follow-up". */
+  name: string
+  /** Email only. Null on the other two, and a check constraint says so in the database. */
+  subject: string | null
+  body: string
+  /**
+   * The rung this is written for, or null for one that suits any account.
+   *
+   * NULLABLE ON PURPOSE. Fourteen positions times three kinds is forty-two pieces of wording, and
+   * a library that does nothing until all forty-two exist is a library nobody ever finishes
+   * filling. A null position is the general version, and resolveTemplate falls back to it.
+   *
+   * COLLECTIONS ONLY. The database refuses a position on a sales template: the 13 rungs describe
+   * a debtor account, and the sales side does not have them.
+   */
+  position: DeskPosition | null
+  /**
+   * ISO 639-1. The book carries preferred_language per debtor and the firm works in more than
+   * one, so a template says which language it is in rather than the reader guessing.
+   */
+  language: string
+  active: boolean
+  /**
+   * The letter this email attaches, where it attaches one.
+   *
+   * The section 129 covering email is the reason this exists: its own words say "attached is a
+   * notice issued in terms of section 129(1)(a)", and nothing connected the two rows. An email
+   * whose text promises an attachment the system knows nothing about reads as finished and is
+   * not — which is the shape of gap this library was built to show.
+   *
+   * Only an email may carry one and only a letter may be carried; a trigger says so, because a
+   * check constraint cannot read the row being pointed at.
+   */
+  attachmentId: string | null
+  /**
+   * 'document' where the body is a letterDocument JSON rather than the words themselves.
+   *
+   * Letters only -- message_templates_format_kind says so. An SMS holding a JSON blob would be
+   * charged by the segment for its own punctuation and nothing would have said so.
+   */
+  format: 'text' | 'document'
+}
+
+/* ---------------------------------------------------------------- merge fields */
+
+/**
+ * THE FIELDS A TEMPLATE MAY USE, and nothing else.
+ *
+ * A closed list rather than "whatever the account object happens to carry". Two reasons, and the
+ * second is the real one:
+ *
+ *   - A typo has to be catchable. `{{ballance}}` in a free-for-all scheme renders as nothing and
+ *     the firm finds out when a debtor rings to ask what "the amount of  is now due" means.
+ *   - Every field here is a promise. The moment a template may reach into the account row, a
+ *     column rename breaks correspondence that has already been signed off, and nobody renaming
+ *     a column will think to check the letters.
+ *
+ * `sample` is what the preview shows and is chosen to be AWKWARD rather than tidy — a long
+ * surname and a five-figure balance — because a template that only ever previews against "Mr Dube
+ * / R1 000" looks fine and then costs three SMS segments on a real account.
+ */
+export interface MergeField {
+  key: string
+  label: string
+  sample: string
+  /**
+   * A FIELD MOST ACCOUNTS CANNOT ANSWER, AND THAT MUST NOT HOLD A NOTICE.
+   *
+   * The firm hit this on the first workflow they ran: a handover held on day 0 because the
+   * account had no identity number, and 19 668 of the 19 912 live accounts have none — 97% of
+   * the book. Every collections template quotes it, so the guard that exists to stop a notice
+   * going out with "{{debtor_id_masked}}" in it would have stopped nearly every notice the firm
+   * sends. The firm's answer: "we should account for people that don't have ID numbers... in all
+   * of the writings."
+   *
+   * SO AN UNFILLED OPTIONAL FIELD IS REMOVED RATHER THAN REPORTED. The line it sits on goes with
+   * it where it is a label line, and only the clause goes where it sits inside a sentence — see
+   * `renderTemplate`. It is NOT blanked in place: "Identity number:" with nothing after it is a
+   * fact the firm does not have, printed as though it forgot to fill it in.
+   *
+   * MARKED ON THE FIELD, NOT IN THE WORDING. A per-use syntax would mean the firm remembering to
+   * type it on thirty-two templates, and forgetting it on the thirty-third is a held workflow
+   * nobody can explain. Whether a field is answerable is a fact about the column behind it.
+   */
+  optional?: true
+}
+
+/**
+ * Shared by both sides — who is writing, from where, on what date.
+ *
+ * Pulled out so the two lists cannot drift on the three fields that mean the same thing
+ * everywhere. An agent's name is an agent's name whether the account is a debtor's or a lead's.
+ */
+const EVERYWHERE: MergeField[] = [
+  /*
+   * WHOEVER IS SENDING THIS, which is not always whoever is assigned to it.
+   *
+   * These resolve to the SIGNED-IN person, and they always have -- so a team leader previewing a
+   * letter on somebody else's account sees their own name here. That is right for "reply to this
+   * and you reach me" and wrong for "the collector handling your account is", and the firm asked
+   * for the second one. It is a separate set of fields (collector_*, below) rather than a change
+   * of meaning here, because a template already written means what it said when it was written.
+   */
+  { key: 'agent_name', label: 'Who is sending this', sample: 'Stephan Bredell' },
+  /*
+   * NOT OPTIONAL, AND THE ONE FIELD WHERE THAT MATTERS. Eight templates quote this and not one of
+   * them quotes {{firm_phone}} as well -- it IS the number on those notices -- so letting the line
+   * drop would post a demand with no way to ring anybody. It falls back to the firm's own number
+   * instead; see mergeValuesFor.
+   */
+  { key: 'agent_phone', label: 'Their number', sample: '012 111 2222' },
+  { key: 'agent_email', label: 'Their email address', sample: 'stephan@bredellferreira.co.za' },
+  /* A WhatsApp number is an extra channel, never the only one, so its line may go. */
+  { key: 'agent_whatsapp', label: 'Their WhatsApp number', sample: '082 123 4567', optional: true },
+  { key: 'firm_name', label: 'The firm', sample: 'Bredell Ferreira' },
+  { key: 'today', label: "Today's date, written out", sample: '18 September 2026' },
+  /*
+   * THE OFFICE, WHICH IS NOT THE AGENT. {{agent_phone}} is whoever is dealing with the account
+   * and changes when the account is handed out; "please telephone this office" needs a number
+   * that does not. Both sides of the business write letters under the firm's name, so these sit
+   * here rather than in either list.
+   */
+  { key: 'firm_phone', label: "The office's telephone number", sample: '012 111 2222' },
+  { key: 'firm_email', label: "The office's email address", sample: 'info@bredellferreira.co.za' },
+  /* Merged exactly as it was typed. Whether it carries a scheme is a question about the template
+     -- a letterhead wants "www...", a signature may want "https://..." so a mail client links it
+     -- and not a question this field can answer once for both. */
+  { key: 'firm_website', label: "The firm's website", sample: 'www.bredellferreira.co.za' },
+  { key: 'firm_address', label: 'The firm’s address, on its own lines', sample: '25 Kerk Street\nPolokwane, 0699' },
+  /* NOT THE SAME ADDRESS, and on a statutory notice the difference is the point: a firm that
+     works from a street it does not receive post at would have replies going nowhere. Offered
+     separately rather than one "address" field somebody has to choose the meaning of. */
+  { key: 'firm_postal_address', label: 'Where post to the firm is sent, on its own lines', sample: 'PO Box 1234\nPolokwane, 0700' },
+  /* "Telephone this office" is only useful with the hours attached. */
+  { key: 'firm_hours', label: 'When the office is open', sample: 'Monday to Friday, 08:00 – 16:30' },
+  /*
+   * THE COUNCIL REGISTRATION, which an acknowledgement of debt names in its very first item:
+   * "Bredell Ferreira (Pty) Ltd (CFDC 0124875/20) as its duly authorised agent". It is how a debtor
+   * can check that the party asking them to sign is registered to collect at all. Already on
+   * firm_settings and already edited in Settings -- it simply had no way into a document.
+   */
+  { key: 'firm_council_number', label: "The firm's Council for Debt Collectors number", sample: 'CFDC 0124875/20' },
+]
+
+/**
+ * THE FIELDS EACH SIDE MAY USE, per scope, and nothing else.
+ *
+ * Split because the sides genuinely do not share a vocabulary: {{balance}} has no meaning on a
+ * lead and {{service_interested}} has none on a debtor account. One combined list would offer
+ * every writer half a list of fields that render as nothing on their side — and a field that
+ * silently renders as nothing is the failure this whole closed-list idea exists to stop.
+ */
+export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
+  collections: [
+    { key: 'debtor_name', label: 'How the debtor is addressed', sample: 'Mr Van Der Westhuizen' },
+    { key: 'debtor_first_name', label: 'First name', sample: 'Johannes' },
+    /*
+     * RAPTOR'S OWN, AND THE ONE A NOTICE LEADS WITH. The firm: "so that we can find them easily.
+     * If they use the client reference, it's more difficult to find." The book proves it -- the
+     * client's reference is used on more than one account 5,013 times over, so 21% of the book
+     * cannot be identified by it, and a debtor reading theirs back down the phone lands the clerk
+     * on several files at once. This one is unique and never reused.
+     */
+    { key: 'case_number', label: 'Our case number, which a notice leads with', sample: 'RAP-100001' },
+    { key: 'reference', label: 'The reference the debtor knows', sample: 'GPS3/10103' },
+    { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
+    /*
+     * THE COLLECTOR THE ACCOUNT IS ASSIGNED TO, which is the answer to "who is handling my
+     * account" -- a question a debtor asks and a letter should be able to answer without knowing
+     * who happened to press send. Read from debtor_accounts.assigned_to, so it follows the
+     * account when it is handed to somebody else; {{agent_*}} above follows the person composing.
+     *
+     * NULL WHERE NOBODY HOLDS IT, and null leaves the placeholder standing rather than printing a
+     * gap -- an unassigned account naming nobody is caught before it is posted.
+     */
+    { key: 'collector_name', label: 'The collector this account is assigned to', sample: 'Rinda Ferreira' },
+    /*
+     * THE DIRECT LINE IS OPTIONAL, AND THE FIRM'S NUMBER IS WHAT IS LEFT. Not one of the fifty
+     * live profiles has a phone number on it, and fifteen collections templates quote this field
+     * -- so held-on-{{collector_phone}} was every notice on the book, for the same reason the
+     * identity number was. The firm: "if someone doesn't have a phone number entered... it should
+     * give the company's default details as contact."
+     *
+     * IT IS SAFE HERE AND NOWHERE ELSE BECAUSE OF WHAT IS ON THE LINE BELOW. All fifteen of those
+     * templates also quote {{firm_phone}}, so dropping the direct line always leaves the debtor a
+     * number to ring. {{agent_phone}} is the opposite case -- none of the eight templates that
+     * quote it carry the firm's number -- so that one is not optional; it falls back to the firm's
+     * number instead, in mergeValuesFor.
+     */
+    { key: 'collector_phone', label: "The collector's number", sample: '012 348 2156', optional: true },
+    { key: 'collector_email', label: "The collector's email address", sample: 'rinda@bredellferreira.co.za' },
+    { key: 'collector_whatsapp', label: "The collector's WhatsApp number", sample: '082 123 4567', optional: true },
+    /*
+     * THE LIAISON ON THE CLIENT, which is the firm's own word -- Liaison and Liaison Manager are
+     * roles in profiles.role. Read from companies.account_owner_id: the person who looks after
+     * the client whose book this account is on, not the client's own contact person.
+     *
+     * A DEBTOR NEVER READS THIS. It is here for what the firm writes TO a client about an
+     * account -- a handover acknowledgement, a monthly report -- where "your liaison is" is the
+     * useful sentence and the collector's name is not.
+     */
+    { key: 'liaison_name', label: 'The liaison who looks after this client', sample: 'Camile Bredell' },
+    { key: 'liaison_phone', label: "The liaison's number", sample: '012 348 2157' },
+    { key: 'liaison_email', label: "The liaison's email address", sample: 'camile@bredellferreira.co.za' },
+    /* A WhatsApp number is an EXTRA channel and never the only one, so its line may go the way
+       the collector's does. profiles.whatsapp is empty on nearly every profile. */
+    { key: 'liaison_whatsapp', label: "The liaison's WhatsApp number", sample: '082 987 6543', optional: true },
+    { key: 'balance', label: 'Balance outstanding', sample: 'R 48,250.00' },
+    { key: 'capital', label: 'Capital outstanding', sample: 'R 31,900.00' },
+    /*
+     * WHAT THE CLIENT HANDED US, WHICH IS NONE OF THE THREE FIGURES BESIDE IT.
+     *
+     * {{capital}} is the capital STILL OUTSTANDING -- it falls as payments are allocated to it --
+     * and {{balance}} is everything owed today including interest and fees. Neither answers the
+     * question the summary of account opens with, which is what the debt WAS when it arrived:
+     * "Handed over: R6 000,00 / Paid so far: R1 000,00 / Balance now owing: R5 741,30" only reads
+     * as a story if the first figure never moves.
+     *
+     * IT IS ALSO THE BASE OF TWO CEILINGS. In duplum caps the non-capital at the capital
+     * outstanding at default, and the Annexure B items 1-7 cap is the capital or R1 225, whichever
+     * is lower -- so a debtor asking why a fee was charged at R3.00 is asking about this number.
+     */
+    { key: 'balance_handover', label: 'What the client handed over to us', sample: 'R 52,000.00' },
+    /*
+     * THE CAPITAL CALCULATION AN ACKNOWLEDGEMENT OF DEBT HAS TO SHOW ITS WORKING FOR.
+     *
+     * Item 6 of the AoD's Part A is a sum the debtor signs their name under: what was handed over,
+     * plus interest, plus fees and VAT, less payments, equals the capital amount. Every line has to
+     * be printed, because the clause above it has the debtor confirm they have CHECKED it and agree
+     * it is correct -- a figure they cannot see is one they cannot have checked, and that is the
+     * clause an attorney attacks first.
+     *
+     * OFF THE LEDGER, like {{balance}} and {{paid_to_date}}: the account row's own columns disagree
+     * with the ledger beneath them on thousands of accounts, and a document somebody signs is the
+     * last place to take the worse of two numbers.
+     */
+    { key: 'interest_accrued', label: 'Interest since handover', sample: 'R 3,284.10' },
+    { key: 'fees_total', label: 'Fees and expenses, including VAT', sample: 'R 1,116.50' },
+    { key: 'fees_vat', label: 'VAT contained in those fees', sample: 'R 145.63' },
+    /* The rate itself. A document that says interest runs and does not say at what is one the
+       debtor cannot check either. */
+    { key: 'interest_rate', label: 'The interest rate on this account', sample: '24% a year' },
+    { key: 'interest_from', label: 'The day interest starts running', sample: '17 September 2026' },
+    /*
+     * THE FIELDS A LETTER NEEDS AND AN SMS NEVER DID.
+     *
+     * A section 129 notice has to identify the debtor, the agreement and the creditor well enough
+     * to be a valid statutory demand -- an address to post it to, the account number the credit
+     * provider knows it by, the date the ten business days run to. None of that fits in 160
+     * characters, so none of it existed until letters did.
+     *
+     * NOTHING FILLS SOME OF THESE YET, and they are here rather than left out for exactly that
+     * reason: the library already marks a template that asks for a field nothing can answer, so
+     * putting them in the vocabulary turns "the notice is missing things" into a precise list on
+     * the row. Leaving them out would let the letter look finished with the facts typed in by
+     * hand, which is how one debtor's address ends up on another debtor's demand.
+     */
+    { key: 'debtor_address', label: 'Where the notice is posted, on its own lines', sample: '14 Protea Street\nWonderboom\nPretoria, 0182' },
+    /*
+     * ONE COLUMN, TWO MEANINGS, TWO FIELDS. debtor_accounts.debtor_id_number holds an ID number on
+     * a person and a registration number on a company -- a decision accountBook.ts made and wrote
+     * down, "cheaper and less error-prone than two columns of which one is always null" -- and
+     * debtor_kind says which it is.
+     *
+     * So these two are the same column read twice, each resolving to NOTHING on the other kind of
+     * debtor. That is not tidiness: before this, {{debtor_id_masked}} masked a company's
+     * registration number as though it were an identity number and printed it on a letter.
+     */
+    /* Optional, both of them: they are the same column, and it is empty on 97% of the book. */
+    { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312XXXX08X', optional: true },
+    { key: 'debtor_reg_no', label: 'Registration number (a company)', sample: '2019/940923/07', optional: true },
+    /*
+     * HOW TO REACH THE DEBTOR, CONFIRMED BY THE DEBTOR. Five fields, and all five optional.
+     *
+     * THE FIRM, of the acknowledgement of debt: "when you fill it in, like address, maybe there
+     * should be like information like your work number, home, your cell phone number, work
+     * number, and email address, just kind of to confirm that stuff. Your employer... put it
+     * there as optional, that's fine."
+     *
+     * OPTIONAL IS NOT A CONVENIENCE HERE, IT IS THE WHOLE POINT. Nobody has all five. A person
+     * with no landline, no job, or no email is the ordinary case on this book -- so a line asking
+     * for one has to be able to LEAVE, or the firm's own agreement goes out reading "Work number:
+     * {{debtor_work_phone}}" on a document somebody is about to sign. That is the fault
+     * MergeField.optional exists for, met again on a new set of fields.
+     *
+     * AND THEY ARE ANSWERED BY THE SIGNER, not by the book. Raptor's copy of a debtor's cellphone
+     * is whatever a client's handover sheet said; these are what the person confirms with their
+     * signature on it. See signingBlanks.ts, which is what puts them on their screen.
+     */
+    { key: 'debtor_mobile', label: 'Cellphone number, as the debtor confirms it', sample: '082 123 4567', optional: true },
+    { key: 'debtor_work_phone', label: 'Work number, as the debtor confirms it', sample: '012 348 2248', optional: true },
+    { key: 'debtor_home_phone', label: 'Home number, as the debtor confirms it', sample: '011 333 4444', optional: true },
+    { key: 'debtor_email', label: 'Email address, as the debtor confirms it', sample: 'j.vdwest@gmail.com', optional: true },
+    { key: 'debtor_employer', label: 'Employer, where the debtor gives one', sample: 'Transnet SOC Ltd', optional: true },
+    { key: 'account_number', label: "The creditor's own account number", sample: '92322880' },
+    { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
+    { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
+    /*
+     * THE ARRANGEMENT'S NEXT INSTALMENT, WHICH IS ONE PAIR OF FIELDS AND NOT FIVE.
+     *
+     * ALL FIVE ARRANGEMENT NOTICES QUOTE AN AMOUNT AND A DATE -- the confirmation, the reminder two
+     * business days out, the one on the day, the receipt and the notice of default -- and they all
+     * mean THE EARLIEST INSTALMENT NOT YET PAID. That one definition is right on every step, which
+     * is what makes two fields enough: on a receipt the payment just allocated has moved the
+     * boundary, so it reads as the next one; on a default the missed instalment is still the
+     * earliest unpaid one, which is what makes "{{ptp_amount}}, due on {{ptp_date}}, has not
+     * reached our trust account" a true sentence. ptpSchedule.nextUnpaid is that definition.
+     *
+     * NOT OPTIONAL, EITHER OF THEM. An optional field is one whose LINE may leave with it, and the
+     * firm's rule for that is a fact the book cannot answer on most accounts -- 97% have no
+     * identity number. An arrangement notice with no amount on it is not a thinner notice, it is a
+     * demand for an unstated sum: the placeholder must stand and hold the step.
+     */
+    { key: 'ptp_amount', label: 'The next instalment under the arrangement', sample: 'R 2,500.00' },
+    { key: 'ptp_date', label: 'The day that instalment is due', sample: '5 October 2026' },
+    /*
+     * ---------------------------------------------------------------------------------------------
+     * THE AFFORDABILITY ASSESSMENT'S OWN FIGURES, WHICH THE BOOK CANNOT ANSWER AND NEVER WILL
+     * ---------------------------------------------------------------------------------------------
+     *
+     * THE FIRM, sending their financial-information request: "We will call them the affordability
+     * assessment letters and build them in exactly like the acknowledgement of debt so that they
+     * can sign it online."
+     *
+     * EVERY ONE OF THESE IS A FACT ONLY THE DEBTOR HOLDS. Raptor has no column for what somebody
+     * earns or what their transport costs, and it never will -- the whole purpose of the form is to
+     * ask. So they exist here only to be MERGE FIELDS on that one document, answered by the
+     * signer's own blanks. accountMergeValues deliberately supplies none of them.
+     *
+     * AND ALL OF THEM ARE OPTIONAL, which on a form means something different from what it means on
+     * a notice. On a section 129 an optional field is one 97% of the book cannot answer, and the
+     * line leaves rather than holding the demand. Here it is a line the DEBTOR has not answered --
+     * "I have no other income" -- and what prints is "R" with nothing after it, which is exactly
+     * what the firm's own paper form looks like before somebody fills it in. The alternative is
+     * braces on a form, which is the thing optional exists to stop.
+     *
+     * THEY CAN ONLY EVER APPEAR ON THIS FORM, which is the half that keeps the guard honest: a
+     * notice quoting {{income_salary}} is a notice somebody wrote by hand on purpose, and nothing
+     * in the firm's eleven letters comes near one.
+     */
+    { key: 'income_salary', label: 'Salary or wages, after deductions', sample: '18 400.00', optional: true },
+    { key: 'income_other', label: 'Income from any other source', sample: '1 250.00', optional: true },
+    { key: 'income_partner', label: "A partner's contribution", sample: '4 000.00', optional: true },
+    { key: 'income_total', label: 'Total income (worked out by the form)', sample: '23 650.00', optional: true },
+    { key: 'expense_housing', label: 'Rent or bond', sample: '6 500.00', optional: true },
+    { key: 'expense_utilities', label: 'Rates, water and electricity', sample: '1 900.00', optional: true },
+    { key: 'expense_food', label: 'Food and household', sample: '4 200.00', optional: true },
+    { key: 'expense_transport', label: 'Transport, fuel or taxi fares', sample: '2 300.00', optional: true },
+    { key: 'expense_school', label: 'School fees and childcare', sample: '2 800.00', optional: true },
+    { key: 'expense_medical', label: 'Insurance and medical aid', sample: '1 750.00', optional: true },
+    { key: 'expense_credit', label: 'Other credit repayments', sample: '3 100.00', optional: true },
+    { key: 'expense_other', label: 'Everything else', sample: '900.00', optional: true },
+    { key: 'expense_total', label: 'Total expenses (worked out by the form)', sample: '23 450.00', optional: true },
+    /* THE ONE THE FIRM'S PAPER FORM DOES NOT HAVE, and the figure the whole assessment is read for. */
+    { key: 'affordability_left', label: 'What is left each month (worked out by the form)', sample: '200.00', optional: true },
+    { key: 'offer_lump_sum', label: 'A lump sum offered now', sample: '2 000.00', optional: true },
+    { key: 'offer_instalments', label: 'How many instalments are offered', sample: '12', optional: true },
+    /*
+     * AND HOW OFTEN IT FALLS, WHICH IS THE FACT THAT MAKES IT AN ARRANGEMENT.
+     *
+     * THE FIRM, READING THE CONFIRMATION THAT WENT OUT: "it should be weekly monthly, like that
+     * should be disclosed." An amount and a date describe a single payment. The debtor on that
+     * email had agreed to R500 a WEEK against R13 347,31 outstanding, and nothing on the page said
+     * so -- the arrangement and a once-off promise to pay five hundred rand read identically.
+     *
+     * THE PHRASE IS arrangements.PTP_FREQUENCY'S, not a second wording here. Three notices will
+     * end up quoting it and a firm that describes one arrangement two ways is a firm a debtor can
+     * argue with.
+     *
+     * NOT OPTIONAL, for the reason above ptp_amount: an arrangement notice with the frequency
+     * dropped out of it is not a thinner notice, it is a demand for one payment. The placeholder
+     * stands and holds the step.
+     */
+    { key: 'ptp_frequency', label: 'How often the instalment falls', sample: 'every month' },
+    /*
+     * AND WHAT WAS ACTUALLY RECEIVED, WHICH IS NOT THE SAME NUMBER.
+     *
+     * THE FIRM'S RECEIPT EMAIL ASKED FOR {{ptp_amount}} TWICE, meaning two different things in one
+     * message: "We confirm receipt of {{ptp_amount}}" and, four lines down, "Next payment:
+     * {{ptp_amount}} on {{ptp_date}}". Under the one definition the other two fields have -- the
+     * earliest instalment NOT YET PAID -- the payment just allocated has already moved that
+     * boundary, so the first line would have confirmed receipt of the instalment still owing. On an
+     * arrangement whose last instalment is the remainder that is a receipt for R2 500 against a
+     * payment of R100.
+     *
+     * SO THE RECEIPT IS ITS OWN FIELD. The alternative was dropping the amount from the firm's
+     * first line, which makes a receipt that does not say what was received.
+     *
+     * IT IS THE NEWEST UNREVERSED PAYMENT ON THE ACCOUNT, which is what a receipt is about, and it
+     * is read from the ledger the notice's balance already comes from -- so the figure confirmed and
+     * the balance under it cannot disagree. A REVERSED payment is not a receipt.
+     */
+    { key: 'ptp_paid', label: 'The payment just received', sample: 'R 2,500.00' },
+    /*
+     * AND THE TWO FIELDS OF A SIMULATION, WHICH IS AN ARRANGEMENT THAT DOES NOT EXIST YET.
+     *
+     * THE FIRM: "this is before you conclude the payment arrangement." The covering email goes out
+     * while the collector is still negotiating -- "attached is a simulation of what it would cost
+     * to settle this account by paying {{ptp_amount}} {{sim_frequency}}, starting {{sim_start}}" --
+     * so there is no promise on the account to read any of it off.
+     *
+     * THE INSTALMENT REUSES {{ptp_amount}}, at the firm's own instruction, and that is the right
+     * call rather than a saving: it is the same fact in the same words, and a second field meaning
+     * "the amount, but hypothetically" is one more thing for somebody to pick wrongly on a
+     * template. What fills it is the figure in the calculator rather than the next unpaid
+     * instalment -- the caller decides which, and on a simulation there is no arrangement for
+     * nextUnpaid to read.
+     *
+     * {{sim_start}} IS NOT {{ptp_date}} AND MUST NOT BECOME IT. ptp_date is the earliest instalment
+     * not yet paid, so on a live arrangement it MOVES as payments come in -- which is exactly what
+     * every one of the five arrangement notices needs. A simulation's start date is where the
+     * projection begins and never moves; merged from ptp_date, a simulation re-sent a month later
+     * would quote a different starting date over the same totals.
+     *
+     * NEITHER IS OPTIONAL. An optional field takes its LINE with it, and the firm's rule for that
+     * is a fact the book cannot answer on most accounts. "paying R 2,500.00 , starting" is not a
+     * thinner sentence, it is a broken one, and the placeholder standing is what holds the message.
+     */
+    { key: 'sim_frequency', label: 'How often the simulated payment would be made', sample: 'a month' },
+    { key: 'sim_start', label: 'The day the simulated payments would start', sample: '5 October 2026' },
+    /*
+     * THE FIVE THE LETTERS NEED AND THE SMSs NEVER DID.
+     *
+     * `handover_date` is the first station on the notice's timeline -- "account handed to us" --
+     * and `paid_to_date` is the figure beside it: what a debtor has paid since, shown against
+     * what is still outstanding. Zero is a real answer there and prints as R 0.00 rather than a
+     * blank, because a blank reads as "we have not looked".
+     *
+     * THE THREE LISTING FIELDS ARE A RECORD, NOT A PLAN. The notice says the default "has now
+     * been reported" and gives the reference to quote at a bureau. They are null until the
+     * submission has actually happened, and that absence is what holds the step -- the firm's own
+     * rule: "it must only send once the submission has actually happened and those three values
+     * exist on the account."
+     */
+    { key: 'handover_date', label: 'The day the account was handed to us', sample: '14 August 2026' },
+    { key: 'paid_to_date', label: 'Paid since the handover', sample: 'R 0.00' },
+    /*
+     * THE LAST RECEIPT, WHICH EXISTS FOR ONE SENTENCE ON A TELEPHONE CALL.
+     *
+     * THE FIRM'S OWN REASON, out of the call-script brief: "the most common objection on a call is
+     * 'I already paid'. Having the last receipt on screen settles it in seconds instead of a call
+     * back." Without it the collector promises to check and rings back tomorrow, by which time the
+     * debtor has stopped answering.
+     *
+     * TWO FIELDS RATHER THAN ONE SENTENCE, because the two halves of the answer are different
+     * kinds of thing: "R500 on 3 September" is an amount and a date, and a template that wants
+     * only the date ("our last receipt from you was on {{last_payment_date}}") must not have to
+     * print the amount to get it.
+     *
+     * NOT {{paid_to_date}}, WHICH IS THE TOTAL. A debtor who has paid four times is answered by
+     * the LAST one -- the total says nothing about whether the payment they are arguing about
+     * arrived. Off the ledger like every other figure here; null where the account has never paid,
+     * which is 20 473 of the book and is the honest answer rather than R 0,00 on a date.
+     */
+    { key: 'last_payment_amount', label: 'The last payment we received', sample: 'R 1,200.00' },
+    { key: 'last_payment_date', label: 'The day that payment reached us', sample: '3 September 2026' },
+    { key: 'listing_date', label: 'The day the default was reported to the bureaus', sample: '1 December 2026' },
+    { key: 'listing_reference', label: 'Our listing reference, to quote at a bureau', sample: 'BFL-2026-11482' },
+    { key: 'bureaus_listed', label: 'Which bureaus it went to', sample: 'TransUnion, Experian and XDS' },
+    /*
+     * THE ESTATE, WHICH IS WHAT AN ACCOUNT BECOMES WHEN THE DEBTOR DIES.
+     *
+     * THE FIRM: "when a debtor dies the account does not end, it changes form. It becomes a claim
+     * against the deceased estate, and the family is not liable for it." The claim is lodged in
+     * writing with the executor and every one of these five is on it.
+     *
+     * {{executor_name}} AND {{estate_number}} READ THE PRACTITIONER COLUMNS the book has carried
+     * since the practitioner work -- `practitioner_name` and `practitioner_reference`, whose own
+     * comment is "their reference for the estate, which every claim submission has to quote back".
+     * Three new columns beside them would be a second executor on one account, and the two would
+     * disagree the first time somebody filled in the other one.
+     *
+     * {{surety_name}} IS NOT AN ESTATE FIELD AND SITS HERE BECAUSE IT IS THE SAME CONVERSATION. A
+     * surety is a debtor in their own right -- script-surety says exactly that -- and the name is
+     * read off the authorised contacts row whose capacity is `surety`, which is the only place a
+     * deed of suretyship is recorded as being on file.
+     *
+     * NONE OF THEM IS OPTIONAL in the MergeField sense: see `optional` below, which is for a field
+     * whose LINE may leave with it. An estate letter with the estate number dropped out of it is
+     * not a thinner letter, it is a claim the Master cannot file.
+     */
+    { key: 'date_of_death', label: 'The day the debtor died', sample: '12 April 2026' },
+    { key: 'executor_name', label: "The executor or Master's Representative", sample: 'Mr T Mokoena' },
+    { key: 'estate_number', label: 'The estate number', sample: '004521/2026' },
+    { key: 'master_office', label: "Which Master's office the estate is reported at", sample: 'Pretoria' },
+    { key: 'surety_name', label: 'The surety, where a signed deed is on file', sample: 'Mrs A Botha' },
+    /*
+     * THE DISPUTE, AND THE ONE FIELD OF THE FOUR THAT MUST NEVER REACH A DEBTOR.
+     *
+     * `dispute_days_left` is a COUNT OF WORKING DAYS WRITTEN OUT ("6 business days"), not a date,
+     * because that is how the firm's own dispute letters read. `disputeWindow` decides the number
+     * and {{respond_by}} carries the date it lands on, so the count and the date cannot disagree --
+     * which is the whole point of the override that feeds them both: while a section 129 is running
+     * the debtor has what is LEFT of ITS period, not a fresh ten days.
+     *
+     * `dispute_summary` IS THE COLLECTOR'S OWN NOTE, and it belongs in the internal notifications
+     * only -- the referral to the liaison, the follow-up, the escalation. It is what the collector
+     * wrote down about what the debtor alleges, in the firm's words rather than the debtor's, and a
+     * debtor reading the firm's working note on their own dispute is how a file ends up quoted back
+     * at the firm. Today the protection is structural: `planSend` resolves every recipient to
+     * `debtor.email`, so a template carrying this field cannot be a workflow node at all and is
+     * sent by hand by the person who wrote it.
+     */
+    { key: 'dispute_days_left', label: 'How long they have to send the documents', sample: '6 business days' },
+    { key: 'dispute_alleged_date', label: 'The day they said the account is disputed', sample: '21 September 2026' },
+    { key: 'dispute_received_date', label: 'The day the dispute arrived in writing', sample: '24 September 2026' },
+    { key: 'dispute_summary', label: 'What the collector wrote down about the dispute', sample: 'Says the account was settled in 2023.' },
+    /*
+     * THE SETTLEMENT THE CLIENT APPROVED, AND ONLY THAT ONE.
+     *
+     * The firm's call script quotes all three -- "{{client_name}} has agreed to accept
+     * {{settlement_amount}} ... That is {{settlement_saving}} written off ... by
+     * {{settlement_expiry}}" -- and its DO NOT list is the rule: "Quote a settlement figure that is
+     * not approved on the account." So they answer ONLY off an approved, unlapsed offer
+     * (settlement.isQuotable decides it, once). Everywhere else they are unanswered and the
+     * placeholder stands, which is what holds a settlement message on an account with nothing
+     * agreed. NOT optional, for the same reason a balance is not: a settlement letter with its
+     * figure quietly dropped out is not a shorter letter, it is a wrong one.
+     */
+    { key: 'settlement_amount', label: 'The settlement the client approved', sample: 'R 18,000.00' },
+    { key: 'settlement_expiry', label: 'The day that settlement must be paid by', sample: '31 October 2026' },
+    { key: 'settlement_saving', label: 'What the debtor is let off, against the balance it was offered on', sample: 'R 30,250.00' },
+    /*
+     * AND THE FIRM'S OWN DETAILS, which are not the agent's and not the client's. Raptor has no
+     * table for them -- companies.banking_details is where REMITTANCE GOES, which is the opposite
+     * direction from where a debtor pays -- so these resolve to nothing until it has one.
+     */
+    { key: 'firm_bank', label: 'Trust account, bank and branch code together', sample: 'Standard Bank · 051001' },
+    /*
+     * THE BRANCH CODE ON ITS OWN, at the firm's correction: "the branch code can be a different
+     * thing than the bank". {{firm_bank}} above still merges the two joined, so a notice written
+     * before the split keeps printing exactly what it printed -- but a page that lays the details
+     * out in a block, which is how a debtor copies them into a banking app, can now ask for each
+     * line separately instead of making somebody retype the half they wanted.
+     */
+    { key: 'firm_bank_branch', label: 'Trust account branch code, on its own', sample: '051001' },
+    { key: 'firm_bank_name', label: 'Trust account bank, on its own', sample: 'Standard Bank' },
+    /* The beneficiary name. An account number without it reaches the right number under the wrong
+       name, and the receiving bank may send it back. */
+    { key: 'firm_bank_holder', label: 'The name on the trust account', sample: 'Bredell Ferreira Trust' },
+    { key: 'firm_bank_account', label: 'Trust account number', sample: '01 234 5678' },
+    /*
+     * WHAT KIND OF ACCOUNT IT IS, in the bank's own words, and it is doing work on a notice: a
+     * legal practitioner trust account tells a debtor the money is not the firm's to spend.
+     */
+    { key: 'firm_bank_type', label: 'What kind of account it is', sample: 'Legal Practitioner Trust Account' },
+    /*
+     * THE ASK ITSELF, written once by the firm and merged wherever payment is discussed -- a
+     * letter, an email, an SMS, a call script. THE FIRM: "we need to move them and motivate them
+     * to pay into our trust account." Retyped into each template instead, the same account ends
+     * up described four different ways, and the one a debtor happens to hold is the one that
+     * counts.
+     *
+     * COLLECTIONS ONLY. It tells a DEBTOR where to pay; a sales template has no business with it.
+     */
+    { key: 'payment_instruction', label: 'The standing ask to pay into the trust account', sample: 'Payment must be made into our trust account, details below.' },
+    { key: 'signatory_name', label: 'Who signs the letter', sample: 'J Bredell' },
+    { key: 'signatory_title', label: 'Their title', sample: 'Director' },
+    ...EVERYWHERE,
+  ],
+  sales: [
+    { key: 'contact_name', label: 'How the person is addressed', sample: 'Mr Van Der Westhuizen' },
+    { key: 'contact_first_name', label: 'First name', sample: 'Johannes' },
+    { key: 'company_name', label: 'Their business', sample: 'Gauteng Property Services' },
+    { key: 'service_interested', label: 'What they asked about', sample: 'Debt collecting' },
+    { key: 'deal_name', label: 'The piece of business', sample: 'GPS collections mandate' },
+    { key: 'deal_value', label: 'What it is worth', sample: 'R 120,000.00' },
+    /*
+     * WHERE A CLIENT PAYS THE FIRM, and why it is only on this side.
+     *
+     * The firm: "there's also an account that is still outstanding with our client." That is
+     * commission the firm is owed, and it is paid into the firm's BUSINESS account -- a third
+     * direction of money, separate from the trust account a debtor pays into and from
+     * companies.banking_details, where remittance goes out.
+     *
+     * A DEBTOR NOTICE CANNOT NAME IT, because these keys are not in the collections list and
+     * templateProblems refuses a field that is not in its scope. That is the whole protection:
+     * getting a debtor to pay into the business account is trust money in the wrong place, and
+     * nobody finds out until month end. A closed list per side is cheaper than a warning.
+     */
+    { key: 'firm_business_bank', label: 'The firm’s own account, bank and branch code together', sample: 'Standard Bank · 051001' },
+    { key: 'firm_business_bank_branch', label: 'Branch code, on its own', sample: '051001' },
+    { key: 'firm_business_bank_name', label: 'Bank, on its own', sample: 'Standard Bank' },
+    { key: 'firm_business_bank_holder', label: 'The name on the account', sample: 'Bredell Ferreira' },
+    { key: 'firm_business_bank_account', label: 'Account number', sample: '02 345 6789' },
+    ...EVERYWHERE,
+  ],
+}
+
+/**
+ * THE FIELDS, IN GROUPS, because forty chips in one row is a list nobody reads.
+ *
+ * THE FIRM: "if we can categorize it ... because now it's like all over the place. Debtor
+ * details, collector details, liaison details, firm details." The chips were in the order the
+ * fields happened to be written in, which put the trust account between a debtor's ID number and
+ * the date -- so somebody looking for the bank details read the whole row every time.
+ *
+ * ORDERED BY WHO THE FIELD IS ABOUT, and the groups are in the order a letter uses them: the
+ * debtor it is to, the account it is about, whose book it is, who is working it, where to pay,
+ * who we are, and the letter itself.
+ *
+ * A TABLE RATHER THAN A PROPERTY ON EACH FIELD. Both work; this one puts the whole grouping on
+ * one screen, where a field in the wrong place is visible. A field missing from it is a failure
+ * rather than a silent "everything else" bucket -- check-message-templates refuses one, because
+ * a field that quietly stops being offered is a field nobody uses again.
+ */
+export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
+  { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked',
+    'debtor_mobile', 'debtor_work_phone', 'debtor_home_phone', 'debtor_email', 'debtor_employer',
+    'debtor_reg_no'] },
+  { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
+  { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
+    'paid_to_date', 'last_payment_amount', 'last_payment_date', 'listing_date',
+    'listing_reference', 'bureaus_listed', 'balance_handover',
+    'balance', 'capital', 'position_as_at', 'respond_by'] },
+  /* THE ESTATE, APART FROM THE ACCOUNT. A writer reaching for "the reference" on an ordinary
+     notice must not be offered {{estate_number}} beside {{reference}}; and a group of its own is
+     how somebody writing to an executor finds all five at once. {{surety_name}} is here because
+     it is the same kind of fact -- somebody other than the debtor who is liable. */
+  { title: 'The estate, and a surety', keys: ['date_of_death', 'executor_name', 'estate_number',
+    'master_office', 'surety_name'] },
+  /*
+   * THE WORKING BEHIND THE BALANCE, APART FROM IT, and the acknowledgement of debt is why the
+   * group exists: item 6 prints the whole sum -- handed over, plus interest, plus fees and VAT,
+   * less payments -- because the clause above it has the debtor confirm they have CHECKED it.
+   *
+   * ITS OWN HEADING RATHER THAN FIVE MORE ENTRIES UNDER "The account", for the reason the
+   * arrangement has one: somebody reaching for "the amount" should not be offered {{balance}} and
+   * {{interest_accrued}} side by side as if either would do. These are the parts; the balance is
+   * the answer.
+   */
+  { title: 'How the balance is made up', keys: ['interest_accrued', 'fees_total', 'fees_vat',
+    'interest_rate', 'interest_from'] },
+  /* THE ARRANGEMENT IS ABOUT THE ARRANGEMENT, not about the account: the balance is what is owed
+     and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
+     amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
+  { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_frequency', 'ptp_paid'] },
+  /* APART FROM THE ARRANGEMENT, because an arrangement is what has been AGREED and these are what
+     the debtor says they can afford before anything is. Offered side by side, a writer reaching for
+     "the amount" would be shown {{ptp_amount}} and {{income_salary}} under one heading. */
+  {
+    title: 'The affordability assessment',
+    keys: ['income_salary', 'income_other', 'income_partner', 'income_total',
+      'expense_housing', 'expense_utilities', 'expense_food', 'expense_transport',
+      'expense_school', 'expense_medical', 'expense_credit', 'expense_other', 'expense_total',
+      'affordability_left', 'offer_lump_sum', 'offer_instalments'],
+  },
+  /* APART FROM THE ARRANGEMENT, because a simulation is not one -- it is what an arrangement WOULD
+     cost, sent while there is still nothing agreed. Grouped together so a writer reaching for the
+     starting date of a live arrangement is not offered {{sim_start}} beside {{ptp_date}}. */
+  { title: 'The payment simulation', keys: ['sim_frequency', 'sim_start'] },
+  /* APART FROM THE ACCOUNT, for two reasons. {{dispute_days_left}} is a count and {{respond_by}}
+     is a date, and offered side by side under one heading they read as alternatives rather than as
+     two halves of one period. And {{dispute_summary}} is the only field in the collections
+     vocabulary that is not written for the debtor to read, which is easier to remember while it is
+     sitting in a group of its own than while it is the fourteenth entry under "The account". */
+  { title: 'The dispute', keys: ['dispute_days_left', 'dispute_alleged_date', 'dispute_received_date',
+    'dispute_summary'] },
+  /* APART FROM THE BALANCE, because a settlement figure beside {{balance}} under one heading reads
+     as another way of saying what is owed. It is not: it is what the client has agreed to accept
+     INSTEAD, until a date, and the three only exist together. */
+  { title: 'The settlement', keys: ['settlement_amount', 'settlement_expiry', 'settlement_saving'] },
+  { title: 'Their business', keys: ['company_name', 'service_interested'] },
+  { title: 'The deal', keys: ['deal_name', 'deal_value'] },
+  { title: 'The client', keys: ['client_name'] },
+  /* Named for what it does rather than for a role: the same two fields are the collector on a
+     debtor account and the consultant on a lead, and one group cannot be called both. */
+  { title: 'Whoever is sending it', keys: ['agent_name', 'agent_phone', 'agent_email', 'agent_whatsapp'] },
+  {
+    title: 'The collector on the account',
+    keys: ['collector_name', 'collector_phone', 'collector_email', 'collector_whatsapp'],
+  },
+  {
+    title: 'The liaison on the client',
+    keys: ['liaison_name', 'liaison_phone', 'liaison_email', 'liaison_whatsapp'],
+  },
+  {
+    title: 'Paying us',
+    keys: ['payment_instruction', 'firm_bank', 'firm_bank_name', 'firm_bank_branch',
+      'firm_bank_holder', 'firm_bank_account', 'firm_bank_type'],
+  },
+  {
+    title: 'Paying us (the client side)',
+    keys: ['firm_business_bank', 'firm_business_bank_name', 'firm_business_bank_branch',
+      'firm_business_bank_holder', 'firm_business_bank_account'],
+  },
+  {
+    title: 'The firm',
+    keys: ['firm_name', 'firm_phone', 'firm_email', 'firm_website', 'firm_address',
+      'firm_postal_address', 'firm_hours', 'firm_council_number'],
+  },
+  /* Not the firm: these are facts about THIS piece of correspondence -- the day it carries and
+     the person putting their name under it. */
+  { title: 'This letter', keys: ['today', 'signatory_name', 'signatory_title'] },
+]
+
+/**
+ * The scope's fields, in groups, with empty groups left out.
+ *
+ * Built from FIELD_GROUPS so the order on the screen is the order in that table and not the order
+ * the fields were written in. A field the table does not mention would vanish from the screen
+ * entirely, so it is returned here as its own group named for the mistake -- visible rather than
+ * missing -- and refused by the checks.
+ */
+export function groupedFields(scope: TemplateScope): { title: string; fields: MergeField[] }[] {
+  const fields = MERGE_FIELDS[scope] ?? []
+  const placed = new Set<string>()
+  const out: { title: string; fields: MergeField[] }[] = []
+  for (const g of FIELD_GROUPS) {
+    const inGroup = g.keys
+      .map((k) => fields.find((f) => f.key === k))
+      .filter((f): f is MergeField => f !== undefined)
+    for (const f of inGroup) placed.add(f.key)
+    if (inGroup.length) out.push({ title: g.title, fields: inGroup })
+  }
+  const rest = fields.filter((f) => !placed.has(f.key))
+  if (rest.length) out.push({ title: 'Not yet grouped', fields: rest })
+  return out
+}
+
+/** Every field either side may use. What a reader of a template needs, before it is filed. */
+export const ALL_FIELD_KEYS = new Set(
+  Object.values(MERGE_FIELDS).flatMap((list) => list.map((f) => f.key)),
+)
+
+/*
+ * An unrecognised scope yields NO known fields, rather than throwing.
+ *
+ * The type stops it and so does the check constraint, but a template is a database row and a row
+ * is data: a library page that throws on one bad row shows nothing at all, where one that reports
+ * every field on that row as unanswerable shows the reader exactly which row to go and fix.
+ */
+const keysFor = (scope: TemplateScope) => new Set((MERGE_FIELDS[scope] ?? []).map((f) => f.key))
+
+/**
+ * `{{field}}`, with optional spaces inside the braces.
+ *
+ * BUILT FRESH ON EVERY USE rather than hoisted into a const, and the reason is narrower than it
+ * looks. A /g RegExp carries `lastIndex` between calls, but neither caller here trips over it:
+ * `String.replace` resets it, and `matchAll` works on a copy. So sharing one today would be
+ * harmless — which is exactly why this is worth a note. The day somebody swaps the `matchAll`
+ * below for an `.exec()` loop, a shared pattern starts the second template halfway through its
+ * own string and drops the fields before that point, silently, on one template in a list.
+ */
+const fieldPattern = () => /\{\{\s*([a-z_]+)\s*\}\}/g
+
+/** Every field the body (and subject) refers to, in the order a reader meets them, deduplicated. */
+export function fieldsUsed(...parts: (string | null | undefined)[]): string[] {
+  const seen: string[] = []
+  for (const part of parts) {
+    for (const m of (part ?? '').matchAll(fieldPattern())) {
+      const key = m[1]
+      if (key && !seen.includes(key)) seen.push(key)
+    }
+  }
+  return seen
+}
+
+/**
+ * WHAT THIS WORDING NEEDS THE ACCOUNT TO ALREADY KNOW.
+ *
+ * The firm's instruction about the listing step: "it must only send once the submission has
+ * actually happened and those three values exist on the account. If they are missing, hold the
+ * node and alert the collector." That rule is enforced by planSend at send time; this is the same
+ * rule said in advance, on the builder, so somebody laying out a workflow can see what a step
+ * will wait for before it waits.
+ *
+ * THE DEBTOR'S AND THE ACCOUNT'S FIELDS ONLY. The firm's own details, the sender and the
+ * collector always resolve -- they come off firm_settings and off a profile, and a step is never
+ * held for want of the firm's bank account. What can be missing is a fact about THIS debtor: an
+ * address nobody has captured, a listing reference that does not exist until the submission has
+ * gone. Read off FIELD_GROUPS rather than listed here, so a field added to the account group is
+ * covered without anybody remembering this.
+ */
+export function accountFieldsNeeded(
+  scope: TemplateScope, subject: string | null, body: string,
+): MergeField[] {
+  const ofTheAccount = new Set(
+    FIELD_GROUPS
+      .filter((g) => g.title === 'The debtor' || g.title === 'The account')
+      .flatMap((g) => g.keys),
+  )
+  const known = new Map(MERGE_FIELDS[scope].map((f) => [f.key, f]))
+  return fieldsUsed(subject, body)
+    .filter((k) => ofTheAccount.has(k))
+    .map((k) => known.get(k))
+    .filter((f): f is MergeField => f !== undefined)
+}
+
+/** The ones that are not fields at all. A typo, every time. */
+/**
+ * Which kind of wording a workflow step's channel needs.
+ *
+ * THE REASON THIS EXISTS. workflow_nodes.template_id points at message_templates, and until the
+ * two lived on one screen the builder had no way to set it: a communication step could be created
+ * saying "send an email" with nothing to send, and the builder could COUNT those ("Notices to
+ * write") without being able to fix one. The step drawer now offers the wording, and this is what
+ * decides which wording it may offer.
+ *
+ * Null where the channel is not a thing the firm writes in advance. "By hand" is a delivery
+ * method for something already written, so it takes a letter; a telephone call takes a script.
+ *
+ * WHATSAPP TAKES THE SMS WORDING and that is a judgement, not an equivalence: it is the only
+ * short-text kind there is, and writing the same sentence twice is how the two drift apart. What
+ * must NOT follow from it is the segment cost — Annexure B item 1(c) prices an SMS, and nothing
+ * in the tariff prices a WhatsApp. A segment figure shown against a WhatsApp step would be a
+ * wrong number on screen, which is worse than no number.
+ */
+export function kindForChannel(channel: string | null): TemplateKind | null {
+  switch (channel) {
+    case 'email': return 'email'
+    case 'sms': case 'whatsapp': return 'sms'
+    case 'post': case 'registered_post': case 'hand': return 'letter'
+    case 'call': return 'call_script'
+    default: return null
+  }
+}
+
+/**
+ * The ones this side cannot answer. A typo, or a field borrowed from the other library.
+ *
+ * SCOPED, because "unknown" only means anything relative to a side. `{{balance}}` is a real field
+ * on a debtor account and nothing at all on a lead — and a sales template carrying it would
+ * render "the amount of  is now due" to a prospect. The old version took no scope and therefore
+ * could not tell those two cases apart.
+ */
+export function unknownFields(
+  scope: TemplateScope, ...parts: (string | null | undefined)[]
+): string[] {
+  const known = keysFor(scope)
+  return fieldsUsed(...parts).filter((k) => !known.has(k))
+}
+
+export interface Rendered {
+  text: string
+  /**
+   * Fields the template asked for and this account could not answer.
+   *
+   * NOT AN ERROR HERE, because rendering a preview with gaps is useful and rendering a live
+   * message with gaps is not. The caller decides, and for anything actually going to a debtor the
+   * answer is always to refuse: "Dear , your account  is overdue" is worse than no message, and
+   * at campaign scale it is worse four hundred times.
+   */
+  missing: string[]
+}
+
+/**
+ * EVERY FIELD MARKED OPTIONAL, ACROSS BOTH LIBRARIES.
+ *
+ * Read off MERGE_FIELDS rather than written out again, so a field marked optional in the
+ * vocabulary is optional everywhere it is used and a second list cannot disagree with the first.
+ */
+const OPTIONAL_FIELDS: ReadonlySet<string> = new Set(
+  Object.values(MERGE_FIELDS).flatMap((list) => list.filter((f) => f.optional).map((f) => f.key)),
+)
+
+export function isOptionalField(key: string): boolean {
+  return OPTIONAL_FIELDS.has(key)
+}
+
+/**
+ * Take out an optional field the account cannot answer, and the words that only existed to
+ * introduce it.
+ *
+ * TWO SHAPES, BECAUSE THE FIRM'S TEMPLATES HAVE TWO. An email or a letter puts it on a line of
+ * its own under the references — "Identity number: {{debtor_id_masked}}" — and the whole line
+ * goes, because a label with nothing after it reads as a fact somebody forgot to type. An SMS
+ * has it inside the sentence — "{{debtor_name}}, {{debtor_id_masked}}. We emailed you" — where
+ * dropping the line would drop the entire message, so only the field and the comma holding it in
+ * go, leaving "Strand Van der see. We emailed you".
+ *
+ * IT NEVER EMPTIES THE MESSAGE. A template that is nothing but the optional field would render
+ * as an empty SMS — sent, and charged to the debtor under item 1(c), saying nothing. Where the
+ * removal would leave nothing behind, the field is treated as missing after all and the notice
+ * holds, which is the outcome that gets somebody to look.
+ */
+function withoutOptional(template: string, key: string): string | null {
+  const one = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`)
+  const lines = template.split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    if (!one.test(line)) { out.push(line); continue }
+    /*
+     * A LABEL LINE, or a line that is only the field. What is left once the field is gone is
+     * either nothing, or a label ending in a colon; either way the line was about the field.
+     */
+    const rest = line.replace(new RegExp(one.source, 'g'), '').trim()
+    if (rest === '' || /^[^{}]*:$/.test(rest)) continue
+    /*
+     * INSIDE A SENTENCE. The separator in front of it goes with it — a comma or a semicolon and
+     * the space around it — and failing that, one after it. Without that, "Name, . We emailed"
+     * is what the debtor reads.
+     */
+    const inline = line
+      .replace(new RegExp(`\\s*[,;]\\s*${one.source}`, 'g'), '')
+      .replace(new RegExp(`${one.source}\\s*[,;]\\s*`, 'g'), '')
+      .replace(new RegExp(one.source, 'g'), '')
+      .replace(/[ \t]{2,}/g, ' ')
+    out.push(inline)
+  }
+  /* A line removed from the middle of a block can leave two blank lines where there was one, and
+     in an email a blank line is a PARAGRAPH — see emailBodyHtml. Collapsed back to one. */
+  const text = out.join('\n').replace(/\n{3,}/g, '\n\n')
+  return text.trim() === '' ? null : text
+}
+
+/**
+ * The same removal, for one span of a NOTICE rather than for a message.
+ *
+ * WHY THE DOCUMENT NEEDS ITS OWN DOOR. The firm's four letters carry the field as a paragraph of
+ * its own — "Identity number: {{debtor_id_masked}}" — and a letter is rendered span by span, so
+ * the span is the whole of that paragraph. renderTemplate refuses to empty a message, which is
+ * right for an SMS and wrong here: an empty span is exactly what should happen, and it is the
+ * DOCUMENT's job to then drop the paragraph around it rather than print a gap on a statutory
+ * demand. See documentWithoutOptional in letterDocument.ts, which is the only caller.
+ *
+ * Returns the text unchanged where there is nothing optional to take out.
+ */
+export function spanWithoutOptional(
+  text: string,
+  values: Partial<Record<string, string | null>>,
+): string {
+  let out = text
+  for (const key of fieldsUsed(out)) {
+    if (!OPTIONAL_FIELDS.has(key)) continue
+    const value = values[key]
+    if (!(value === undefined || value === null || value.trim() === '')) continue
+    out = withoutOptional(out, key) ?? ''
+  }
+  return out
+}
+
+/**
+ * Substitute what is known and report what is not. Never invents, never leaves "undefined".
+ *
+ * AN OPTIONAL FIELD NOTHING FILLS IS REMOVED RATHER THAN REPORTED, so it does not hold a notice
+ * — see MergeField.optional, and withoutOptional above for what "removed" means.
+ */
+export function renderTemplate(
+  template: string | null | undefined,
+  values: Partial<Record<string, string | null>>,
+): Rendered {
+  const unfilled = (key: string): boolean => {
+    const value = values[key]
+    return value === undefined || value === null || value.trim() === ''
+  }
+
+  /* Cut the optional gaps out FIRST, so what is measured below is the text that will actually
+     go — an SMS is priced per segment on the merged words, and a clause removed after the
+     count would be a quote the debtor is charged against and never reads. */
+  let source = template ?? ''
+  for (const key of fieldsUsed(source)) {
+    if (!OPTIONAL_FIELDS.has(key) || !unfilled(key)) continue
+    const trimmed = withoutOptional(source, key)
+    /* Null means removing it would leave nothing at all. Left standing, so it is reported as
+       missing below and somebody looks at the template rather than a debtor getting silence. */
+    if (trimmed !== null) source = trimmed
+  }
+
+  const missing: string[] = []
+  const text = source.replace(fieldPattern(), (whole, key: string) => {
+    const value = values[key]
+    if (value === undefined || value === null || value.trim() === '') {
+      if (!missing.includes(key)) missing.push(key)
+      // The placeholder is left standing rather than blanked. A gap reads as finished prose and
+      // gets sent; "{{debtor_name}}" in a preview is unmistakably unfinished.
+      return whole
+    }
+    return value
+  })
+  return { text, missing }
+}
+
+/**
+ * Every field filled with its sample, for previewing with no account in front of you.
+ *
+ * Both sides at once, deliberately. A preview's job is to show what the words look like filled
+ * in; refusing to fill a field because it belongs to the other library would make a
+ * mis-scoped template preview as if it were fine, which is the one thing a preview must not do.
+ * templateProblems is what says the field does not belong here.
+ */
+export function sampleValues(): Record<string, string> {
+  return Object.fromEntries(
+    Object.values(MERGE_FIELDS).flatMap((list) => list.map((f) => [f.key, f.sample] as const)),
+  )
+}
+
+/**
+ * The sentence to show when a template asked for something this account could not answer.
+ *
+ * NULL WHEN THERE IS NOTHING WRONG, which is the whole contract. CLAUDE.md: a warning that fires
+ * when nothing is wrong is worse than no warning, because people stop reading it — and this one
+ * has to still be read on the day it matters.
+ */
+export function missingFieldsNote(missing: string[]): string | null {
+  if (missing.length === 0) return null
+  const names = missing.map((f) => `{{${f}}}`).join(', ')
+  return missing.length === 1
+    ? `${names} could not be filled from this account, and will send with the braces in it.`
+    : `${names} could not be filled from this account, and will send with the braces in them.`
+}
+
+/* ---------------------------------------------------------------- what the account answers with */
+
+/** Just enough of an account to write to its debtor. Passed in, so this file fetches nothing. */
+export interface TemplateAccount {
+  /** Raptor's own, unique and never reused. Not the creditor's accountNumber below. */
+  caseNumber: string | null
+  /** The day the debt fell due and the account came to the firm. First station on the timeline. */
+  handoverDate: string | null
+  /**
+   * Paid SINCE the handover, which is what the notices show against what is still outstanding.
+   *
+   * SUMMED FROM THE PAYMENTS LEDGER BY THE CALLER, never read off `debtor_accounts.payments_to_date`.
+   * That column is null on 20 473 of the 23 782 accounts -- including 1 243 that have received
+   * money, up to R90 530 of it -- and where it is set it disagrees with the ledger beneath it on
+   * 2 644 rows out of 3 309. Both callers take it from the computed balance for that reason; see
+   * the note at the call site in AccountDetail.
+   *
+   * NULL ONLY WHERE NO BALANCE COULD BE COMPUTED AT ALL, which leaves the placeholder standing and
+   * the notice unsendable -- as it should, because then nobody knows.
+   */
+  paymentsToDate: number | null
+  /** The three the listing notice is a record of. Null until the submission has actually gone. */
+  listingDate: string | null
+  listingReference: string | null
+  bureausListed: string | null
+  /**
+   * THE LAST RECEIPT, FOR ONE SENTENCE ON A TELEPHONE CALL -- see {{last_payment_amount}}.
+   *
+   * OFF THE PAYMENTS LEDGER, like paymentsToDate above and for the identical reason: the account
+   * row cannot answer it. Null where the debtor has never paid, which is most of the book, and
+   * null is right -- "R 0.00 on no date" is not an answer to "when did I pay?".
+   */
+  lastPaymentAmount?: number | null
+  lastPaymentDate?: string | null
+  /**
+   * THE ESTATE. All five are null on a living debtor, which is the ordinary case.
+   *
+   * `executorName` and `estateNumber` ARE THE PRACTITIONER COLUMNS, read by the caller off
+   * `practitioner_name` and `practitioner_reference` where `practitioner_kind` is 'executor' --
+   * see the note on these fields in MERGE_FIELDS for why there is not a second executor here.
+   */
+  dateOfDeath?: string | null
+  executorName?: string | null
+  estateNumber?: string | null
+  masterOffice?: string | null
+  /** The surety named on the authorised contacts row that holds the signed deed. */
+  suretyName?: string | null
+  debtorKind: 'individual' | 'company'
+  debtorTitle: string | null
+  debtorFirstName: string | null
+  debtorSurname: string | null
+  accountNumber: string | null
+  clientReference: string | null
+  capitalOutstanding: number
+  /** What the client handed us. Fixed at the handover; see {{balance_handover}}. */
+  capitalHandedOver: number
+  preferredLanguage: string | null
+}
+
+/**
+ * How to address this debtor.
+ *
+ * A COMPANY IS NOT A "MR". The book holds a company's registered name in the surname field —
+ * there is nowhere else for it to go — so a template that renders "Dear Mr Moloto Trading CC"
+ * puts the firm's letterhead behind an obvious mistake. debtor_kind is the flag that tells the
+ * two apart and it is exactly what it is for.
+ *
+ * Returns null rather than a guess where there is no name at all, so renderTemplate reports it
+ * missing and the send is refused.
+ */
+export function addressAs(account: TemplateAccount): string | null {
+  const surname = (account.debtorSurname ?? '').trim()
+  const first = (account.debtorFirstName ?? '').trim()
+  if (account.debtorKind === 'company') {
+    const name = [first, surname].filter(Boolean).join(' ').trim()
+    return name === '' ? null : name
+  }
+  const title = (account.debtorTitle ?? '').trim()
+  if (surname === '') return first === '' ? null : first
+  return title === '' ? surname : `${title} ${surname}`
+}
+
+/**
+ * "8503125009087" -> "850312XXXX08X".
+ *
+ * A South African ID is YYMMDD SSSS C A Z: the date of birth, four digits that encode sex, a
+ * citizenship digit, and a check digit. The four that encode sex are covered and so is the check
+ * digit; the date of birth is left, because it is what lets a debtor recognise their own number
+ * on a notice, which is the whole point of printing part of it.
+ *
+ * NO SPACES, AT THE FIRM'S INSTRUCTION -- "there's spaces in between the ID numbers. I don't
+ * think that's really necessary. It's wasting space." It was "850312 XXXX 08 X", which is
+ * sixteen characters for thirteen digits, and an SMS is billed in blocks of 160: every
+ * individual message in the collections library carries this field, so three characters back is
+ * three characters of headroom on each of them before the next one costs R7.00 instead of R3.50.
+ *
+ * ONE RENDERING EVERYWHERE, not a short one for SMS and a spaced one for letters. The same
+ * argument as the firm's bank account, which `bankLine` exists to write one way: a number printed
+ * two ways across two notices reads as two numbers.
+ *
+ * ANYTHING THAT IS NOT THIRTEEN DIGITS IS RETURNED UNTOUCHED rather than mangled into a shape it
+ * does not have -- 45 rows of the firm's own import file had a telephone number in this column,
+ * and "0746 XXXX 63" masked as though it were an identity number would look deliberate.
+ */
+export function maskSaId(raw: string | null | undefined): string | null {
+  const s = (raw ?? '').replace(/\s/g, '')
+  if (!s) return null
+  if (!/^\d{13}$/.test(s)) return s
+  return `${s.slice(0, 6)}XXXX${s.slice(10, 12)}X`
+}
+
+/** "2026-09-18" -> "18 September 2026". A date in a letter is never written in ISO. */
+export function longDate(date: string): string {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December']
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d || m < 1 || m > 12) return date
+  return `${d} ${months[m - 1]} ${y}`
+}
+
+/**
+ * Somebody a letter can name, structurally.
+ *
+ * Written out rather than imported from types.ts for the same reason FirmSettings' shape is: this
+ * file is pure, every QA check imports it directly, and a type from a module that reaches the
+ * database would drag supabase in behind it. Every field optional -- a person with no WhatsApp
+ * number is ordinary, and null leaves the placeholder standing.
+ */
+export interface Person {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  whatsapp?: string | null
+}
+
+/**
+ * The values this account answers the merge fields with.
+ *
+ * Balance is passed in rather than computed: it is capital plus interest plus fees less payments,
+ * subject to in duplum, and accountBalance.ts is the one place that arithmetic lives. A second
+ * implementation here would eventually disagree with the statement the debtor is holding.
+ */
+export function mergeValuesFor(input: {
+  account: TemplateAccount
+  balance: number | null
+  clientName: string | null
+  agentName: string | null
+  agentPhone: string | null
+  /**
+   * The three people a letter can name, each passed whole for the reason the firm's own details
+   * are: a list of fields here is a list to fall behind.
+   *
+   * `agent` is WHOEVER IS SENDING -- the signed-in person. `collector` is whoever the ACCOUNT is
+   * assigned to, which follows the account when it is handed out. `liaison` is whoever looks
+   * after the CLIENT. On a quiet day they are the same person and the distinction looks like
+   * pedantry; the day an account is reassigned it is the difference between a debtor reaching
+   * somebody and reaching nobody.
+   */
+  agentEmail?: string | null
+  agentWhatsapp?: string | null
+  collector?: Person | null
+  liaison?: Person | null
+  today: string
+  money: (amount: number) => string
+  /**
+   * WHAT A LETTER NEEDS AND A TEXT MESSAGE NEVER DID, all optional and all defaulting to null.
+   *
+   * NULL IS THE HONEST ANSWER while nothing fills them, and it is not the same as an empty
+   * string: renderTemplate leaves an unresolved placeholder STANDING rather than printing a gap,
+   * so a notice built before Raptor has the firm's trust account shows {{firm_bank}} on the page
+   * instead of a blank line that reads as finished. One of those gets caught; the other gets
+   * posted.
+   */
+  debtorAddress?: string | null
+  /* How to reach the debtor, as the book holds it and the signer confirms it. All five may be
+     absent, and a line whose field is absent leaves the document -- see MergeField.optional. */
+  debtorMobile?: string | null
+  debtorWorkPhone?: string | null
+  debtorHomePhone?: string | null
+  debtorEmail?: string | null
+  debtorEmployer?: string | null
+  debtorIdMasked?: string | null
+  respondBy?: string | null
+  positionAsAt?: string | null
+  /**
+   * THE INSTALMENT THE ARRANGEMENT NOTICES ARE ABOUT: the earliest one not yet paid.
+   *
+   * PASSED IN RATHER THAN DERIVED HERE, because working it out needs the promise and this function
+   * is given the ACCOUNT. ptpSchedule.nextUnpaid is the one place the answer is decided; a second
+   * derivation here would be a second opinion about a figure that goes on a letter with a 48-hour
+   * ultimatum under it.
+   *
+   * NULL ON EVERY ACCOUNT WITH NO LIVE ARRANGEMENT, which is nearly all of them, and null leaves
+   * both placeholders standing -- so a template that quotes them cannot be sent off an account
+   * that has no arrangement to quote.
+   */
+  nextInstalment?: { amount: number; dueOn: string } | null
+  /**
+   * HOW OFTEN THE ARRANGEMENT FALLS: 'weekly', 'monthly' or 'once_off'.
+   *
+   * ITS OWN FIELD RATHER THAN A FOURTH PROPERTY ON nextInstalment, because it is a fact about the
+   * ARRANGEMENT and not about the instalment -- ptpSchedule returns instalments, and a shape bolted
+   * onto one of them would have to be carried through every function that makes one.
+   *
+   * NULL WHERE THERE IS NO LIVE ARRANGEMENT, like nextInstalment beside it, so the placeholder
+   * stands and a template that quotes the frequency cannot be sent off an account with nothing to
+   * quote.
+   */
+  arrangement?: Arrangement | null
+  /**
+   * THE OFFER BEING SIMULATED, where this is a simulation rather than a notice.
+   *
+   * Absent on every other message, which is what leaves {{sim_frequency}} and {{sim_start}}
+   * unresolved so the two of them hold a template that has no business quoting them. The caller
+   * passes `nextInstalment` alongside it with the figure being TRIED rather than the one owed --
+   * on a simulation there is no arrangement for nextUnpaid to read, and the firm's own wording
+   * reuses {{ptp_amount}} for it.
+   */
+  simulation?: { frequency: string; startOn: string } | null
+  /**
+   * THE PAYMENT A RECEIPT IS ABOUT: the newest unreversed payment on the account, or null where
+   * there is none. See `ptp_paid` above for why it cannot be the instalment amount.
+   */
+  paymentReceived?: number | null
+  /**
+   * THE DISPUTE, where the message is about one.
+   *
+   * OMITTED OR NULL ON EVERY ACCOUNT WITH NO DISPUTE, which is nearly all of them, and null leaves
+   * the placeholders standing -- an acknowledgement merged against an account with no dispute on it
+   * would otherwise tell a debtor they have until nothing to send their documents.
+   *
+   * `daysLeft` ARRIVES ALREADY WRITTEN OUT ("6 business days") rather than as a number, because
+   * `disputeWindow` decides the count and `disputeDaysPhrase` decides how it reads, singular at one
+   * included. A number here would be a second place that decides the wording of a statutory period.
+   */
+  dispute?: {
+    daysLeft: string | null
+    allegedOn: string | null
+    receivedOn: string | null
+    summary: string | null
+  } | null
+  /**
+   * THE SETTLEMENT THE CLIENT APPROVED, already decided quotable by the caller
+   * (settlement.isQuotable). Null or absent on every other account, which leaves the three
+   * placeholders standing.
+   */
+  settlement?: { amount: number; expiresOn: string; saving: number } | null
+  /**
+   * The firm's own details, PASSED WHOLE RATHER THAN FIELD BY FIELD.
+   *
+   * The shape is FirmSettings' -- same key names, every one optional but `firmName` -- and the
+   * type is written out here rather than imported, because firmSettings.ts reaches the database
+   * and importing it would drag supabase into every QA check that imports this file.
+   *
+   * WHOLE, BECAUSE A MAPPER IN BETWEEN IS THE FAILURE CLAUDE.md WARNS ABOUT. The caller now
+   * writes `firm` and nothing else; there is no list of fields to copy across and therefore no
+   * list to forget a field from. That matters more here every time this grows: the firm's details
+   * went from four fields to eighteen in one sitting.
+   *
+   * companies.banking_details is still deliberately not read: remittance goes OUT to a client,
+   * which is the opposite direction from both accounts below.
+   */
+  /**
+   * THE LEDGER'S OWN BREAKDOWN, for the documents that have to show their working.
+   *
+   * Optional, and null leaves the placeholders standing -- the right failure: an acknowledgement
+   * of debt whose capital calculation cannot be filled in is one that must not go out, and the
+   * template check catches it before anybody signs anything.
+   */
+  breakdown?: {
+    interest: number
+    fees: number
+    receiptFees: number
+    vat: number
+  } | null
+  /** What the account's interest is doing, for the same documents. */
+  interestRateAnnual?: number | null
+  interestFrom?: string | null
+  firm: {
+    firmName: string
+    councilNumber?: string | null
+    phone?: string | null
+    email?: string | null
+    website?: string | null
+    physicalAddress?: string | null
+    postalAddress?: string | null
+    officeHours?: string | null
+    trustBank?: string | null
+    trustBranchCode?: string | null
+    trustAccountName?: string | null
+    trustAccountNumber?: string | null
+    trustAccountType?: string | null
+    paymentInstruction?: string | null
+    businessBank?: string | null
+    businessBranchCode?: string | null
+    businessAccountName?: string | null
+    businessAccountNumber?: string | null
+    signatoryName?: string | null
+    signatoryTitle?: string | null
+  }
+}): Record<string, string | null> {
+  const a = input.account
+  const some = (v: string | null | undefined): string | null => (v ?? '').trim() || null
+  return {
+    debtor_name: addressAs(a),
+    debtor_first_name: (a.debtorFirstName ?? '').trim() || null,
+    /*
+     * OURS AND THEIRS, SEPARATELY, and `reference` is deliberately left meaning what it always
+     * meant. Flipping it to Raptor's number would have changed what a field labelled "the
+     * reference the debtor knows" resolves to, silently, in every template already written.
+     */
+    case_number: (a.caseNumber ?? '').trim() || null,
+    handover_date: a.handoverDate ? longDate(a.handoverDate) : null,
+    /*
+     * ZERO IS AN ANSWER. `paid_to_date` is the figure the notices print against what is still
+     * outstanding, and a debtor who has paid nothing must read "R 0.00" -- a blank there reads as
+     * a field nobody filled in, on a statutory demand. Null only where the account genuinely does
+     * not know, which leaves the placeholder standing and the notice unsendable, as it should.
+     */
+    paid_to_date: a.paymentsToDate === null || a.paymentsToDate === undefined
+      ? null : input.money(a.paymentsToDate),
+    /* ZERO IS NOT AN ANSWER HERE, unlike paid_to_date above: a debtor arguing "I already paid"
+       is answered by a receipt or by nothing at all, and "R 0.00" on no date would be a sentence
+       the collector reads out that means the opposite of what it says. */
+    last_payment_amount: a.lastPaymentAmount === null || a.lastPaymentAmount === undefined
+      ? null : input.money(a.lastPaymentAmount),
+    last_payment_date: a.lastPaymentDate ? longDate(a.lastPaymentDate) : null,
+    date_of_death: a.dateOfDeath ? longDate(a.dateOfDeath) : null,
+    executor_name: (a.executorName ?? '').trim() || null,
+    estate_number: (a.estateNumber ?? '').trim() || null,
+    master_office: (a.masterOffice ?? '').trim() || null,
+    surety_name: (a.suretyName ?? '').trim() || null,
+    listing_date: a.listingDate ? longDate(a.listingDate) : null,
+    listing_reference: (a.listingReference ?? '').trim() || null,
+    bureaus_listed: (a.bureausListed ?? '').trim() || null,
+    // The client's own reference is what appears on the debtor's paperwork; ours is the fallback.
+    reference: (a.clientReference ?? '').trim() || (a.accountNumber ?? '').trim() || null,
+    client_name: (input.clientName ?? '').trim() || null,
+    balance: input.balance === null ? null : input.money(input.balance),
+    capital: input.money(a.capitalOutstanding),
+    /* Never derived from the balance: it is a fact about the day the account arrived, and the
+       only figure on the summary of account that does not move. */
+    balance_handover: input.money(a.capitalHandedOver),
+    /* FEES AND THE VAT INSIDE THEM, never added together: vat is a COMPONENT of fees -- which is
+       what BalanceBreakdown's own comment says -- and summing them would overstate what the debtor
+       is putting their name to. */
+    interest_accrued: input.breakdown ? input.money(input.breakdown.interest) : null,
+    fees_total: input.breakdown
+      ? input.money(input.breakdown.fees + input.breakdown.receiptFees) : null,
+    fees_vat: input.breakdown ? input.money(input.breakdown.vat) : null,
+    /* "24% a year", not "24" -- the document reads as a sentence, and a bare number would be a
+       rate with no unit on something somebody signs. */
+    interest_rate: input.interestRateAnnual === null || input.interestRateAnnual === undefined
+      ? null : `${input.interestRateAnnual}% a year`,
+    interest_from: input.interestFrom ? longDate(input.interestFrom) : null,
+    agent_name: (input.agentName ?? '').trim() || null,
+    /*
+     * THE FIRM'S NUMBER WHERE THE PERSON HAS NONE. The firm, told that not one of the fifty live
+     * profiles carries a phone number: "it should give the company's default details as contact,
+     * for example, Peter on 012 348 2156."
+     *
+     * A FALLBACK RATHER THAN AN OPTIONAL FIELD, because of what quotes it: eight templates use
+     * {{agent_phone}} and none of them also quote {{firm_phone}}, so this is the only number on
+     * those notices and a dropped line would leave a debtor no way to ring. The collector's
+     * direct line is the other way round -- all fifteen templates that quote it print the firm's
+     * number on the line below -- so that one is marked optional and its line goes.
+     *
+     * Still null where the firm itself has no number: a placeholder left standing gets caught,
+     * and an empty line under somebody's name reads as finished.
+     */
+    agent_phone: (input.agentPhone ?? '').trim() || some(input.firm.phone),
+    agent_email: some(input.agentEmail),
+    agent_whatsapp: some(input.agentWhatsapp),
+    collector_name: some(input.collector?.name),
+    collector_phone: some(input.collector?.phone),
+    collector_email: some(input.collector?.email),
+    collector_whatsapp: some(input.collector?.whatsapp),
+    liaison_name: some(input.liaison?.name),
+    liaison_phone: some(input.liaison?.phone),
+    liaison_email: some(input.liaison?.email),
+    liaison_whatsapp: some(input.liaison?.whatsapp),
+    firm_name: input.firm.firmName,
+    firm_council_number: some(input.firm.councilNumber),
+    firm_phone: some(input.firm.phone),
+    firm_email: some(input.firm.email),
+    firm_website: some(input.firm.website),
+    firm_address: some(input.firm.physicalAddress),
+    firm_postal_address: some(input.firm.postalAddress),
+    firm_hours: some(input.firm.officeHours),
+    today: longDate(input.today),
+    /* The creditor's own number, which is NOT the reference above: the client's reference is what
+       appears on the debtor's paperwork, and a section 129 has to identify the agreement. */
+    account_number: some(a.accountNumber),
+    debtor_address: some(input.debtorAddress),
+    debtor_mobile: some(input.debtorMobile),
+    debtor_work_phone: some(input.debtorWorkPhone),
+    debtor_home_phone: some(input.debtorHomePhone),
+    debtor_email: some(input.debtorEmail),
+    debtor_employer: some(input.debtorEmployer),
+    /*
+     * MASKED HERE, not at the call site, and it was not masked at all before: the field has
+     * always been called debtor_id_masked and AccountDetail passed the whole number straight
+     * through. A field whose name promises a mask and prints thirteen digits is worse than one
+     * that never claimed to.
+     */
+    debtor_id_masked: a.debtorKind === 'company' ? null : maskSaId(input.debtorIdMasked),
+    debtor_reg_no: a.debtorKind === 'company' ? some(input.debtorIdMasked) : null,
+    respond_by: input.respondBy ? longDate(input.respondBy) : null,
+    /* Written out like every other date a debtor reads -- "5 October 2026", not 2026-10-05 -- and
+       through the caller's own `money`, so the arrangement's figures are formatted exactly as the
+       balance above them is. Two formats for two amounts in one letter reads as two systems. */
+    ptp_amount: input.nextInstalment ? input.money(input.nextInstalment.amount) : null,
+    ptp_date: input.nextInstalment ? longDate(input.nextInstalment.dueOn) : null,
+    /* The debtor's wording, decided once in arrangements.ts -- see PTP_FREQUENCY, and see
+       ARRANGEMENT_LABEL beside it for why the screen's wording is not this one. */
+    ptp_frequency: input.arrangement ? PTP_FREQUENCY[input.arrangement] : null,
+    /* Null, not R 0.00, where nothing has been received: a receipt for nothing is not a receipt,
+       and the standing placeholder is what stops it going out. `paid_to_date` is the opposite case
+       and prints R 0.00 on purpose -- there, zero is the answer to "what have they paid". */
+    ptp_paid: input.paymentReceived === null || input.paymentReceived === undefined
+      ? null : input.money(input.paymentReceived),
+    /* NULL EVERYWHERE EXCEPT ON A SIMULATION, which is the only thing that has these -- and null is
+       what leaves the placeholder standing rather than sending a debtor a sentence with a gap in
+       it. The frequency arrives already in the firm's own words ("a month", "a week"), the same
+       phrase the calculator on the screen is using, so the page and the covering email cannot
+       describe one offer two ways. */
+    sim_frequency: some(input.simulation?.frequency),
+    sim_start: input.simulation?.startOn ? longDate(input.simulation.startOn) : null,
+    /* Straight through. The phrasing of the count is disputeWindow's, the two dates go through
+       longDate like every other date a debtor reads, and the summary is the collector's own words
+       untouched -- a renderer tidying up somebody's note about a disputed account would be
+       rewriting the firm's record of what was alleged. */
+    dispute_days_left: input.dispute?.daysLeft ?? null,
+    dispute_alleged_date: input.dispute?.allegedOn ? longDate(input.dispute.allegedOn) : null,
+    dispute_received_date: input.dispute?.receivedOn ? longDate(input.dispute.receivedOn) : null,
+    dispute_summary: input.dispute?.summary ?? null,
+    settlement_amount: input.settlement ? input.money(input.settlement.amount) : null,
+    settlement_expiry: input.settlement ? longDate(input.settlement.expiresOn) : null,
+    settlement_saving: input.settlement ? input.money(input.settlement.saving) : null,
+    position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
+    firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),
+    firm_bank_name: some(input.firm.trustBank),
+    firm_bank_branch: some(input.firm.trustBranchCode),
+    firm_bank_holder: some(input.firm.trustAccountName),
+    firm_bank_account: some(input.firm.trustAccountNumber),
+    firm_bank_type: some(input.firm.trustAccountType),
+    payment_instruction: some(input.firm.paymentInstruction),
+    /* The other direction a client's money comes from. Offered only to sales templates -- see
+       MERGE_FIELDS -- but resolved here, because one function answers every scope. */
+    firm_business_bank: bankLine(input.firm.businessBank, input.firm.businessBranchCode),
+    firm_business_bank_name: some(input.firm.businessBank),
+    firm_business_bank_branch: some(input.firm.businessBranchCode),
+    firm_business_bank_holder: some(input.firm.businessAccountName),
+    firm_business_bank_account: some(input.firm.businessAccountNumber),
+    signatory_name: some(input.firm.signatoryName),
+    signatory_title: some(input.firm.signatoryTitle),
+  }
+}
+
+/**
+ * Bank and branch code written the way they read on a page: "Standard Bank · 051001".
+ *
+ * THE JOIN LIVES HERE BECAUSE THE SPLIT HAPPENED IN THE DATABASE. The firm used to type both into
+ * one box and {{firm_bank}} printed it; they then asked for them apart, because a branch code is
+ * a separate thing copied into a separate box in a banking app. Templates already written still
+ * say {{firm_bank}}, so something has to put them back together, and it has to do it the same way
+ * every time -- a letter that reads "Standard Bank - 051001" on one notice and
+ * "Standard Bank, 051001" on the next looks like two different accounts to a nervous debtor.
+ *
+ * HALF AN ANSWER IS STILL AN ANSWER. With only one of the two filled in, that one is returned
+ * rather than null: a notice naming the bank and not the branch is worse than one naming both and
+ * better than one naming neither, and the screen is already saying what is missing.
+ *
+ * The separator is U+00B7, which WinAnsi can draw -- see winAnsi.ts. A character the PDF cannot
+ * print would refuse the build of every notice carrying this field.
+ */
+export function bankLine(
+  bank: string | null | undefined, branchCode: string | null | undefined,
+): string | null {
+  const b = (bank ?? '').trim()
+  const c = (branchCode ?? '').trim()
+  if (b && c) return `${b} \u00b7 ${c}`
+  return b || c || null
+}
+
+/* ---------------------------------------------------------------- is it fit to save */
+
+export interface TemplateProblem {
+  field: 'name' | 'subject' | 'body'
+  message: string
+}
+
+/**
+ * What is wrong with this template, in the order somebody reading the form would meet it.
+ *
+ * CHECKED WHEN IT IS SAVED, NOT WHEN IT IS SENT. A template with a typo in a field name saved on
+ * a Tuesday is a campaign that goes out broken on a Thursday to everybody at once, and by then
+ * the person who could have spotted it is not in the room. The cost of catching it here is one
+ * person retyping a word.
+ *
+ * Nothing in here is a warning. A template either saves or it does not, because a form that saves
+ * through a warning teaches people to ignore warnings — and the one warning that matters on this
+ * screen is about money.
+ */
+export function templateProblems(input: {
+  /**
+   * 'document' where the body is a letterDocument JSON rather than prose.
+   *
+   * THE FIELD SCAN BELOW IS SKIPPED FOR ONE, and this was found by the letter refusing to save:
+   * a document's JSON contains its running header, the running header legally contains {{page}}
+   * and {{pages}}, and those are the PRINTER's fields rather than the account's. Scanning the
+   * JSON as prose reported them as typos and disabled Save on a perfectly good notice.
+   *
+   * letterProblems in letterDocument.ts owns that check for a document, and it owns it properly
+   * — header and body have different vocabularies. Two validators disagreeing about the same
+   * document is worse than one of them not answering.
+   */
+  format?: 'text' | 'document'
+  /** Which library it is being filed in, which is what decides whether a field is known. */
+  scope: TemplateScope
+  kind: TemplateKind
+  name: string
+  subject: string | null
+  body: string
+}): TemplateProblem[] {
+  const problems: TemplateProblem[] = []
+  if (!input.name.trim()) {
+    problems.push({ field: 'name', message: 'Give it a name — this is what people pick it by.' })
+  }
+  if (!input.body.trim()) {
+    problems.push({ field: 'body', message: 'There is nothing to send.' })
+  }
+
+  /*
+   * A subject belongs to email and to nothing else. An SMS has no subject and a call script has
+   * no subject, and carrying one anyway means a screen somewhere renders an empty line above the
+   * words a collector is meant to read aloud.
+   */
+  const subject = (input.subject ?? '').trim()
+  if (input.kind === 'email' && subject === '') {
+    problems.push({ field: 'subject', message: 'An email needs a subject line.' })
+  }
+  if (input.kind !== 'email' && subject !== '') {
+    problems.push({
+      field: 'subject',
+      message: `A ${TEMPLATE_KINDS[input.kind].label.toLowerCase()} has no subject line.`,
+    })
+  }
+
+  const unknown = input.format === 'document'
+    ? []
+    : unknownFields(input.scope, input.body, input.kind === 'email' ? input.subject : null)
+  if (unknown.length > 0) {
+    problems.push({
+      field: unknownFields(input.scope, input.body).length > 0 ? 'body' : 'subject',
+      message: unknown.length === 1
+        ? `There is no field called ${unknown[0]}. Check the list of fields beside the box.`
+        : `These are not fields: ${unknown.join(', ')}. Check the list beside the box.`,
+    })
+  }
+  return problems
+}
+
+/* ---------------------------------------------------------------- what an SMS will cost */
+
+export interface SmsForecast {
+  segments: number
+  encoding: string
+  /** Rand at the Annexure B rate, for one debtor. */
+  cost: number
+  /** What forced UCS-2, where something did. A curly apostrophe doubles the bill on its own. */
+  offending: string[]
+}
+
+/**
+ * What one SMS from this template will cost the debtor, rendered against the awkward samples.
+ *
+ * ANNEXURE B ITEM 1(c) IS PER SEGMENT, NOT PER MESSAGE — R3.50 each, and the network decides how
+ * many there are. A template that fits in 160 characters against "Mr Dube" and spills to 161
+ * against "Mr Van Der Westhuizen" costs the second debtor double, for the same words. Previewing
+ * against the long sample is the only way that is visible before it is charged.
+ *
+ * The firm's cap is ten SMS a month per account; this says nothing about that, because the cap is
+ * a fact about an account's history rather than about a template.
+ */
+export const SMS_RAND_PER_SEGMENT = 3.5
+
+export function forecastSms(body: string, values: Record<string, string> = sampleValues()): SmsForecast {
+  const { text } = renderTemplate(body, values)
+  const cost = smsCost(text)
+  return {
+    segments: cost.segments,
+    encoding: cost.encoding,
+    cost: cost.segments * SMS_RAND_PER_SEGMENT,
+    offending: cost.offending,
+  }
+}
+
+/* ---------------------------------------------------------------- picking one */
+
+/**
+ * How a campaign decides which script a collector reads.
+ *
+ * THE RUNNER CHOOSES, which is the firm's own instruction: either one script for the whole
+ * campaign, or let it follow the account. Both are right for different lists — a campaign chasing
+ * one client's book is one conversation, while a power hour over a mixed list is a different call
+ * on every account, and a broken arrangement is nothing like a first contact.
+ */
+export type ScriptMode =
+  | { kind: 'fixed'; templateId: string }
+  | { kind: 'by_position' }
+
+export type ResolveReason =
+  | 'fixed'
+  | 'position'
+  | 'position_other_language'
+  | 'general'
+  | 'general_other_language'
+  | 'none'
+
+export interface Resolved {
+  template: MessageTemplate | null
+  reason: ResolveReason
+}
+
+/**
+ * Which template this account gets.
+ *
+ * FALLS BACK RATHER THAN REFUSES, in this order: this position in this language, this position in
+ * English, the general one in this language, the general one in English. The alternative — every
+ * position must have a script or the account is skipped — sounds safer and is not: it means a
+ * power hour silently passes over the accounts nobody has written a script for yet, which are
+ * precisely the unusual ones somebody should be ringing.
+ *
+ * ENGLISH IS THE FALLBACK, not a "default language" setting. The firm works in English and the
+ * book's preferred_language is a courtesy where it is known. A collector handed a script in a
+ * language the debtor did not ask for is a small awkwardness; a collector handed nothing is a
+ * call that does not happen.
+ *
+ * The reason comes back with the template because the screen has to be able to say "there is no
+ * Afrikaans version of this, you are reading the English one" — a fallback nobody is told about
+ * is indistinguishable from a bug.
+ */
+export function resolveTemplate(input: {
+  templates: MessageTemplate[]
+  mode: ScriptMode
+  position: DeskPosition | null
+  language: string | null
+}): Resolved {
+  const live = input.templates.filter((t) => t.active)
+  if (input.mode.kind === 'fixed') {
+    const id = input.mode.templateId
+    return { template: live.find((t) => t.id === id) ?? null, reason: live.some((t) => t.id === id) ? 'fixed' : 'none' }
+  }
+
+  const wanted = (input.language ?? 'en').trim().toLowerCase() || 'en'
+  const at = (position: DeskPosition | null, language: string) =>
+    live.find((t) => t.position === position && t.language.toLowerCase() === language) ?? null
+
+  if (input.position !== null) {
+    const exact = at(input.position, wanted)
+    if (exact) return { template: exact, reason: 'position' }
+    if (wanted !== 'en') {
+      const english = at(input.position, 'en')
+      if (english) return { template: english, reason: 'position_other_language' }
+    }
+  }
+  const general = at(null, wanted)
+  if (general) return { template: general, reason: 'general' }
+  if (wanted !== 'en') {
+    const englishGeneral = at(null, 'en')
+    if (englishGeneral) return { template: englishGeneral, reason: 'general_other_language' }
+  }
+  return { template: null, reason: 'none' }
+}
+
+/**
+ * What to tell the collector about the choice, or null where there is nothing worth saying.
+ *
+ * A FALLBACK NOBODY IS TOLD ABOUT IS INDISTINGUISHABLE FROM A BUG. A collector who asked for the
+ * script for a broken arrangement and got the general one needs to know that is what happened —
+ * otherwise the general script reads as the firm's considered answer to a broken promise, which
+ * it is not.
+ *
+ * And nothing is said where nothing went wrong. A warning that fires when the right script was
+ * found is a warning people stop reading, and then the one that matters goes unread too.
+ */
+export function resolveNote(resolved: Resolved, position: DeskPosition | null): string | null {
+  const language = 'This debtor asked for another language. There is no version in it yet, so this is the English one.'
+  switch (resolved.reason) {
+    case 'none':
+      return 'There is no script for this account yet.'
+    case 'position_other_language':
+      return language
+    case 'general_other_language':
+      return position === null ? language : `${language} It is also the general script, not one written for this position.`
+    case 'general':
+      return position === null ? null : 'There is no script for this position yet, so this is the general one.'
+    default:
+      return null
+  }
+}
+
+/* ---------------------------------------------------------------- throwing one away */
+
+/**
+ * Where a template is already being used, as far as deleting it is concerned.
+ *
+ * Counted rather than listed, plus the names, because the question a person is answering is "is
+ * this safe to throw away" and a list of twelve step ids does not help them answer it.
+ */
+export interface TemplateUsage {
+  /** Workflow steps that send this template. */
+  steps: number
+  /**
+   * How many of those sit in a version that is FROZEN — active or archived.
+   *
+   * Active is the one running against live accounts. Archived matters just as much and is easier
+   * to overlook: accounts ran on it, and what they were sent is the firm's record of what it
+   * said. Deleting the wording out from under either is rewriting history.
+   */
+  frozenSteps: number
+  /** The workflows those steps belong to, named so somebody can go and look. */
+  workflows: string[]
+  /**
+   * Emails that attach this letter, by name.
+   *
+   * The same silent shape as the workflow step: the foreign key is `on delete set null`, so
+   * deleting a letter leaves the covering email intact, still saying "attached is a notice", with
+   * nothing attached. A defective delivery that reads as a correct one.
+   */
+  attachedTo: string[]
+}
+
+/**
+ * Where this template is already wired in, said in one line for the person reading it.
+ *
+ * NOT THE DELETE WARNING. That one exists to stop damage and only speaks when something would
+ * break; this one answers "is anything sending these words right now?", which is the question
+ * somebody has before they edit a sentence -- and the answer changes whether they edit it at all.
+ *
+ * Null where nothing uses it, because a line reading "used by nothing" on twenty rows out of
+ * twenty-two is furniture, and furniture is what teaches people to stop reading the line that
+ * matters.
+ */
+export function usageNote(usage: TemplateUsage): string | null {
+  const parts: string[] = []
+  if (usage.steps > 0) {
+    const where = usage.workflows.length > 0 ? ` in ${usage.workflows.join(', ')}` : ''
+    parts.push(usage.steps === 1
+      ? `Sent by one step${where}.`
+      : `Sent by ${usage.steps} steps${where}.`)
+  }
+  if (usage.attachedTo.length > 0) {
+    parts.push(usage.attachedTo.length === 1
+      ? `Posted with ${usage.attachedTo[0]}.`
+      : `Posted with ${usage.attachedTo.join(', ')}.`)
+  }
+  /*
+   * THE FROZEN COUNT IS THE PART THAT CHANGES BEHAVIOUR. Editing wording a published workflow
+   * sends does not change what already went out -- but it does change what the NEXT account on
+   * that workflow receives, without a new version and without anybody approving it.
+   */
+  if (usage.frozenSteps > 0) {
+    parts.push(usage.frozenSteps === 1
+      ? 'One of those is in a published workflow, so an edit here changes what the next account receives.'
+      : `${usage.frozenSteps} of those are in published workflows, so an edit here changes what the next accounts receive.`)
+  }
+  return parts.length > 0 ? parts.join(' ') : null
+}
+
+/**
+ * Why this template may NOT be deleted, or null where it may.
+ *
+ * THE DANGER IS SILENT, which is the whole reason this exists. workflow_nodes.template_id is
+ * `on delete set null`, so deleting a template does not fail and does not warn: the step survives
+ * saying "send an email" with nothing to send, and nobody finds out until the day it runs.
+ *
+ * Retiring is the answer offered instead, and it is a better one than it looks: the resolver only
+ * reads active templates, so a retired template is out of circulation exactly as a deleted one
+ * is — and the words are still there to read the day somebody asks what was sent.
+ */
+export function deleteRefusal(usage: TemplateUsage): string | null {
+  if (usage.frozenSteps === 0) return null
+  const where = usage.workflows.length > 0 ? ` (${usage.workflows.join(', ')})` : ''
+  return usage.frozenSteps === 1
+    ? `A published or archived workflow step sends this${where}. Retire it instead — the step `
+      + 'would be left sending nothing, and accounts that already ran on it are the record of '
+      + 'what the firm said.'
+    : `${usage.frozenSteps} published or archived workflow steps send this${where}. Retire it `
+      + 'instead — they would be left sending nothing, and accounts that already ran on them are '
+      + 'the record of what the firm said.'
+}
+
+/**
+ * What somebody should know before deleting one they ARE allowed to delete.
+ *
+ * Not a refusal. A draft workflow is being written and losing a template from it is an edit, not
+ * damage — but it is an edit somebody should make on purpose rather than discover later.
+ */
+export function deleteWarning(usage: TemplateUsage, seedKey: string | null): string | null {
+  const notes: string[] = []
+  /*
+   * AN EMAIL LEFT CLAIMING AN ATTACHMENT IT NO LONGER HAS. Warned rather than refused: replacing
+   * a letter with a better one is ordinary work, and the fix is one field away. What must not
+   * happen is that nobody is told.
+   */
+  if (usage.attachedTo.length > 0) {
+    notes.push(usage.attachedTo.length === 1
+      ? `${usage.attachedTo[0]} attaches this letter and would be left attaching nothing.`
+      : `${usage.attachedTo.length} emails attach this letter `
+        + `(${usage.attachedTo.join(', ')}) and would be left attaching nothing.`)
+  }
+  const draftSteps = usage.steps - usage.frozenSteps
+  if (draftSteps > 0) {
+    notes.push(draftSteps === 1
+      ? 'A step in a draft workflow sends this, and would be left sending nothing.'
+      : `${draftSteps} steps in draft workflows send this, and would be left sending nothing.`)
+  }
+  /*
+   * A seeded row comes back. seed_key is what makes seeding idempotent, so the migration that
+   * put this here will put it back the next time the schema is replayed — deleting it is not
+   * permanent and somebody should know that before they are surprised by it.
+   */
+  if (seedKey) {
+    notes.push(`This one was seeded as ${seedKey}, so replaying the schema would bring it back.`)
+  }
+  return notes.length > 0 ? notes.join(' ') : null
+}

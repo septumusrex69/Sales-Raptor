@@ -25,3 +25,8 @@ dist-ssr
 
 # Screenshots from scripts/qa/screenshot.mjs. Throwaway output, never committed.
 .qa-screenshots/
+
+# Built output of the offline layout harness (.qa-harness). The sources are committed; the
+# bundle and the PNGs it shoots are not.
+.qa-harness/bundle.js
+.qa-harness/*.png

@@ -1,14 +1,22 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall } from 'lucide-react'
+import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
-import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
+import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
+import { CapabilitiesModal } from '../../components/settings/CapabilitiesModal'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
+import { byDepartment, matchesPerson, teamsForRole } from '../../lib/departments'
+import { canLeadCollections } from '../../lib/permissions'
+import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { THEMES } from '../../lib/themes'
@@ -22,26 +30,91 @@ import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
 import { getCurrentSalesMonth } from '../../lib/salesMonth'
 import { formatCurrency, TODAY } from '../../data/mockData'
 
+/* Workflows left this list at the firm's instruction -- a workflow is not a setting, it is
+   content somebody writes and publishes a version of, and it lives in the library beside the
+   wording it sends. See src/pages/library/LibraryWorkflows.tsx. */
 const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
+const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
+
 export function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('Profile')
+  /*
+   * THE TAB IS IN THE URL, so another screen can send somebody straight to one.
+   *
+   * THE FIRM: "when I go to Bredell Ferreira as a client and I say upload a batch, it takes me
+   * here" -- here being Profile. The button already linked to ?tab=Data Import; this page held
+   * the tab in a useState seeded with 'Profile' and never looked at the query string, so the
+   * link was right and landed nowhere. A link that silently ignores half of itself is worse than
+   * no link, because it reads as the app losing your place.
+   *
+   * A tab nobody recognises falls back to Profile rather than rendering an empty pane.
+   */
+  const [navCollapsed, toggleNav] = useSettingsNavCollapsed()
+  const [params, setParams] = useSearchParams()
+  const fromUrl = params.get('tab')
+  const tab: Tab = isTab(fromUrl) ? fromUrl : 'Profile'
+
+  /* Clicking a tab REPLACES rather than pushes: twelve tabs clicked in a row should not mean
+     twelve taps of Back to leave the page. Arriving by link keeps its own history entry. */
+  const setTab = (next: Tab) => {
+    const keep = new URLSearchParams(params)
+    keep.set('tab', next)
+    /* The client only means anything to Data Import; carrying it onto Teams would put a stale
+       company in the URL of a screen that has never heard of one. */
+    if (next !== 'Data Import') keep.delete('client')
+    setParams(keep, { replace: true })
+  }
 
   return (
     <div className="flex gap-6">
-      <nav className="w-52 shrink-0 space-y-0.5">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium ${tab === t ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
-          >
-            {t}
+      {/*
+        FOLDS AWAY, LIKE THE MAIN MENU DOES. THE FIRM: "the pane on the left hand side has been
+        collapsed, but now that you've got all these other settings, that pane should also be able
+        to collapse, because now the screen is getting small." Settings is a two-column screen
+        inside a two-column app, and with the main rail already folded this was still the last
+        208px between an iPad and a forty-column table.
+
+        Its own preference, remembered separately from the main menu: somebody who folds this to
+        read the handover table still wants the main menu where they left it.
+      */}
+      {!navCollapsed && (
+        <nav className="w-52 shrink-0 space-y-0.5">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium ${tab === t ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
+            >
+              {t}
+            </button>
+          ))}
+          {/* At the bottom, under the list, which is where the main menu keeps its own. */}
+          <button type="button" onClick={toggleNav} aria-expanded="true"
+            title="Narrow the settings menu"
+            className="w-full flex items-center gap-2 mt-2 px-3 py-2 rounded-lg text-[12px]
+              text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <PanelLeftClose size={15} /> Narrow this menu
           </button>
-        ))}
-      </nav>
+        </nav>
+      )}
       <div className="flex-1 min-w-0">
+        {/*
+          THE WAY BACK, AND WHERE YOU ARE, in one line.
+          
+          Folded to a bare icon this would reclaim the width and lose the answer to "which tab am
+          I on" -- these tabs have no icons to fall back on, and the panes do not all announce
+          themselves. So the strip carries the tab's own name, which is both the label and the
+          control: the whole thing expands the menu again.
+        */}
+        {navCollapsed && (
+          <button type="button" onClick={toggleNav} aria-expanded="false"
+            title="Show the settings menu"
+            className="flex items-center gap-2 mb-3 -mt-1 px-2 py-1.5 rounded-lg text-sm
+              font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700">
+            <PanelLeftOpen size={15} /> {tab}
+          </button>
+        )}
         {tab === 'Profile' && <ProfileTab />}
         {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Users' && <UsersTab />}
@@ -53,7 +126,7 @@ export function SettingsPage() {
         {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
         {tab === 'Notifications' && <NotificationsTab />}
         {tab === 'Integrations' && <IntegrationsTab />}
-        {tab === 'Data Import' && <DataImportTab />}
+        {tab === 'Data Import' && <DataImportTab forCompanyId={params.get('client')} />}
       </div>
     </div>
   )
@@ -66,6 +139,7 @@ function ProfileTab() {
     fullName: currentUser?.name ?? '',
     email: currentUser?.email ?? '',
     phone: currentUser?.phone ?? '',
+    whatsapp: currentUser?.whatsapp ?? '',
     emailSignature: currentUser?.emailSignature ?? '',
     emailSignatureImageUrl: currentUser?.emailSignatureImageUrl,
     emailSignatureImageWidth: currentUser?.emailSignatureImageWidth,
@@ -94,6 +168,7 @@ function ProfileTab() {
             const patch = {
               name: form.fullName,
               phone: form.phone || undefined,
+              whatsapp: form.whatsapp || undefined,
               emailSignature: form.emailSignature || undefined,
               emailSignatureImageUrl: form.emailSignatureImageUrl,
               emailSignatureImageWidth: form.emailSignatureImageWidth,
@@ -117,6 +192,14 @@ function ProfileTab() {
             </FormField>
             <FormField label="Phone">
               <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </FormField>
+            {/* ITS OWN NUMBER, NOT THE DESK LINE. A debtor messaged on a landline is a message
+                nobody receives, and workflows have had a WhatsApp channel since they were built.
+                Fills {{collector_whatsapp}} on an account this person holds. */}
+            <FormField label="WhatsApp">
+              <input className={inputClass} value={form.whatsapp}
+                placeholder="Only if it differs from the number above"
+                onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
             </FormField>
             <FormField label="Role">
               <input className={inputClass} value={currentUser?.role ?? ''} disabled />
@@ -185,6 +268,64 @@ function ProfileTab() {
   )
 }
 
+/*
+ * THE KINDS A TEAM CAN BE, in one place and drawn from the type.
+ *
+ * Written out twice as a pair of <option>s, 'Call centre' would have been added to one and
+ * forgotten in the other -- which is exactly how 'Pre-legal Team Leader' came to be missing from
+ * the invite box while the row dropdown had it.
+ */
+const TEAM_KINDS: TeamKind[] = ['Sales', 'Communications', 'Call centre']
+
+/** A tint each, so the department a team belongs to is legible at a glance. */
+const TEAM_KIND_TINT: Record<TeamKind, string> = {
+  Sales: 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]',
+  Communications: 'bg-[var(--tint-steel)] text-[var(--c-navy)]',
+  'Call centre': 'bg-[var(--tint-green)] text-[var(--c-green)]',
+}
+
+/**
+ * One department, foldable.
+ *
+ * The firm, looking at the organised list: "now it's just one long big list. It's nice that it's
+ * organised, but drop downs would be nice." Thirty-eight people in the call centre is most of the
+ * screen, and somebody looking for a liaison should not have to scroll past all of them.
+ *
+ * OPEN UNLESS SOMEBODY FOLDED IT. A screen that hides everything on arrival answers nothing; one
+ * that stays folded once you have folded it is a preference. useCollapsed keeps that in
+ * localStorage per department -- it is about the screen somebody is sitting at, which is the same
+ * reason the two nav panes keep theirs there.
+ *
+ * THE COUNT IS ON THE HEADING, so a folded department still says how many are in it.
+ */
+function DepartmentGroup({ group, columns, renderRow, forceOpen = false }: {
+  group: { meta: { id: string; label: string; blurb: string }; people: User[] }
+  columns: number
+  renderRow: (u: User) => React.ReactNode
+  /** A search is on, so the fold is ignored -- see `searching` in UsersTab. */
+  forceOpen?: boolean
+}) {
+  const [collapsed, toggle] = useCollapsed(`users:${group.meta.id}`)
+  const folded = collapsed && !forceOpen
+  return (
+    <Fragment>
+      <tr className="border-y border-slate-100 bg-slate-50/70">
+        <th colSpan={columns} className="text-left px-3 py-1.5 whitespace-normal">
+          <button type="button" onClick={toggle}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 hover:text-slate-900"
+            aria-expanded={!folded}>
+            {folded ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+            {group.meta.label}
+            <span className="font-normal text-slate-400">{group.people.length}</span>
+          </button>
+          <span className="ml-3 text-[11px] font-normal text-slate-400">{group.meta.blurb}</span>
+        </th>
+      </tr>
+      {!folded && group.people.map((u) => renderRow(u))}
+    </Fragment>
+  )
+}
+
 function UsersTab() {
   const { users, teams, updateUser, removeUserLocal } = useAppStore()
   const { currentUser, session } = useAuth()
@@ -193,48 +334,90 @@ function UsersTab() {
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [removingUser, setRemovingUser] = useState<User | null>(null)
   const [emailUser, setEmailUser] = useState<User | null>(null)
+  /*
+   * WHO IS HAVING THEIR PERMISSIONS LOOKED AT. The firm asked for Swordfish's shape -- "you can
+   * choose, for example, for a user to have a management template, but you can add them more
+   * functionality" -- and the role picker in the row beside this is the template half of it.
+   */
+  const [capabilityUser, setCapabilityUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
+  /*
+   * WHOSE BOOK SETTINGS ARE OPEN, and never more than one.
+   *
+   * THE FIRM, LOOKING AT TWO PEOPLE AND FOUR ROWS: "the way the users are set out here is
+   * confusing. Itumeleng is here twice. It's only necessary once." The rank, the ceiling, the
+   * capacity and the reserve used to be a SECOND TABLE under this one, listing the same people
+   * again -- and drawing the same rank twice, once as a chip on the row and once as a dropdown
+   * below. So they come out of that table and open under the person they are about.
+   *
+   * NOT FOUR MORE COLUMNS, which is what the second table existed to avoid: this list is seven
+   * wide already and the Status column is over the right-hand edge of the firm's iPad.
+   */
+  const [bookOpen, setBookOpen] = useState<string | null>(null)
+  /*
+   * What each person is actually carrying, IN PLAY. Asked of the database rather than counted
+   * here because the book is six figures -- and in play rather than total, because a collector
+   * holding 500 accounts of which 372 are written off is holding 128, and a ceiling counting the
+   * corpses would refuse them work they have room for.
+   */
+  const [bookLoad, setBookLoad] = useState<Map<string, number> | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void supabase.rpc('collector_book_load').then(({ data, error }) => {
+      if (cancelled || error) return
+      const rows = (data ?? []) as { user_id: string; in_play_accounts: number }[]
+      setBookLoad(new Map(rows.map((r) => [r.user_id, Number(r.in_play_accounts ?? 0)])))
+    })
+    return () => { cancelled = true }
+  }, [])
+  /* WHO MAY SET A RANK, which is not who may edit the rest of the row: a team leader ranks their
+     collectors without being an Administrator, and an Administrator has every capability. */
+  const canRank = canLeadCollections(currentUser)
+  const [showArchived, setShowArchived] = useState(false)
+  /*
+   * SEEDED FROM THE URL, so a result in the global search can land here already narrowed to the
+   * person somebody was looking for. Held as ordinary state afterwards -- the first thing anybody
+   * does is clear it to see who else is there, and that should not be a history entry.
+   */
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
 
-  return (
-    <Card padded={false}>
-      <div className="p-5 flex items-center justify-between">
-        <CardHeader title="Users" subtitle={`${users.length} team members`} />
-        {isAdmin && (
-          <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
-            <Plus size={15} /> Add User
-          </button>
-        )}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-              <th className="font-medium px-5 py-2.5">User</th>
-              <th className="font-medium px-3 py-2.5">Role</th>
-              <th className="font-medium px-3 py-2.5">Team</th>
-              <th className="font-medium px-3 py-2.5">Email</th>
-              <th className="font-medium px-3 py-2.5">Status</th>
-              {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
-              {isAdmin && <th className="font-medium px-3 py-2.5"></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-t border-slate-50">
-                <td className="px-5 py-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <UserAvatar userId={u.id} size={26} />
-                    <span className="font-medium text-slate-700">{u.name}</span>
+  /* Derived, never stored -- see departments.ts. */
+  const teamName = useCallback(
+    (id: string | undefined) => teams.find((t) => t.id === id)?.name ?? null,
+    [teams],
+  )
+  const found = useMemo(
+    () => users.filter((u) => matchesPerson(u, teamName(u.teamId), search)),
+    [users, search, teamName],
+  )
+  const grouped = useMemo(() => byDepartment(found), [found])
+  /*
+   * A SEARCH IGNORES THE FOLDS. Somebody who folded the call centre away and then typed a name
+   * would be told there is nobody by that name, which is the worst possible answer: it is wrong,
+   * and it looks authoritative.
+   */
+  const searching = search.trim().length > 0
+  /* The heading rows span the table, and the table is two columns wider for an administrator. */
+  const columns = isAdmin ? 7 : 5
+
+  /* The row exactly as it was, lifted so the groups below can each draw their own people. */
+  const renderRow = (u: User) => (
+            <Fragment key={u.id}>
+              <tr className="border-b border-slate-50 hover:bg-slate-50">
+                <td className="px-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <UserAvatar userId={u.id} size={20} />
+                    <span className="font-medium text-slate-700 max-w-[14rem] truncate" title={u.name}>{u.name}</span>
                   </div>
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <select
-                      className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
-                      {(['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only'] as UserRole[]).map((r) => (
+                      {ASSIGNABLE_ROLES.map((r) => (
                         <option key={r}>{r}</option>
                       ))}
                     </select>
@@ -242,15 +425,21 @@ function UsersTab() {
                     <span className="text-slate-500">{u.role}</span>
                   )}
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <select
-                      className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
                       value={u.teamId ?? ''}
                       onChange={(e) => updateUser(u.id, { teamId: e.target.value || undefined })}
                     >
                       <option value="">No team</option>
-                      {teams.map((t) => (
+                      {/*
+                        * ONLY THE TEAMS THIS ROLE MAY BE IN. The firm: "a pre-legal agent can't be
+                        * in a team that is for communications." Offering a team and then having
+                        * the database refuse it is worse than never offering it -- the person
+                        * reads the refusal as a fault rather than as the rule.
+                      */}
+                      {teamsForRole(u.role, teams).map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.name}
                         </option>
@@ -259,33 +448,89 @@ function UsersTab() {
                   ) : (
                     <span className="text-slate-500">{teams.find((t) => t.id === u.teamId)?.name ?? '—'}</span>
                   )}
+                  {/*
+                    * THE RANK, BESIDE THE TEAM, at the firm's asking: "you can put their rank,
+                    * their grade -- rather call it a rank -- next to the team that they're in."
+                    *
+                    * ONLY FOR SOMEBODY WHO COLLECTS. A rank on a sales rep would be a column of
+                    * dashes down two thirds of the list. An unranked collector shows "no rank"
+                    * rather than nothing, because that is a thing to go and fix: an unranked
+                    * person is offered no accounts at all.
+                  */}
+                  {/*
+                    * AND THE CHIP IS THE WAY IN. It was already the one thing on this row about
+                    * collecting, so making it the control puts the rank and the three numbers
+                    * behind the word somebody is already looking at -- rather than in a second
+                    * table listing the same person again.
+                    *
+                    * A BUTTON ONLY FOR SOMEBODY WHO MAY SET IT. For everybody else it stays the
+                    * chip it always was: a thing that is read, not pressed. A control that opens
+                    * and then refuses is worse than no control.
+                  */}
+                  {COLLECTING_ROLES.includes(u.role) && (() => {
+                    const cls = `ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${
+                      u.collectorGrade ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-slate-100 text-slate-400'}`
+                    const label = u.collectorGrade ?? 'no rank'
+                    /*
+                      BOTH HALVES WERE OUT OF DATE. A rank limits nothing at the moment -- "don't
+                      limit anybody for any amount as of yet" -- and an UNRANKED collector has not
+                      been offered "no accounts at all" since ungraded started meaning Junior.
+                      Telling somebody their colleague can be given nothing, when they can be given
+                      anything, sends them to fix something that is not broken.
+                    */
+                    const why = u.collectorGrade
+                      ? `${u.collectorGrade} — recorded, but nothing is held back by rank at the moment`
+                      : 'No rank set. Nothing is held back by rank at the moment, so they can still be given work'
+                    if (!canRank) return <span className={cls} title={why}>{label}</span>
+                    const open = bookOpen === u.id
+                    return (
+                      <button type="button" aria-expanded={open}
+                        onClick={() => setBookOpen(open ? null : u.id)}
+                        title={`${why}. Press to set their rank and book.`}
+                        className={`${cls} inline-flex items-center gap-1 hover:ring-1 hover:ring-slate-300`}>
+                        {label}
+                        <ChevronDown size={10} className={open ? 'rotate-180' : ''} />
+                      </button>
+                    )
+                  })()}
                 </td>
-                <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5 text-slate-500 max-w-[16rem] truncate" title={u.email}>{u.email}</td>
+                <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <button
                       onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
-                      className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}
+                      className={`badge !px-2 !py-0.5 !text-[11px] ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}
                     >
                       {u.status}
                     </button>
                   ) : (
-                    <span className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
+                    <span className={`badge !px-2 !py-0.5 !text-[11px] ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
                   )}
                 </td>
                 {isAdmin && (
-                  <td className="px-3 py-2.5">
+                  <td className="px-2 py-1.5">
                     <ResetLoginButton email={u.email} />
                   </td>
                 )}
                 {isAdmin && (
-                  <td className="px-3 py-2.5">
+                  <td className="px-2 py-1.5">
                     <div className="flex items-center gap-2.5">
                       <button onClick={() => setEmailUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email connection">
                         <Mail size={14} />
                       </button>
                       <button onClick={() => setSignatureUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email signature">
                         <ImageIcon size={14} />
+                      </button>
+                      {/*
+                        * WHAT THEY MAY DO, beside the role rather than inside the edit box. The
+                        * role is a template and this is the departure from it, so they are two
+                        * different questions about one person -- and burying the second inside the
+                        * first would mean opening a form about somebody's name and team to answer
+                        * "may she approve a payment?".
+                      */}
+                      <button onClick={() => setCapabilityUser(u)} className="text-slate-400 hover:text-brand-600"
+                        title={`What ${u.name.split(' ')[0]} may do`}>
+                        <KeyRound size={14} />
                       </button>
                       <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
                         <Pencil size={14} />
@@ -299,7 +544,135 @@ function UsersTab() {
                   </td>
                 )}
               </tr>
+              {/*
+                THE PERSON'S BOOK, UNDER THE PERSON. One row per human being: the firm sent back a
+                screen that listed Itumeleng in a Users table and again in a Collectors table, with
+                her rank drawn in both. This is that second table, folded into the row it was always
+                about.
+
+                SPANNING EVERY COLUMN so the controls lay themselves out rather than being squeezed
+                into whichever cell they landed under -- and so the count stays right for an
+                administrator, who sees two more columns than anybody else.
+              */}
+              {bookOpen === u.id && (
+                <tr>
+                  <td colSpan={columns} className="p-0">
+                    <CollectorsPanel user={u} canEdit={canRank}
+                      inPlay={bookLoad?.get(u.id) ?? null}
+                      onChange={(patch) => updateUser(u.id, patch)} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+  )
+
+  return (
+    <div className="space-y-5">
+    <Card padded={false}>
+      <div className="p-5 flex items-center justify-between">
+        <CardHeader
+          title="Users"
+          /*
+           * SAYS WHAT IS ON SCREEN, not what exists. Searching and still reading "57 team
+           * members" over four rows is the header disagreeing with the table under it.
+           */
+          subtitle={searching
+            ? `${found.length} of ${users.length} team members match “${search.trim()}”`
+            : `${users.length} team members`}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            * FINDING ONE PERSON AMONG A HUNDRED. The firm: "here we are in the user section, but
+            * we're searching only for other stuff -- it should be for users."
+            *
+            * Offered to everybody, not only an administrator: reading the list is not an
+            * administrator's privilege, and somebody looking up a colleague's team is the
+            * commonest reason to open this screen at all.
+          */}
+          <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-brand-500/40">
+            <Search size={15} className="text-slate-400 shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search people, email, role or team"
+              className="bg-transparent text-sm outline-none w-56 placeholder:text-slate-400"
+            />
+            {searching && (
+              <button type="button" onClick={() => setSearch('')} title="Clear" className="text-slate-400 hover:text-slate-600">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        {isAdmin && (
+          <>
+            {/*
+              * ONE DOOR. The firm: "the add someone who has left doesn't deserve its own button --
+              * if you add a user, you can just select somewhere there, for example by the role,
+              * say that that person already left."
+              *
+              * They were two buttons and two forms for the same four fields, differing in one
+              * decision, and the second one sat on the screen permanently for something done
+              * perhaps twice a year. The decision moved inside, next to the role.
+            */}
+            <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
+              <Plus size={15} /> Add User
+            </button>
+          </>
+        )}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full list-table whitespace-nowrap">
+          <thead>
+            <tr className="text-left border-y border-slate-100 text-slate-400">
+              <th className="font-medium px-3 py-2">User</th>
+              <th className="font-medium px-2 py-2">Role</th>
+              <th className="font-medium px-2 py-2">Team</th>
+              <th className="font-medium px-2 py-2">Email</th>
+              <th className="font-medium px-2 py-2">Status</th>
+              {isAdmin && <th className="font-medium px-2 py-2">Login</th>}
+              {isAdmin && <th className="font-medium px-2 py-2"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {/*
+              * GROUPED, NOT ONE LIST OF A HUNDRED. The firm: "there are more than 100 users ...
+              * we need to categorise them." A heading row per department, in the firm's own
+              * order, and inside the call centre the ladder they described -- manager, then team
+              * leaders, then agents -- because a list sorted by name alone hides the structure
+              * entirely. The row markup is unchanged; only what wraps it is new.
+            */}
+            {grouped.departments.map((d) => (
+              <DepartmentGroup key={d.meta.id} group={d} columns={columns} renderRow={renderRow}
+                forceOpen={searching} />
             ))}
+            {/*
+              * AND THE PEOPLE WHO HAVE LEFT, KEPT RATHER THAN REMOVED. The firm: "if somebody
+              * left the company we archive the user, just to understand if there's a timestamp
+              * about someone that did something or an action that can be checked."
+              *
+              * Out of the departments so a headcount means the people doing that job, and folded
+              * away rather than hidden, so the answer to "who was that?" is one click and not a
+              * setting somebody has to know exists.
+            */}
+            {grouped.archived.length > 0 && (
+              <Fragment>
+                <tr className="border-y border-slate-100 bg-slate-50/70">
+                  <th colSpan={columns} className="text-left px-3 py-1.5 whitespace-normal">
+                    <button type="button" onClick={() => setShowArchived((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 hover:text-slate-700">
+                      {showArchived ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      No longer here
+                      <span className="font-normal text-slate-400">{grouped.archived.length}</span>
+                    </button>
+                    <span className="ml-3 text-[11px] font-normal text-slate-400">
+                      Kept so anything they did still has a name on it.
+                    </span>
+                  </th>
+                </tr>
+                {showArchived && grouped.archived.map((u) => renderRow(u))}
+              </Fragment>
+            )}
           </tbody>
         </table>
       </div>
@@ -310,6 +683,7 @@ function UsersTab() {
           accessToken={session.access_token}
           onClose={() => setEditingUser(null)}
           onSaveName={(name) => updateUser(editingUser.id, { name })}
+          onSaveDetails={(patch) => updateUser(editingUser.id, patch)}
         />
       )}
       {removingUser && session && (
@@ -326,7 +700,19 @@ function UsersTab() {
       {signatureUser && (
         <AdminSignatureModal user={signatureUser} onClose={() => setSignatureUser(null)} onSave={(patch) => updateUser(signatureUser.id, patch)} />
       )}
+      {capabilityUser && (
+        <CapabilitiesModal
+          user={capabilityUser}
+          onClose={() => setCapabilityUser(null)}
+          /* BOTH COLUMNS AT ONCE, because they are derived together from one set of ticks -- a
+             capability is the template's, or added, or removed, and writing one column without the
+             other would leave a name in both. */
+          onSave={(patch) => updateUser(capabilityUser.id, patch)}
+        />
+      )}
     </Card>
+
+    </div>
   )
 }
 
@@ -433,6 +819,7 @@ function AdminEmailConnectModal({ user, accessToken, onClose }: { user: User; ac
             Connected as <span className="font-medium">{status.email}</span>
           </p>
           {status.lastSyncedAt && <p className="text-xs text-slate-400 mt-1">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>}
+          <SyncTrouble status={status} />
           <div className="flex justify-end mt-4">
             <button onClick={handleDisconnect} className="text-sm font-medium px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
               Disconnect
@@ -511,24 +898,41 @@ function ResetLoginButton({ email }: { email: string }) {
       <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
         {state === 'sending' ? 'Sending…' : 'Send login link'}
       </button>
-      {error && <p className="text-[11px] text-[var(--c-rust-deep)] mt-0.5 max-w-[160px]">{error}</p>}
+      {error && <p className="text-[11px] text-[var(--c-rust-deep)] mt-0.5 max-w-[160px] whitespace-normal">{error}</p>}
     </div>
   )
 }
 
+/**
+ * EDITING SOMEBODY ELSE'S DETAILS, INCLUDING THE NUMBER A DEBTOR IS GIVEN.
+ *
+ * THE PHONE IS HERE BECAUSE OF WHAT IT HOLDS UP. Every notice the firm sends carries "Direct
+ * line: {{collector_phone}}", and a field nothing fills stops the notice rather than posting
+ * braces to a debtor — so a collector with no number on their profile cannot have a section 129
+ * go out on any of their accounts. All fifty live profiles were in that state.
+ *
+ * AND ONLY THE PERSON THEMSELVES COULD FIX IT, on Settings → Profile, which means fifty people
+ * each logging in before the first statutory demand can be sent. An administrator filling them in
+ * is one afternoon; the other way is a plan that does not happen.
+ */
 function EditUserModal({
   user,
   accessToken,
   onClose,
   onSaveName,
+  onSaveDetails,
 }: {
   user: User
   accessToken: string
   onClose: () => void
   onSaveName: (name: string) => void
+  /** Phone and WhatsApp, written straight to the profile like the name is. */
+  onSaveDetails: (patch: { phone?: string; whatsapp?: string }) => void
 }) {
   const [name, setName] = useState(user.name)
   const [email, setEmail] = useState(user.email)
+  const [phone, setPhone] = useState(user.phone ?? '')
+  const [whatsapp, setWhatsapp] = useState(user.whatsapp ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -538,6 +942,12 @@ function EditUserModal({
     setSubmitting(true)
     setError(null)
     if (name.trim() !== user.name) onSaveName(name.trim())
+    /* Only what changed, and `undefined` where a field was cleared — updateUser patches the row,
+       so sending an empty string would write one rather than emptying the column. */
+    const details: { phone?: string; whatsapp?: string } = {}
+    if (phone.trim() !== (user.phone ?? '')) details.phone = phone.trim() || undefined
+    if (whatsapp.trim() !== (user.whatsapp ?? '')) details.whatsapp = whatsapp.trim() || undefined
+    if (Object.keys(details).length > 0) onSaveDetails(details)
     if (email.trim() !== user.email) {
       try {
         const res = await fetch('/api/update-user-email', {
@@ -573,6 +983,21 @@ function EditUserModal({
         {email.trim() !== user.email && (
           <p className="text-xs text-slate-400 mb-3.5 -mt-2">Changing the email changes their login — they'll need to sign in with the new address.</p>
         )}
+        <FormField label="Phone">
+          <input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </FormField>
+        {/* SAID WHERE IT IS TYPED, because the consequence is not obvious from the field. */}
+        <p className="text-xs text-slate-400 mb-3.5 -mt-2">
+          The direct line every notice gives the debtor. Without it a section 129 on this person's
+          accounts holds rather than going out with the brackets in it.
+        </p>
+        {/* Its own number, not the desk line: a debtor messaged on a landline is a message nobody
+            receives. Fills {{collector_whatsapp}} on an account this person holds. */}
+        <FormField label="WhatsApp">
+          <input className={inputClass} value={whatsapp}
+            placeholder="Only if it differs from the number above"
+            onChange={(e) => setWhatsapp(e.target.value)} />
+        </FormField>
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
@@ -652,13 +1077,47 @@ function RemoveUserModal({
   )
 }
 
-const INVITE_ROLES: UserRole[] = ['Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison', 'Pre-legal Agent', 'Read Only']
+/*
+ * EVERY ROLE SOMEBODY CAN BE GIVEN, IN ONE PLACE.
+ *
+ * There were two of these lists in this file -- one on the row dropdown, one in the invite box --
+ * and they differed by a single entry: the invite box had no 'Pre-legal Team Leader', so the one
+ * role that leads the collections floor was the one role nobody could be invited AS. You had to
+ * invite them as something else and change it afterwards, which is the sort of thing people do
+ * once and then forget the second half of.
+ *
+ * Held against the UserRole union by check-settings-roles, so a role added to the type and
+ * forgotten here fails rather than quietly never being offered.
+ */
+export const ASSIGNABLE_ROLES: UserRole[] = [
+  'Administrator', 'Sales Manager', 'Sales Representative', 'Liaison Manager', 'Liaison',
+  'Call Centre Manager', 'Pre-legal Team Leader', 'Pre-legal Agent', 'Read Only',
+]
 
 function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<UserRole>('Sales Representative')
+  /*
+   * WHETHER THIS PERSON STILL WORKS HERE, at the firm's asking: "the add someone who has left
+   * doesn't deserve its own button -- if you add a user, you can just select somewhere there,
+   * for example by the role, say that that person already left."
+   *
+   * The two used to be separate buttons and separate forms over the same four fields. What
+   * actually differs is ONE decision and what follows from it: a record gets no email, no
+   * password and a locked account, and exists so the leads, deals and accounts they worked can
+   * stay theirs.
+   */
+  const [hasLeft, setHasLeft] = useState(false)
   const [teamId, setTeamId] = useState('')
+  /*
+   * A TEAM CHOSEN BEFORE THE ROLE CHANGED IS DROPPED. Pick a sales team, then change the role to
+   * Pre-legal Agent, and the box would still be holding a team the database refuses -- the
+   * picker no longer offers it, so it is invisible and the invite fails on submit.
+   */
+  useEffect(() => {
+    if (teamId && !teamsForRole(role, teams).some((t) => t.id === teamId)) setTeamId('')
+  }, [role, teamId, teams])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
@@ -666,19 +1125,30 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!email) return
+    /* A record with no name is a row nobody can identify, which is the whole point of making one. */
+    if (hasLeft && !name.trim()) { setError('A name is needed. It is the whole point of the record.'); return }
     setSubmitting(true)
     setError(null)
     try {
       const res = await fetch('/api/invite-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ email, name: name || undefined, role, teamId: teamId || undefined }),
+        /* signIn:false is what separates a record from an invitation — see api/invite-user.ts. */
+        body: JSON.stringify(hasLeft
+          ? { email, name: name.trim(), role, signIn: false }
+          : { email, name: name || undefined, role, teamId: teamId || undefined }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
         setError(body.error ?? 'Something went wrong sending the invite.')
         return
       }
+      /*
+       * A RECORD NEEDS THE LIST RE-READ. AppStore loads the people once at start-up, and a former
+       * colleague added here must appear under "No longer here" without somebody wondering why
+       * they cannot see them. An invitation does not: that person appears when they accept.
+       */
+      if (hasLeft) { window.location.reload(); return }
       setSent(true)
     } catch {
       setError('Could not reach the server. Please try again.')
@@ -706,36 +1176,70 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   return (
     <Modal title="Add User" onClose={onClose} width={420}>
       <form onSubmit={handleSubmit}>
-        <FormField label="Full Name (optional)">
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <FormField label={hasLeft ? 'Full name' : 'Full Name (optional)'} required={hasLeft}>
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} autoFocus required={hasLeft} />
         </FormField>
         <FormField label="Email" required>
           <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
+          {hasLeft && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              Only used to tell one record from another — nothing is ever sent to it. Their old
+              work address is the usual answer.
+            </p>
+          )}
         </FormField>
-        <FormField label="Role" required>
+        <FormField label={hasLeft ? 'Role they had' : 'Role'} required>
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-            {INVITE_ROLES.map((r) => (
+            {ASSIGNABLE_ROLES.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </select>
         </FormField>
+        {/*
+          * THE DECISION, BESIDE THE ROLE, where the firm asked for it. A tick rather than a second
+          * button: adding somebody who has left is done perhaps twice a year, and it was taking
+          * up permanent space on the screen for it.
+        */}
+        <label className="flex items-start gap-2.5 mb-3.5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={hasLeft}
+            onChange={(e) => setHasLeft(e.target.checked)} />
+          <span className="text-sm text-slate-600">
+            This person has already left the firm
+            <span className="block text-[11px] text-slate-400">
+              A record, not a login. No email is sent, no password is ever set, and the account is
+              locked so it cannot be signed in to — it exists so the leads, deals and accounts they
+              worked can stay theirs.
+            </span>
+          </span>
+        </label>
+        {/*
+          * NO TEAM ON SOMEBODY WHO HAS LEFT. They are filed under "No longer here" rather than in
+          * a department -- byDepartment keeps them out of the headcounts on purpose -- so a team
+          * on the record would be a field that changes nothing anybody can see.
+        */}
+        {!hasLeft && (
         <FormField label="Team (optional)">
           <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
             <option value="">No team</option>
-            {teams.map((t) => (
+            {/* Follows the role chosen above: pick Pre-legal Agent and the communications teams
+                stop being offered, because the database will not accept that pairing. */}
+            {teamsForRole(role, teams).map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
           </select>
         </FormField>
+        )}
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
           <button type="submit" disabled={submitting} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {submitting ? 'Sending…' : 'Send Invite'}
+            {submitting
+              ? (hasLeft ? 'Adding…' : 'Sending…')
+              : (hasLeft ? 'Add record' : 'Send Invite')}
           </button>
         </div>
       </form>
@@ -743,20 +1247,6 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   )
 }
 
-/**
- * Where the numbers get set.
- *
- * Two scopes on purpose. A target on the team is the team's total; a target on a person is
- * theirs alone. Neither implies the other and the business genuinely uses both — "we want 75
- * mandates a month" is a team number, while "nobody signs fewer than 15" is a personal one —
- * so this offers both rather than picking one and forcing the other to be derived from it.
- *
- * Each metric takes a goal and, optionally, a floor. That is how the targets were actually
- * described ("fifty is the minimum, we want seventy-five"), and a single figure would throw
- * away the half people are held to.
- *
- * A blank or zero goal clears the target rather than storing a goal of nothing.
- */
 function TargetsTab() {
   const { teams, users, targets, setTarget } = useAppStore()
   const { currentUser } = useAuth()
@@ -818,19 +1308,31 @@ function TargetsTab() {
             <span>Target</span>
             <span>Minimum</span>
           </div>
-          {TARGET_METRICS.map((def) => (
-            <TargetRow
-              key={def.id}
-              metricId={def.id}
-              label={def.label}
-              description={def.description}
-              unit={def.unit}
-              existing={resolveTarget(targets, scopeType, effectiveScopeId, def.id, periodKey)}
-              disabled={!canEdit}
-              onSave={(targetValue, thresholdValue) =>
-                setTarget({ scopeType, scopeId: effectiveScopeId, metric: def.id, targetValue, thresholdValue })
-              }
-            />
+          {/*
+            Split by side, because the two halves of the firm are set by different people. A
+            team leader setting R100 000 for a collector should not have to read past seven
+            sales metrics that mean nothing on the book to find the one line they came for.
+          */}
+          {(['sales', 'collections'] as const).map((side) => (
+            <div key={side}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 pt-2 pb-1 px-1">
+                {side === 'sales' ? 'Sales' : 'Collections'}
+              </p>
+              {TARGET_METRICS.filter((def) => def.side === side).map((def) => (
+                <TargetRow
+                  key={def.id}
+                  metricId={def.id}
+                  label={def.label}
+                  description={def.description}
+                  unit={def.unit}
+                  existing={resolveTarget(targets, scopeType, effectiveScopeId, def.id, periodKey)}
+                  disabled={!canEdit}
+                  onSave={(targetValue, thresholdValue) =>
+                    setTarget({ scopeType, scopeId: effectiveScopeId, metric: def.id, targetValue, thresholdValue })
+                  }
+                />
+              ))}
+            </div>
           ))}
         </div>
       ) : (
@@ -877,14 +1379,21 @@ function TargetRow({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[1fr_130px_130px] gap-3 items-center py-2 border-t border-slate-50">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-700">
-          {label}
-          {unit === 'currency' && <span className="ml-1.5 text-[11px] font-normal text-slate-400">in rand</span>}
-        </p>
-        <p className="text-[11.5px] text-slate-400 leading-snug">{description}</p>
-      </div>
+    /* One line per metric, the firm's checking-list look: what the metric means trails its name in
+       grey and is whole in the tooltip, and a rand target's own reading sits on the same line
+       rather than on a third one under the boxes. */
+    <div className="grid grid-cols-1 sm:grid-cols-[1fr_130px_130px] gap-x-3 gap-y-1 items-center py-1 border-t border-slate-50">
+      <p className="min-w-0 truncate text-[12.5px]" title={description}>
+        <span className="font-medium text-slate-700">{label}</span>
+        {unit === 'currency' && <span className="ml-1.5 text-[11px] font-normal text-slate-400">in rand</span>}
+        {existing && unit === 'currency' && (
+          <span className="text-slate-500 tabular-nums">
+            {' '}&middot; {formatCurrency(existing.targetValue)} a month
+            {existing.thresholdValue != null && `, minimum ${formatCurrency(existing.thresholdValue)}`}
+          </span>
+        )}
+        <span className="text-slate-400"> &middot; {description}</span>
+      </p>
       <input
         type="number"
         min={0}
@@ -895,7 +1404,7 @@ function TargetRow({
         onBlur={commit}
         placeholder="—"
         aria-label={`${label} target`}
-        className={inputClass}
+        className={`${inputClass} !py-1 !text-[12.5px]`}
       />
       <input
         type="number"
@@ -907,14 +1416,8 @@ function TargetRow({
         onBlur={commit}
         placeholder="optional"
         aria-label={`${label} minimum`}
-        className={inputClass}
+        className={`${inputClass} !py-1 !text-[12.5px]`}
       />
-      {existing && unit === 'currency' && (
-        <p className="sm:col-span-3 text-[11px] text-slate-400 -mt-1">
-          {formatCurrency(existing.targetValue)} a month
-          {existing.thresholdValue != null && `, minimum ${formatCurrency(existing.thresholdValue)}`}
-        </p>
-      )}
       <input type="hidden" value={metricId} readOnly />
     </div>
   )
@@ -933,12 +1436,15 @@ function TeamsTab() {
   return (
     <Card>
       <CardHeader title="Teams" subtitle="Group salespeople into teams" />
-      <div className="space-y-3">
+      {/* The checking-list look, as on every list the firm reads down: a thin rule between teams
+          rather than a boxed card each, the name, kind and head count on one line, and the
+          members as small chips under it. */}
+      <div className="divide-y divide-slate-100 border-y border-slate-100 text-[12.5px]">
         {teams.map((t) => {
           const unassigned = users.filter((u) => u.teamId !== t.id)
           return (
-            <div key={t.id} className="border border-slate-100 rounded-xl p-3.5">
-              <div className="flex items-center justify-between">
+            <div key={t.id} className="py-1.5 px-1">
+              <div className="flex items-center justify-between gap-3 whitespace-nowrap">
                 {editingTeamId === t.id ? (
                   <form
                     className="flex items-center gap-2 flex-1"
@@ -963,16 +1469,14 @@ function TeamsTab() {
                     </button>
                   </form>
                 ) : (
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold text-slate-700">{t.name}</p>
-                      <span
-                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${t.kind === 'Communications' ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]'}`}
-                      >
-                        {t.kind}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400">{t.memberIds.length} members</p>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <p className="font-semibold text-slate-700 truncate" title={t.name}>{t.name}</p>
+                    <span
+                      className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${TEAM_KIND_TINT[t.kind] ?? TEAM_KIND_TINT.Sales}`}
+                    >
+                      {t.kind}
+                    </span>
+                    <p className="shrink-0 text-slate-400">&middot; {t.memberIds.length} members</p>
                   </div>
                 )}
                 {isAdmin && editingTeamId !== t.id && (
@@ -980,11 +1484,10 @@ function TeamsTab() {
                     <select
                       value={t.kind}
                       onChange={(e) => updateTeam(t.id, { kind: e.target.value as TeamKind })}
-                      className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
                       title="Which dashboard this team's members land on"
                     >
-                      <option value="Sales">Sales</option>
-                      <option value="Communications">Communications</option>
+                      {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
                     </select>
                     <button
                       onClick={() => {
@@ -1002,13 +1505,13 @@ function TeamsTab() {
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2 mt-3">
+              <div className="flex flex-wrap items-center gap-1 mt-1">
                 {t.memberIds.map((id) => {
                   const member = users.find((u) => u.id === id)
                   return (
-                    <div key={id} className="flex items-center gap-1.5 bg-slate-50 rounded-full pl-1 pr-2 py-1">
-                      <UserAvatar userId={id} size={20} />
-                      <span className="text-xs text-slate-600">{member?.name ?? 'Unknown'}</span>
+                    <div key={id} className="flex items-center gap-1 bg-slate-50 rounded-full pl-0.5 pr-1.5 py-0.5">
+                      <UserAvatar userId={id} size={16} />
+                      <span className="text-[11px] text-slate-600 whitespace-nowrap">{member?.name ?? 'Unknown'}</span>
                       {isAdmin && (
                         <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove from team">
                           <X size={12} />
@@ -1020,7 +1523,7 @@ function TeamsTab() {
               </div>
               {isAdmin && unassigned.length > 0 && (
                 <select
-                  className="text-sm text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none mt-2.5"
+                  className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none mt-1"
                   value=""
                   onChange={(e) => {
                     if (e.target.value) updateUser(e.target.value, { teamId: t.id })
@@ -1049,12 +1552,27 @@ function TeamsTab() {
           }}
           className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
         >
-          <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
-          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)} className={`${inputClass} w-40 shrink-0`}>
-            <option value="Sales">Sales</option>
-            <option value="Communications">Communications</option>
+          {/* flex-1 min-w-0: the name is the field that should take the slack, and min-w-0 is
+              what lets a flex child actually narrow rather than hold its content's width. */}
+          <input className={`${controlClass} flex-1 min-w-0`} placeholder="New team name"
+            value={name} onChange={(e) => setName(e.target.value)} />
+          {/* controlClass, NOT inputClass: the latter carries w-full, which beats the w-40 below
+              in the generated stylesheet however they are ordered here. See Modal.tsx. */}
+          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)}
+            aria-label="What kind of team"
+            className={`${controlClass} w-40 shrink-0`}>
+            {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
-          <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
+          {/*
+            REFUSED VISIBLY RATHER THAN SILENTLY. The submit handler returns early on a blank name,
+            which is right -- and it did it without a word, so pressing the button looked exactly
+            like a feature that does not work. A button that cannot act says so by being unpressable.
+          */}
+          <button type="submit" disabled={!name.trim()}
+            title={name.trim() ? 'Add this team' : 'Give the team a name first'}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+              bg-brand-600 text-white hover:bg-brand-700 shrink-0
+              disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
             <Plus size={15} /> Add Team
           </button>
         </form>
@@ -1090,14 +1608,14 @@ function PipelinesTab() {
   return (
     <Card>
       <CardHeader title="Pipelines" subtitle="Customise your sales pipeline stages" />
-      <div className="space-y-2">
+      <div className="border-y border-slate-100 text-[12.5px]">
         {stages.map((s, i) => (
-          <div key={s} className="flex items-center gap-3 border border-slate-100 rounded-lg px-3.5 py-2.5">
-            <span className="text-xs text-slate-400 w-5">{i + 1}</span>
-            <span className="text-sm font-medium text-slate-700 flex-1">{s}</span>
+          <div key={s} className="flex items-center gap-3 border-b border-slate-50 last:border-b-0 px-3 py-1.5 hover:bg-slate-50">
+            <span className="text-slate-400 w-5 tabular-nums">{i + 1}</span>
+            <span className="font-medium text-slate-700 flex-1 truncate">{s}</span>
             {!(['Won', 'Rejected'] as string[]).includes(s) && (
-              <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
-                <X size={14} />
+              <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-0.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
+                <X size={13} />
               </button>
             )}
           </div>
@@ -1136,27 +1654,27 @@ function CustomFieldsTab() {
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full list-table whitespace-nowrap">
           <thead>
-            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-              <th className="font-medium px-5 py-2.5">Field</th>
-              <th className="font-medium px-3 py-2.5">Related To</th>
-              <th className="font-medium px-3 py-2.5">Type</th>
-              <th className="font-medium px-3 py-2.5">Status</th>
+            <tr className="text-left border-y border-slate-100 text-slate-400">
+              <th className="font-medium px-3 py-2">Field</th>
+              <th className="font-medium px-2 py-2">Related To</th>
+              <th className="font-medium px-2 py-2">Type</th>
+              <th className="font-medium px-2 py-2">Status</th>
               <th className="w-10"></th>
             </tr>
           </thead>
           <tbody>
             {fields.map((f) => (
-              <tr key={f.id} className="border-t border-slate-50">
-                <td className="px-5 py-2.5 font-medium text-slate-700">{f.name}</td>
-                <td className="px-3 py-2.5 text-slate-500">{f.relatedTo}</td>
-                <td className="px-3 py-2.5 text-slate-500">{f.type}</td>
-                <td className="px-3 py-2.5">
-                  <span className={`badge ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
+              <tr key={f.id} className="border-b border-slate-50 hover:bg-slate-50">
+                <td className="px-3 py-1.5 font-medium text-slate-700 max-w-[16rem] truncate" title={f.name}>{f.name}</td>
+                <td className="px-2 py-1.5 text-slate-500">{f.relatedTo}</td>
+                <td className="px-2 py-1.5 text-slate-500">{f.type}</td>
+                <td className="px-2 py-1.5">
+                  <span className={`badge !px-2 !py-0.5 !text-[11px] ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
                 </td>
-                <td className="px-3 py-2.5">
-                  <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
+                <td className="px-2 py-1.5">
+                  <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-0.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
                     <Trash2 size={14} />
                   </button>
                 </td>
@@ -1375,8 +1893,8 @@ function NotificationsTab() {
       <CardHeader title="Notifications" subtitle="Choose which events notify you" />
       <div className="divide-y divide-slate-50">
         {NOTIFICATION_TYPES.map((t) => (
-          <div key={t} className="flex items-center justify-between py-2.5">
-            <span className="text-sm text-slate-700">{t}</span>
+          <div key={t} className="flex items-center justify-between py-1.5">
+            <span className="text-[12.5px] text-slate-700">{t}</span>
             <Toggle checked={enabled[t]} onChange={(v) => setEnabled((prev) => ({ ...prev, [t]: v }))} />
           </div>
         ))}
@@ -1646,19 +2164,19 @@ function BuzzBoxIntegrationCard() {
             <div>
               <p className="text-xs font-semibold text-slate-500 mb-2">Everyone’s extensions</p>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full list-table whitespace-nowrap">
                   <thead>
-                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                    <tr className="text-left text-slate-400 border-b border-slate-100">
                       <th className="font-medium px-2 py-1.5">Person</th>
                       <th className="font-medium px-2 py-1.5 w-72">Extension</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeUsers.map((u) => (
-                      <tr key={u.id} className="border-b border-slate-50">
+                      <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50">
                         <td className="px-2 py-1.5">
                           <div className="flex items-center gap-2">
-                            <UserAvatar userId={u.id} size={22} />
+                            <UserAvatar userId={u.id} size={20} />
                             <span className="text-slate-700">{u.name}</span>
                           </div>
                         </td>
@@ -1708,7 +2226,42 @@ function ExtensionPicker({ value, options, saving, onChange }: { value?: string;
   )
 }
 
-type EmailStatus = { connected: boolean; email?: string; lastSyncedAt?: string | null }
+type EmailStatus = {
+  connected: boolean; email?: string; lastSyncedAt?: string | null
+  /* WHEN RAPTOR LAST TRIED, AND WHY IT FAILED. `lastSyncedAt` only moves on success, so on its
+     own it cannot tell "never connected" from "the nightly job has not run" -- which is how a
+     mailbox sat unread for four days with a debtor's reply in it and nothing saying so. */
+  lastAttemptAt?: string | null
+  syncError?: string | null
+}
+
+/**
+ * The one line that says a mailbox is not being read.
+ *
+ * SHOWN IN BOTH PLACES a mailbox status appears -- an administrator looking at somebody else's
+ * connection, and a person looking at their own -- because the person most likely to notice is
+ * whichever of them opens the screen first.
+ */
+function SyncTrouble({ status }: { status: EmailStatus }) {
+  if (!status.connected) return null
+  if (status.syncError) {
+    return (
+      <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+        Raptor could not read this mailbox
+        {status.lastAttemptAt ? ` when it last tried, ${new Date(status.lastAttemptAt).toLocaleString()}` : ''}:
+        {' '}{status.syncError}
+      </p>
+    )
+  }
+  if (!status.lastSyncedAt) {
+    return (
+      <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+        This mailbox has never been read. Nothing sent to it will reach an account until it syncs.
+      </p>
+    )
+  }
+  return null
+}
 
 function EmailIntegrationCard() {
   const { session } = useAuth()
@@ -1722,6 +2275,21 @@ function EmailIntegrationCard() {
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
+  /*
+   * A SECOND BUTTON FOR EVERYBODY'S MAILBOX, at the firm's asking: "give an option to sync your
+   * email address and to sync for the whole company for now, just for in the interim."
+   *
+   * THE CASE IS THEIR OWN AND IT IS EXACT. An account allocated to somebody sends from that
+   * person's address and the debtor replies to it -- "however, it doesn't sync because... only
+   * after she's been logged in. So if she's not logged in or it did not sync, how does that sync
+   * work?" It did not: the whole company's mail was read once a night at 05:00 UTC by the cron and
+   * by nothing else. Now a collector who can see the reply is sitting in a colleague's inbox can
+   * go and get it.
+   *
+   * ITS OWN SPINNER, not `syncing`. The two can be pressed one after the other and a shared flag
+   * would put the spinner on the wrong button and disable the one that is free.
+   */
+  const [syncingAll, setSyncingAll] = useState(false)
 
   useEffect(() => {
     if (!accessToken) return
@@ -1773,6 +2341,51 @@ function EmailIntegrationCard() {
     setStatus({ connected: false })
   }
 
+  /*
+   * WHAT IT SAYS AFTERWARDS IS THE WHOLE POINT OF THE BUDGET. The run stops itself before Vercel
+   * kills it and hands back how far it got, so "9 of 15, press again" reaches the person instead
+   * of a spinner that dies. Skipped is not a failure and is worded as what it is: somebody else
+   * just did those.
+   */
+  async function handleSyncEveryone() {
+    if (!accessToken) return
+    setSyncingAll(true)
+    setSyncMessage(null)
+    try {
+      const res = await fetch('/api/email/sync-all', {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSyncMessage(body.error ?? 'Could not sync the company mailboxes.')
+      } else {
+        const bits = [
+          `${body.syncedMailboxes ?? 0} of ${body.mailboxes ?? 0} mailboxes read`,
+          `${body.logged ?? 0} new message${body.logged === 1 ? '' : 's'}`,
+        ]
+        if (body.skipped) bits.push(`${body.skipped} synced moments ago`)
+        if (body.failed) bits.push(`${body.failed} could not be reached`)
+        if (body.remaining) bits.push(`${body.remaining} left — press again to finish`)
+        /*
+         * AND WHICH ONES, BY ADDRESS.
+         *
+         * A COUNT CANNOT BE ACTED ON, and this is the sentence that would have saved four days:
+         * the firm sent a section 129 from samuel@, the debtor replied to it, and the reply never
+         * appeared because the sweep had never once opened that mailbox. "2 left" told them
+         * nothing; "not reached: samuel@…" tells them where the message they are waiting for is.
+         */
+        const missed: string[] = Array.isArray(body.notReached) ? body.notReached : []
+        setSyncMessage(`${bits.join(' · ')}.${
+          missed.length > 0 ? ` Not reached: ${missed.join(', ')}.` : ''}`)
+        await refreshSyncedData()
+      }
+    } catch {
+      setSyncMessage('Could not reach the server.')
+    } finally {
+      setSyncingAll(false)
+    }
+  }
+
   async function handleSync() {
     if (!accessToken) return
     setSyncing(true)
@@ -1813,6 +2426,7 @@ function EmailIntegrationCard() {
                 ? `Connected as ${status.email}`
                 : 'Send email and automatically log matching replies as CRM activity'}
             </p>
+            {status?.connected && <SyncTrouble status={status} />}
             {status?.connected && status.lastSyncedAt && (
               <p className="text-xs text-slate-400 mt-0.5">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>
             )}
@@ -1834,6 +2448,16 @@ function EmailIntegrationCard() {
               className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5 disabled:opacity-50"
             >
               <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
+            </button>
+            {/* BESIDE YOUR OWN, because the question a person has is "is the mail in yet" and the
+                answer is sometimes in somebody else's inbox. Worded as what it does rather than as
+                a scope: "Sync everyone" reads at a glance, "Sync all connections" does not. */}
+            <button
+              onClick={handleSyncEveryone}
+              disabled={syncingAll}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Users size={13} className={syncingAll ? 'animate-pulse' : ''} /> Sync everyone
             </button>
             <button
               onClick={handleDisconnect}

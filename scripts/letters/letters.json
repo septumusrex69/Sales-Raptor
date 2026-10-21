@@ -1,0 +1,8694 @@
+{
+ "letter-demand-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Directors"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "LETTER OF DEMAND — FINAL NOTICE BEFORE LIQUIDATION PROCEEDINGS, AND NOTICE OF THE PERSONAL LIABILITY OF DIRECTORS AND SURETIES"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor, and are duly authorised to issue this demand. It is addressed to the company and to each of its directors. This is a formal legal demand. Please read all of it."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "The debt"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The company is indebted to the creditor as set out below, and the amount is due and payable in full."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     40,
+     60
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHERE THIS ACCOUNT STANDS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account handed to us"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{handover_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "This notice issued"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "You must respond by"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{respond_by}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     50,
+     50
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHAT HAS BEEN PAID SINCE THIS ACCOUNT WAS HANDED TO US",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Paid since handover"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{paid_to_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Still outstanding and due in full",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Position as at"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{position_as_at}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total outstanding balance",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest accrues on the overdue amount at 2% per month, as provided for in the agreement, until the account is paid in full.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "Demand"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We demand payment of {{balance}} by {{respond_by}}. A company that keeps incurring debts it has no reasonable prospect of paying may be carrying on business recklessly, which Section 22 of the Companies Act 71 of 2008 prohibits. The directors should consider the company’s position with that in mind."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How the company may deal with us"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Settle the account. ",
+       "bold": true
+      },
+      {
+       "text": "Payment of {{balance}} settles the account in full. A settlement figure to the intended date of payment is available on request."
+      }
+     ],
+     [
+      {
+       "text": "Propose a payment arrangement. ",
+       "bold": true
+      },
+      {
+       "text": "Send it in writing with amounts and dates, together with the company’s latest management accounts or bank statements. Nothing is agreed until we confirm it in writing."
+      }
+     ],
+     [
+      {
+       "text": "Dispute the debt. ",
+       "bold": true
+      },
+      {
+       "text": "If there is any dispute regarding this matter, tell us in writing with the grounds and supporting documents. We will investigate and give a written finding."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Sureties. ",
+      "bold": true
+     },
+     {
+      "text": "Where any person has signed as surety and co-principal debtor for the company’s obligations, this demand is also directed at that person, and the creditor may proceed against every surety personally."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Where the National Credit Act applies to the agreement, this is also a notice in terms of Section 129(1)(a) of that Act, and the company may refer the agreement to an ADR agent, an ombud with jurisdiction or a consumer court within 10 (ten) business days of delivery."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What happens if the company does not respond"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "WHAT FOLLOWS IF WE DO NOT HEAR FROM THE COMPANY",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If the company has not paid by {{respond_by}}, our client’s attorneys will be instructed to take the following steps:"
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     30,
+     70
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Credit bureau listing",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Reported to the registered credit bureaus against the company’s registration number, where suppliers and lenders who assess the company can see it."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Statutory demand",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Our client’s attorneys serve a demand on the company in terms of Section 345 of the Companies Act 61 of 1973. If it is not paid within three weeks, the company is deemed unable to pay its debts."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Liquidation",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An application is brought in the High Court for the company to be wound up. Control of the company and its assets passes from the directors to a liquidator."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Directors held liable",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An application is brought under Section 424 of that Act for an order declaring every director who allowed the company to trade recklessly personally liable for its debts."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Sureties sued",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Every person who signed as surety is sued in their personal capacity, and their personal assets may be attached and sold."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal costs",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Reasonable legal and collection costs are claimed and added to what is owed."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The company can still avoid this. Pay, or contact {{collector_name}} on {{collector_phone}} or {{collector_email}} with a written proposal, before {{respond_by}}, quoting reference {{case_number}}."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We would prefer to resolve this matter without an application to court, and appreciate the company’s cooperation in doing so."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-final-notice-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "FINAL NOTICE BEFORE CREDIT BUREAU LISTING AND LEGAL ACTION"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. We sent you a notice in terms of Section 129(1)(a) of the National Credit Act, and a reminder. The period for responding has ended, and we have received no payment, no payment arrangement and no dispute from you."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "Where the account stands"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     40,
+     60
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHERE THIS ACCOUNT STANDS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account handed to us"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{handover_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "This notice issued"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "You must respond by"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{respond_by}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     50,
+     50
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHAT HAS BEEN PAID SINCE THIS ACCOUNT WAS HANDED TO US",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Paid since handover"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{paid_to_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Still outstanding and due in full",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Position as at"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{position_as_at}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total outstanding balance",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest accrues on the overdue amount at 2% per month until the account is paid in full, so the amount owing grows every month this remains unresolved.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What happens in 20 business days"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "UNLESS THE ACCOUNT IS PAID OR AN ARRANGEMENT IS AGREED",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If we have not heard from you by {{respond_by}}, 20 business days from the date of this notice, the following will follow."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     30,
+     70
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Credit bureau listing",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Your default is reported to the registered credit bureaus and appears on your credit profile, where every credit provider who assesses you can see it."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal action",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "One of our attorneys proceeds with legal action against you to enforce the agreement."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Summons and judgment",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Summons is issued and served on you, and judgment may be granted against you for the full {{balance}}, plus interest."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Enforcement",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "A warrant of execution allows the sheriff to attach and sell your movable or immovable property, or an attachment order is granted against your salary."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal costs",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Reasonable legal and collection costs are added to what you already owe."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What this means"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "The amount you owe grows. ",
+       "bold": true
+      },
+      {
+       "text": "Once the matter is in court, the legal costs, the sheriff’s fees and the interest are added to the {{balance}} you owe today. What you end up paying is substantially more than the amount in this notice."
+      }
+     ],
+     [
+      {
+       "text": "A judgment goes onto your name. ",
+       "bold": true
+      },
+      {
+       "text": "It is granted for the full balance plus those costs, and it stays on record and can be enforced for many years."
+      }
+     ],
+     [
+      {
+       "text": "The listing follows you. ",
+       "bold": true
+      },
+      {
+       "text": "It appears on your credit profile, where every credit provider who assesses you can see it, and it makes it harder to get a loan, a credit account, a vehicle or a home loan."
+      }
+     ],
+     [
+      {
+       "text": "Paying later does not erase the listing. ",
+       "bold": true
+      },
+      {
+       "text": "The record is updated to show the account was settled, but it remains on your profile for the period the credit bureau rules allow."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to stop this"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Pay in full. ",
+       "bold": true
+      },
+      {
+       "text": "Payment of {{balance}} settles the account and stops every step above."
+      }
+     ],
+     [
+      {
+       "text": "Arrange payment. ",
+       "bold": true
+      },
+      {
+       "text": "Contact {{collector_name}} and agree an amount and date. Once confirmed in writing, the listing and the handover are put on hold for as long as it is kept to."
+      }
+     ],
+     [
+      {
+       "text": "Dispute the debt. ",
+       "bold": true
+      },
+      {
+       "text": "If there is any dispute regarding this matter that has not yet been raised with us, tell us in writing now, with the reasons."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This is the last step before the file leaves our office. We would still rather agree something workable."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-final-notice-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Directors"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "FINAL NOTICE BEFORE CREDIT BUREAU LISTING AND LEGAL ACTION"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. We sent the company a letter of demand, and a reminder. The date for payment has passed, and we have received no payment, no written proposal and no dispute from the company."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "Where the account stands"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     40,
+     60
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHERE THIS ACCOUNT STANDS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account handed to us"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{handover_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "This notice issued"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "You must respond by"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{respond_by}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     50,
+     50
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHAT HAS BEEN PAID SINCE THIS ACCOUNT WAS HANDED TO US",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Paid since handover"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{paid_to_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Still outstanding and due in full",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Position as at"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{position_as_at}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total outstanding balance",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest accrues on the overdue amount at 2% per month until the account is paid in full, so the amount owing grows every month this remains unresolved.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What happens in 20 business days"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "UNLESS THE ACCOUNT IS PAID OR AN ARRANGEMENT IS AGREED",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If we have not heard from the company by {{respond_by}}, 20 business days from the date of this notice, the following will follow."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     30,
+     70
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Credit bureau listing",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The company’s default is reported to the registered credit bureaus against its registration number, where suppliers, lenders and landlords who assess it can see it."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Statutory demand",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Our attorneys serve a demand in terms of Section 345 of the Companies Act 61 of 1973. If it is not met within three weeks, the company is deemed unable to pay its debts."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Liquidation",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An application is brought in the High Court to wind the company up, and control of its assets passes to a liquidator."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Directors held liable",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An order is sought declaring every director who allowed the company to trade recklessly personally liable for its debts."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Sureties sued",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Every person who signed as surety is sued in their personal capacity."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal costs",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Reasonable legal and collection costs are added to what is owed."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What this means"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "What is owed grows. ",
+       "bold": true
+      },
+      {
+       "text": "Once the matter is in court, the legal costs and the interest are added to the {{balance}} owing today."
+      }
+     ],
+     [
+      {
+       "text": "The listing follows the company. ",
+       "bold": true
+      },
+      {
+       "text": "It affects the company’s ability to obtain credit terms, finance and leases."
+      }
+     ],
+     [
+      {
+       "text": "The directors are exposed personally. ",
+       "bold": true
+      },
+      {
+       "text": "An order under Section 424 makes a director who allowed reckless trading liable for the company’s debts."
+      }
+     ],
+     [
+      {
+       "text": "Every surety is exposed personally. ",
+       "bold": true
+      },
+      {
+       "text": "Their own assets may be attached and sold."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to stop this"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Pay in full. ",
+       "bold": true
+      },
+      {
+       "text": "Payment of {{balance}} settles the account and stops every step above."
+      }
+     ],
+     [
+      {
+       "text": "Arrange payment. ",
+       "bold": true
+      },
+      {
+       "text": "Contact {{collector_name}} and agree an amount and date. Once confirmed in writing, the listing and the handover are put on hold for as long as it is kept to."
+      }
+     ],
+     [
+      {
+       "text": "Dispute the debt. ",
+       "bold": true
+      },
+      {
+       "text": "If there is any dispute regarding this matter that has not yet been raised with us, tell us in writing now, with the reasons."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This is the last step before the file leaves our office. We would still rather agree something workable."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-listing-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "NOTICE OF CREDIT BUREAU LISTING, AND OF THE PREPARATION OF YOUR FILE FOR LEGAL ACTION"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. Our final notice gave you 20 business days to pay the account or agree an arrangement. That period has ended without a payment, an arrangement or a dispute, and the default has now been reported to the credit bureaus."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "The listing"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "THE DEFAULT HAS BEEN REPORTED TO THE CREDIT BUREAUS",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This is the record of what was submitted, and the reference to quote if it is queried with a bureau."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     36,
+     64
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE LISTED",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BUREAUS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{bureaus_listed}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "IDENTITY NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{debtor_id_masked}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "AMOUNT LISTED",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "LISTING REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_reference}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The listing appears on your credit profile, where every credit provider who assesses you can see it. It remains there for the period the credit bureau rules allow. If you believe it is wrong, you may dispute it with us or directly with the bureau, quoting the listing reference above. A bureau must investigate a disputed record."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "The file is being prepared for legal action"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Your file is now being prepared for one of our attorneys to proceed against you to enforce the agreement. Once summons is issued, the legal costs and the sheriff’s fees are added to the {{balance}} you owe today, a judgment may be granted against your name, and it may be enforced by attachment of your property or of your salary."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "It is still cheaper to settle now"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Pay in full. ",
+       "bold": true
+      },
+      {
+       "text": "Payment of {{balance}} settles the account and stops the legal steps. The record at the bureaus is then updated to show the account as settled."
+      }
+     ],
+     [
+      {
+       "text": "Arrange payment. ",
+       "bold": true
+      },
+      {
+       "text": "Speak to {{collector_name}} and agree an amount and date. Once confirmed in writing, the file is held for as long as it is kept to."
+      }
+     ],
+     [
+      {
+       "text": "Dispute it. ",
+       "bold": true
+      },
+      {
+       "text": "If there is any dispute regarding this matter, tell us in writing with the reasons, and we will investigate and give a written finding."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Settling does not remove the listing, but it does stop the costs growing and shows every future credit provider that the account was paid.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Even at this stage we would rather agree something workable than litigate."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-listing-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Directors"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "NOTICE OF CREDIT BUREAU LISTING, AND OF THE PREPARATION OF THE FILE FOR LEGAL ACTION"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. Our final notice gave the company 20 business days to pay the account or agree an arrangement. That period has ended without a payment, an arrangement or a dispute, and the default has now been reported to the credit bureaus."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "The listing"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "THE DEFAULT HAS BEEN REPORTED TO THE CREDIT BUREAUS",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This is the record of what was submitted, and the reference to quote if it is queried with a bureau."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     36,
+     64
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE LISTED",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BUREAUS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{bureaus_listed}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "REGISTRATION NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{debtor_reg_no}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "AMOUNT LISTED",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "LISTING REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_reference}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The listing appears against the company’s registration number, where suppliers, lenders and landlords who assess it can see it. If the company believes it is wrong, it may dispute it with us or directly with the bureau, quoting the listing reference above. A bureau must investigate a disputed record."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "The file is being prepared for legal action"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The file is now being prepared for one of our attorneys to proceed against the company, beginning with a demand in terms of Section 345 of the Companies Act, followed by an application to wind the company up, an application to hold directors who allowed reckless trading personally liable, and action against every surety personally."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "It is still cheaper to settle now"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Pay in full. ",
+       "bold": true
+      },
+      {
+       "text": "Payment of {{balance}} settles the account and stops the legal steps. The record at the bureaus is then updated to show the account as settled."
+      }
+     ],
+     [
+      {
+       "text": "Arrange payment. ",
+       "bold": true
+      },
+      {
+       "text": "Speak to {{collector_name}} and agree an amount and date. Once confirmed in writing, the file is held for as long as it is kept to."
+      }
+     ],
+     [
+      {
+       "text": "Dispute it. ",
+       "bold": true
+      },
+      {
+       "text": "If there is any dispute regarding this matter, tell us in writing with the reasons, and we will investigate and give a written finding."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Settling does not remove the listing, but it does stop the costs growing and shows every future credit provider that the account was paid.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Even at this stage we would rather agree something workable than litigate."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-summons-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "NOTICE OF INTENDED SUMMONS — YOUR FILE HAS BEEN HANDED TO OUR ATTORNEYS"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. Every step short of court has now been taken, and the file has been handed to one of our attorneys with instructions to issue summons."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "Where this matter stands"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     50,
+     50
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHAT HAS BEEN PAID SINCE THIS ACCOUNT WAS HANDED TO US",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Paid since handover"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{paid_to_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Still outstanding and due in full",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Position as at"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{position_as_at}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total outstanding balance",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest accrues on the overdue amount at 2% per month until the account is paid in full, so the amount owing grows every month this remains unresolved.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     36,
+     64
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "LISTED WITH THE BUREAUS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "LISTING REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_reference}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What the attorneys are instructed to do"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     30,
+     70
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Summons",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Issued and served on you by the sheriff at your home or your place of work."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Judgment",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "May be granted for the full {{balance}}, plus interest, and recorded against your name."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Your possessions",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "A warrant of execution allows the sheriff to attach and sell your movable or immovable property."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Your salary",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An emoluments attachment order requires your employer to deduct before you are paid."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal costs",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The attorney’s fees, the sheriff’s fees and the court costs are added to what you owe, and they are recoverable from you."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "There is still a short window"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If you pay {{balance}} into our trust account before summons is issued, the matter ends there, without court costs. If you cannot pay it all at once, call {{collector_name}} today on {{collector_phone}} and say what you can do. An arrangement confirmed in writing holds the file, but only if it is agreed before summons is issued."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Even now we would rather resolve this than litigate."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-summons-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Directors"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "NOTICE OF INTENDED LEGAL PROCEEDINGS — THE FILE HAS BEEN HANDED TO OUR ATTORNEYS"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. Every step short of court has now been taken, and the file has been handed to one of our attorneys with instructions to proceed against the company, its directors and its sureties."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "Where this matter stands"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     50,
+     50
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHAT HAS BEEN PAID SINCE THIS ACCOUNT WAS HANDED TO US",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Paid since handover"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{paid_to_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Still outstanding and due in full",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Position as at"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{position_as_at}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total outstanding balance",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest accrues on the overdue amount at 2% per month until the account is paid in full, so the amount owing grows every month this remains unresolved.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     36,
+     64
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "LISTED WITH THE BUREAUS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "LISTING REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{listing_reference}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What the attorneys are instructed to do"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     30,
+     70
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Statutory demand",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Served in terms of Section 345 of the Companies Act 61 of 1973. If it is not met within three weeks, the company is deemed unable to pay its debts."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Liquidation",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An application to the High Court to wind the company up. Control of its assets passes to a liquidator."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Directors held liable",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An order under Section 424 declaring every director who allowed reckless trading personally liable for the company’s debts."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Sureties sued",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Every surety is sued in their personal capacity and their personal assets may be attached."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal costs",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Added to what is owed and recoverable from the company."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "There is still a short window"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Payment of {{balance}} into our trust account, before the attorneys act, ends the matter without legal costs. Otherwise send {{collector_name}} a written proposal today on {{collector_email}}, with amounts, dates and the company’s latest management accounts. An arrangement confirmed in writing holds the file, but only if it is agreed before proceedings begin."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Even now we would rather resolve this than litigate."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-aod-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "ACKNOWLEDGEMENT OF DEBT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Repayment agreement with consent to judgment"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "between {{client_name}}, the creditor identified in item 1 of Part A (the “Creditor”), represented by {{firm_name}}, its duly authorised agent, and the debtor identified in item 3 of Part A (the “Debtor”)."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "headerRow": true,
+    "widths": [
+     25,
+     25,
+     25,
+     25
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "STEP 1",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "STEP 2",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "STEP 3",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "STEP 4",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "The debtor acknowledges the debt and waives all defences"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The debtor pays the agreed instalments"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "On default the full balance becomes due at once"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The creditor may lodge the signed consent to judgment"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "How this agreement works. It consists of Part A (particulars), Part B (terms and conditions) and Annexure A (consent to judgment). Every field in Part A must be completed before signature."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHY YOU ARE BEING ASKED TO SIGN THIS"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This agreement records what is owed and how it will be paid, and it holds legal action for as long as the instalments are met."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     32,
+     68
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "If you sign, and pay",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "No further collection step is taken and no legal proceedings are instituted while the instalments are paid on time and in full."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "If you sign, and miss a payment",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The full balance falls due at once, the default is reported to the credit bureaus, and the creditor may lodge the signed consent to judgment in Annexure A."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "If you do not sign",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Nothing is held. The account continues on its normal course: the notices already sent stand, the default is reported to the credit bureaus, and the file goes to our attorneys."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "What signing does not do",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "It does not reduce the amount owing, stop interest running, or stop the fees and expenses prescribed in Annexure B to the Debt Collectors Act from being charged."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "pagebreak"
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "PART A — AGREEMENT PARTICULARS"
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "headerRow": true,
+    "widths": [
+     6,
+     26,
+     68
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "ITEM",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "DESCRIPTION",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "PARTICULARS",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "1"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}, represented by {{firm_name}} ({{firm_council_number}}) as its duly authorised agent for the collection of this debt."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "2"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Creditor domicilium and notices"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Care of {{firm_name}}, {{firm_address}}. Email: {{firm_email}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "3"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Debtor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{debtor_name}}. Identity number: {{debtor_id_masked}}. Domicilium: {{debtor_address}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "4"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Sureties"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Not applicable unless named here. The Debtor is liable for the Debt."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "5"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Cause of the debt"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Moneys lent and advanced, or goods or services supplied, under the agreement between the Creditor and the Debtor, as reflected on the Creditor’s statement of account."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "6"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Calculation of the capital amount"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Balance handed over on {{handover_date}}: {{balance_handover}}. Plus interest to {{today}}: {{interest_accrued}}. Plus fees and expenses, including VAT of {{fees_vat}}: {{fees_total}}. Less payments received: {{paid_to_date}}. Capital amount: {{balance}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "7"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Amounts excluded"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Fees and expenses prescribed in Annexure B to the Debt Collectors Act 114 of 1998, and VAT on them, incurred after the signature date. These are charged on the account as they arise."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "8"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Repayment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_amount}} {{ptp_frequency}}, beginning on {{ptp_date}}, until the capital amount, interest and costs have been paid in full."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "9"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Interest"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{interest_rate}} on the outstanding balance from {{interest_from}}, calculated daily and compounded monthly, subject to the in duplum rule."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "10"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Default period"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "7 (seven) days from the due date of any instalment."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "11"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Payment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Into the trust account of {{firm_name}}: {{firm_bank}}. Account name: {{firm_bank_holder}}. Account number: {{firm_bank_account}}. Reference: {{case_number}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "HOW WE WILL REACH YOU"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "These are the details we will use. Correct any that are wrong before you sign, and leave blank anything you do not have."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Cellphone number: {{debtor_mobile}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Work number: {{debtor_work_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Home number: {{debtor_home_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Email address: {{debtor_email}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Employer: {{debtor_employer}}"
+     }
+    ]
+   },
+   {
+    "kind": "pagebreak"
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "PART B — TERMS AND CONDITIONS"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Background. The Creditor supplied the goods, services or credit described in item 5 of Part A to the Debtor, and the Debtor has not paid for all of it. The account has been handed to the Creditor’s agent for collection. The Debtor has asked for time to pay, and the Creditor is prepared to accept payment in instalments on these terms and against the security recorded here."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "INTERPRETATION"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "In this agreement, Business Day means any day other than a Saturday, Sunday or official public holiday in the Republic of South Africa; Capital Amount means the amount in item 6 of Part A; Debt means the Capital Amount together with all interest, fees, costs and other amounts payable under this agreement; Instalment means a payment set out in item 8 of Part A; and Signature Date means the date on which the party signing last signs."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Clause headings are for convenience only. The singular includes the plural, and “including” is not a word of limitation. If Part A and Part B conflict, Part A prevails."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The rule that a contract is interpreted against the party who drafted it does not apply."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Where the National Credit Act 34 of 2005 applies to the underlying agreement, nothing in this agreement waives, limits or substitutes any right the Debtor has under that Act, and this agreement is read subject to it."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "ACKNOWLEDGEMENT OF DEBT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor acknowledges that it is truly and lawfully indebted to the Creditor in the Capital Amount, made up as set out in item 6 of Part A, arising from the cause described in item 5 of Part A."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor confirms that it has received what the Debt relates to; that it has checked the statement of account and agrees the Capital Amount is correct; that the Debt is due, owing and payable and is not subject to any dispute, query, counterclaim or set-off; and that it has no defence of whatever nature to a claim for the Debt."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor waives any defence based on non causa debiti, errore calculi, revision of accounts, non numeratae pecuniae and no value received, and confirms that it understands the meaning and effect of that waiver."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The amounts described in item 7 of Part A are not included in the Capital Amount, and this agreement does not affect the Creditor’s right to recover them."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "REPAYMENT AND INTEREST"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor undertakes to pay the Debt in the Instalments set out in item 8 of Part A, into the account in item 11 of Part A, quoting the reference given there."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest runs on the outstanding balance at the rate and from the date in item 9 of Part A. Nothing in this agreement permits interest, fees and costs together to exceed the capital outstanding at the time of default, as required by section 103(5) of the National Credit Act."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Payment is made free of deduction or set-off. A payment is only made when it reflects in the account in item 11 of Part A."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "DEFAULT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor is in default if an Instalment is not paid in full within the default period in item 10 of Part A, or if the Debtor breaches any other term of this agreement."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "On default, the full outstanding balance of the Debt becomes due and payable immediately, without further notice, and the Creditor may lodge the consent to judgment in Annexure A."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Creditor’s failure to enforce any right under this agreement, or any indulgence given, is not a waiver of that right and does not prevent the Creditor enforcing it later."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "CREDIT BUREAUS"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor acknowledges that the default has been or may be reported to the registered credit bureaus, and that signing this agreement does not by itself remove that report. Where the Debt is paid in full the Creditor will report that fact to the bureaus it reported the default to."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "DOMICILIUM AND NOTICES"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The parties choose the addresses in items 2 and 3 of Part A as their domicilium citandi et executandi for all notices and legal process under this agreement. A notice sent by email is deemed received on the Business Day it is sent, unless the sender receives a delivery failure."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A party may change its domicilium by written notice to the other, taking effect ten Business Days after the notice is received."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "COSTS"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor is liable for the fees and expenses prescribed in Annexure B to the Debt Collectors Act 114 of 1998 and VAT on them, and, where legal proceedings are instituted, for legal costs on the attorney and own client scale, including collection commission and tracing costs."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHOLE AGREEMENT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This agreement is the whole agreement between the parties on what it deals with. No variation, cancellation or waiver has any effect unless it is in writing and signed by both parties. No representation not recorded here has been relied on."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "The Debtor — {{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "pagebreak"
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "ANNEXURE A — CONSENT TO JUDGMENT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "In the Magistrate’s Court for the district in which the Debtor resides, carries on business or is employed."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     32,
+     68
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Plaintiff",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Defendant",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{debtor_name}}, identity number: {{debtor_id_masked}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Reference",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Defendant, having acknowledged the debt described in Part A of the agreement to which this annexure is attached, hereby consents in terms of section 58 of the Magistrates’ Courts Act 32 of 1944 to judgment being entered against the Defendant for:"
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": true,
+    "items": [
+     [
+      {
+       "text": "payment of the Capital Amount recorded in item 6 of Part A, less any payments made after the Signature Date;"
+      }
+     ],
+     [
+      {
+       "text": "interest on that amount at the rate recorded in item 9 of Part A;"
+      }
+     ],
+     [
+      {
+       "text": "costs of suit on the attorney and own client scale; and"
+      }
+     ],
+     [
+      {
+       "text": "collection commission and the fees and expenses prescribed in Annexure B to the Debt Collectors Act 114 of 1998."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Defendant confirms that this consent is given freely, that the Defendant has read and understood it, and that the Defendant has been advised of the right to obtain independent legal advice before signing."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "The Defendant — {{debtor_name}}"
+     }
+    ]
+   }
+  ]
+ },
+ "letter-aod-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "ACKNOWLEDGEMENT OF DEBT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Repayment agreement with consent to judgment"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "between {{client_name}}, the creditor identified in item 1 of Part A (the “Creditor”), represented by {{firm_name}}, its duly authorised agent, and the debtor identified in item 3 of Part A (the “Debtor”)."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "headerRow": true,
+    "widths": [
+     25,
+     25,
+     25,
+     25
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "STEP 1",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "STEP 2",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "STEP 3",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "STEP 4",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "The debtor acknowledges the debt and waives all defences"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The debtor pays the agreed instalments"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "On default the full balance becomes due at once"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The creditor may lodge the signed consent to judgment"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "How this agreement works. It consists of Part A (particulars), Part B (terms and conditions) and Annexure A (consent to judgment). Every field in Part A must be completed before signature."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHY YOU ARE BEING ASKED TO SIGN THIS"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This agreement records what is owed and how it will be paid, and it holds legal action for as long as the instalments are met."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     32,
+     68
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "If you sign, and pay",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "No further collection step is taken and no legal proceedings are instituted while the instalments are paid on time and in full."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "If you sign, and miss a payment",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "The full balance falls due at once, the default is reported to the credit bureaus, and the creditor may lodge the signed consent to judgment in Annexure A."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "If you do not sign",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Nothing is held. The account continues on its normal course: the notices already sent stand, the default is reported to the credit bureaus, and the file goes to our attorneys."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "What signing does not do",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "It does not reduce the amount owing, stop interest running, or stop the fees and expenses prescribed in Annexure B to the Debt Collectors Act from being charged."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "pagebreak"
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "PART A — AGREEMENT PARTICULARS"
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "headerRow": true,
+    "widths": [
+     6,
+     26,
+     68
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "ITEM",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "DESCRIPTION",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "PARTICULARS",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "1"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}, represented by {{firm_name}} ({{firm_council_number}}) as its duly authorised agent for the collection of this debt."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "2"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Creditor domicilium and notices"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Care of {{firm_name}}, {{firm_address}}. Email: {{firm_email}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "3"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Debtor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{debtor_name}}. Registration number: {{debtor_reg_no}}. Domicilium: {{debtor_address}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "4"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Sureties"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Not applicable unless named here. The Debtor is liable for the Debt."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "5"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Cause of the debt"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Moneys lent and advanced, or goods or services supplied, under the agreement between the Creditor and the Debtor, as reflected on the Creditor’s statement of account."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "6"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Calculation of the capital amount"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Balance handed over on {{handover_date}}: {{balance_handover}}. Plus interest to {{today}}: {{interest_accrued}}. Plus fees and expenses, including VAT of {{fees_vat}}: {{fees_total}}. Less payments received: {{paid_to_date}}. Capital amount: {{balance}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "7"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Amounts excluded"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Fees and expenses prescribed in Annexure B to the Debt Collectors Act 114 of 1998, and VAT on them, incurred after the signature date. These are charged on the account as they arise."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "8"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Repayment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_amount}} {{ptp_frequency}}, beginning on {{ptp_date}}, until the capital amount, interest and costs have been paid in full."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "9"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Interest"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{interest_rate}} on the outstanding balance from {{interest_from}}, calculated daily and compounded monthly, subject to the in duplum rule."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "10"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Default period"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "7 (seven) days from the due date of any instalment."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "11"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Payment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Into the trust account of {{firm_name}}: {{firm_bank}}. Account name: {{firm_bank_holder}}. Account number: {{firm_bank_account}}. Reference: {{case_number}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "HOW WE WILL REACH YOU"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "These are the details we will use. Correct any that are wrong before you sign, and leave blank anything you do not have."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Cellphone number: {{debtor_mobile}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Work number: {{debtor_work_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Home number: {{debtor_home_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Email address: {{debtor_email}}"
+     }
+    ]
+   },
+   {
+    "kind": "pagebreak"
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "PART B — TERMS AND CONDITIONS"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Background. The Creditor supplied the goods, services or credit described in item 5 of Part A to the Debtor, and the Debtor has not paid for all of it. The account has been handed to the Creditor’s agent for collection. The Debtor has asked for time to pay, and the Creditor is prepared to accept payment in instalments on these terms and against the security recorded here."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "INTERPRETATION"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "In this agreement, Business Day means any day other than a Saturday, Sunday or official public holiday in the Republic of South Africa; Capital Amount means the amount in item 6 of Part A; Debt means the Capital Amount together with all interest, fees, costs and other amounts payable under this agreement; Instalment means a payment set out in item 8 of Part A; and Signature Date means the date on which the party signing last signs."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Clause headings are for convenience only. The singular includes the plural, and “including” is not a word of limitation. If Part A and Part B conflict, Part A prevails."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The rule that a contract is interpreted against the party who drafted it does not apply."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Where the National Credit Act 34 of 2005 applies to the underlying agreement, nothing in this agreement waives, limits or substitutes any right the Debtor has under that Act, and this agreement is read subject to it."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "ACKNOWLEDGEMENT OF DEBT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor acknowledges that it is truly and lawfully indebted to the Creditor in the Capital Amount, made up as set out in item 6 of Part A, arising from the cause described in item 5 of Part A."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor confirms that it has received what the Debt relates to; that it has checked the statement of account and agrees the Capital Amount is correct; that the Debt is due, owing and payable and is not subject to any dispute, query, counterclaim or set-off; and that it has no defence of whatever nature to a claim for the Debt."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor waives any defence based on non causa debiti, errore calculi, revision of accounts, non numeratae pecuniae and no value received, and confirms that it understands the meaning and effect of that waiver."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The amounts described in item 7 of Part A are not included in the Capital Amount, and this agreement does not affect the Creditor’s right to recover them."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "REPAYMENT AND INTEREST"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor undertakes to pay the Debt in the Instalments set out in item 8 of Part A, into the account in item 11 of Part A, quoting the reference given there."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest runs on the outstanding balance at the rate and from the date in item 9 of Part A. Nothing in this agreement permits interest, fees and costs together to exceed the capital outstanding at the time of default, as required by section 103(5) of the National Credit Act."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Payment is made free of deduction or set-off. A payment is only made when it reflects in the account in item 11 of Part A."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "DEFAULT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor is in default if an Instalment is not paid in full within the default period in item 10 of Part A, or if the Debtor breaches any other term of this agreement."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "On default, the full outstanding balance of the Debt becomes due and payable immediately, without further notice, and the Creditor may lodge the consent to judgment in Annexure A."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Creditor’s failure to enforce any right under this agreement, or any indulgence given, is not a waiver of that right and does not prevent the Creditor enforcing it later."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "CREDIT BUREAUS"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor acknowledges that the default has been or may be reported to the registered credit bureaus, and that signing this agreement does not by itself remove that report. Where the Debt is paid in full the Creditor will report that fact to the bureaus it reported the default to."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "DOMICILIUM AND NOTICES"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The parties choose the addresses in items 2 and 3 of Part A as their domicilium citandi et executandi for all notices and legal process under this agreement. A notice sent by email is deemed received on the Business Day it is sent, unless the sender receives a delivery failure."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A party may change its domicilium by written notice to the other, taking effect ten Business Days after the notice is received."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "COSTS"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Debtor is liable for the fees and expenses prescribed in Annexure B to the Debt Collectors Act 114 of 1998 and VAT on them, and, where legal proceedings are instituted, for legal costs on the attorney and own client scale, including collection commission and tracing costs."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHOLE AGREEMENT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "This agreement is the whole agreement between the parties on what it deals with. No variation, cancellation or waiver has any effect unless it is in writing and signed by both parties. No representation not recorded here has been relied on."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "for the Debtor — {{debtor_name}} ({{debtor_reg_no}}), duly authorised"
+     }
+    ]
+   },
+   {
+    "kind": "pagebreak"
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "ANNEXURE A — CONSENT TO JUDGMENT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "In the Magistrate’s Court for the district in which the Debtor resides, carries on business or is employed."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     32,
+     68
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Plaintiff",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Defendant",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{debtor_name}}, registration number: {{debtor_reg_no}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Reference",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Defendant, having acknowledged the debt described in Part A of the agreement to which this annexure is attached, hereby consents in terms of section 58 of the Magistrates’ Courts Act 32 of 1944 to judgment being entered against the Defendant for:"
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": true,
+    "items": [
+     [
+      {
+       "text": "payment of the Capital Amount recorded in item 6 of Part A, less any payments made after the Signature Date;"
+      }
+     ],
+     [
+      {
+       "text": "interest on that amount at the rate recorded in item 9 of Part A;"
+      }
+     ],
+     [
+      {
+       "text": "costs of suit on the attorney and own client scale; and"
+      }
+     ],
+     [
+      {
+       "text": "collection commission and the fees and expenses prescribed in Annexure B to the Debt Collectors Act 114 of 1998."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Defendant confirms that this consent is given freely, that the Defendant has read and understood it, and that the Defendant has been advised of the right to obtain independent legal advice before signing."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "for the Defendant — {{debtor_name}}, duly authorised"
+     }
+    ]
+   }
+  ]
+ },
+ "letter-affordability-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "AFFORDABILITY ASSESSMENT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Financial information required before a payment arrangement can be put to the creditor"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. You have asked to pay the balance of {{balance}} over time. Before a proposal can be put to the creditor, we need the information set out below."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT TO SEND US"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send these to us by email. Fill in the summary below, sign at the foot of this document, and attach the documents to your reply."
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": true,
+    "keepTogether": true,
+    "items": [
+     [
+      {
+       "text": "Proof of income for the last three months: payslips if you are employed, or bank statements if you are not."
+      }
+     ],
+     [
+      {
+       "text": "Bank statements for your main account for the last three months."
+      }
+     ],
+     [
+      {
+       "text": "A copy of your identity document."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "YOUR INCOME"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "INCOME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT PER MONTH",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Salary or wages, after deductions"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_salary}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Income from any other source"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_other}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Income of a spouse or partner who contributes"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_partner}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total income",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_total}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "YOUR EXPENSES"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "EXPENSES",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT PER MONTH",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Rent or bond"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_housing}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Rates, water and electricity"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_utilities}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Food and household"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_food}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Transport, fuel or taxi fares"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_transport}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "School fees and childcare"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_school}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Insurance and medical aid"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_medical}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Other credit repayments"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_credit}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Everything else"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_other}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total expenses",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_total}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "What is left each month",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{affordability_left}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT YOU CAN PAY"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "YOUR PROPOSAL",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Amount you propose to pay each time"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{ptp_amount}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "How often it will be paid"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_frequency}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "The date of the first payment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Any lump sum you can pay now"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{offer_lump_sum}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT HAPPENS NEXT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We use this information only to assess the proposal and to put it to the creditor, and we process it in accordance with the Protection of Personal Information Act 4 of 2013. A proposal cannot be considered until the information above has reached us, and the account continues on its normal course in the meantime."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send the documents to {{agent_email}}, quoting reference {{case_number}}. We will revert as soon as the creditor has considered the proposal."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "By signing below you confirm that the information given above is true and complete. This document is not an agreement to accept your proposal and it does not suspend the account."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "{{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{firm_name}}, duly authorised agent of {{client_name}}"
+     }
+    ]
+   }
+  ]
+ },
+ "letter-affordability-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "AFFORDABILITY ASSESSMENT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Financial information required before a payment arrangement can be put to the creditor"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. The company has asked to pay the balance of {{balance}} over time. Before a proposal can be put to the creditor, we need the information set out below."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT TO SEND US"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send these to us by email. Fill in the proposal below, sign at the foot of this document, and attach the documents to your reply."
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": true,
+    "keepTogether": true,
+    "items": [
+     [
+      {
+       "text": "The company’s latest management accounts, or its most recent annual financial statements if management accounts are not available."
+      }
+     ],
+     [
+      {
+       "text": "Bank statements for the company’s main account for the last three months."
+      }
+     ],
+     [
+      {
+       "text": "A debtors and creditors age analysis as at the date of this proposal."
+      }
+     ],
+     [
+      {
+       "text": "The name and capacity of the person signing on behalf of the company."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "THE PROPOSAL"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "YOUR PROPOSAL",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Amount the company proposes to pay each time"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{ptp_amount}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "How often it will be paid"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_frequency}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "The date of the first payment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Number of instalments proposed"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{offer_instalments}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Any lump sum the company can pay now"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{offer_lump_sum}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT HAPPENS NEXT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We use this information only to assess the proposal and to put it to the creditor, and we process it in accordance with the Protection of Personal Information Act 4 of 2013. A proposal cannot be considered until the information above has reached us, and the account continues on its normal course in the meantime."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send the documents to {{agent_email}}, quoting reference {{case_number}}. We will revert as soon as the creditor has considered the proposal."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "By signing below the company confirms that the information given above is true and complete. This document is not an agreement to accept the proposal and it does not suspend the account."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "for {{debtor_name}} ({{debtor_reg_no}}), duly authorised"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{firm_name}}, duly authorised agent of {{client_name}}"
+     }
+    ]
+   }
+  ]
+ },
+ "letter-s129-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "NOTICE IN TERMS OF SECTION 129(1)(a) READ WITH SECTION 130 OF THE NATIONAL CREDIT ACT 34 OF 2005"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor, and are duly authorised to issue this notice. This is a formal legal notice. Please read all of it."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "Your default"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "You are in default under your agreement with the creditor, and the full outstanding balance is due and payable."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     50,
+     50
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHAT HAS BEEN PAID SINCE THIS ACCOUNT WAS HANDED TO US",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Paid since handover"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{paid_to_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Still outstanding and due in full",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     40,
+     60
+    ],
+    "headerRow": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "WHERE THIS ACCOUNT STANDS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": ""
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account handed to us"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{handover_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "This notice issued"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "You must respond by"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{respond_by}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Position as at"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{position_as_at}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total outstanding balance",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{balance}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Interest accrues on the overdue amount at 2% per month, the maximum rate for incidental credit agreements under the National Credit Act, and will not exceed the limits set by Section 103(5) of the Act.",
+      "size": 9
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What you may do — your rights under Section 129(1)(a)"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The National Credit Act entitles you to refer this agreement to any of the bodies below, so that the parties may resolve any dispute or agree a plan to bring the payments up to date, at no cost to you."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Debt counsellor",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Registered with the National Credit Regulator. 0860 627 627 · www.ncr.org.za"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Ombud with jurisdiction",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "National Financial Ombud Scheme South Africa, credit division. 0860 800 900 · www.nfosa.co.za"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ADR agent or consumer court",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An alternative dispute resolution agent accredited in terms of the Act, your province’s consumer court, or the National Consumer Tribunal."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If you intend to make such a referral you must do so within 10 (ten) business days of the date this notice is delivered to you."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "You may also deal with us directly"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "You do not have to make a referral. You may resolve this matter with us on any of the following bases:"
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Settle the account. ",
+       "bold": true
+      },
+      {
+       "text": "Payment of {{balance}} settles the account in full. A settlement figure to your intended date of payment is available on request."
+      }
+     ],
+     [
+      {
+       "text": "Propose a payment arrangement. ",
+       "bold": true
+      },
+      {
+       "text": "Tell us in writing what you can afford and when, with proof of income for the last three months and a breakdown of your expenses."
+      }
+     ],
+     [
+      {
+       "text": "Dispute the debt. ",
+       "bold": true
+      },
+      {
+       "text": "If the amount is wrong, or you are not liable, tell us in writing with your reasons and supporting documents. We will give you a written finding."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "You may also bring the agreement up to date. At any time before the creditor has cancelled the agreement you may reinstate it by paying all amounts that are overdue, together with the creditor’s permitted default charges and the reasonable costs of enforcement to the date of payment."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What happens if you do not respond"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "WHAT FOLLOWS IF WE DO NOT HEAR FROM YOU",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Once you have not responded within 10 (ten) business days of delivery, and have been in default for at least 20 (twenty) business days, the creditor may approach a court in terms of Section 130 to enforce the agreement. That may result in:"
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     30,
+     70
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Credit bureau listing",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Your default is reported to the registered credit bureaus, where every credit provider who assesses you can see it."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Summons",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Issued and served on you at your home or your place of work."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Judgment",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Granted against you for the full {{balance}}, plus interest, and recorded against your name."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Your possessions",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "A warrant of execution allows the sheriff to attach and sell your movable or immovable property."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Your salary",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "An emoluments attachment order requires your employer to deduct before you are paid."
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Legal costs",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Reasonable legal and collection costs are added to what you already owe."
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "You can avoid all of this. Contact {{collector_name}} on {{collector_phone}} or {{collector_email}} before {{respond_by}}, quoting reference {{case_number}}. We would rather agree something workable with you than litigate."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "How to pay"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "A payment into our trust account is verified on the day it reaches us. Do not pay any other account."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     34,
+     66
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "BANK",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NAME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_holder}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "BRANCH CODE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_branch}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT NUMBER",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{firm_bank_account}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PAYMENT REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "PROOF OF PAYMENT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Email it to {{firm_email}} on the day you pay"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "QUESTIONS",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Speak to {{collector_name}}, who handles this account, on {{firm_phone}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We intend to settle this matter amicably and appreciate your cooperation in doing the same."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowDownLeft, ArrowUpRight, Paperclip, Mail, Handshake } from 'lucide-react'
-import { emailDayLabel, emailTimeLabel, parseEmailActivity } from '../lib/emailActivity'
+import { ArrowDownLeft, ArrowUpRight, Paperclip, Handshake } from 'lucide-react'
+import {
+  emailDayLabel, emailTimeLabel, hasOthers, parseEmailActivity, type AnswerMode,
+} from '../lib/emailActivity'
+import { MessageActions } from './email/MessageActions'
+import { useEmailView } from '../lib/emailView'
+import { EmailViewSwitcher } from './email/EmailViewSwitcher'
+import { ReadingPane } from './email/ReadingPane'
 import { DateGroupHeading } from './ui/DateGroupHeading'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
+import type { ReactNode } from 'react'
 import type { Activity } from '../types'
+import { FileActions } from './ui/FileActions'
+import { AttachmentLabel } from './AttachmentKindTag'
 
 type Direction = 'sent' | 'received'
 
@@ -33,15 +42,15 @@ function DirectionBadge({ kind }: { kind: Direction }) {
     <span
       title={`${label} — ${hint}`}
       style={{ backgroundColor: tint, color }}
-      className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
+      className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
     >
-      <Icon size={14} strokeWidth={2.4} />
+      <Icon size={12} strokeWidth={2.4} />
     </span>
   )
 }
 
 /** A key to the row colours, so nobody has to work out which direction blue vs green means. */
-export function EmailLegend() {
+export function EmailLegend({ children }: { children?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-3 pb-3 border-b border-slate-100">
       {(Object.keys(EMAIL_KINDS) as Direction[]).map((kind) => (
@@ -50,7 +59,45 @@ export function EmailLegend() {
           <span className="text-[11px] text-slate-500">{EMAIL_KINDS[kind].label}</span>
         </span>
       ))}
+      {/* The view switcher rides here so all three pages that use this card get it without
+          any of them having to know about it. */}
+      {children && <span className="ml-auto">{children}</span>}
     </div>
+  )
+}
+
+/**
+ * One row in the reading pane's left-hand column.
+ *
+ * Written here rather than reusing EmailActivityRow collapsed, because ReadingPane makes every
+ * row a button and EmailActivityRow is a button of its own — nesting them is invalid and the
+ * inner one would swallow the click. The pane shows the real row, opened, on the right.
+ */
+function EmailPaneRow({ activity }: { activity: Activity }) {
+  const parsed = parseEmailActivity(activity.subject)
+  const kind = directionOf(parsed)
+  const unread = parsed?.direction === 'received' && activity.isRead === false
+  return (
+    <span className="flex items-start gap-2.5 px-4 py-2.5">
+      <DirectionBadge kind={kind} />
+      <span className="min-w-0 flex-1">
+        <span className={`block text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+          {parsed?.subject ?? activity.subject}
+        </span>
+        <span className="block text-[11px] text-slate-400 mt-0.5">
+          {emailDayLabel(activity.activityDate)} &middot; {emailTimeLabel(activity.activityDate)}
+        </span>
+        {/* `truncate`, not line-clamp-1 — Safari reserves the unclamped height. See MailPage. */}
+        {activity.notes && (
+          <span className="block text-[12px] text-slate-500 mt-0.5 truncate">
+            {activity.notes.replace(/\s+/g, ' ').trim()}
+          </span>
+        )}
+      </span>
+      {(activity.attachmentNames ?? []).length > 0 && (
+        <Paperclip size={12} className="shrink-0 text-slate-400 mt-1" />
+      )}
+    </span>
   )
 }
 
@@ -64,13 +111,26 @@ export function EmailLegend() {
  */
 export function EmailActivityRow({
   activity,
-  onReply,
+  onAnswer,
+  mine,
   showDeal,
   open: openProp,
   onToggleOpen,
 }: {
   activity: Activity
-  onReply?: () => void
+  /**
+   * Reply, reply all or forward — one callback rather than three.
+   *
+   * The page decides what the composer opens with (see openingFor); this decides which of the
+   * three is offered at all, which is a question about the message and belongs here.
+   */
+  onAnswer?: (mode: AnswerMode) => void
+  /**
+   * Every address that is us, so a reply-all is not offered when the only other name on the
+   * message is our own. Without it, mail addressed to two of the firm's own people would show a
+   * Reply all that copies the sender back to themselves.
+   */
+  mine?: string[]
   /**
    * Name the deal a message came from. On for the client and lead timelines, where an email
    * arrives from somewhere and the reader has no way to tell which piece of business it was
@@ -92,8 +152,6 @@ export function EmailActivityRow({
   const [selfOpen, setSelfOpen] = useState(false)
   const open = openProp ?? selfOpen
   const setOpen = (next: boolean) => (onToggleOpen ? onToggleOpen(next) : setSelfOpen(next))
-  const [downloading, setDownloading] = useState<string | null>(null)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
   const { userById, updateActivity, refreshSyncedData, deals } = useAppStore()
   const { session } = useAuth()
 
@@ -106,6 +164,18 @@ export function EmailActivityRow({
   const attachments = activity.attachmentNames ?? []
   const isIncoming = parsed?.direction === 'received'
   const isUnread = isIncoming && activity.isRead === false
+  /*
+   * Whether a reply-all would reach anybody a plain reply would not.
+   *
+   * Empty on everything synced before the columns existed, and on everything that is not a synced
+   * email, which correctly reads as "nobody else known" and hides the button. A Reply all that
+   * quietly did the same thing as Reply is a second button people learn to ignore.
+   */
+  const othersWereOn = hasOthers(
+    activity.emailToRecipients ?? [],
+    activity.emailCcRecipients ?? [],
+    mine ?? [],
+  )
   const actorName = userById(activity.userId)?.name
 
   function toggle() {
@@ -114,48 +184,37 @@ export function EmailActivityRow({
   }
 
   /**
-   * Pulls the file from the mailbox through the server rather than storing it in the CRM.
-   * Needs the auth header, so it can't be a plain link — fetch, then hand the browser a
-   * blob to save.
+   * Pulls the file from the mailbox through the server rather than storing it in the CRM. Needs
+   * the auth header, so it can't be a plain link -- the bytes are fetched and FileActions opens or
+   * saves them (the firm, 19 Oct: "an option to open it or download it").
    */
-  async function download(name: string) {
-    if (!session?.access_token) return
-    setDownloading(name)
-    setDownloadError(null)
-    try {
-      const res = await fetch('/api/email/attachment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ activityId: activity.id, filename: name }),
-      })
-      if (!res.ok) {
-        const errorBody = await res.json().catch(() => ({}))
-        setDownloadError(errorBody.error ?? 'Could not download that attachment.')
-        return
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = name
-      link.click()
-      URL.revokeObjectURL(url)
-      // The download is logged as an Activity server-side; pull it in so it shows straight away.
-      void refreshSyncedData()
-    } catch {
-      setDownloadError('Could not reach the server.')
-    } finally {
-      setDownloading(null)
+  async function attachment(name: string): Promise<Blob> {
+    if (!session?.access_token) throw new Error('Signed out. Sign in again to fetch the file.')
+    const res = await fetch('/api/email/attachment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ activityId: activity.id, filename: name }),
+    }).catch(() => { throw new Error('Could not reach the server.') })
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({}))
+      throw new Error(errorBody.error ?? 'Could not download that attachment.')
     }
+    const blob = await res.blob()
+    // The fetch is logged as an Activity server-side; pull it in so it shows straight away.
+    void refreshSyncedData()
+    return blob
   }
 
   return (
     <div className={open ? 'bg-slate-50/80' : ''}>
-      <button onClick={toggle} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-slate-50" aria-expanded={open}>
+      {/* The checking list's density, which the firm asked for on every list: 12.5px, one line,
+          a row the height of its text. The opened body below keeps its reading size — that is
+          a paragraph, not a row. */}
+      <button onClick={toggle} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-slate-50" aria-expanded={open}>
         <DirectionBadge kind={kind} />
         <span className="flex-1 min-w-0 flex items-baseline gap-2">
-          <span className={`text-[14.5px] shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
-          {!open && body && <span className="text-[13.5px] text-slate-400 truncate min-w-0">{body}</span>}
+          <span className={`text-[12.5px] shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
+          {!open && body && <span className="text-[12.5px] text-slate-400 truncate min-w-0">{body}</span>}
         </span>
         <span className="flex items-center gap-2.5 shrink-0">
           {dealLabel && (
@@ -170,12 +229,29 @@ export function EmailActivityRow({
           )}
           {attachments.length > 0 && <Paperclip size={13} className="text-slate-400" />}
           {isUnread && <span className="w-2 h-2 rounded-full bg-brand-500" title="Unread" />}
-          <span className="text-[12px] text-slate-400 tabular-nums">{emailTimeLabel(activity.activityDate)}</span>
+          <span className="text-[12px] text-slate-400 tabular-nums whitespace-nowrap">{emailTimeLabel(activity.activityDate)}</span>
         </span>
       </button>
 
       {open && (
-        <div className="pl-[46px] pr-3 pb-3.5">
+        <div className="pl-[42px] pr-3 pb-3.5">
+          {/*
+            THE ACTIONS COME FIRST, and they used to come last. The firm, on the same card on an
+            account: "to put these things at the top, currently it's still at the bottom, so if
+            you want to reply, you have to go all the way down."
+          */}
+          {onAnswer && (
+            <MessageActions
+              /* No fee note. Annexure B is for debtor ACCOUNTS; a lead, a deal and a client
+                 raise nothing, and a button claiming R25 here would be plainly wrong. */
+              onReply={isIncoming ? () => onAnswer('reply') : null}
+              onReplyAll={isIncoming && othersWereOn ? () => onAnswer('replyAll') : null}
+              onForward={() => onAnswer('forward')}
+              onMarkUnread={isIncoming && !isUnread
+                ? () => { updateActivity(activity.id, { isRead: false }); setOpen(false) }
+                : null}
+            />
+          )}
           <p className="text-[11px] text-slate-400 mb-2">
             <span style={{ color: EMAIL_KINDS[kind].color }} className="font-medium">
               {EMAIL_KINDS[kind].label}
@@ -199,40 +275,11 @@ export function EmailActivityRow({
           {body && <p className="text-[15px] leading-relaxed text-slate-700 whitespace-pre-wrap max-w-[70ch]">{body}</p>}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {attachments.map((name, i) => (
-              <button
-                key={`${name}-${i}`}
-                onClick={() => void download(name)}
-                disabled={downloading === name}
-                title="Download from the mailbox"
-                className="inline-flex items-center gap-1.5 text-xs text-slate-600 bg-white border border-slate-200 rounded-md px-2.5 py-1.5 max-w-[280px] hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
-              >
-                <Paperclip size={12} className="shrink-0" />
-                <span className="truncate">{name}</span>
-                {downloading === name && <span className="text-slate-400">…</span>}
-              </button>
+              <FileActions key={`${name}-${i}`} name={name}
+                label={<span className="inline-flex items-center gap-1.5"><Paperclip size={12} className="shrink-0" /><AttachmentLabel name={name} /></span>}
+                fetchFile={() => attachment(name)} testId="activity-attachment" />
             ))}
-            {onReply && (
-              <button
-                onClick={onReply}
-                className="text-xs font-medium text-brand-600 border border-slate-200 rounded-md px-3 py-1.5 bg-white hover:bg-slate-50"
-              >
-                Reply
-              </button>
-            )}
-            {isIncoming && !isUnread && (
-              <button
-                onClick={() => {
-                  updateActivity(activity.id, { isRead: false })
-                  setOpen(false)
-                }}
-                title="Put this back on the unread list to follow up later"
-                className="inline-flex items-center gap-1.5 text-xs text-slate-500 border border-slate-200 rounded-md px-3 py-1.5 bg-white hover:bg-slate-50"
-              >
-                <Mail size={12} /> Mark unread
-              </button>
-            )}
           </div>
-          {downloadError && <p className="text-xs text-red-600 mt-2">{downloadError}</p>}
         </div>
       )}
     </div>
@@ -246,12 +293,16 @@ export function EmailActivityRow({
  */
 export function EmailActivityList({
   activities,
-  onReply,
+  onAnswer,
+  mine,
   showDeal,
   focusId,
 }: {
   activities: Activity[]
-  onReply?: (activity: Activity) => void
+  /** Reply, reply all or forward. The page turns the mode into what the composer opens with. */
+  onAnswer?: (activity: Activity, mode: AnswerMode) => void
+  /** Every address that is us — see the same prop on the row. */
+  mine?: string[]
   showDeal?: boolean
   /**
    * A specific message to open and scroll to, named in the URL by whatever linked here.
@@ -266,6 +317,9 @@ export function EmailActivityList({
 }) {
   // One at a time. Opening a message closes whatever was open before it.
   const [openId, setOpenId] = useState<string | null>(null)
+  const [view, setView] = useEmailView()
+  // Selecting a message in the reading pane marks it read, the same as opening a row does.
+  const { updateActivity } = useAppStore()
   const focusRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -278,10 +332,46 @@ export function EmailActivityList({
     return () => window.clearTimeout(timer)
   }, [focusId, activities])
 
+  if (view === 'reading') {
+    return (
+      <div className="-mx-1">
+        <EmailLegend>
+          <EmailViewSwitcher view={view} onChange={setView} />
+        </EmailLegend>
+        {/*
+          The pane shows the REAL row on the right, forced open, so the body, the attachment
+          downloads and the action bar behave exactly as they do in the list. Only the left-hand
+          summary is written separately, and only because a row cannot be a button inside a
+          button.
+        */}
+        <ReadingPane
+          items={activities}
+          selectedId={openId}
+          onSelect={(a) => {
+            if (parseEmailActivity(a.subject)?.direction === 'received' && a.isRead === false) {
+              updateActivity(a.id, { isRead: true })
+            }
+            setOpenId(a.id)
+          }}
+          emptyDetail="Pick a message on the left to read it."
+          renderRow={(a) => <EmailPaneRow activity={a} />}
+          renderDetail={(a) => (
+            <div className="px-1">
+              <EmailActivityRow activity={a} open showDeal={showDeal} mine={mine}
+                onAnswer={onAnswer ? (mode) => onAnswer(a, mode) : undefined} />
+            </div>
+          )}
+        />
+      </div>
+    )
+  }
+
   let lastDay: string | null = null
   return (
     <div className="-mx-1">
-      <EmailLegend />
+      <EmailLegend>
+        <EmailViewSwitcher view={view} onChange={setView} />
+      </EmailLegend>
       <div className="divide-y divide-slate-100">
         {activities.map((a) => {
           const day = emailDayLabel(a.activityDate)
@@ -294,7 +384,8 @@ export function EmailActivityList({
               )}
               <EmailActivityRow
                 activity={a}
-                onReply={onReply ? () => onReply(a) : undefined}
+                onAnswer={onAnswer ? (mode) => onAnswer(a, mode) : undefined}
+                mine={mine}
                 showDeal={showDeal}
                 open={openId === a.id}
                 onToggleOpen={(next) => setOpenId(next ? a.id : null)}

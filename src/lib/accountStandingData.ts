@@ -1,0 +1,245 @@
+/**
+ * Reading what stands behind a debtor and against them.
+ *
+ * The queries only. The vocabulary, the types and every rule live in accountStanding.ts, which
+ * imports nothing — so the checks can run them without a database, the way handOut.ts and
+ * handOutData.ts are split.
+ */
+import { supabase } from './supabase'
+import {
+  sortDirectors,
+  type AccountDirector, type AccountJudgment, type AccountStanding, type DirectorCompany,
+  type PractitionerKind,
+} from './accountStanding.ts'
+
+/* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
+
+const toDirector = (r: any): AccountDirector => ({
+  id: r.id,
+  accountId: r.account_id,
+  idNumber: r.id_number ?? null,
+  fullName: r.full_name,
+  status: (r.status as 'Active' | 'Resigned' | null) ?? null,
+  appointedOn: r.appointed_on ?? null,
+  source: r.source ?? 'xds',
+  tracedAt: r.traced_at ?? null,
+  companies: [],
+})
+
+const toDirectorCompany = (r: any): DirectorCompany => ({
+  id: r.id,
+  directorId: r.director_id,
+  companyName: r.company_name,
+  status: (r.status as 'Active' | 'Resigned' | null) ?? null,
+  appointedOn: r.appointed_on ?? null,
+  registrationNumber: r.registration_number ?? null,
+})
+
+const toJudgment = (r: any): AccountJudgment => ({
+  id: r.id,
+  accountId: r.account_id,
+  againstDirectorId: r.against_director_id ?? null,
+  caseNumber: r.case_number,
+  caseType: r.case_type ?? null,
+  caseReason: r.case_reason ?? null,
+  plaintiff: r.plaintiff ?? null,
+  filedOn: r.filed_on ?? null,
+  amount: r.amount === null || r.amount === undefined ? null : Number(r.amount),
+  sourceText: r.source_text ?? null,
+  source: r.source ?? 'xds',
+  recordedAt: r.recorded_at,
+})
+
+/**
+ * Both lists in one round trip's worth of waiting.
+ *
+ * Most accounts have neither — the whole imported book is individuals with no bureau profile
+ * pulled — so this resolves to two empty arrays and the panel does not render. That is the
+ * common case and it must cost nothing.
+ */
+export async function fetchStanding(accountId: string): Promise<AccountStanding> {
+  const [d, j] = await Promise.all([
+    supabase.from('account_directors')
+      .select('id,account_id,id_number,full_name,status,appointed_on,source,traced_at')
+      .eq('account_id', accountId),
+    supabase.from('account_judgments')
+      .select('id,account_id,against_director_id,case_number,case_type,case_reason,plaintiff,filed_on,amount,source_text,source,recorded_at')
+      .eq('account_id', accountId)
+      .order('filed_on', { ascending: false, nullsFirst: false }),
+  ])
+  if (d.error) throw d.error
+  if (j.error) throw j.error
+
+  const directors = sortDirectors((d.data ?? []).map(toDirector))
+
+  /*
+   * The directorships in a second round trip, keyed on the directors we just read.
+   *
+   * NOT an embedded select. PostgREST would nest them under the director rows, which the
+   * hand-written mapper above would then have to know about — and a shape that only the mapper
+   * understands is the same silent-undefined trap this codebase already has a name for. Two plain
+   * queries and an explicit join here is a few milliseconds and no mystery.
+   *
+   * Skipped entirely when there are no directors, which is nearly every account.
+   */
+  if (directors.length > 0) {
+    const { data, error } = await supabase.from('account_director_companies')
+      .select('id,director_id,company_name,status,appointed_on,registration_number')
+      .in('director_id', directors.map((x) => x.id))
+    if (error) throw error
+    const byDirector = new Map<string, DirectorCompany[]>()
+    for (const row of (data ?? []).map(toDirectorCompany)) {
+      const list = byDirector.get(row.directorId)
+      if (list) list.push(row); else byDirector.set(row.directorId, [row])
+    }
+    for (const director of directors) director.companies = byDirector.get(director.id) ?? []
+  }
+
+  return { directors, judgments: (j.data ?? []).map(toJudgment) }
+}
+
+
+/**
+ * Recording who to deal with when it is no longer the debtor.
+ *
+ * Typed by a person, not read off a document, and that is the point: a trace profile says a
+ * company is in final liquidation and does NOT name the liquidator. Somebody has to look it up —
+ * the Master's office, the notice, the client — and this is where it lands when they do.
+ *
+ * Clearing it is setting the kind to null, which is somebody correcting a mistake rather than an
+ * appointment ending. An appointment that has ended leaves the account under administration until
+ * a person says otherwise, so nothing here touches the sub-status.
+ */
+export async function savePractitioner(accountId: string, input: {
+  kind: PractitionerKind | null
+  name: string | null
+  firm: string | null
+  reference: string | null
+  phone: string | null
+  email: string | null
+  appointedOn: string | null
+}): Promise<void> {
+  const trim = (v: string | null) => (v ?? '').trim() || null
+  const { error } = await supabase.from('debtor_accounts').update({
+    practitioner_kind: input.kind,
+    practitioner_name: trim(input.name),
+    practitioner_firm: trim(input.firm),
+    practitioner_reference: trim(input.reference),
+    practitioner_phone: trim(input.phone),
+    practitioner_email: trim(input.email),
+    /* An empty date input reads as '' and Postgres will not take that for a date. */
+    practitioner_appointed_on: trim(input.appointedOn),
+  }).eq('id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Putting an account on the rung a document says it belongs on.
+ *
+ * WRITES THE SUB-STATUS, because that is what the rung is derived from — positions are derived,
+ * never stored, and the one string every screen reads is this one. See clientPosition.
+ *
+ * Deliberately narrow: it takes the wording from administrationReading, which only produces
+ * phrases the derivation already knows. A free-text status setter belongs on the account screen
+ * with the firm's own list in front of the person choosing, not on the end of a PDF import.
+ */
+export async function setSubStatus(accountId: string, subStatus: string): Promise<void> {
+  const { error } = await supabase.from('debtor_accounts')
+    .update({ sub_status: subStatus }).eq('id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+/* ---------- directors, by hand ---------- */
+
+/**
+ * Record a director nobody's bureau report has produced.
+ *
+ * DIRECTORS USED TO ARRIVE ONE WAY ONLY: read off a commercial trace PDF. That works when a trace
+ * has been bought, and the firm's ask is the case where one has not — "if there's a company, the
+ * ID numbers of the directors should also be stored". A collector reading a letterhead, a CIPC
+ * disclosure or a signed suretyship has the names and often the numbers long before anybody pays
+ * a bureau for them, and until now there was nowhere to put them.
+ *
+ * `source` marks where a director came from and defaults to 'xds' on the column, so anything
+ * typed in is stamped 'manual' and the two stay tellable apart. That matters for the CIPC work
+ * next: a name that came off the register and a name somebody typed are not equally trustworthy,
+ * and a re-import must never silently overwrite the one a person checked.
+ */
+export async function saveDirector(input: {
+  accountId: string
+  /** Absent for a new one; present to correct one already on the account. */
+  directorId?: string
+  fullName: string
+  idNumber: string | null
+  status: 'Active' | 'Resigned' | null
+  appointedOn: string | null
+  source?: string
+}): Promise<void> {
+  const row = {
+    account_id: input.accountId,
+    full_name: input.fullName,
+    id_number: input.idNumber,
+    status: input.status,
+    appointed_on: input.appointedOn,
+    source: input.source ?? 'manual',
+  }
+  const q = input.directorId
+    ? supabase.from('account_directors').update(row).eq('id', input.directorId)
+    : supabase.from('account_directors').insert(row)
+  const { error } = await q
+  /*
+   * The table is unique on (account_id, id_number, full_name), which is what stops a re-imported
+   * trace duplicating somebody. Typed in by hand it reads as a collision, and "duplicate key" is
+   * not a sentence anybody should have to decode.
+   */
+  if (error) {
+    throw new Error(/duplicate key/i.test(error.message)
+      ? 'That director is already on this account.'
+      : error.message)
+  }
+}
+
+/**
+ * Take one off.
+ *
+ * Deleted rather than marked resigned, because those are different facts: a director who has
+ * resigned is a real person who really was one, and the account should still say so. This is for
+ * the row that was wrong — the wrong company's director, a name typed twice.
+ */
+export async function removeDirector(directorId: string): Promise<void> {
+  const { error } = await supabase.from('account_directors').delete().eq('id', directorId)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * THE THREE ESTATE FACTS THE PRACTITIONER COLUMNS DO NOT HOLD.
+ *
+ * THE EXECUTOR IS A PRACTITIONER -- savePractitioner above writes the name, the firm and the
+ * estate number (`practitioner_reference`, whose own comment is "their reference for the estate,
+ * which every claim submission has to quote back"). These three are the ones with nowhere to go:
+ * when the debtor died, which Master's office the estate is reported at, and the day the notice to
+ * creditors was advertised.
+ *
+ * THE LAST OF THEM IS THE ONE THAT COSTS MONEY. The firm: "a claim lodged after the period in that
+ * notice is lost. This is the one date on an estate file that actually costs the client money if
+ * it is missed, so it needs a hard task, not a note." estateClaimDeadline counts from it, and
+ * returns null without it rather than guessing -- a date computed from the statutory minimum would
+ * put a deadline in the diary that the Master's own notice may contradict, and the firm would work
+ * to ours.
+ *
+ * A BLANK DATE INPUT READS AS '' and Postgres will not take that for a date, which is why every
+ * one of them goes through `trim`. savePractitioner learned that the hard way.
+ */
+export async function saveEstate(accountId: string, input: {
+  dateOfDeath: string | null
+  masterOffice: string | null
+  noticeToCreditorsOn: string | null
+}): Promise<void> {
+  const trim = (v: string | null) => (v ?? '').trim() || null
+  const { error } = await supabase.from('debtor_accounts').update({
+    date_of_death: trim(input.dateOfDeath),
+    master_office: trim(input.masterOffice),
+    notice_to_creditors_on: trim(input.noticeToCreditorsOn),
+  }).eq('id', accountId)
+  if (error) throw new Error(error.message)
+}

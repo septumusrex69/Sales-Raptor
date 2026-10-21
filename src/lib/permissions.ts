@@ -1,5 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
+import { departmentOf } from './departments.ts'
+import { can } from './capabilities.ts'
 import type { User } from '../types'
+
+/**
+ * THESE ARE NOW NAMES FOR A CAPABILITY, NOT LISTS OF ROLES.
+ *
+ * Every predicate below used to spell out the roles that passed it. The firm asked for
+ * Swordfish's shape -- "you can choose, for example, for a user to have a management template, but
+ * you can add them more functionality" -- and a hand-written role list cannot express that at all.
+ * So each one now asks `can(user, ...)`, which reads the role's template, adds what this person
+ * was granted and removes what was taken away. See capabilities.ts.
+ *
+ * THREE THINGS IN THIS FILE STILL READ THE ROLE AND ARE NOT CAPABILITIES, which is a distinction
+ * worth writing down because they look like the others:
+ *
+ *   canEditOwned       MIRRORS AN RLS POLICY, WORD FOR WORD. Its whole value is that it says what
+ *                      the database will allow; making it grantable would mean the app offering an
+ *                      edit that Postgres then refuses, which is the "button works, then silently
+ *                      fails" it exists to prevent. It becomes a capability the day the policy does.
+ *   visibleDisputeOwners  WHICH ROWS, not whether. A capability answers "may you"; this answers
+ *                      "whose". Pooling them IS a capability -- `dispute.pool` -- and that one is
+ *                      in the list.
+ *   isAssignableOwner  WHO MAY BE GIVEN a lead or a deal. A fact about other people, asked to fill
+ *                      a picker, not a permission the person themselves holds.
+ *   useDefaultOwnerFilter  WHERE A LIST STARTS, which anybody can then change. A default is not a
+ *                      permission, and making it one would mean a manager needing a grant to have
+ *                      their own list open the way it always has.
+ *
+ * THEY KEPT THEIR NAMES ON PURPOSE. Fifty-one call sites read far better as `canFreezeAccounts`
+ * than as a string, and the reasoning each one carries is the record of a decision the firm made.
+ * What changed is the ARGUMENT: a role string could never answer a per-person question, so they
+ * take the person.
+ */
 
 /**
  * Whether `user` may edit, close, or delete a record owned by `ownerId` —
@@ -16,8 +49,21 @@ export function canEditOwned(user: Pick<User, 'id' | 'role'> | null | undefined,
 }
 
 /** Reassigning a record to a different owner is a managerial action, independent of who currently owns it. */
-export function canReassign(user: Pick<User, 'role'> | null | undefined): boolean {
-  return user?.role === 'Administrator' || user?.role === 'Sales Manager' || user?.role === 'Liaison Manager'
+export function canReassign(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'book.reassign')
+}
+
+/**
+ * Whether this person may put an ACCOUNT on somebody's desk.
+ *
+ * NOT canReassign, which is the sales side's test and leaves out the pre-legal team leader — the
+ * person who actually shares the collections floor's work out. It lived as a bare array inside
+ * AccountsList and the account screen needed the same answer, which is how a permission ends up
+ * written twice and enforced once: the list would offer it to a team leader and the account
+ * screen would not, for the same action on the same account.
+ */
+export function canHandOutAccounts(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'book.hand_out')
 }
 
 /**
@@ -33,8 +79,147 @@ export function canReassign(user: Pick<User, 'role'> | null | undefined): boolea
  * themselves. RLS remains the real boundary — this stops the app offering what the database
  * should refuse.
  */
-export function canViewClients(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role !== undefined && role !== 'Pre-legal Agent'
+export function canViewClients(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'client.view')
+}
+
+/**
+ * WHO MAY BE PUT DOWN AS A CLIENT'S LIAISON.
+ *
+ * THE FIRM, LOOKING AT THE PICKER ON "ADD A CLIENT": "There should only be liaisons or liaison
+ * manager, not anybody else, any other user when adding a client."
+ *
+ * It was offering every active person in the firm -- a pre-legal agent, a sales rep, whoever had
+ * just been invited. The prop was even called `liaisons`; nothing had ever filtered it.
+ *
+ * A ROLE AND NOT A CAPABILITY, which is the opposite of how most of this file works and is
+ * deliberate. `client.view` is held by seven of the nine roles -- a pre-legal TEAM LEADER has it,
+ * so does a sales rep -- because seeing a client and BEING the firm's named contact for one are
+ * different questions. This is the second question: whose name goes on the mandate, who the
+ * client telephones, and who `{{liaison_name}}` resolves to on a letter.
+ *
+ * A GRANT CANNOT WIDEN IT, and that follows. Giving somebody `client.view` so they can read a
+ * commission rate must not quietly make them answerable for the relationship.
+ */
+export const CLIENT_LIAISON_ROLES = ['Liaison', 'Liaison Manager'] as const
+
+export function canBeClientLiaison(user: Pick<User, 'role'> | null | undefined): boolean {
+  return !!user && (CLIENT_LIAISON_ROLES as readonly string[]).includes(user.role)
+}
+
+/**
+ * Whether this person may move a message that is ALREADY filed onto a different record.
+ *
+ * Administrator only, at the firm's instruction. Filing unfiled mail is everyday work and stays
+ * open to everyone; re-filing moves a debtor's correspondence between accounts and raises a
+ * second item 6 fee on the destination, which makes it a money action.
+ *
+ * The real boundary is the protect_filed_mail_target trigger in supabase/schema.sql, which
+ * silently reverts the change for anyone else. This only stops the app offering a button that
+ * would appear to work and quietly do nothing.
+ */
+export function canRefileMail(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'mail.refile')
+}
+
+/**
+ * Whether this person may stop or restart work on an account.
+ *
+ * Not a collector's decision, at the firm's instruction that removing an account from
+ * circulation sits at management level. A liaison is included because a freeze is most often
+ * something a CLIENT asked for, and the liaison is who the client asks.
+ *
+ * A freeze changes no balance and raises no fee, so it is reversible and needs no approval —
+ * what it needs is a name against it, which is what the reason and the status history give it.
+ */
+export function canFreezeAccounts(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'book.freeze')
+}
+
+/**
+ * Whether this person is answerable for somebody else's collections work.
+ *
+ * THE FIRM ASKED FOR ONE THING AND IT IMPLIES THIS: "it flags them and it flags the team leader
+ * as well in the team leader's dashboard." A collector sees their own carried accounts; a leader
+ * sees the floor's. That is a different screen for the same panel, so it needs a name.
+ *
+ * NOT canReassign, which is the sales side's managerial test and does not include the pre-legal
+ * team leader — who is precisely the person this is for. Borrowing that one would have shown a
+ * collections team leader nothing and a sales manager the collections floor.
+ */
+export function canLeadCollections(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'floor.lead')
+}
+
+/**
+ * WHOSE DISPUTES THIS PERSON MAY LOOK AT.
+ *
+ * The firm, having made a new user and opened the board: "I went into the disputes pane and I saw
+ * everybody's dispute. I think by default it should be related to the user." The owner filter
+ * started on "All Owners" and offered every person in the firm, so a collector on their first
+ * morning was reading the whole floor's disputes.
+ *
+ * THREE ANSWERS, AND THE MIDDLE ONE IS THE FIRM'S OWN SHAPE:
+ *
+ *   - An ADMINISTRATOR sees anybody's. "As an administrator, you should be able to see other
+ *     people's disputes."
+ *   - A LEADER sees their own and, ONE AT A TIME, anybody in their team. The firm was explicit
+ *     that this is per person rather than pooled: "for any individual in your team — I can't see
+ *     how it would benefit to look at a bird's eye view at the entire team's tickets." So this
+ *     returns the people, and `mayPoolDisputes` refuses the pooled view.
+ *   - EVERYBODY ELSE sees their own, and the picker has nobody else in it.
+ *
+ * A SALES MANAGER IS NOT A LEADER HERE. They lead the sales side and a dispute is a collections
+ * record; nothing the firm said puts the floor's disputes in front of them. Inferred rather than
+ * instructed — say so if it is wrong.
+ *
+ * ORDERED WITH THE PERSON THEMSELVES FIRST, because that is the one they open every morning.
+ */
+export function visibleDisputeOwners<T extends Pick<User, 'id' | 'role' | 'teamId'>>(
+  me: Pick<User, 'id' | 'role' | 'teamId'> | null | undefined,
+  everyone: T[],
+): T[] {
+  if (!me) return []
+  const self = everyone.filter((u) => u.id === me.id)
+  if (me.role === 'Administrator') {
+    return [...self, ...everyone.filter((u) => u.id !== me.id)]
+  }
+  /*
+   * THE CALL CENTRE MANAGER LEADS THE FLOOR, NOT A TEAM. The firm: "the call centre manager is
+   * the manager of the team leaders." A team leader's reach is their own team; theirs is every
+   * team, so it is the department rather than teamId that answers this.
+   *
+   * INFERRED FROM THE SHAPE, NOT INSTRUCTED. The firm described the ladder and not the disputes
+   * board specifically. Still one person at a time -- mayPoolDisputes refuses them the pooled
+   * view for the same reason it refuses a team leader.
+   */
+  if (me.role === 'Call Centre Manager') {
+    return [...self, ...everyone.filter((u) => u.id !== me.id && departmentOf(u.role) === 'Call centre')]
+  }
+  if (me.role === 'Pre-legal Team Leader' || me.role === 'Liaison Manager') {
+    /*
+     * A LEADER WITH NO TEAM LEADS NOBODY, which is the safe way round: `teamId` is optional and
+     * eleven of the firm's people have none, so matching undefined to undefined would hand every
+     * teamless leader every other teamless person.
+     */
+    const mates = me.teamId
+      ? everyone.filter((u) => u.id !== me.id && !!u.teamId && u.teamId === me.teamId)
+      : []
+    return [...self, ...mates]
+  }
+  return self
+}
+
+/**
+ * Whether the board may be looked at as a whole rather than one person at a time.
+ *
+ * ONLY AN ADMINISTRATOR. The firm ruled the pooled view out for a leader in the same breath as
+ * granting them their team: a leader picks a person. Keeping "All Owners" for them would be the
+ * bird's-eye view they said they had no use for, sitting at the top of the list as the easiest
+ * thing to click.
+ */
+export function mayPoolDisputes(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'dispute.pool')
 }
 
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
@@ -69,4 +254,186 @@ export function useDefaultOwnerFilter(
     }
   }, [currentUser])
   return [owner, setOwner]
+}
+
+/**
+ * Whether this person may open the library at all.
+ *
+ * EVERYONE, at the firm's instruction: "perhaps everyone can view everything in the library. Only
+ * [an administrator] can edit." That reverses an earlier instruction to keep collectors out of it
+ * altogether, and the newer one is the better rule — a collector reading a script on a live call
+ * benefits from seeing the whole ladder it sits on, and the risk a library carries is in WRITING
+ * it, not in reading it.
+ *
+ * Here as a function rather than as `true` written into the page, so the one place that decides
+ * this stays findable the day it narrows again. It mirrors message_templates_select, which has
+ * always been open to every authenticated user.
+ */
+export function canViewLibrary(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'library.view')
+}
+
+/**
+ * Whether this person may CHANGE what the library says.
+ *
+ * ADMINISTRATOR ONLY, and this is the half that was never in question: "only [an administrator]
+ * can edit." The wording is the firm's legal position, the attorney signs it off, and a sentence
+ * nobody approved goes out four hundred times rather than once. A workflow is the same thing in
+ * another form — it decides WHEN a statutory notice is sent.
+ *
+ * Mirrors message_templates_insert/update/delete and the workflow_* write policies in
+ * supabase/schema.sql. RLS is the real boundary; this stops the app offering a button the
+ * database would refuse.
+ */
+export function canEditLibrary(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'library.edit')
+}
+
+/**
+ * WHO SEES THE FINANCE SECTION, AND IT IS ONE ROLE.
+ *
+ * The firm, setting the condition for the whole module: "The Finance section is Administrator
+ * only. Sales representatives never see the payment split." It is the same instinct as the
+ * company dashboard's rule -- "we're not going to be disclosing commission and income from the
+ * Annexure B fees" -- one screen further in: a payover run IS the commission earned on a client's
+ * whole book, and the back office is what the firm still intends to take off every debtor.
+ *
+ * THIS IS THE COURTESY, NOT THE BOUNDARY. Every function behind these screens checks the role
+ * itself, in the database, because they run as security definer and there is no policy to fall
+ * back on inside one. A menu item that always refuses is worse than no menu item; a menu item
+ * that is the ONLY thing refusing is worse still.
+ */
+export function canViewFinance(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view')
+}
+
+/**
+ * WHO SEES THE TRUST ACCOUNT. The same question canViewFinance has always answered, under the
+ * name the firm uses for it now.
+ *
+ * NOT A RENAME OF THE CAPABILITY, only of the predicate. 'finance.view' is written into RLS
+ * policies and into live profiles' grants and revokes; what it gates is called Trust, what it is
+ * called stays. canViewFinance is kept beside it because the account screen and the payment
+ * modals already ask for it by that name, and a sweep through them would be a diff nobody can
+ * review for the sake of a word.
+ */
+export function canViewTrust(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view')
+}
+
+/**
+ * WHO SEES THE FIRM'S OWN ACCOUNTS, and it is deliberately a different question.
+ *
+ * THE FIRM: "the trust and the business should be separated. It shouldn't be in the same tab in
+ * finance... we have one place where we manage the trust and we have another place outside where
+ * we manage the business."
+ *
+ * The separation is worth having for its own sake -- they are separately governed and separately
+ * audited books -- but this predicate is what pays for it. Trust is other people's money and
+ * business is the firm's, and the lists of people who should see each are not the same list in
+ * either direction: a bookkeeper capturing supplier invoices has no business moving client trust
+ * money, and the administrator who runs payovers does not need to see salaries. One gate over
+ * both could only ever be the wider of the two.
+ *
+ * NOTHING IN THE DATABASE ENFORCES IT YET, because nothing is behind it yet -- the business
+ * tables are still to be built. This is the courtesy on the menu and the route; the boundary
+ * arrives with the first table, in that table's own migration. Said plainly here because the
+ * opposite mistake -- a tick that claims an enforcement it does not have -- is the one
+ * capabilities.ts was written to stop.
+ */
+export function canViewBusiness(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'business.view')
+}
+
+/** The Income screen: business.income, which no role has by default. business_income asks the same. */
+export function canViewIncome(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'business.income')
+}
+
+/**
+ * MAY THIS PERSON DRAW THE FIRM'S EARNINGS OUT OF TRUST? Both ticks: it is done from the business
+ * side and it moves trust money, at the firm's ruling -- and draw_from_trust asks both, so the
+ * button is never drawn for somebody the database would refuse.
+ */
+export function canDrawFromTrust(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view') && can(user, 'business.view')
+}
+
+/**
+ * WHO MAY RECORD THAT MONEY ARRIVED.
+ *
+ * NOT THE SAME QUESTION AS canViewFinance, and keeping them apart is the point. The firm's rule
+ * is about the SPLIT -- "The Finance section is Administrator only. Sales representatives never
+ * see the payment split" -- and capturing a receipt shows none of it. The firm: "let's do it in
+ * the finance section and you will be able to do it on the account as well."
+ *
+ * A PRE-LEGAL AGENT IS NOT ON THIS LIST, and used to be. The firm, seeing the button on a
+ * collector's screen: "she's a normal pre-legal agent, she can't be allocating payments."
+ *
+ * THE PRINCIPLE UNDERNEATH IT IS WHO THE MONEY IS LEARNED FROM. A trust receipt arrives on the
+ * firm's own bank statement and is imported; the only thing anybody types in by hand is a PTC,
+ * and a PTC is what the CLIENT tells you. A pre-legal agent deals with the DEBTOR, so they are
+ * never the person told "he paid us direct" -- and the thing they are told, that the debtor says
+ * they paid, is a claim to be checked against the statement rather than a receipt to record.
+ *
+ * SO: the liaisons, who talk to clients; their manager; the two supervisors on the collections
+ * floor, who are where anything unusual on the floor ends up; and finance.
+ *
+ * AN ALLOW LIST, NOT A DENY LIST. A role added to the firm later is refused until somebody
+ * decides it belongs, which is the safe direction for something that creates money.
+ *
+ * THE SALES SIDE IS ABSENT ON PURPOSE -- CLAUDE.md: fees are charged on ACCOUNTS ONLY and the
+ * sales side raises nothing. A representative has no business writing a ledger entry.
+ *
+ * THE REAL BOUNDARY IS may_record_payment() IN THE DATABASE. This is the browser's copy of it,
+ * for deciding whether to draw a button; the two lists are held against each other by
+ * check-record-payment.
+ */
+export function canRecordPayment(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'payment.record')
+}
+
+/**
+ * WHO MAY REVERSE A POSTED PAYMENT -- the browser's copy of reverse_payment's own guard, so the
+ * button on Check is only drawn where the database will honour it.
+ */
+export function canReversePayment(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'payment.reverse')
+}
+
+/**
+ * WHO MAY RECORD THAT A CLIENT ACCEPTED A SETTLEMENT -- the client liaisons and the Administrator,
+ * at the firm's ruling. approve_settlement asks the same tick, so a button drawn here is never
+ * refused there.
+ */
+export function canApproveSettlement(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'settlement.approve')
+}
+
+/**
+ * WHO MAY UNDO A HANDOVER THAT SHOULD NEVER HAVE COME IN.
+ *
+ * THE FIRM, after a test import went in twice: "make sure that everything is being deleted." The
+ * general case is a client sending the wrong file, or the same file twice, and two hundred
+ * accounts opening that nobody should be collecting on.
+ *
+ * ADMINISTRATOR ONLY, AND NARROWER THAN ANYTHING ELSE IN THIS FILE — narrower than approving the
+ * import that created them. Approving is a judgement about a sheet; this removes accounts, their
+ * contacts, their diary entries and the record of every notice sent on them. The person who can
+ * do that should be the person who answers for the database, not the person who happened to run
+ * the import.
+ *
+ * A CAPABILITY, NOT A ROLE READ, AND A CHECK MADE ME WRITE IT TWICE. I had it as
+ * `role === 'Administrator'`, which check-capabilities refused: the file excuses exactly four
+ * role reads and each answers something other than "may you". This answers precisely that, so it
+ * belongs in the capability list — where an administrator holds it by default and, the day the
+ * firm wants one liaison manager able to undo an import, it can be given to that one person
+ * without making them an administrator. Which is the whole reason the capability tier exists.
+ *
+ * `handoverDiscard` REFUSES FAR MORE THAN THIS ALLOWS. A payment received, a remittance already
+ * gone to the client, an arrangement, a filed document — any of those and nobody can undo it,
+ * because by then it is a record the firm may be asked about rather than a mistake.
+ */
+export function canDiscardHandover(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'handover.discard')
 }

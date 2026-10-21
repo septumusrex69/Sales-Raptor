@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Phone, Mail, MessageCircle, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
+import { Phone, Mail, MessageCircle, MessageSquare, Calendar, StickyNote, FileText, CheckSquare, ArrowRightLeft, Trophy, XOctagon, Inbox } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { ClientPicker } from '../../components/ui/ClientPicker'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { formatDateTime } from '../../data/mockData'
@@ -15,6 +16,7 @@ const ACTIVITY_TYPES: ActivityType[] = [
   'Call',
   'Email',
   'WhatsApp',
+  'SMS',
   'Meeting',
   'Note',
   'Proposal',
@@ -32,6 +34,7 @@ const ICONS: Record<ActivityType, typeof Phone> = {
   Call: Phone,
   Email: Mail,
   WhatsApp: MessageCircle,
+  SMS: MessageSquare,
   Meeting: Calendar,
   Note: StickyNote,
   Proposal: FileText,
@@ -94,68 +97,76 @@ export function ActivitiesPage() {
             <option key={t}>{t}</option>
           ))}
         </select>
-        <select value={company} onChange={(e) => setCompany(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
-          <option value="All">All Companies</option>
-          {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        {/* Searchable: the same picker as the book's filter and the handover import, so there is
+            one way of finding a client in this app. 'All' rather than '' because this screen's
+            filter has always used the word. */}
+        <div className="w-56">
+          <ClientPicker
+            clients={companies}
+            value={company === 'All' ? '' : company}
+            onChange={(id) => setCompany(id || 'All')}
+            clearLabel="All companies" />
+        </div>
         <span className="text-xs text-slate-400 ml-auto">{filtered.length} activities</span>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
         {Object.entries(grouped).map(([day, items]) => (
           <div key={day}>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{day}</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">{day}</p>
             <Card padded={false}>
-              <div className="divide-y divide-slate-50">
-                {items.map((a) => {
-                  const Icon = ICONS[a.type]
-                  const lead = leadById(a.leadId)
-                  const deal = deals.find((d) => d.id === a.dealId)
-                  const co = companyById(a.companyId)
-                  return (
-                    <div key={a.id} className="flex items-start gap-3 px-5 py-3">
-                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${ICON_COLORS[a.type]}`}>
-                        <Icon size={15} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-slate-700">{a.subject}</p>
-                        {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
-                        <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                          <UserAvatar userId={a.userId} size={16} />
-                          <span>{formatDateTime(a.activityDate)}</span>
-                          {lead && (
-                            <>
-                              ·{' '}
-                              <Link to={`/leads/${lead.id}`} className="text-brand-600 hover:underline">
-                                {lead.firstName} {lead.lastName}
-                              </Link>
-                            </>
-                          )}
-                          {deal && (
-                            <>
-                              ·{' '}
-                              <Link to={`/deals/${deal.id}`} className="text-brand-600 hover:underline">
-                                {deal.name}
-                              </Link>
-                            </>
-                          )}
-                          {co && !deal && !lead && (
-                            <>
-                              ·{' '}
-                              <Link to={`/companies/${co.id}`} className="text-brand-600 hover:underline">
-                                {co.name}
-                              </Link>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
+              {/* A ROW AN ACTIVITY, in the checking list's shape, which the firm asked for on every
+                  list in the app. The notes used to be a second line and who/when/regarding a
+                  third; the notes now ride after the subject (whole in the tooltip) and the rest
+                  are columns, so a day of thirty calls is thirty lines. */}
+              <div className="overflow-x-auto">
+                <table className="w-full list-table whitespace-nowrap">
+                  <tbody>
+                    {items.map((a) => {
+                      const Icon = ICONS[a.type]
+                      const lead = leadById(a.leadId)
+                      const deal = deals.find((d) => d.id === a.dealId)
+                      const co = companyById(a.companyId)
+                      return (
+                        <tr key={a.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                          <td className="pl-3 pr-1 py-1.5 w-7">
+                            <span className={`w-5 h-5 rounded-md flex items-center justify-center ${ICON_COLORS[a.type]}`} title={a.type}>
+                              <Icon size={12} />
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span className="block max-w-[32rem] truncate" title={a.notes ? `${a.subject} · ${a.notes}` : a.subject}>
+                              <span className="font-medium text-slate-700">{a.subject}</span>
+                              {a.notes && <span className="text-slate-500"> · {a.notes}</span>}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span className="block max-w-[16rem] truncate">
+                              {lead && (
+                                <Link to={`/leads/${lead.id}`} className="text-brand-600 hover:underline">
+                                  {lead.firstName} {lead.lastName}
+                                </Link>
+                              )}
+                              {lead && deal && <span className="text-slate-400"> · </span>}
+                              {deal && (
+                                <Link to={`/deals/${deal.id}`} className="text-brand-600 hover:underline">
+                                  {deal.name}
+                                </Link>
+                              )}
+                              {co && !deal && !lead && (
+                                <Link to={`/companies/${co.id}`} className="text-brand-600 hover:underline">
+                                  {co.name}
+                                </Link>
+                              )}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 w-6"><UserAvatar userId={a.userId} size={16} /></td>
+                          <td className="pl-2 pr-3 py-1.5 text-right text-slate-400 tabular-nums">{formatDateTime(a.activityDate)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             </Card>
           </div>

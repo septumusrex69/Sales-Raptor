@@ -13,7 +13,7 @@
  * elsewhere), multiple sheets (the first is the one), merged cells, or anything about styling
  * beyond working out which numbers are dates.
  */
-import { readZipEntries, readZipEntry } from './zip'
+import { readZipEntries, readZipEntry } from './zip.ts'
 
 /** Excel counts days from 1899-12-30 — the offset absorbs its deliberate 1900 leap-year bug. */
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30)
@@ -37,6 +37,12 @@ function columnIndex(ref: string): number {
   return n - 1
 }
 
+/** One sheet, named as the tab is named. */
+export interface XlsxSheet {
+  name: string
+  rows: string[][]
+}
+
 /**
  * Rows from the first sheet, as arrays of strings.
  *
@@ -45,6 +51,20 @@ function columnIndex(ref: string): number {
  * rendered yyyy/mm/dd, which is the shape Swordfish's own exports use.
  */
 export async function readXlsxRows(buffer: ArrayBuffer): Promise<string[][]> {
+  const sheets = await readXlsxSheets(buffer)
+  if (sheets.length === 0) throw new Error('That spreadsheet has no readable first sheet.')
+  return sheets[0].rows
+}
+
+/**
+ * Every sheet in the workbook, in the order the tabs sit in.
+ *
+ * The leads book is a tab per sales month and the first one is not the whole story — the tab
+ * called "Complete Leads List" is missing several hundred leads that exist only on the monthly
+ * tabs. Reading one sheet is right for a register maintained as a single table and wrong for a
+ * workbook somebody has been adding to for three years, so both are available.
+ */
+export async function readXlsxSheets(buffer: ArrayBuffer): Promise<XlsxSheet[]> {
   const entries = readZipEntries(buffer)
   const text = async (name: string) => {
     const entry = entries.find((e) => e.name === name)
@@ -86,34 +106,60 @@ export async function readXlsxRows(buffer: ArrayBuffer): Promise<string[][]> {
     }
   }
 
-  // The first sheet, found through the workbook's relationships rather than assumed to be
-  // sheet1.xml — a workbook whose first sheet was deleted and re-added does not match.
+  // Each sheet is found through the workbook's relationships rather than assumed to be
+  // sheet1.xml, sheet2.xml and so on — a workbook whose tabs were deleted and re-added, which
+  // three years of monthly tabs guarantees, does not match that assumption.
   const workbook = parse(await text('xl/workbook.xml'))
-  const firstSheetRelId = workbook.getElementsByTagName('sheet')[0]?.getAttribute('r:id')
   const rels = parse(await text('xl/_rels/workbook.xml.rels'))
-  let target = [...rels.getElementsByTagName('Relationship')]
-    .find((r) => r.getAttribute('Id') === firstSheetRelId)?.getAttribute('Target')
-  if (!target) target = 'worksheets/sheet1.xml'
-  const sheetPath = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
+  const relTarget = (id: string | null): string | null => (id
+    ? [...rels.getElementsByTagName('Relationship')]
+      .find((r) => r.getAttribute('Id') === id)?.getAttribute('Target') ?? null
+    : null)
 
-  const sheetXml = await text(sheetPath)
-  if (!sheetXml) throw new Error('That spreadsheet has no readable first sheet.')
+  const sheets: XlsxSheet[] = []
+  const tabs = [...workbook.getElementsByTagName('sheet')]
+  for (let i = 0; i < tabs.length; i += 1) {
+    const tab = tabs[i]
+    const target = relTarget(tab.getAttribute('r:id')) ?? `worksheets/sheet${i + 1}.xml`
+    const sheetPath = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
+    const sheetXml = await text(sheetPath)
+    if (!sheetXml) continue
 
-  const rows: string[][] = []
-  for (const row of parse(sheetXml).getElementsByTagName('row')) {
-    const cells: string[] = []
-    for (const c of row.getElementsByTagName('c')) {
-      const index = columnIndex(c.getAttribute('r') ?? '')
-      // Gaps are real: an empty cell is often not written at all, so position comes from the
-      // reference and the holes are filled rather than the row silently shifting left.
-      while (cells.length < index) cells.push('')
-      cells.push(cellText(c, sharedStrings, dateStyles))
+    const rows: string[][] = []
+    for (const row of parse(sheetXml).getElementsByTagName('row')) {
+      const cells: string[] = []
+      for (const c of row.getElementsByTagName('c')) {
+        const index = columnIndex(c.getAttribute('r') ?? '')
+        // Gaps are real: an empty cell is often not written at all, so position comes from the
+        // reference and the holes are filled rather than the row silently shifting left.
+        while (cells.length < index) cells.push('')
+        cells.push(cellText(c, sharedStrings, dateStyles))
+      }
+      rows.push(cells)
     }
-    rows.push(cells)
+    // Excel keeps trailing empty rows where someone once clicked.
+    while (rows.length && rows[rows.length - 1].every((v) => v === '')) rows.pop()
+    sheets.push({ name: tab.getAttribute('name') ?? `Sheet ${i + 1}`, rows })
   }
-  // Excel keeps trailing empty rows where someone once clicked.
-  while (rows.length && rows[rows.length - 1].every((v) => v === '')) rows.pop()
-  return rows
+  return sheets
+}
+
+/**
+ * A number, written however Excel felt like writing it.
+ *
+ * The cached value in the file is not the text you see in the cell. A mobile number typed as
+ * digits is stored as a number, and Excel writes it as "6.65550183E8" — which, left alone, is
+ * what gets imported as somebody's phone number, and is only noticed when nobody can be phoned.
+ * Four hundred and fifty of them in the leads workbook alone.
+ *
+ * Returns null for anything that is not in scientific notation, so ordinary numbers and all text
+ * pass through untouched.
+ */
+export function plainNumber(raw: string): string | null {
+  if (!/^-?\d*\.?\d+e[+-]?\d+$/i.test(raw)) return null
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return null
+  return Number.isInteger(n) ? n.toFixed(0) : String(n)
 }
 
 function cellText(c: Element, sharedStrings: string[], dateStyles: Set<number>): string {
@@ -126,6 +172,9 @@ function cellText(c: Element, sharedStrings: string[], dateStyles: Set<number>):
   if (type === 's') return sharedStrings[Number(raw)] ?? ''
   if (type === 'b') return raw === '1' ? 'TRUE' : 'FALSE'
   if (type === 'e') return ''
+
+  const plain = plainNumber(raw)
+  if (plain !== null) return plain
 
   const style = Number(c.getAttribute('s') ?? -1)
   if (dateStyles.has(style)) {

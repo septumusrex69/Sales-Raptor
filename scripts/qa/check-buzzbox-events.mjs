@@ -21,7 +21,7 @@ const check = (name, actual, expected) => {
 }
 
 /* ------------------------------------------------------------------ *
- * The answered call. 08:38:12 -> 08:38:24 UTC, debtor on 0832573344.
+ * The answered call. 08:38:12 -> 08:38:24 UTC, debtor on 0835550344.
  * Six events, in the order they arrived.
  * ------------------------------------------------------------------ */
 const CALL = 'e6bea85d-dbc1-40ec-b5ab-2c145d94f6e6'
@@ -58,10 +58,10 @@ const createExternal = {
   bbEventTimeStamp: '2026-09-12T08:38:15.272519519',
   eventAvps: [
     { att: 'state', val: 'ringing' },
-    { att: 'channel-name', val: 'sofia/external/0832573344' },
+    { att: 'channel-name', val: 'sofia/external/0835550344' },
     { att: 'effect-caller-id-name' }, { att: 'caller-id-number' },
     { att: 'accountcode' }, { att: 'internal-number' },
-    { att: 'destination', val: '0832573344' },
+    { att: 'destination', val: '0835550344' },
   ],
 }
 // 4. THE DEBTOR ANSWERS.
@@ -71,7 +71,7 @@ const answerExternal = {
   bbEventTimeStamp: '2026-09-12T08:38:20.290651477',
   eventAvps: [
     { att: 'state', val: 'answered' },
-    { att: 'channel-name', val: 'sofia/external/0832573344' },
+    { att: 'channel-name', val: 'sofia/external/0835550344' },
   ],
 }
 // 5. The two legs are joined: a conversation is happening.
@@ -83,7 +83,7 @@ const bridge = {
     { att: 'state', val: 'answered' },
     { att: 'channel-name', val: 'sofia/internal/141@41.133.90.117:60500' },
     { att: 'b-internal-id', val: DEBTOR_LEG },
-    { att: 'b-channel-name', val: 'sofia/external/0832573344' },
+    { att: 'b-channel-name', val: 'sofia/external/0835550344' },
     { att: 'a-channel-name', val: 'sofia/internal/141@41.133.90.117:60500' },
     { att: 'a-internal-id', val: EXT_LEG },
   ],
@@ -155,9 +155,9 @@ check('a different call has a different externalId',
   parseCallEvent(rangOut).externalId === CALL, false)
 
 /* ---- finding the debtor's number ---- */
-check('the debtor leg names the number', parseCallEvent(answerExternal).number, '0832573344')
-check('a bridge names it on the b-leg', parseCallEvent(bridge).number, '0832573344')
-check('CHANNEL_CREATE on the debtor leg names it', parseCallEvent(createExternal).number, '0832573344')
+check('the debtor leg names the number', parseCallEvent(answerExternal).number, '0835550344')
+check('a bridge names it on the b-leg', parseCallEvent(bridge).number, '0835550344')
+check('CHANNEL_CREATE on the debtor leg names it', parseCallEvent(createExternal).number, '0835550344')
 // The trap: destination on the extension's leg is the extension. Reading it as a number would
 // attach the call to whichever debtor happens to have 141 in their phone number.
 check('the extension leg does NOT report 141 as the debtor’s number',
@@ -171,10 +171,10 @@ check('the debtor leg has no extension', parseCallEvent(answerExternal).extensio
 
 /* ---- matching two spellings of one number ---- */
 // We dial E.164 without the plus; BuzzBox reports the local form. Neither string equals the other.
-check('E.164 and local forms share a tail', numberTail('27832573344'), numberTail('0832573344'))
-check('...and so does the pretty form', numberTail('+27 83 257 3344'), '832573344')
-check('the tail is nine digits', numberTail('0832573344'), '832573344')
-check('two different numbers do not collide', numberTail('0832573344') === numberTail('0832573345'), false)
+check('E.164 and local forms share a tail', numberTail('27835550344'), numberTail('0835550344'))
+check('...and so does the pretty form', numberTail('+27 83 555 0344'), '835550344')
+check('the tail is nine digits', numberTail('0835550344'), '835550344')
+check('two different numbers do not collide', numberTail('0835550344') === numberTail('0835550345'), false)
 check('an extension is not a number', numberTail('141'), null)
 check('nothing is not a number', numberTail(null), null)
 check('an empty string is not a number', numberTail(''), null)
@@ -209,10 +209,10 @@ check('an empty payload claims nothing was answered', parseCallEvent({}).answere
 check('...and names no number', parseCallEvent({}).number, null)
 
 /* ---- the small parsers, directly ---- */
-check('external leg number', externalLegNumber('sofia/external/0832573344'), '0832573344')
+check('external leg number', externalLegNumber('sofia/external/0835550344'), '0835550344')
 check('internal leg extension', internalLegExtension('sofia/internal/141@41.133.90.117:60500'), '141')
 check('an internal channel is not an external one', externalLegNumber('sofia/internal/141@x'), null)
-check('an external channel has no extension', internalLegExtension('sofia/external/0832573344'), null)
+check('an external channel has no extension', internalLegExtension('sofia/external/0835550344'), null)
 
 console.log(`\n${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  FAIL ${f}`)

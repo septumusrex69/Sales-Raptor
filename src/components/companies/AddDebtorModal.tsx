@@ -1,6 +1,11 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { Paperclip, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
-import { suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
+import { DictateButton } from '../ui/Dictate'
+import { fileSize } from '../../lib/fileSize.ts'
+import { firmToday } from '../../lib/dateLabels'
+import { formatDate } from '../../data/mockData'
+import { DEFAULT_INTEREST_RATE_ANNUAL, suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
 
 /**
  * One debtor, taken by hand.
@@ -10,32 +15,73 @@ import { suggestReference, validateNewDebtor, type NewDebtorInput, type Problem 
  * everything else about a debtor can be added on the account page afterwards, but capital, the
  * handover date and the rate cannot be got wrong and fixed later without the whole history moving.
  */
-export function AddDebtorModal({ companyName, existingReferences, busy, error, onClose, onSave }: {
+export function AddDebtorModal({ companyName, existingReferences, clientCode, busy, error, onClose, onSave }: {
   companyName: string
   /** This client's account numbers, so the next in their series can be proposed. */
   existingReferences: string[]
+  /** Their code, so a client with NOTHING on the book still gets a reference proposed. */
+  clientCode?: string | null
   busy: boolean
   error: string | null
   onClose: () => void
-  onSave: (input: NewDebtorInput) => void
+  /**
+   * The note is separate: it is not part of the account, it goes onto its timeline.
+   *
+   * SO ARE THE CASE FILES, and for the same reason: they hang off the account's id, which does not
+   * exist until the row is written. See `files` below.
+   */
+  onSave: (input: NewDebtorInput, note: string | null, files: File[]) => void
 }) {
-  const today = new Date().toISOString().slice(0, 10)
-  const suggested = useMemo(() => suggestReference(existingReferences), [existingReferences])
+  /* THE FIRM'S DAY, IN SAST: it is this account's handover date (prompt 11). */
+  const today = firmToday()
+  const suggested = useMemo(
+    () => suggestReference(existingReferences, clientCode),
+    [existingReferences, clientCode],
+  )
 
   const [form, setForm] = useState<NewDebtorInput>({
     accountNumber: suggested ?? '',
     clientReference: '',
     firstName: '',
     surname: '',
+    debtorKind: 'individual',
     idNumber: '',
     capital: '',
     handoverDate: today,
+    defaultDate: '',
     // Standard, and stated rather than assumed — a rate left to a hidden default is a rate
     // nobody checked.
-    interestRateAnnual: '24',
+    /* THE FIRM'S STANDING RATE, from the one place that holds it rather than typed here as
+       well -- three entry points were giving three answers. See DEFAULT_INTEREST_RATE_ANNUAL. */
+    interestRateAnnual: String(DEFAULT_INTEREST_RATE_ANNUAL),
     mobile: '', workPhone: '', altNumber: '', email: '', address: '', employer: '',
     kin1Name: '', kin1Phone: '', kin2Name: '', kin2Phone: '',
   })
+  /*
+   * A NOTE, AT THE FIRM'S ASKING: "at the add a debtor, there should be a note as well, option
+   * for make a note." Kept out of NewDebtorInput because it is not part of the account -- it goes
+   * onto the account's own timeline afterwards, the same place the import writes its notes.
+   */
+  const [note, setNote] = useState('')
+  /*
+   * THE CASE FILES, AT THE FIRM'S ASKING: "attach the case files. PDFs, Excel, images or whatever.
+   * When you upload a debtor."
+   *
+   * THE BATCH IMPORT ALREADY TAKES THEM -- "their PDFs, if there are any", matched to accounts by
+   * filename -- and the account page takes them afterwards. A debtor captured BY HAND was the one
+   * way in with no way to bring the paperwork with it, so the mandate, the contract and the
+   * invoices stayed in somebody's inbox until they remembered to open the account and upload them.
+   *
+   * ANY TYPE, WHICH IS THE FIRM'S OWN WORD FOR IT. The documents panel has never restricted this
+   * either: a client sends a scanned mandate as a JPEG and an age analysis as a spreadsheet, and a
+   * picker that accepted only PDFs would send them away to convert their own paperwork.
+   *
+   * HELD HERE UNTIL THE ACCOUNT EXISTS. They are filed against its id, which is written by the
+   * save -- so they are handed back with the form rather than uploaded as they are chosen, and
+   * choosing them commits nobody to anything until Add debtor is pressed.
+   */
+  const [files, setFiles] = useState<File[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
   // Problems appear once, on submit. Marking a field wrong while somebody is still typing in it
   // is just shouting at them for not having finished.
   const [shown, setShown] = useState<Problem[]>([])
@@ -43,12 +89,13 @@ export function AddDebtorModal({ companyName, existingReferences, busy, error, o
   const set = (k: keyof NewDebtorInput) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
   const problemFor = (k: keyof NewDebtorInput) => shown.find((p) => p.field === k)?.message
+  const isCompany = form.debtorKind === 'company'
 
   function submit(e: FormEvent) {
     e.preventDefault()
     const problems = validateNewDebtor(form, today)
     setShown(problems)
-    if (problems.length === 0) onSave(form)
+    if (problems.length === 0) onSave(form, note.trim() || null, files)
   }
 
   return (
@@ -77,28 +124,85 @@ export function AddDebtorModal({ companyName, existingReferences, busy, error, o
             hint={suggested ? `next in this client’s series` : undefined}>
             <input className={inputClass} value={form.accountNumber} onChange={set('accountNumber')} placeholder={suggested ?? 'ABC0001'} />
           </Field>
-          <Field label="Their reference" problem={problemFor('clientReference')}>
+          {/* The same field the account header names, and it has to be called the same thing
+              there and here — see AccountDetail. */}
+          <Field label="Client reference" problem={problemFor('clientReference')}>
             <input className={inputClass} value={form.clientReference} onChange={set('clientReference')} />
           </Field>
 
-          <Field label="First name" problem={problemFor('firstName')}>
-            <input className={inputClass} value={form.firstName} onChange={set('firstName')} />
-          </Field>
-          <Field label="Surname" required problem={problemFor('surname')}>
-            <input className={inputClass} value={form.surname} onChange={set('surname')} />
-          </Field>
+          {/*
+            PERSON OR BUSINESS, ASKED FIRST, at the firm's instruction: "when you add a debtor,
+            remember we have to account for a company as well -- person or a company or a
+            business. And then you would say, add a debtor: okay, this debtor is an individual or
+            a person."
+            
+            IT CHANGES THE FIELDS UNDER IT AND THAT IS WHY IT IS FIRST. A company has no first
+            name and no ID number; it has a registration number, and asking a company for a
+            thirteen-digit ID is how a registration number ends up in the ID column -- which is
+            what the old sheet did on its own, in all 45 rows.
+
+            THE DATABASE'S WORDS ARE 'individual' AND 'company'; the screen says Person and
+            Business, which is what the handover sheet asks a client. Two vocabularies for one
+            distinction, and the screen speaks the firm's.
+          */}
+          <div className="col-span-2">
+            <Field label="Person or business" required problem={problemFor('debtorKind')}>
+              <div className="flex gap-2">
+                {([['individual', 'Person'], ['company', 'Business']] as const).map(([value, label]) => (
+                  <button key={value} type="button"
+                    onClick={() => setForm((f) => ({ ...f, debtorKind: value }))}
+                    className={`flex-1 text-sm font-medium rounded-lg border px-3 py-2 ${
+                      form.debtorKind === value
+                        ? 'border-gold-500 bg-gold-50 text-navy-950'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+
+          {!isCompany && (
+            <Field label="First name" problem={problemFor('firstName')}>
+              <input className={inputClass} value={form.firstName} onChange={set('firstName')} />
+            </Field>
+          )}
+          <div className={isCompany ? 'col-span-2' : undefined}>
+            <Field label={isCompany ? 'Registered name' : 'Surname'} required
+              problem={problemFor('surname')}>
+              <input className={inputClass} value={form.surname} onChange={set('surname')} />
+            </Field>
+          </div>
 
           <div className="col-span-2">
-            <Field label="ID number" problem={problemFor('idNumber')} hint="checked against the ID check digit">
-              <input className={inputClass} value={form.idNumber} onChange={set('idNumber')} inputMode="numeric" maxLength={13} />
+            {/*
+              ONE COLUMN, TWO MEANINGS, decided by the kind -- which is how debtor_id_number
+              already works on the account (see accountBook.ts). Labelled for what is being asked
+              for, because "ID number" over a box somebody is typing a CK number into is the
+              label doing the opposite of its job.
+            */}
+            <Field label={isCompany ? 'Registration number' : 'ID number'}
+              problem={problemFor('idNumber')}
+              hint={isCompany ? 'e.g. 2016/210735/07' : 'checked against the ID check digit'}>
+              <input className={inputClass} value={form.idNumber} onChange={set('idNumber')}
+                inputMode={isCompany ? 'text' : 'numeric'}
+                maxLength={isCompany ? 30 : 13} />
             </Field>
           </div>
 
           <Field label="Capital handed over (R)" required problem={problemFor('capital')}>
             <input className={inputClass} value={form.capital} onChange={set('capital')} inputMode="decimal" />
           </Field>
-          <Field label="Handover date" required problem={problemFor('handoverDate')} hint="interest runs from here">
-            <input type="date" className={inputClass} value={form.handoverDate} onChange={set('handoverDate')} max={today} />
+          {/*
+            HANDED OVER TODAY, NOT TYPED (prompt 11). The box used to be "Handover date -- interest
+            runs from here", and what people typed into it was the client's date of default, which
+            opened the account with months of interest it had never earned. The firm: "interest
+            runs from the date of handover, never from the date of default." So the handover is the
+            day the account is added, and the default date is asked for as what it is: a record.
+          */}
+          <Field label="Date of default" problem={problemFor('defaultDate')}
+            hint={`a record only — handed over today, ${formatDate(today)}, and interest runs from today`}>
+            <input type="date" className={inputClass} value={form.defaultDate ?? ''} onChange={set('defaultDate')} max={today} />
           </Field>
 
           <div className="col-span-2">
@@ -155,6 +259,83 @@ export function AddDebtorModal({ companyName, existingReferences, busy, error, o
             <input className={inputClass} value={form.kin2Phone} onChange={set('kin2Phone')} inputMode="tel" />
           </Field>
         </div>
+
+        {/*
+          A NOTE, at the firm's asking: "at the add a debtor, there should be a note as well,
+          option for make a note."
+
+          LAST, BECAUSE IT IS ABOUT EVERYTHING ABOVE IT. An account taken over the phone arrives
+          with things that fit in no box -- what the client said about the debtor, why the ID is
+          missing, what was promised -- and until now the only way to record them was to open the
+          account afterwards and remember to. It goes onto the account's own timeline, which is
+          where the import already writes its notes, so the collector who gets it reads one thing.
+
+          DICTATED OR TYPED. A spoken note is two or three sentences where a typed one is four
+          words, and this is the moment somebody has the client on the telephone.
+        */}
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-2">A note</p>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3}
+          placeholder="Anything the collector should know before the first call — optional"
+          className={`${inputClass} resize-none`} />
+        <div className="mt-1.5">
+          <DictateButton size="small" value={note} onChange={setNote} />
+        </div>
+
+        {/*
+          THE CASE FILES. Beside the note rather than up with capital and the handover date,
+          because the two of them are the same kind of thing: what came with the account and did
+          not fit in a box.
+        */}
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-2">
+          The case files
+        </p>
+        <input ref={fileRef} type="file" multiple className="hidden"
+          onChange={(e) => {
+            /* ADDED TO WHAT IS THERE, not replacing it: the mandate and the invoices are usually
+               in two different folders, and a picker that forgot the first choice on the second
+               would make somebody gather them up somewhere else first. */
+            setFiles((f) => [...f, ...Array.from(e.target.files ?? [])])
+            /* Cleared, or choosing the same file twice in a row fires no change event. */
+            e.target.value = ''
+          }} />
+        <button type="button" onClick={() => fileRef.current?.click()}
+          className="w-full flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 text-left">
+          <span className={`shrink-0 w-8 h-8 rounded-lg grid place-items-center ${
+            files.length ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+            <Paperclip size={16} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-slate-700">
+              The mandate, the contract, the invoices — anything the client sent
+            </span>
+            <span className="block text-xs text-slate-400">
+              {files.length
+                ? `${files.length} file${files.length === 1 ? '' : 's'} · ${fileSize(files.reduce((n, f) => n + f.size, 0))}`
+                : 'PDFs, spreadsheets, photographs — optional'}
+            </span>
+          </span>
+          <span className="text-xs font-medium text-brand-600 shrink-0">
+            {files.length ? 'Add more' : 'Choose'}
+          </span>
+        </button>
+
+        {/* NAMED AND REMOVABLE. A count alone cannot tell somebody they attached the wrong
+            client's mandate, which is the mistake worth catching before the account opens. */}
+        {files.length > 0 && (
+          <ul className="mt-1.5 space-y-1">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${i}`} className="flex items-center gap-2 text-[11px] text-slate-500">
+                <span className="truncate flex-1">{f.name}</span>
+                <span className="shrink-0 text-slate-400">{fileSize(f.size)}</span>
+                <button type="button" aria-label={`Remove ${f.name}`}
+                  onClick={() => setFiles((all) => all.filter((_, n) => n !== i))}
+                  className="shrink-0 text-slate-400 hover:text-negative-700">
+                  <X size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {error && (
           <p className="mt-4 text-sm text-negative-700 bg-negative-50 border border-negative-100 rounded-lg px-3 py-2">{error}</p>

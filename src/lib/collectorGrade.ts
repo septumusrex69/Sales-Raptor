@@ -1,0 +1,306 @@
+/**
+ * What a collector is trusted with.
+ *
+ * THE FIRM ONLY EARNS ON WHAT IT RECOVERS, and it carries its clients' reputation while doing
+ * it. That is the whole reason this file exists: a R400 000 defended matter on a junior's desk
+ * is not a training opportunity, it is a client relationship and a year's commission.
+ *
+ * ONE LINE, AND IT IS AT R50 000. Everything below it goes to anybody — the firm's own decision,
+ * made against the obvious objection: "yes, it is a risk to allocate bigger accounts to smaller
+ * people, but you want to take that risk to help them grow, give them confidence and give some
+ * fairness." A collector who is only ever given small accounts stays a collector who has only
+ * ever worked small accounts.
+ *
+ * Four grades, and a band on every account derived from what the account already is. Nobody
+ * types a difficulty in — a number that has to be maintained by hand is a number that is right
+ * on the day it is set and wrong for ever afterwards.
+ *
+ * GRADE IS ABOUT WHICH ACCOUNTS, NEVER HOW MANY. A junior and an elite collector carry the same
+ * book and work the same number of days: the company standard is 500 accounts and 50 a day for
+ * everybody. What the grade changes is which of those 500 they may be given. Individual people
+ * differ — some carry more, some work more in a day — and that is what the per-person overrides
+ * are for, not the grade.
+ *
+ * GRADE IS SET BY A PERSON, NEVER COMPUTED. The collector's dashboard can show that somebody's
+ * numbers look like a Skilled collector's; a team leader decides. One large settlement is not a
+ * promotion, and it is an employment matter besides.
+ */
+
+import { ROLE_DEPARTMENTS } from './departments.ts'
+import type { UserRole } from '../types'
+
+export const COLLECTOR_GRADES = ['Junior', 'Skilled', 'Senior', 'Elite'] as const
+export type CollectorGrade = (typeof COLLECTOR_GRADES)[number]
+
+/** Higher reaches further. Used only for "may this person take this account". */
+export function gradeRank(grade: CollectorGrade): number {
+  return COLLECTOR_GRADES.indexOf(grade)
+}
+
+export type AccountBandId = 'generic' | 'high_value' | 'major'
+
+export interface AccountBand {
+  id: AccountBandId
+  label: string
+  /** Capital outstanding at or above this figure falls in this band. */
+  from: number
+  /** The least experienced collector who may be given one. */
+  minGrade: CollectorGrade
+  hint: string
+}
+
+/**
+ * The bands, in the firm's own figures.
+ *
+ * AN ABSOLUTE LINE, not one relative to each client's book. That was considered and is wrong:
+ * the firm's real book runs to nearly a billion rand with single accounts reaching R27 million,
+ * and it is distributed evenly across collectors on purpose — which is how a junior's ability
+ * shows up on the small accounts before anybody trusts them with a large one. A threshold that
+ * floated with each client's median would make the top of a gym-membership book "high value" and
+ * put R4 000 accounts in front of an elite collector.
+ *
+ * Ordered low to high. The band is the LAST one whose `from` the balance meets, so adding a
+ * fourth rung later is a line in this array and nothing else.
+ */
+export const ACCOUNT_BANDS: AccountBand[] = [
+  {
+    id: 'generic',
+    label: 'Generic',
+    from: 0,
+    minGrade: 'Junior',
+    hint: 'Ordinary collection work. The bulk of any book, and where a new collector proves themselves.',
+  },
+  {
+    id: 'high_value',
+    label: 'High value',
+    from: 25000,
+    /*
+     * OPEN TO EVERYBODY, AT THE FIRM'S INSTRUCTION, and it was Skilled until they said otherwise.
+     *
+     * Their reasoning, and it is theirs to make: "yes, it is a risk to allocate bigger accounts to
+     * smaller people, but you want to take that risk to help them grow, give them confidence and
+     * give some fairness." A junior who is never handed anything above R25 000 never learns to,
+     * and never gets a shot at the commission on one. Only R50 000 and up is held back now.
+     *
+     * The band itself stays, because it is not only a gate: it is what the screen calls the
+     * account, and what a later rule can point at without inventing the line again.
+     */
+    minGrade: 'Junior',
+    hint: 'Worth enough that how the call is handled changes the outcome — but open to any collector.',
+  },
+  {
+    id: 'major',
+    label: 'Major',
+    from: 50000,
+    /*
+     * OPEN TO EVERYBODY TOO, AND NOW NOTHING IS HELD BACK BY RANK AT ALL.
+     *
+     * THE FIRM: "Don't limit anybody for any amount as of yet. So even a junior can have an
+     * account up to, you know, more than 25 000. We will later look at these limitations."
+     *
+     * It was Senior. High value went to Junior one change earlier for the same reason -- "you want
+     * to take that risk to help them grow" -- and this is the firm finishing the thought while they
+     * set the floor up: a simulation where half the book cannot be handed out teaches nobody
+     * anything, and they would rather find the real limits by watching the work.
+     *
+     * AS OF YET, WHICH IS THE WHOLE POINT OF DOING IT THIS WAY. The band still exists, is still
+     * worked out from the balance, and is still what the screen CALLS the account. Putting a limit
+     * back is this one word. Deleting the bands would have made it a rebuild.
+     */
+    minGrade: 'Junior',
+    hint: 'Needs judgement and experience. The firm’s commission and the client’s reputation both ride on these — but open to any collector for now.',
+  },
+]
+
+export interface BandInput {
+  /** Capital still outstanding. What is actually at stake, not what was handed over. */
+  capitalOutstanding: number
+  /** The account's position, where it is known. Some positions outrank the balance entirely. */
+  disputed?: boolean
+  inLegal?: boolean
+  underAdministration?: boolean
+}
+
+/**
+ * Which band an account falls in.
+ *
+ * THE BALANCE IS NOT THE ONLY THING. A defended matter is a legal conversation at R2 000 as much
+ * as at R200 000 — the debtor has engaged a position, somebody has to answer it in writing, and
+ * getting it wrong is how a dispute becomes a counterclaim. Same for anything in legal or under
+ * administration: those are conversations with attorneys, curators and trustees, not with a
+ * debtor, and they are not junior work at any value.
+ *
+ * So a hard position lifts the account at least to High value, and the balance may lift it
+ * further. Neither ever lowers it.
+ *
+ * WORTH KNOWING: since the firm opened High value to every grade, this lift no longer changes
+ * who may take the account — a disputed R2 000 account is now junior work like any other. The
+ * lift is kept because it is still what the account is CALLED, and because the day the firm
+ * wants defended matters held back the line is already here to move. It is flagged rather than
+ * quietly removed: deleting it would make restoring the rule a rewrite instead of one word.
+ */
+export function accountBand(input: BandInput): AccountBand {
+  let band = ACCOUNT_BANDS[0]
+  for (const b of ACCOUNT_BANDS) {
+    if (input.capitalOutstanding >= b.from) band = b
+  }
+
+  if (input.disputed || input.inLegal || input.underAdministration) {
+    /*
+     * Compared by BAND ORDER, not by the grade each band requires. It used to compare minGrade
+     * ranks, which worked only while every band needed a different grade — the moment the firm
+     * opened High value to everybody, Junior === Junior and the lift silently stopped firing, so
+     * a disputed account was no longer even LABELLED High value. Ordering by the rung itself is
+     * what the rule always meant, and it survives the next time a grade line moves.
+     */
+    const at = ACCOUNT_BANDS.findIndex((b) => b.id === band.id)
+    const floorAt = ACCOUNT_BANDS.findIndex((b) => b.id === 'high_value')
+    if (floorAt > at) band = ACCOUNT_BANDS[floorAt]
+  }
+  return band
+}
+
+/**
+ * May this collector be given this account?
+ *
+ * TRUE FOR EVERY PAIR AT THE MOMENT, and that is a setting rather than a simplification. Every
+ * band's `minGrade` is Junior while the firm finds its feet -- "don't limit anybody for any amount
+ * as of yet" -- so this returns true for everybody.
+ *
+ * IT IS STILL ASKED, EVERYWHERE, which is the reason not to shortcut it to `return true`. The
+ * hand-out planner filters on it, the checks exercise it, and the day a band's minGrade moves back
+ * up, every one of those call sites starts honouring it again without being found and changed.
+ */
+export function mayTake(grade: CollectorGrade, band: AccountBand): boolean {
+  return gradeRank(grade) >= gradeRank(band.minGrade)
+}
+
+/**
+ * Roles that work a collections book.
+ *
+ * A GRADE IS NOT A PREREQUISITE FOR RECEIVING WORK, and treating it as one was a mistake. It
+ * meant nobody could be handed an account until an administrator had graded them one by one --
+ * so a firm with thirty pre-legal clerks had thirty ungraded people and a hand-out screen that
+ * offered nobody. The grade WIDENS what somebody may be given; it does not admit them.
+ *
+ * Ungraded therefore means Junior: generic accounts, which is the bulk of any book and where a
+ * new collector proves themselves anyway. A team leader raises it when they have seen the work.
+ */
+/*
+ * DERIVED FROM THE DEPARTMENT, NOT WRITTEN OUT AGAIN -- and this list is the reason that matters.
+ *
+ * THE FIRM, looking at the hand-out box: "Nicole was given as an option to hand out accounts to,
+ * but she's not a debt collector. She's not in the pre-legal space. She's a liaison, so she
+ * shouldn't have an option here."
+ *
+ * The two lists had already disagreed and nothing noticed. `departments.ts` has put a Liaison in
+ * COMMUNICATIONS since it was written, and the blurb it draws under the call centre reads
+ * "Everybody here carries accounts and a diary" -- while this array, written separately, listed
+ * Liaison and Liaison Manager as people who work a book. So the firm's own org chart said one
+ * thing on the people screen and another in the hand-out box, which is exactly the drift
+ * departments.ts was created to end ("a role list written twice in this codebase has drifted
+ * twice").
+ *
+ * WORKING THE BOOK IS WHAT THE CALL CENTRE IS. The firm on the manager and the team leaders:
+ * "they're also pre-legal agents, they just have reduced books" -- so all three call-centre roles
+ * collect, and the reduction is a per-person book_ceiling rather than anything about the role.
+ * The company standard stays 500 for everybody; see CLAUDE.md on why a role must not decide how
+ * many.
+ *
+ * A LIAISON IS THE CLIENT'S PERSON, NOT THE DEBTOR'S. They are whose name goes on the mandate and
+ * who the client telephones -- see canBeClientLiaison, which is the other half of the same
+ * distinction and was the firm's instruction a few days earlier.
+ */
+export const COLLECTING_ROLES: string[] = (Object.keys(ROLE_DEPARTMENTS) as UserRole[])
+  .filter((role) => ROLE_DEPARTMENTS[role] === 'Call centre')
+
+/** What an ungraded collector may be given. The lowest rung, never nothing. */
+export const UNGRADED_EQUIVALENT: CollectorGrade = 'Junior'
+
+/* ---------- the company standards ---------- */
+
+/**
+ * The most accounts one collector should carry at once, in play.
+ *
+ * The firm's own figure: "on average, a collector can manage about 500 accounts, but there are
+ * exceptions". The exceptions are the per-person override on profiles.book_ceiling; this is what
+ * applies until somebody sets one.
+ *
+ * Flat across every grade, deliberately. A junior does not carry a smaller book than an elite —
+ * they carry a different KIND of account out of the same 500.
+ */
+export const DEFAULT_BOOK_CEILING = 500
+
+/**
+ * What a month's collection target is, before anybody sets one.
+ *
+ * THE FIRM'S OWN FIGURES, and the first two being equal is theirs as well: "make all the junior
+ * collectors 60 and the skilled collector 60 and then the senior 80 and then the elite 100". A
+ * junior and a skilled collector carry the same book and are asked for the same rand; what
+ * separates them is which accounts they may be given, not how hard the month is.
+ *
+ * A DEFAULT, NOT A RULE. It is what applies until a team leader sets a figure for somebody in
+ * Settings → Targets, or (when the collector's own dashboard exists) until the collector raises
+ * their own for the month. Without it the whole screen reads "No target" until thirty numbers
+ * have been typed in one at a time, which is how a screen gets abandoned in its first week.
+ *
+ * Grade is the only thing it can key on that is already maintained. Ungraded means Junior, the
+ * same way it does everywhere else — see UNGRADED_EQUIVALENT.
+ */
+export const DEFAULT_MONTH_TARGET: Record<CollectorGrade, number> = {
+  Junior: 60000,
+  Skilled: 60000,
+  Senior: 80000,
+  Elite: 100000,
+}
+
+/**
+ * The target that applies to somebody, and where it came from.
+ *
+ * WHERE IT CAME FROM IS SHOWN, NOT HIDDEN. A team leader looking at a floor of targets has to be
+ * able to tell the ones somebody chose from the ones the system assumed — otherwise the first
+ * time a figure looks wrong, nobody can say whether it was set wrong or never set at all.
+ */
+export type TargetOrigin = 'set' | 'grade'
+
+export function monthTargetFor(input: {
+  /** What a team leader (or later, the collector) set for this month. Null where nobody has. */
+  set: number | null | undefined
+  grade: CollectorGrade | null | undefined
+  /** Whether this person works a book at all. Somebody who does not has no target, not nought. */
+  collects: boolean
+}): { target: number | null; origin: TargetOrigin } {
+  if (input.set != null && input.set > 0) return { target: input.set, origin: 'set' }
+  if (!input.collects) return { target: null, origin: 'grade' }
+  return { target: DEFAULT_MONTH_TARGET[input.grade ?? UNGRADED_EQUIVALENT], origin: 'grade' }
+}
+
+/**
+ * How many of a day's slots are held for work handed to this person.
+ *
+ * The firm's rule: a clerk who can work 45 a day may only diarise 35 of them himself, so there
+ * is always room for what a team leader sends. It constrains the agent's OWN booking only — the
+ * distributor fills to the full capacity — which is what keeps the two sides from having to know
+ * about each other.
+ */
+export const DEFAULT_DIARY_RESERVE = 10
+
+/** A number is a typo when it is not a working rate. Same reasoning as the capacity bounds. */
+export const MIN_BOOK_CEILING = 1
+export const MAX_BOOK_CEILING = 5000
+
+export const bookCeilingOf = (set: number | null | undefined): number =>
+  set && set > 0 ? set : DEFAULT_BOOK_CEILING
+
+export const diaryReserveOf = (set: number | null | undefined): number =>
+  set === null || set === undefined || set < 0 ? DEFAULT_DIARY_RESERVE : set
+
+/**
+ * How many a person may diarise for THEMSELVES on a given day.
+ *
+ * Never below one. A reserve larger than the capacity would otherwise say "you may book nothing
+ * today", which is not a rule anybody meant and would read as the diary being broken.
+ */
+export function selfBookingLimit(capacity: number, reserve: number): number {
+  return Math.max(1, capacity - reserve)
+}

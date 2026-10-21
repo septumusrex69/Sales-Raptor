@@ -14,6 +14,7 @@ import {
   consultationNote, dialledNote, noAnswerNote,
   ATTEMPT_DESCRIPTION, ATTEMPT_ITEM_ID, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID,
 } from './callRules.ts'
+import { clockNow } from './clock.ts'
 
 export * from './callRules.ts'
 
@@ -71,7 +72,7 @@ export async function recordDial(input: {
 
   await addNote({
     accountId: input.accountId,
-    body: dialledNote(input.number, input.extension, charge),
+    body: dialledNote(input.number, input.extension),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',
@@ -121,6 +122,14 @@ export async function recordConsultation(input: {
   comment: string
   /** The account_calls row, where there is one, so the fee is claimed exactly once. */
   callId?: string | null
+  /**
+   * WHO WAS SPOKEN TO, where it was not the debtor: "his mother", "the accounts lady".
+   *
+   * IT DOES NOT CHANGE THE FEE, at the firm's decision -- any conversation about the account is a
+   * consultation, see CONSULTATION_ITEM_NOTE. It changes the NOTE, which is what has to survive
+   * somebody reading the account two years later and asking who agreed to what.
+   */
+  spokeTo?: string | null
   actor: Actor
 }): Promise<ChargeResult> {
   const said = input.comment?.trim()
@@ -135,7 +144,7 @@ export async function recordConsultation(input: {
    */
   if (input.callId) {
     const { data: claimed } = await supabase.from('account_calls')
-      .update({ consultation_charged_at: new Date().toISOString() })
+      .update({ consultation_charged_at: clockNow().toISOString() })
       .eq('id', input.callId)
       .is('consultation_charged_at', null)
       .select('id')
@@ -160,7 +169,7 @@ export async function recordConsultation(input: {
    */
   await addNote({
     accountId: input.accountId,
-    body: consultationNote(input.number, charge),
+    body: consultationNote(input.number, input.spokeTo),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',

@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, Database, FileUp, Info, Loader2, Upload } from 'lucide-react'
+import clsx from 'clsx'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
@@ -9,12 +10,17 @@ import { parseCsv, type CsvRow } from '../../lib/csv'
 import { readSingleCsvFromZip } from '../../lib/zip'
 import { readXlsx } from '../../lib/xlsx'
 import {
-  buildImportPlan, planRows, IMPORT_TABLES, WIPE_TABLES, type ImportPlan,
+  buildImportPlan, countWhatAWipeWouldDelete, planRows, tollIsUnknown, wipeTollLine,
+  IMPORT_TABLES, WIPE_TABLES, type ImportPlan, type WipeToll,
 } from '../../lib/swordfishImport'
+import { cutoverDefault, settledThroughDefault } from '../../lib/trustCycles'
 import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
 } from '../../lib/accountEnrich'
 import { formatCurrency } from '../../data/mockData'
+import { HandoverImportCard } from './HandoverImportCard'
+import { LeadsImportCard } from './LeadsImportCard'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * Which database this app is actually pointed at.
@@ -121,12 +127,35 @@ type SourceKey = (typeof SOURCES)[number]['key']
 type Files = Partial<Record<SourceKey, File>>
 type Phase = { step: string; done: number; total: number } | null
 
-export function DataImportTab() {
+export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }) {
   const { currentUser } = useAuth()
   const { users } = useAppStore()
   const [files, setFiles] = useState<Files>({})
   const [ownerId, setOwnerId] = useState(currentUser?.id ?? '')
   const [only, setOnly] = useState('')
+  /*
+   * WHERE SWORDFISH'S BOOKS STOP AND RAPTOR'S BEGIN.
+   *
+   * THE FIRM: "if the payments come from Swordfish, they're already in there and they've already
+   * been approved... except for the ones that doesn't fall in the next payment run. If we import,
+   * for example, today, the entire Swordfish book, then from the 11th September until today would
+   * not have been processed. It should go into a state of needing to be approved."
+   *
+   * ASKED RATHER THAN WORKED OUT, and they said why in the same breath -- "I don't know. We'll have
+   * to figure that out." Only the firm knows when the old system last paid its clients, and this is
+   * the most consequential number in the migration: too early and every client is paid a second
+   * time for money they already have, too late and a month of collections is never remitted.
+   * settledThroughDefault offers their own worked example; this box is where they correct it.
+   */
+  /*
+   * A CLEAN BREAK BY DEFAULT (S8). The go-live plan the firm agreed on 10 Oct: everything received up to
+   * the cut-over is Swordfish's to pay over, paid or not yet paid, and Raptor splits only what comes
+   * after. The other mode -- "Swordfish has paid up to" -- is the old one, kept for trial imports.
+   */
+  const [cleanBreak, setCleanBreak] = useState(true)
+  const [settledThrough, setSettledThrough] = useState(
+    () => cutoverDefault(clockToday()),
+  )
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [reading, setReading] = useState(false)
   const [phase, setPhase] = useState<Phase>(null)
@@ -134,12 +163,62 @@ export function DataImportTab() {
   const [done, setDone] = useState<string | null>(null)
   const [wipe, setWipe] = useState(false)
   const [confirmText, setConfirmText] = useState('')
+  /*
+   * THE WIPE IS BEHIND A LINK NOW, AND IT COUNTS WHAT IT WOULD TAKE.
+   *
+   * THE FIRM: "The 'Delete everything first' tickbox sits next to a normal import. One wrong tick
+   * wipes every client, lead, deal, contact, task, activity and account. Move it behind a 'Start
+   * over' link, say exactly what will be deleted ('1 client and 8 accounts')."
+   *
+   * Both halves matter. A tickbox beside the ordinary button is one slip away from the worst thing
+   * this screen can do, and a list of table names reads identically on an empty database and on a
+   * live one -- so it says the same the day it costs nothing and the day it costs the firm its book.
+   */
+  const [startOver, setStartOver] = useState(false)
+  const [toll, setToll] = useState<WipeToll | null>(null)
+  /*
+   * THE STOP BUTTON (the handoff: "There is no Stop button on the import, though the code has an
+   * `abort` flag nothing sets"). A stop is honoured BETWEEN chunks of 500, never mid-request, and
+   * a stopped run goes down exactly the road a failed one does -- `discard_import_batch` -- because
+   * half a book is half a book whoever decided it. It is NOT offered while the wipe runs: a wipe
+   * stopped part-way leaves a book that is neither the old one nor empty, which is the one state
+   * worse than either. `stoppable` is what the button reads; `abort` is what the loop reads.
+   */
   const abort = useRef(false)
+  const [stoppable, setStoppable] = useState(false)
+  const [stopping, setStopping] = useState(false)
 
   const isAdmin = currentUser?.role === 'Administrator'
+
+  /* COUNTED WHEN THE LINK IS OPENED, not on every render: four head counts, and nobody pays for
+     them unless they are about to be shown the thing they describe. */
+  useEffect(() => {
+    if (!startOver || toll) return
+    let cancelled = false
+    void countWhatAWipeWouldDelete(supabase).then((t) => { if (!cancelled) setToll(t) })
+    return () => { cancelled = true }
+  }, [startOver, toll])
   // The register is optional: without it the clients come from the configuration in the repo,
   // which is how this worked before the register existed.
-  const ready = SOURCES.filter((s) => s.required).every((s) => files[s.key])
+  const haveAccounts = SOURCES.filter((s) => s.required).every((s) => files[s.key])
+  /*
+   * THE CLIENT REGISTER CAN BE READ ON ITS OWN.
+   *
+   * THE FIRM, AFTER THE FIRST TEST IMPORT: "The client register can't be imported on its own.
+   * 'Read the exports' stays disabled until the four account files are chosen. Add a client-only
+   * import using the same register reader, so clients can be loaded before any handover."
+   *
+   * Which is the order the work actually happens in: a client is signed, the mandate is filed, and
+   * the first handover arrives weeks later. Requiring four account exports to load one client meant
+   * the client could not exist until it had a book, so a liaison had nothing to attach a mandate or
+   * a contact to.
+   *
+   * THE SAME READER, NOT A SECOND ONE. `buildImportPlan` with no account rows produces a plan of
+   * companies and nothing else -- `buildFromRegister` is the same function either way, so a client
+   * loaded alone and a client loaded with its book are built identically.
+   */
+  const clientsOnly = !haveAccounts && !!files.clients
+  const ready = haveAccounts || clientsOnly
 
   const readPlan = useCallback(async () => {
     setError(null); setDone(null); setPlan(null); setReading(true)
@@ -165,18 +244,23 @@ export function DataImportTab() {
           clients: parsed.clients,
           debtors: parsed.debtors,
         },
-        { ownerId, only: only.trim() || undefined },
+        {
+          ownerId, only: only.trim() || undefined, settledThrough, cleanBreak,
+          /* Every user, active or not: an inactive match is flagged rather than treated as unknown. */
+          clerks: users.map((u) => ({ id: u.id, name: u.name, active: u.status === 'Active' })),
+        },
       ))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setReading(false); setPhase(null)
     }
-  }, [files, ownerId, only])
+  }, [files, ownerId, only, settledThrough, cleanBreak, users])
 
   const runImport = useCallback(async () => {
     if (!plan) return
-    setError(null); setDone(null); abort.current = false
+    setError(null); setDone(null); abort.current = false; setStopping(false)
+    const STOPPED = 'You stopped the import.'
     const rows = planRows(plan)
     const totalRows = IMPORT_TABLES.reduce((t, k) => t + rows[k].length, 0)
     try {
@@ -186,6 +270,7 @@ export function DataImportTab() {
        * it and then failing on the first insert leaves a mess that looks like data loss, because
        * it is. The read is cheap and the alternative is unrecoverable by the person clicking.
        */
+      setStoppable(true)
       setPhase({ step: 'Checking the database is ready', done: 0, total: 0 })
       for (const table of IMPORT_TABLES) {
         const { error: e } = await supabase.from(table).select('id').limit(1)
@@ -198,33 +283,83 @@ export function DataImportTab() {
         }
       }
 
+      if (abort.current) throw new Error(`${STOPPED} Nothing was changed.`)
       if (wipe) {
+        setStoppable(false)
         for (const [i, table] of WIPE_TABLES.entries()) {
           setPhase({ step: `Clearing ${table.replace(/_/g, ' ')}`, done: i, total: WIPE_TABLES.length })
           // PostgREST requires a filter before it will delete in bulk; this one matches every row.
           const { error: e } = await supabase.from(table).delete().not('id', 'is', null)
           if (e) throw new Error(`Clearing ${table}: ${e.message}`)
         }
+        setStoppable(true)
       }
+      /*
+       * ALL OR NOTHING, keyed on this run (prompt 8). The firm's test import died part-way and left
+       * 7 clients, 20 accounts, 90 payments and 2 202 fees behind with no interest -- "a half-imported
+       * book is worse than none". One transaction cannot carry the real book (tens of thousands of
+       * rows, past what one request may hold), so every client, batch and account this run writes
+       * carries its id, and on ANY failure -- an insert refused, a network that dropped -- the run is taken
+       * back out by `discard_import_batch`, everything else going with its account by cascade.
+       */
+      const batch = crypto.randomUUID()
+      const STAMPED = new Set<string>(['companies', 'handovers', 'debtor_accounts'])
       let written = 0
-      for (const table of IMPORT_TABLES) {
-        const all = rows[table]
-        for (let i = 0; i < all.length; i += 500) {
-          if (abort.current) throw new Error('Stopped. The import is partial — run it again with "delete everything" ticked.')
-          const chunk = all.slice(i, i + 500)
-          const { error: e } = await supabase.from(table).insert(chunk)
-          if (e) throw new Error(explain(table, i, e.message))
-          written += chunk.length
-          setPhase({ step: `Writing ${table.replace(/_/g, ' ')}`, done: written, total: totalRows })
+      try {
+        for (const table of IMPORT_TABLES) {
+          const all = STAMPED.has(table)
+            ? rows[table].map((r) => ({ ...r, import_batch_id: batch }))
+            : rows[table]
+          for (let i = 0; i < all.length; i += 500) {
+            if (abort.current) throw new Error(STOPPED)
+            const chunk = all.slice(i, i + 500)
+            const { error: e } = await supabase.from(table).insert(chunk)
+            if (e) throw new Error(explain(table, i, e.message))
+            written += chunk.length
+            setPhase({ step: `Writing ${table.replace(/_/g, ' ')}`, done: written, total: totalRows })
+          }
         }
+      } catch (failure) {
+        const why = failure instanceof Error ? failure.message : String(failure)
+        /* Nothing written yet is nothing to take back -- and saying "taken back out" over a run
+           that never wrote a row would be a claim about the book that is not true. */
+        if (written === 0) throw new Error(`${why} Nothing was written.`)
+        setStoppable(false)
+        setPhase({ step: 'Taking this import back out', done: 0, total: 0 })
+        const { data: undone, error: undoError } = await supabase.rpc('discard_import_batch', { p_batch: batch })
+        if (undoError) {
+          /* THE ONE CASE WORTH SHOUTING ABOUT: half a book is in the database. Say exactly how to
+             finish the job, with the id that does it. */
+          throw new Error(`${why} Taking the partial import back out ALSO failed (${undoError.message}). `
+            + `Half of this import is still in the database. An administrator can remove it with `
+            + `discard_import_batch('${batch}').`)
+        }
+        const n = undone as { accounts?: number; clients?: number } | null
+        throw new Error(`${why} Everything this run had written has been taken back out `
+          + `(${n?.accounts ?? 0} accounts, ${n?.clients ?? 0} clients), so the book is `
+          + `${wipe ? 'empty, as the wipe left it' : 'as it was before you pressed Import'}.`)
       }
       setDone(`Imported ${totalRows.toLocaleString('en-ZA')} rows.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setPhase(null)
+      setPhase(null); setStoppable(false); setStopping(false)
     }
   }, [plan, wipe])
+
+  /*
+   * TWO TABS, NOT TWO HEADINGS, at the firm's correction -- drawn on the screenshot as a pair of
+   * boxes side by side over the first heading.
+   *
+   * The headings were the right split and the wrong shape: stacked, the sales half sits above the
+   * collections half and is read as step one of it, which is the exact confusion the headings
+   * were added to end. A person doing an import is on ONE side of the business that morning, and
+   * the other side's cards are noise they have to scroll past.
+   *
+   * COLLECTIONS FIRST, because it is where the work is: the book is hundreds of thousands of
+   * accounts and the leads workbook is a few hundred rows once a month.
+   */
+  const [side, setSide] = useState<'collections' | 'sales'>('collections')
 
   if (!isAdmin) {
     return (
@@ -239,12 +374,38 @@ export function DataImportTab() {
 
   return (
     <div className="space-y-4">
-      <DebtorDetailsCard />
+      {/*
+        TWO SIDES, TWO SECTIONS, at the firm's instruction: "on a client level ... that'll go with
+        the collections. And then on the lead side, that's something different. Split them."
+
+        They were one flat list of six file pickers, and the list did not say which half of the
+        business any of them belonged to -- so the leads workbook sat above the book migration as
+        though they were steps in one procedure. They are not related at all: one brings a sales
+        pipeline in, the other brings a quarter of a million debtor accounts across.
+      */}
+      <Sides side={side} onPick={setSide} />
+
+      {side === 'sales' && <LeadsImportCard />}
+
+      {/* A fragment: the migration is a card, its progress is a card and its plan is a third, and
+          all three belong to this side. */}
+      {/*
+        THE HANDOVER IMPORT IS FIRST, at the firm's instruction: "on the very, very, very top I
+        need an import file in the data import. So a new handover import. Then bring the book
+        across from Swordfish, and then refresh the details of existing stuff."
+
+        Which is also the order of how often each is used: a handover arrives every week, the
+        Swordfish migration happens once, and the refresh is for a client who sends a corrected
+        contact list.
+      */}
+      {side === 'collections' && (
+      <>
+      <HandoverImportCard forCompanyId={forCompanyId} />
 
       <Card>
         <CardHeader
-          title="Import from Swordfish"
-          subtitle="Reading the exports shows what would change and writes nothing. Importing is a separate step."
+          title="Bring the book across from Swordfish"
+          subtitle="Once, at the start. Reading the exports shows what would change and writes nothing — importing is a separate step."
         />
 
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-slate-50 text-sm">
@@ -268,17 +429,74 @@ export function DataImportTab() {
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4 mt-5">
+          {/*
+            NOT CLIENT ALLOCATION, and the old label said it was.
+            THE FIRM: "if I import a client, the client allocation doesn't work here."
+
+            They are right, and the label was the lie. The Swordfish register creates around three
+            hundred client records in one go, and companies.account_owner_id is NOT NULL-able in
+            practice -- something has to be written. So this is the name every one of those records
+            STARTS under, so that none of them arrives ownerless; who actually looks after a client
+            is a decision the firm makes one client at a time, on the client, afterwards.
+
+            The control the firm actually wants -- "you can choose which client does the handover
+            batch fall on" -- belongs to a different import, of one batch onto one existing client,
+            and a picker of PEOPLE could never have been it. That import does not exist yet.
+          */}
           <label className="block">
-            <span className="block text-xs font-medium text-slate-500 mb-1">Clients land on</span>
+            <span className="block text-xs font-medium text-slate-500 mb-1">
+              New client records start under
+            </span>
             <select className={inputClass} value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setPlan(null) }}>
               {users.filter((u) => u.status === 'Active').map((u) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
             </select>
             <span className="block text-[11px] text-slate-400 mt-1">
-              Every imported client is assigned to this person. Reassign individually afterwards.
+              Not client allocation &mdash; a placeholder so no client arrives ownerless. Who looks
+              after a client is set on the client itself, one at a time.
             </span>
           </label>
+          {/*
+            THE DATE SITS BESIDE THE OTHER TWO ANSWERS THE IMPORT NEEDS, not behind an "advanced"
+            fold: it is not a tuning knob, it is the question "what has Swordfish already paid your
+            clients?", and the firm has to answer it every time.
+          */}
+          <div className="block">
+            <div className="flex gap-1 mb-1" role="radiogroup" aria-label="Where Raptor's money starts">
+              {([[true, 'Clean break'], [false, 'Swordfish has paid up to']] as const).map(([v, label]) => (
+                <button key={label} type="button" role="radio" aria-checked={cleanBreak === v}
+                  className={clsx('text-[11px] px-2 py-0.5 rounded-full border',
+                    cleanBreak === v ? 'bg-navy-900 text-white border-navy-900' : 'text-slate-500 border-slate-200')}
+                  onClick={() => {
+                    setCleanBreak(v)
+                    setSettledThrough(v ? cutoverDefault(clockToday()) : settledThroughDefault(clockToday()))
+                    setPlan(null)
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="block text-xs font-medium text-slate-500 mb-1">
+              {cleanBreak ? 'Cut-over: Swordfish\u2019s up to and including' : 'Swordfish has paid clients over up to and including'}
+            </span>
+            <input
+              type="date"
+              aria-label={cleanBreak ? 'Cut-over date' : 'Swordfish has paid clients over up to and including'}
+              className={inputClass}
+              value={settledThrough}
+              onChange={(e) => { setSettledThrough(e.target.value); setPlan(null) }}
+            />
+            <span className="block text-[11px] text-slate-400 mt-1">
+              {cleanBreak
+                ? <>Every receipt up to this day is Swordfish&rsquo;s to pay over, including the cycles it has
+                  not paid yet. Raptor splits only what arrives after it. Go-live: 10 December. The parallel
+                  run: 10 October.</>
+                : <>Receipts up to this day are history: they stay out of the approval queue and no payover
+                  run can claim them. Everything after it arrives needing approval. Raptor cannot work
+                  this out &mdash; set it to the last day the old system actually remitted.</>}
+            </span>
+          </div>
           <label className="block">
             <span className="block text-xs font-medium text-slate-500 mb-1">Only these clients (optional)</span>
             <input
@@ -299,13 +517,26 @@ export function DataImportTab() {
           onClick={readPlan}
         >
           {reading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
-          {reading ? 'Reading…' : 'Read the exports'}
+          {reading ? 'Reading…' : clientsOnly ? 'Read the client register' : 'Read the exports'}
         </button>
+        {/*
+          WHAT THIS READ WILL ACTUALLY DO, said before it is pressed rather than discovered after.
+          The register alone loads clients and no book, which is the normal order of things: a
+          client is signed and the first handover arrives weeks later.
+        */}
+        {clientsOnly && (
+          <p className="text-xs text-slate-500 mt-2">
+            The client register on its own: this loads the <strong>clients</strong> and their
+            commission scales, and no accounts. Add the four account exports to bring a book across
+            as well.
+          </p>
+        )}
         {!ready && (
           <p className="text-xs text-slate-400 mt-2">
-            The four account exports are needed — balances cannot be checked without them. Without the
-            client register the clients are worked out from their names instead, which is a guess where
-            the register is a record. Without Debtors Per Client there are no phone numbers, no email
+            Choose the client register to load clients on their own, or all four account exports to
+            bring a book across — balances cannot be checked without them. Without the client
+            register the clients are worked out from their names instead, which is a guess where the
+            register is a record. Without Debtors Per Client there are no phone numbers, no email
             addresses and no main comments: the book imports, but nobody can be phoned.
           </p>
         )}
@@ -328,7 +559,22 @@ export function DataImportTab() {
                 </>
               )}
             </div>
+            {stoppable && (
+              <button
+                type="button"
+                disabled={stopping}
+                onClick={() => { abort.current = true; setStopping(true) }}
+                className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {stopping ? 'Stopping…' : 'Stop'}
+              </button>
+            )}
           </div>
+          {stopping && (
+            <p className="text-xs text-slate-500 mt-2">
+              Stopping after this batch of rows. Everything this import has written will be taken back out.
+            </p>
+          )}
         </Card>
       )}
 
@@ -365,41 +611,152 @@ export function DataImportTab() {
       {plan && !done && (
         <Card>
           <CardHeader title="Write it" subtitle="Nothing above has touched the database yet." />
-          <label className="flex items-start gap-2.5 text-sm text-slate-700">
-            <input type="checkbox" className="mt-0.5" checked={wipe} onChange={(e) => { setWipe(e.target.checked); setConfirmText('') }} />
-            <span>
-              Delete everything first — every client, lead, deal, contact, task, activity and account.
-              <span className="block text-[11px] text-slate-400 mt-0.5">
-                People, teams and targets are kept. Without this, the import adds to whatever is already there.
-              </span>
-              <span className="block text-[11px] text-slate-500 mt-1">
-                On <span className="font-mono font-medium">{DATABASE_HOST}</span>.
-              </span>
-            </span>
-          </label>
+          <p className="text-sm text-slate-600">
+            This ADDS to whatever is already there. Nothing is removed.
+          </p>
 
-          {wipe && (
-            <div className="mt-3 pl-6">
-              <p className="text-xs text-slate-500 mb-1.5">
-                Type <span className="font-mono font-semibold text-slate-700">delete everything</span> to confirm.
-              </p>
-              <input className={`${inputClass} max-w-xs`} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+          {startOver && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50/50 p-4">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-rose-800">
+                    Start over: delete what is in Raptor first
+                  </p>
+                  {/*
+                    THE REAL NUMBERS, OR NOTHING. A count that failed to come back reads as -1 and
+                    the wipe is not offered at all: zero would read as "nothing to lose", which is
+                    the one thing this must never say wrongly.
+                  */}
+                  {toll === null && <p className="text-[13px] text-slate-500 mt-1">Counting what is there…</p>}
+                  {toll !== null && tollIsUnknown(toll) && (
+                    <p className="text-[13px] text-rose-700 mt-1">
+                      Raptor could not count what is in the database, so this is not offered. Try again.
+                    </p>
+                  )}
+                  {toll !== null && !tollIsUnknown(toll) && (
+                    <>
+                      <p className="text-[13px] text-rose-800 mt-1">
+                        This deletes <span className="font-semibold">{wipeTollLine(toll)}</span>,
+                        with every payment, fee, note, diary entry and document on them,
+                        on <span className="font-mono font-medium">{DATABASE_HOST}</span>.
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        People, teams and targets are kept. Nothing else is.
+                      </p>
+                      <label className="flex items-start gap-2.5 text-sm text-slate-700 mt-3">
+                        <input type="checkbox" className="mt-0.5" checked={wipe}
+                          onChange={(e) => { setWipe(e.target.checked); setConfirmText('') }} />
+                        <span>Yes, delete it and import from scratch</span>
+                      </label>
+                      {wipe && (
+                        <div className="mt-3 pl-6">
+                          <p className="text-xs text-slate-500 mb-1.5">
+                            Type <span className="font-mono font-semibold text-slate-700">delete everything</span> to confirm.
+                          </p>
+                          <input className={`${inputClass} max-w-xs`} value={confirmText}
+                            onChange={(e) => setConfirmText(e.target.value)} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button type="button"
+                    onClick={() => { setStartOver(false); setWipe(false); setConfirmText('') }}
+                    className="mt-3 text-[13px] font-medium text-slate-500 underline hover:text-slate-700">
+                    Never mind
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
-          <button
-            className="btn-primary mt-5 inline-flex items-center gap-2"
-            disabled={!!phase || (wipe && confirmText.trim().toLowerCase() !== 'delete everything')}
-            onClick={runImport}
-          >
-            <Upload size={15} />
-            Import {plan.debtorAccounts.length.toLocaleString('en-ZA')} accounts
-          </button>
+          {/*
+            THE ONE BUTTON THIS WHOLE SCREEN EXISTS FOR, and it now looks it: the firm circled it
+            ("Make the import more prominent") because it drew as plain text against the Start
+            over link. Large, gold, on its own line -- and the destructive link moved BELOW it, in
+            the quiet weight, so the two can no longer be read as one control or hit by one tap.
+          */}
+          <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+            <button
+              className="btn-primary gap-2 px-6 py-3 text-base shadow-sm"
+              disabled={!!phase || (wipe && confirmText.trim().toLowerCase() !== 'delete everything')}
+              onClick={runImport}
+            >
+              <Upload size={18} />
+              {plan.debtorAccounts.length === 0
+                ? `Import ${plan.companies.length.toLocaleString('en-ZA')} ${plan.companies.length === 1 ? 'client' : 'clients'}`
+                : `Import ${plan.debtorAccounts.length.toLocaleString('en-ZA')} ${plan.debtorAccounts.length === 1 ? 'account' : 'accounts'}`}
+            </button>
+          </div>
+
+          {/* THE DESTRUCTIVE PATH IS A LINK, NOT A TICKBOX BESIDE THE ORDINARY BUTTON -- and it sits
+              under the button, never beside it. Opening it is a deliberate act; the counts are
+              fetched only once somebody has. */}
+          {!startOver && (
+            <button type="button" onClick={() => setStartOver(true)}
+              className="mt-4 block text-[13px] font-medium text-slate-400 underline hover:text-rose-700">
+              Start over instead
+            </button>
+          )}
         </Card>
       )}
+      </>
+      )}
+
+      {/*
+        BELOW THE MIGRATION, NOT ABOVE IT, and that is the whole answer to the firm's question:
+        "you have here the debtors per client report, which is in two places. Please clarify that."
+
+        It is the same export doing two different jobs. Up there it is one of six files that BUILD
+        the book, read once at the migration. Down here it is that one file on its own, applied to
+        accounts the book already has -- which is what happens every month afterwards. Sitting
+        above the migration it read as a duplicate of a step; sitting below it, in order, it reads
+        as what comes next. The card says so itself now rather than leaving it to the order.
+      */}
+      {side === 'collections' && <DebtorDetailsCard />}
     </div>
   )
 }
+
+/**
+ * Which side of the business is being imported.
+ *
+ * THE FIRM DREW THIS: two boxes side by side, "Collections | Sales", over a pair of stacked
+ * headings. Stacked, the sales half sat above the collections half and read as step one of it --
+ * which is what the headings were added to stop, so they were the right split in the wrong shape.
+ *
+ * Built to look like the library's tabs rather than to a new pattern: these are the same thing
+ * doing the same job two screens apart, and a person should not have to learn it twice.
+ */
+function Sides({ side, onPick }: {
+  side: 'collections' | 'sales'
+  onPick: (s: 'collections' | 'sales') => void
+}) {
+  const tabs: [typeof side, string, string][] = [
+    ['collections', 'Collections', 'The book. The first import brings it across from Swordfish; everything after that updates accounts already in it.'],
+    ['sales', 'Sales', 'Leads, and the people behind them. Nothing here touches the book.'],
+  ]
+  return (
+    <Card>
+      <div className="flex gap-5 border-b border-slate-100 -mt-1">
+        {tabs.map(([key, label]) => (
+          <button key={key} type="button" onClick={() => onPick(key)}
+            className={`py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+              side === key
+                ? 'border-gold-400 font-medium text-navy-950'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {/* The blurb belongs to the tab you are on, so the sentence describing the other side is
+          not sitting on the screen contradicting it. */}
+      <p className="text-xs text-slate-400 mt-3">{tabs.find(([k]) => k === side)?.[2]}</p>
+    </Card>
+  )
+}
+
 
 /**
  * Updating debtor details on their own.
@@ -461,8 +818,8 @@ function DebtorDetailsCard() {
   return (
     <Card>
       <CardHeader
-        title="Update debtor details"
-        subtitle="Debtors Per Client on its own, applied to accounts already in the book. Nothing is cleared."
+        title="Refresh debtor details from a new export"
+        subtitle="The same Debtors Per Client file as above, on its own, applied to accounts the book already has. Nothing is cleared. This is the one to run every month."
       />
 
       <FilePicker

@@ -1,16 +1,20 @@
+import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, Columns3, Loader2, Mail, MessageCircle,
-  MessageSquare, PanelRight, Phone, Plus, Printer, Rows3, ShieldAlert, StickyNote, X, XCircle,
-  type LucideIcon,
-} from 'lucide-react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { rand } from '../../lib/money'
+import { PhoneLink } from '../../components/PhoneLink'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction as Action, RecordActions, RecordFigure as Figure,
+  RecordFigures, RecordLayout, RecordLayoutSwitcher, RecordTabs, useRecordLayout,
+} from '../../components/record/RecordShell'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
-import { accountFlagList, fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
+import { fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
+import { accountRate } from '../../lib/commissionRule'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import { chargeMessage } from '../../lib/accountCharges'
 import { promiseProblem, recordPromise, PROMISE_ITEM_ID } from '../../lib/accountPromises'
@@ -21,21 +25,129 @@ import {
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
-import { isWrittenOff } from '../../lib/accountStatus'
-import { canViewClients } from '../../lib/permissions'
-import { styleFor, PROMISE_CHIP } from './timelineStyle'
+import { accountEnded, isWrittenOff } from '../../lib/accountStatus'
+import {
+  canFreezeAccounts, canHandOutAccounts, canViewClients, canViewFinance, isAssignableOwner,
+} from '../../lib/permissions'
+import { HandOutModal } from './HandOutModal'
+import { CancelArrangementModal } from './CancelArrangementModal'
+import type { Selection } from '../../lib/accountAllocation'
+import { timeOnDesk, firmToday, firmDay } from '../../lib/dateLabels'
+import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
+import { LedgerPanel } from './LedgerPanel'
+import { RecordPaymentModal } from '../finance/RecordPaymentModal'
+import { canApproveSettlement, canRecordPayment, canReversePayment } from '../../lib/permissions'
+import { AccountPaymentsList } from '../../components/accounts/AccountPaymentsList'
+import { isQuotable, type Settlement } from '../../lib/settlement'
+import { fetchSettlement } from '../../lib/settlementApi'
+import { SettlementPanel } from '../../components/accounts/SettlementPanel'
+import { fetchStatusChanges } from '../../lib/accountEndingApi'
+import type { StatusChange } from '../../lib/accountTimeline'
+import { ENDING_LABEL, ENDING_SHORT } from '../../lib/accountEnding'
+import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
+import { FreezeModal } from './FreezeModal'
+import { EndAccountModal } from '../../components/accounts/EndAccountModal'
+import { useBackLink, useRecordName } from '../../lib/backLink'
+import { HoldAccountModal, ReleaseAccountModal } from '../../components/accounts/HoldAccountModal'
+import { bookLabel, holdLabel } from '../../lib/accountBooks'
+import { compareWithSwordfish } from '../../lib/importGap'
+import { ClientActionModal } from './ClientActionModal'
+import {
+  CLIENT_FLAGS, CLIENT_POSITIONS, DESK_POSITIONS, deskPosition, frozenByLabel, positionReport,
+  type ClientFlag, type ClientPosition, type DeskPosition,
+} from '../../lib/clientPosition.ts'
+import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
+import { TRACE_REQUEST_FOR, traceNeeds, traceableMobile } from '../../lib/traceAttempt.ts'
+import { balanceInputFor } from '../../lib/balanceInput.ts'
+import { noticeToReissue, type Reissue } from '../../lib/reissueNotice.ts'
+import { ReissueNoticeModal } from './ReissueNoticeModal'
+import { tracingThisMonth, type TracingMonth } from '../../lib/traceSources.ts'
+import { MONTHLY_LIMIT, TRACING_ACTION_CODE } from '../../lib/actionTariff.ts'
+import {
+  directorshipSummary, judgmentSummary, practitionerLabel, practitionerMeaning, splitJudgments,
+  type AccountDirector, type AccountJudgment, type AccountStanding, type DirectorCompany,
+  type PractitionerKind,
+} from '../../lib/accountStanding.ts'
+import { fetchStanding } from '../../lib/accountStandingData.ts'
+import { DirectorModal } from './DirectorModal'
+import { heldProperty, propertyAcross, traceSummary, type FiledTrace } from '../../lib/traceStore.ts'
+import { fetchTraces } from '../../lib/traceStoreData.ts'
+import { TraceWorkspaceModal } from './TraceWorkspaceModal'
+import { TraceUploadModal } from './TraceUploadModal'
+import { PractitionerModal } from './PractitionerModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
-import { fetchQueries, type AccountQuery } from '../../lib/accountQueries'
+import { CallScriptPanel } from '../../components/collections/CallScriptPanel'
+import { AuthorisedContactsPanel } from './AuthorisedContactsPanel'
+import { ParkTraceModal } from './ParkTraceModal'
+import { ReferAccountModal } from './ReferAccountModal'
+import { EstatePanel } from './EstatePanel'
+import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
+import { DiariseModal } from '../../components/diary/DiariseModal'
+import { fetchQueries, openDisputeOn, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
+import {
+  fetchAccountEmails, markRepliesRead, markRepliesUnread, recordSentEmail, replySubject,
+  type AccountEmail,
+} from '../../lib/accountEmails'
+import { EmailsPanel } from './EmailsPanel'
+import { clockNow, clockToday } from '../../lib/clock.ts'
+/* The same four helpers the mailbox answers its own mail with. Written once, so a reply-all from
+   an account and a reply-all from the mailbox cannot disagree about who is on a thread. */
+import { forwardBody, forwardSubject, recipientLine, replyAllTo } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
 import { formatMoney, formatDate } from '../../data/mockData'
+import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
+import { dayKey } from '../../lib/collectionPace'
+import { accountMergeValues } from '../../lib/accountMergeValues.ts'
+import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
+import { WorkflowRunPanel, StartWorkflowAsk } from '../../components/collections/WorkflowRunPanel'
+import { Modal } from '../../components/ui/Modal'
+import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
+import { TestClockPanel } from '../../components/collections/TestClockPanel'
+import { SigningPanel } from './SigningPanel'
+import { LeavingModal } from './LeavingModal'
+import { hasOpenDiaryEntry } from '../../lib/diary'
+import { shouldAskOnLeaving } from '../../lib/leavingAccount.ts'
+import {
+  fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn,
+  type AccountRun, type StartableWorkflow,
+} from '../../lib/accountRun.ts'
+import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
+import { liveArrangement, nextUnpaid } from '../../lib/ptpSchedule.ts'
+import { RepaymentCalculator } from '../../components/collections/RepaymentCalculator.tsx'
+import { AccountDocuments } from '../../components/collections/AccountDocuments.tsx'
+import { todayIso } from '../../lib/reminderTime.ts'
+import { lastPayment } from '../../lib/accountBalance.ts'
+import {
+  dispositionNote, needsMore, nodeReached, outcomeFor, type CallState,
+} from '../../lib/callScripts.ts'
+import { recordOutcome } from '../../lib/recordOutcome.ts'
+import {
+  fetchAuthorisedContacts, suretyName, type AuthorisedContact,
+} from '../../lib/authorisedContacts.ts'
+import { needsAttention } from '../../lib/runSteps.ts'
+import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
+import { fetchOtherAccounts } from '../../lib/accountBook'
+import { useTitleSlot } from '../../components/layout/TitleSlot'
+import { compareTraceReports } from '../../lib/traceCompare.ts'
+import {
+  newFindingWord, reportsLine, traceSubjects, type TraceSubject,
+} from '../../lib/traceSubjects.ts'
+import { reallocationLine, roundLine, traceRound } from '../../lib/traceRound.ts'
+import {
+  hasProgress, instalmentProgress, moneyProgress, progressPercent, type PaymentProgress,
+} from '../../lib/paymentProgress.ts'
+import { instalmentsDue } from '../../lib/arrangements'
+import { AccountWhatsApp } from './AccountWhatsApp'
+import { whatsAppOpening } from '../../lib/whatsapp'
+import { recordWhatsApp } from '../../lib/accountWhatsApp'
 
-type Tab = 'Overview' | 'Transactions' | 'Documents'
+type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'Documents'
 
 /**
  * How the Overview arranges its six panels.
@@ -45,26 +157,16 @@ type Tab = 'Overview' | 'Transactions' | 'Documents'
  * the middle column gets squeezed, an iPad held in one hand. The firm asked to be able to choose
  * rather than have the page choose for them.
  */
-type Layout = 'columns' | 'stacked' | 'wide'
-
-const LAYOUTS: { id: Layout; label: string; icon: LucideIcon; hint: string }[] = [
-  { id: 'columns', label: 'Three columns', icon: Columns3, hint: 'Details, history and money side by side' },
-  { id: 'stacked', label: 'One column', icon: Rows3, hint: 'Everything under each other, in reading order' },
-  { id: 'wide', label: 'Wide history', icon: PanelRight, hint: 'Details and history two thirds, money one third' },
-]
-
-/** Remembered per browser, not per account: it is a preference about eyes, not about a debtor. */
+/*
+ * The layout switcher is now shared with every other record page — see RecordShell. The key stays
+ * per page type, because the right arrangement genuinely differs: an account has a long timeline
+ * to give width to, a lead has not.
+ */
 const LAYOUT_KEY = 'raptor.account.layout'
 
-function storedLayout(): Layout {
-  try {
-    const saved = localStorage.getItem(LAYOUT_KEY)
-    if (LAYOUTS.some((l) => l.id === saved)) return saved as Layout
-  } catch { /* private browsing, or storage switched off. The default is fine. */ }
-  return 'columns'
-}
-
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * One debtor account: who to call, what the story is, and what is owed.
@@ -79,18 +181,129 @@ const TODAY = new Date().toISOString().slice(0, 10)
  */
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>()
-  const { companies, users } = useAppStore()
-  const { currentUser } = useAuth()
+  const { companies, users, teams } = useAppStore()
+  const { currentUser, session } = useAuth()
   const [account, setAccount] = useState<DebtorAccount | null>(null)
+  /* The assign-and-refer screen, opened off the name in the band. */
+  const [handOut, setHandOut] = useState(false)
   const [ledgers, setLedgers] = useState<AccountLedgers | null>(null)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [documents, setDocuments] = useState<AccountDocument[]>([])
   const [queries, setQueries] = useState<AccountQuery[]>([])
-  const [tab, setTab] = useState<Tab>('Overview')
-  const [layout, setLayout] = useState<Layout>(storedLayout)
+  /*
+   * THE SETTLEMENT, read on its own rather than inside the page's opening Promise.all: a page that
+   * cannot say whether a settlement exists is still a page a collector can work, and a failure here
+   * must not blank the account. Null answers the three settlement fields with nothing, which is the
+   * safe direction -- the placeholder stands and nothing unapproved is quoted. `settlementTick`
+   * is bumped by reload, which every action on this page already calls.
+   */
+  const [settlement, setSettlement] = useState<Settlement | null>(null)
+  const [settlementTick, setSettlementTick] = useState(0)
+  const [emails, setEmails] = useState<AccountEmail[]>([])
+  const [standing, setStanding] = useState<AccountStanding>({ directors: [], judgments: [] })
+  const [traces, setTraces] = useState<FiledTrace[]>([])
+  /** The same debtor's accounts elsewhere on the book. Derived from the identity number. */
+  const [otherAccounts, setOtherAccounts] = useState<OtherAccount[]>([])
+  /** Which filed trace is open for working. See TraceWorkspaceModal. */
+  const [openTrace, setOpenTrace] = useState<string | null>(null)
+  /** Which of the two endings a spent trace is being given, or null. See ParkTraceModal. */
+  const [parking, setParking] = useState<'park' | 'write_off' | null>(null)
+  /** Referring the account, or transferring a caller on the line. See ReferAccountModal. */
+  const [referring, setReferring] = useState<'refer' | 'transfer' | null>(null)
+  /** What the referral did, said where the press was. */
+  const [referred, setReferred] = useState<string | null>(null)
+  /** Whether the signed-in agent has a mailbox connected at all. Null while we are asking. */
+  const [mailbox, setMailbox] = useState<string | null>(null)
+  /** Set when writing a reply, so the debtor's client threads our answer under their message. */
+  const [replyTo, setReplyTo] = useState<AccountEmail | null>(null)
+  /*
+   * Arriving from the Messages menu.
+   *
+   * The `email` parameter picks the Emails tab and nothing more. It deliberately does NOT open
+   * the message: the firm's instruction was "just take it to the account and show the email as
+   * unread on the account", and the unread marker is what tells you which one to open. Landing
+   * on the Overview with the reply three tabs away would be the other failure, so the tab still
+   * switches.
+   */
+  const [params] = useSearchParams()
+  const cameForEmail = params.get('email') !== null
+  const [tab, setTab] = useState<Tab>(cameForEmail ? 'Emails' : 'Overview')
+  const [layout, chooseLayout] = useRecordLayout(LAYOUT_KEY)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [composeTo, setComposeTo] = useState<string | null>(null)
+  /**
+   * The Cc line the composer opens with, for a reply-all.
+   *
+   * Editable in the box, deliberately: a reply-all that quietly copied a debtor's attorney would
+   * be the firm's mistake and not the sender's, and the only moment to catch it is before Send.
+   */
+  const [composeCc, setComposeCc] = useState('')
+  /**
+   * The message being passed on, where this is a forward.
+   *
+   * Separate from replyTo because the two produce opposite openings: a reply is threaded and
+   * addressed and starts empty; a forward is neither threaded nor addressed and starts with the
+   * original quoted under it.
+   */
+  const [forwardOf, setForwardOf] = useState<AccountEmail | null>(null)
+  /**
+   * THE COVERING EMAIL FOR A DOCUMENT JUST SENT FOR SIGNATURE.
+   *
+   * THE FIRM: "my instruction was you have to send it from email." Shaped like `simulation` below
+   * and for the same reason: the composer is the one place that knows the mailbox, the recipients
+   * and how a sent message is recorded against the account, so the panel hands it a message rather
+   * than growing a send button of its own. `appendHtml` is the big button -- see signingRules.ts.
+   */
+  const [signingEmail, setSigningEmail] = useState<
+    {
+      subject: string; body: string; appendHtml: string; note: string
+      /** The signed copy going back to the debtor, already drawn. See SigningPanel. */
+      attachments?: AttachedFile[]
+    } | null>(null)
+  /**
+   * A PAYMENT SIMULATION ON ITS WAY OUT, where the calculator has just drawn one.
+   *
+   * THE FIRM: "if you click on that, it sends it to the debtor as an email and it charges it as
+   * well. So you can send it from the emails or you can send it from the promise to pay section."
+   *
+   * IT GOES OUT THROUGH THE COMPOSE BOX, which is the sentence to hold on to. That box sends
+   * through the collector's own mailbox, files the message on the account and raises item 1(a) --
+   * so the simulation is charged by exactly the thing that charges every other email, rather than
+   * by a second sender that would have to remember the R25 on its own.
+   *
+   * IT CARRIES ITS OWN MERGE VALUES. {{ptp_amount}}, {{sim_frequency}} and {{sim_start}} describe
+   * an arrangement that does not exist yet -- "this is before you conclude the payment
+   * arrangement" -- so nothing on the account can answer them and the calculator hands them up
+   * with the figures it was showing.
+   */
+  const [simulation, setSimulation] = useState<{
+    file: { filename: string; contentType: string; size: number; content: string }
+    values: Record<string, string>
+    subject: string
+    body: string
+    missing: string[]
+  } | null>(null)
+
+  /**
+   * Clear whatever the last message left behind, before opening the composer again.
+   *
+   * Four buttons now open the same modal with four different shapes. Without one place that
+   * resets them, forwarding a message and then replying to a different one opens a reply that is
+   * still carrying the forward's quoted body — the sort of bug that sends the wrong email.
+   */
+  function startCompose() {
+    setReplyTo(null)
+    setForwardOf(null)
+    setComposeCc('')
+    /* Cleared with everything else. Left behind, the next ordinary email to this debtor would
+       open with a simulation attached to it -- the exact class of bug this function exists for. */
+    setSimulation(null)
+    /* And the same for the signing button: an ordinary email carrying a Sign the acknowledgement
+       of debt button for a document sent an hour ago is the worst version of that bug, because the
+       link still works. */
+    setSigningEmail(null)
+  }
 
   // The action bar drives the panels below it rather than opening modals of its own: "Add Note"
   // puts the cursor in the note box that is already on the page, so there is one way to write a
@@ -98,8 +311,110 @@ export function AccountDetail() {
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
+  /** Words the SMS box opens with, where something on the page wrote them. See SigningPanel. */
+  const [smsText, setSmsText] = useState<string | null>(null)
   const [disputing, setDisputing] = useState(false)
+  /*
+   * THE REQUEST THE TRACE BOX ASKED FOR, as a prefilled description.
+   *
+   * THE FIRM: "we would need more information like an ID number." A trace that cannot be run is
+   * one of the few places where nothing the firm does next moves the account, so the trace box
+   * offers the ask -- and it opens the Escalate box rather than raising anything itself, because a
+   * request has to reach somebody by name and the owner picker lives there. See
+   * TraceButton.onAskClient.
+   */
+  const [askingTrace, setAskingTrace] = useState<string | null>(null)
+  /* The message the Escalate box was opened on, and which of its two buttons was pressed. */
+  const [classifying, setClassifying] = useState<{ email: AccountEmail; kind: 'dispute' | 'request' } | null>(null)
+  /*
+   * RECORDING A PAYMENT FROM THE ACCOUNT, at the firm's asking: "let's do it in the finance
+   * section and you will be able to do it on the account as well."
+   *
+   * NOT GATED ON canViewFinance. That test is about who may see the payment SPLIT -- the firm's
+   * rule is "sales representatives never see the payment split" -- and capturing a receipt shows
+   * none of it. What capture needs is somebody who works the book or talks to the client, which
+   * is who learns that a debtor paid the client direct. See may_record_payment() in the database,
+   * which is the boundary this only mirrors.
+   */
+  const [payingIn, setPayingIn] = useState(false)
+  const [freezing, setFreezing] = useState(false)
+  const [ending, setEnding] = useState(false)
+  /* ON HOLD AND BACK AGAIN. Separate from `ending`, because a hold is reversible and an ending is
+     not, and the difference is the thing somebody needs to feel before they press either. */
+  const [holding, setHolding] = useState(false)
+  const [releasing, setReleasing] = useState(false)
+  const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
+  const [scriptOpen, setScriptOpen] = useState(false)
+  /*
+   * THE FIRM'S OWN HALF OF A LETTER — its trust account, who signs, its name.
+   *
+   * Read once per account rather than per message: it is one row and it changes about never, and
+   * fetching it again for every compose would put a round trip in front of a button somebody
+   * presses fifty times a day. FIRM_UNSET while it is in flight, so a compose opened in the first
+   * moment shows {{firm_bank}} standing rather than a blank line that reads as finished.
+   */
+  const [firm, setFirm] = useState<FirmSettings>(FIRM_UNSET)
+  useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
+  useEffect(() => {
+    if (!id) return
+    let live = true
+    fetchSettlement(id)
+      .then((x) => { if (live) setSettlement(x) })
+      .catch(() => { if (live) setSettlement(null) })
+    return () => { live = false }
+  }, [id, settlementTick])
+
+  /*
+   * THE DEBTOR'S OTHER ACCOUNTS, fetched only where the identity number can be trusted.
+   *
+   * `debtorKey` is asked first so the common case costs nothing: an account with no ID, or with
+   * the telephone number the old sheet put in that column, makes no request at all. Cleared on
+   * the way in, or clicking from one of a debtor's accounts to another would show the first
+   * account's list against the second for as long as the fetch took -- which on this panel means
+   * offering somebody a link back to the account they are already looking at.
+   */
+  useEffect(() => {
+    setOtherAccounts([])
+    if (!account?.id) return
+    const key = debtorKey(account.debtorIdNumber, account.debtorKind)
+    if (!key) return
+    let live = true
+    void fetchOtherAccounts(account.id, account.debtorIdNumber ?? '', account.debtorKind)
+      .then((rows) => { if (live) setOtherAccounts(rows) })
+      .catch(() => { /* A panel that cannot load is a panel that is not shown. */ })
+    return () => { live = false }
+  }, [account?.id, account?.debtorIdNumber, account?.debtorKind])
+  const [diariseOpen, setDiariseOpen] = useState(false)
+  /*
+   * WHETHER THIS VISIT HAS CHANGED ANYTHING, AND WHETHER THERE IS A DAY TO COME BACK ON.
+   *
+   * THE FIRM: "I'm confirming that with you when you rediarise. Or if you go out of the account.
+   * To confirm the status of the account. And also if you want to rediarise."
+   *
+   * `touched` IS SET BY THE ACTIONS, NOT BY THE PAGE NOTICING. Opening an account to read a figure
+   * is most of what anybody does on a busy day, and asking a team leader who looked at a balance
+   * to confirm a status they never touched is how a status gets confirmed without being read. See
+   * leavingAccount.ts, which owns the rule.
+   */
+  const [touched, setTouched] = useState(false)
+  const [hasEntry, setHasEntry] = useState<boolean | null>(null)
+  const [leavingOpen, setLeavingOpen] = useState(false)
+  /*
+   * THE UPLOAD BOX, AND THE PDF IT WAS HANDED WHERE THERE IS ONE.
+   *
+   * THE FIRM: "these 2 could be one screen and one step if you combine them." The trace
+   * confirmation now carries the file chooser, so the file arrives with the request to open --
+   * and the reader skips straight to the profile rather than drawing a second empty chooser.
+   *
+   * `true` IS STILL A VALID VALUE: every other door into this box (the trace panel, the workspace,
+   * a document somebody was emailed) opens it with nothing chosen.
+   */
+  const [tracing, setTracing] = useState<boolean | File>(false)
+  /** Null = closed. A kind inside it is the office the trace's status line implied. */
+  const [practitioner, setPractitioner] = useState<{ suggest: PractitionerKind | null } | null>(null)
+  /* Null when closed; `editing` null means adding, a director means correcting that one. */
+  const [director, setDirector] = useState<{ editing: AccountDirector | null } | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -115,12 +430,13 @@ export function AccountDetail() {
          * information gained. From Paris that is a round trip of about 200ms, spent to learn
          * something we knew before the page rendered.
          */
-        const [a, l, w, d, q] = await Promise.all([
+        const [a, l, w, d, q, e, st, tr] = await Promise.all([
           fetchAccount(id), fetchLedgers(id), fetchWorkspace(id), fetchDocuments(id), fetchQueries(id),
+          fetchAccountEmails(id), fetchStanding(id), fetchTraces(id),
         ])
         if (cancelled) return
         setAccount(a)
-        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q) }
+        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e); setStanding(st); setTraces(tr) }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
@@ -141,18 +457,151 @@ export function AccountDetail() {
    * so a collector could trace a debtor and email them a statement that did not have the trace
    * on it.
    */
+  /*
+   * Can this agent send anything?
+   *
+   * Mail goes out through their OWN connected mailbox, so an agent who has not connected one in
+   * Settings cannot email a debtor at all. Asked once, up front, so the buttons can say why they
+   * are disabled instead of letting someone write a demand letter and fail on Send.
+   */
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    let cancelled = false
+    void fetch('/api/email/status', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((b: { connected?: boolean; email?: string | null }) => {
+        if (!cancelled && b.connected) setMailbox(b.email ?? null)
+      })
+      .catch(() => { /* a status we could not read just leaves the buttons disabled. */ })
+    return () => { cancelled = true }
+  }, [session])
+
+  /*
+   * THE WORKFLOW'S RUNS, READ HERE RATHER THAN IN THE PANEL THAT DRAWS THEM.
+   *
+   * The panel used to fetch its own, which was right while it lived in the Overview rail and is
+   * wrong now that it is a tab: a tab only mounts when it is opened, so a panel holding its own
+   * rows cannot put a mark on the tab that opens it — and the held section 129 would be a thing
+   * you had to go looking for.
+   *
+   * ITS OWN EFFECT, NOT THE PAGE'S BIG ONE. A workflow list that cannot be read must not stop the
+   * account loading: what a debtor owes is the page, and this is one tab of it.
+   */
+  const [runs, setRuns] = useState<AccountRun[]>([])
+  const [startable, setStartable] = useState<StartableWorkflow[]>([])
+  /*
+   * A WORKFLOW THE ACTION ROW ASKED TO START, HANDED TO THE TAB THAT CONFIRMS IT.
+   *
+   * The row's button is a shortcut, not a second place to issue a statutory demand -- the second
+   * press and the sentence on it live in WorkflowRunPanel, written once. Empty string means "take
+   * me there" with no version named, which is what several offers on one account come to.
+   */
+  const [askStart, setAskStart] = useState<string | null>(null)
+  /*
+   * THE ONE THE ROW ASKED FOR, CONFIRMED WHERE THE PRESS HAPPENED.
+   *
+   * THE FIRM: "starting the Section 129 process should be more prominent, it should pop up in your
+   * face, like do you want to proceed yes or no -- not take you to the workflow page and then ask
+   * you, like, oh it's down there. This is too weird, people can miss that."
+   *
+   * Pressing it used to switch to the Workflow tab and open the question inside that pane, which
+   * on a tablet is below the fold. A statutory demand should not wait on a confirmation somebody
+   * cannot see. The QUESTION is unchanged -- the same component, the same sentence about which day
+   * it goes out on -- it is only in front of them now. See StartWorkflowAsk.
+   */
+  const [startNow, setStartNow] = useState<StartableWorkflow | null>(null)
+  const [runsError, setRunsError] = useState<string | null>(null)
+  /*
+   * THE EMAIL ADDRESS WAS CORRECTED AND SOMETHING MAY HAVE BEEN SERVED ON THE OLD ONE.
+   *
+   * THE FIRM: "when you've changed the primary email address, it should ask you, do you want to
+   * restart the Section 129 process?" Held here rather than in the panel because the question can
+   * only be answered by something holding the account's RUNS, and the panel holds contacts. Both
+   * addresses travel with it: the old one is what the notice went to and what goes on the record,
+   * the new one is where the fresh sequence goes.
+   */
+  const [reissuing, setReissuing] = useState<
+    { offer: Reissue; before: string; after: string } | null>(null)
+  /*
+   * WHEN A MESSAGE WENT OUT AND THE RECORDING OF IT DID NOT.
+   *
+   * THE FIRM: "I sent an email to this account and the charges didn't immediately add." On the
+   * account they were looking at nothing was lost -- the R 28,75 was raised a second before the
+   * email itself, and every one of the last week's messages carries its charge. But the chain that
+   * does it was fired with `void` and no catch, so the one case where it DOES go wrong is silent:
+   * the debtor has been emailed, no fee is raised, nothing is filed, the page never refreshes, and
+   * the screen says nothing at all. That is indistinguishable, from the outside, from exactly what
+   * they described.
+   */
+  const [sendProblem, setSendProblem] = useState<string | null>(null)
+
+  const loadRuns = useCallback(async () => {
+    if (!id) return
+    try {
+      const [ran, canStart] = await Promise.all([
+        fetchAccountRuns(id),
+        /* Its own failure again. A list of what can be STARTED that cannot be read must not hide
+           what has already gone to this debtor, which is the more important half. */
+        fetchStartableWorkflows(id).catch(() => [] as StartableWorkflow[]),
+      ])
+      setRuns(ran); setStartable(canStart); setRunsError(null)
+    } catch (e) {
+      setRuns([]); setRunsError(e instanceof Error ? e.message : String(e))
+    }
+  }, [id])
+
+  useEffect(() => { void loadRuns() }, [loadRuns])
+
+  /* Anything on any run that is waiting for a person. Read from the one function that decides
+     it, so the tab's mark and the words over the track can never disagree. */
+  const waitingOnMe = runs.reduce((n, r) => n + needsAttention(r.steps).length, 0)
+
+  /*
+   * AND THE WORKFLOWS COME WITH EVERYTHING ELSE.
+   *
+   * THE FIRM: "the stuff comes once you refresh. It shouldn't be like that. It should load
+   * immediately and be available immediately. Otherwise you're missing things."
+   *
+   * This refetched the account, the ledgers, the workspace, the documents, the queries, the emails,
+   * the standing and the traces -- and not the runs. But recording a PROMISE starts the arrangement
+   * sequence and pauses the section 129; escalating a DISPUTE pauses it too; a PAYMENT can end it.
+   * Every one of those is an action taken from the row of buttons at the top of the account, and
+   * every one of them left the Workflow tab showing what was true a minute ago -- including the dot
+   * on the tab itself, which counts the steps waiting on a person.
+   *
+   * IT IS THE SAME loadRuns THE PANEL ALREADY USES for its own actions, so a release refreshes
+   * through one path and a promise through the other, and both end up at the same read.
+   */
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, l, w, d, q] = await Promise.all([
+    const [a, l, w, d, q, e, st, tr] = await Promise.all([
       fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
-      fetchDocuments(account.id), fetchQueries(account.id),
+      fetchDocuments(account.id), fetchQueries(account.id), fetchAccountEmails(account.id),
+      fetchStanding(account.id), fetchTraces(account.id),
+      loadRuns(),
     ])
     if (a) setAccount(a)
+    setSettlementTick((n) => n + 1)
     setLedgers(l)
     setWorkspace(w)
     setDocuments(d)
     setQueries(q)
-  }, [account])
+    setEmails(e)
+    setStanding(st)
+    setTraces(tr)
+    /*
+     * ANYTHING THAT RELOADS THE ACCOUNT HAS CHANGED IT. Every action on this page calls reload when
+     * it is done -- a call, an SMS, an email, a note, a trace, an arrangement -- so this is the one
+     * place that has to know, rather than nine call sites remembering to say so. Reading the page
+     * does not reload it, which is exactly the line leavingAccount draws.
+     */
+    setTouched(true)
+    /* AND WHETHER IT NOW HAS A DATE. Re-asked on every reload, because diarising IS one of the
+       actions: a prompt that kept firing after somebody had just answered it is the thing the firm
+       complained about, moved rather than cured. */
+    setHasEntry(await hasOpenDiaryEntry(account.id))
+  }, [account, loadRuns])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
   const { busy: queryBusy, run: runQuery } = useWriter(reload)
@@ -161,52 +610,431 @@ export function AccountDetail() {
 
   const statement = useMemo(() => {
     if (!account || !ledgers) return null
-    const input: BalanceInput = {
-      capitalHandedOver: account.capitalHandedOver,
-      handoverDate: account.handoverDate,
-      inDuplum: account.inDuplum,
-      // An account written off stopped accruing then. Swordfish records the date inside the
-      // comment ("Closed on 2026/09/07 ..."), which we do not have, so the last action stands in
-      // for it — imprecise, and labelled as such rather than presented as the closing date.
-      writtenOffAt: isWrittenOff(account.status) ? account.lastActionAt : null,
-      // Interest runs to today, not to the last monthly posting. Without this the balance stands
-      // still between postings and a collector quotes a settlement that is days out of date.
-      interestRateAnnual: account.interestRateAnnual,
-      accrueTo: new Date().toISOString().slice(0, 10),
-      ledgers: {
-        payments: ledgers.payments
-          .filter((p) => !p.reversedAt)
-          .map((p) => ({
-            date: p.receivedAt.slice(0, 10),
-            amount: p.amount,
-            paidToClient: p.paidToClient,
-            commissionExclVat: p.collectionCommission,
-          })),
-        fees: ledgers.fees.map((f) => ({
-          date: f.incurredAt.slice(0, 10),
-          at: f.incurredAt,
-          description: f.description,
-          exclVat: f.amountExclVat,
-          vat: f.vatAmount,
-          billed: f.billed,
-          segments: f.segments,
-        })),
-        interest: ledgers.accruals.map((i) => ({ from: i.accruedOn, days: i.days, amount: i.amountAccrued })),
+    /*
+     * ASSEMBLED BY THE ONE FUNCTION THAT ASSEMBLES IT, because the accounts list now shows the
+     * same five figures and has to get there the same way. Written out here and again there, the
+     * list and the account would eventually disagree about one debtor -- which is exactly what the
+     * firm would be looking at when they noticed. See balanceInput.ts.
+     */
+    const input: BalanceInput = balanceInputFor({
+      account: {
+        capitalHandedOver: account.capitalHandedOver,
+        handoverDate: account.handoverDate,
+        interestRateAnnual: account.interestRateAnnual,
+        status: account.status,
+        lastActionAt: account.lastActionAt,
+        endedAs: account.endedAs, prescribed: account.prescribed, prescriptionDate: account.prescriptionDate,
+        endedOn: account.endedOn,
       },
-    }
-    return buildStatement(input)
+      ledgers,
+      /* TODAY IN JOHANNESBURG. toISOString is UTC, so between midnight and two in the morning
+         local it is still yesterday -- and interest would be quoted a day short. */
+      today: firmToday(),
+      writtenOff: isWrittenOff,
+    })
+    /*
+     * THE INPUT TRAVELS WITH THE STATEMENT, so the repayment calculator projects forward from the
+     * very assembly the statement was built on rather than from a second one. Assembled twice, the
+     * quotation a collector reads down the telephone and the balance printed beside it would drift
+     * -- and the drift would be invisible, because both would look like figures about this account.
+     */
+    return { ...buildStatement(input), input }
   }, [account, ledgers])
 
+  /*
+   * THE LAST RECEIPT, off the statement that was just assembled -- see lastPayment.
+   *
+   * ONE ARITHMETIC. It is the figure a collector reads out when a debtor says "I already paid",
+   * and it comes from the same ledger as the balance beside it; read off the account row it would
+   * be null on 20 473 accounts, 1 243 of which have had money.
+   */
+  const lastPaid = useMemo(() => lastPayment(statement?.lines ?? []), [statement?.lines])
+
+  /*
+   * WHO MAY BE TOLD ANYTHING, which the call panel reads before a collector may disclose.
+   *
+   * FETCHED HERE RATHER THAN IN THE PANEL, like the workflow runs: the panel only mounts when a
+   * call starts, and the verification tick inside it cannot wait on a request. The account page
+   * has the rows before the telephone rings.
+   */
+  const [authorised, setAuthorised] = useState<AuthorisedContact[]>([])
+  const loadAuthorised = useCallback(async () => {
+    if (!id) return
+    try { setAuthorised(await fetchAuthorisedContacts(id)) } catch { setAuthorised([]) }
+  }, [id])
+  useEffect(() => { void loadAuthorised() }, [loadAuthorised])
+  /* ONLY OFF A ROW WITH THE DEED ON FILE. See suretyName: naming a surety on the strength of a
+     row nobody has evidence for is the firm asserting a liability it cannot prove. */
+  const suretyOnFile = useMemo(() => suretyName(authorised, firmToday()), [authorised])
+
+  /* Closes, holds and re-opens, with who, why and any charge (prompt 11). Re-read when the account
+     changes, which is what a withdrawal does. */
+  const [statusChanges, setStatusChanges] = useState<StatusChange[]>([])
+  useEffect(() => {
+    if (!account?.id) return
+    let live = true
+    void fetchStatusChanges(account.id).then((c) => { if (live) setStatusChanges(c) }).catch(() => {})
+    return () => { live = false }
+  }, [account?.id, account?.endedAs, account?.holdReason])
   const timeline = useMemo(
-    () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? []),
-    [ledgers, workspace],
+    () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? [], account && {
+      handoverDate: account.handoverDate,
+      defaultDate: account.defaultDate,
+      importedAt: account.createdAt,
+    }, workspace?.contacts ?? [], statusChanges),
+    [ledgers, workspace, account, statusChanges],
   )
 
   const ceiling = useMemo(() => {
     if (!account) return null
-    const schedule = scheduleFor(account.lastActionAt ?? account.handoverDate ?? new Date().toISOString())
+    const schedule = scheduleFor(account.lastActionAt ?? account.handoverDate ?? clockNow().toISOString())
     return { limit: feeCeiling(account.capitalHandedOver, schedule) }
   }, [account])
+
+  /*
+   * WHAT THE FIRM'S WORDING IS MERGED AGAINST, resolved here because this is the only place that
+   * holds all of it: the account, the balance struck from the three ledgers, the client whose
+   * book it is, and who is sending.
+   *
+   * HOISTED OUT OF THE COMPOSER, because it is no longer only a letter that needs it. At the
+   * firm's instruction -- "everything that we have in the library, to be in the account as well
+   * as an option" -- the SMS box and the email box both pick from the library now, and all three
+   * have to merge against THE SAME VALUES. Computed in two places they would drift, and the
+   * drift would be a debtor sent a balance by SMS that does not match the one in the letter
+   * posted the same day.
+   *
+   * mergeValuesFor had no caller at all until the composer. It was written, exported and checked,
+   * and nothing in the app had ever asked it a question -- which is worth knowing, because a
+   * resolver nobody calls is a resolver nobody notices is wrong.
+   *
+   * THE FIRM'S OWN DETAILS COME FROM THE DATABASE. They were fields nothing on earth could fill
+   * -- `firmName` was a string literal typed in here, and the trust account and the signatory
+   * were passed as literal null -- so a section 129 told the debtor to pay and did not say where.
+   * Library -> The firm is where they are set.
+   *
+   * WHAT IS STILL NULL IS STILL NULL, and deliberately: the debtor's postal address and the date
+   * to respond by are not the firm's details and do not belong on that screen. Passed as null
+   * rather than as an empty string, and then DROPPED from the map below -- renderTemplate treats
+   * a missing key and an empty string differently, and only the first leaves {{respond_by}}
+   * standing where somebody can see it. One of those gets caught; the other gets posted.
+   */
+  const letterContext = useMemo(() => ({
+    reference: account?.clientReference ?? account?.accountNumber ?? null,
+    /* So the email picker offers the half of the library written for this debtor. */
+    audience: account?.debtorKind,
+    values: account
+      ? accountMergeValues({
+        account: {
+          caseNumber: account.caseNumber,
+          handoverDate: account.handoverDate,
+          /* What the client gave us, which is neither the capital still outstanding nor the
+             balance owed today -- the one figure on a summary of account that never moves. */
+          capitalHandedOver: account.capitalHandedOver,
+          /*
+           * OFF THE LEDGER, NOT OFF THE ACCOUNT ROW -- the same place {{balance}} three lines
+           * below comes from, and the same thing the runner has always done (step.ts passes
+           * `balance.payments`).
+           *
+           * THE FIRM, LOOKING AT A COMPOSE BOX THAT WOULD NOT FILL IT: "so if there's no pay to
+           * date thing, then zero has been paid to date." Right, and the reason it would not fill
+           * was that `debtor_accounts.payments_to_date` is null on 20 473 of the 23 782 accounts.
+           *
+           * DEFAULTING THAT NULL TO ZERO WOULD HAVE BEEN A LIE ON 1 243 OF THEM. They have payment
+           * rows totalling R23,7 million -- up to R90 530 on one account -- with the column still
+           * null; and of the 3 309 rows where the column IS set, 2 644 disagree with the ledger
+           * beneath them. So the column cannot answer "what has this debtor paid" in either
+           * direction, and a notice telling somebody who has paid R90 000 that they have paid
+           * nothing is the worst version of this bug rather than the fix for it.
+           *
+           * THE LEDGER ALWAYS CAN, and zero falls out of it by itself: no payment rows sum to
+           * R 0,00, which is exactly what the firm asked to see.
+           */
+          paymentsToDate: statement?.breakdown?.payments ?? null,
+          listingDate: account.listingDate,
+          listingReference: account.listingReference,
+          bureausListed: account.bureausListed,
+          debtorKind: account.debtorKind,
+          debtorTitle: account.debtorTitle,
+          debtorFirstName: account.debtorFirstName,
+          debtorSurname: account.debtorSurname,
+          accountNumber: account.accountNumber,
+          clientReference: account.clientReference,
+          capitalOutstanding: account.capitalOutstanding,
+          preferredLanguage: account.preferredLanguage,
+          /*
+           * THE LAST RECEIPT, OFF THE STATEMENT. It answers "I already paid" on a call -- the
+           * firm's own reason for the field -- and it comes off the same ledger the balance beside
+           * it does, so the collector is not quoting two different arithmetics down one telephone.
+           */
+          lastPaymentAmount: lastPaid?.amount ?? null,
+          lastPaymentDate: lastPaid?.date ?? null,
+          /*
+           * THE ESTATE. The executor IS the practitioner, and only where the appointment on file
+           * says `executor`: a liquidator's name in {{executor_name}} would put the wrong office
+           * on a claim against a deceased estate. Null on every living debtor.
+           */
+          dateOfDeath: account.dateOfDeath,
+          executorName: account.practitionerKind === 'executor' ? account.practitionerName : null,
+          estateNumber: account.practitionerKind === 'executor' ? account.practitionerReference : null,
+          masterOffice: account.masterOffice,
+          /* THE SURETY, off the one row that records a signed deed of suretyship as being held.
+             A surety with no deed on file is not a surety we may name to anybody. */
+          suretyName: suretyOnFile,
+        },
+        balance: statement?.breakdown?.balance ?? null,
+        /*
+         * THE WORKING BEHIND THE BALANCE, for an acknowledgement of debt.
+         *
+         * Item 6 of an AoD is a sum the debtor signs their name under, and the clause above it has
+         * them confirm they have CHECKED it. So the lines of that sum come off the same ledger the
+         * balance above does -- never off the account row, whose own columns disagree with the
+         * ledger on thousands of accounts.
+         *
+         * Absent where the statement has not loaded, which leaves the placeholders standing and
+         * the document unsendable rather than signed against a blank.
+         */
+        breakdown: statement?.breakdown
+          ? {
+            interest: statement.breakdown.interest,
+            fees: statement.breakdown.fees,
+            receiptFees: statement.breakdown.receiptFees,
+            vat: statement.breakdown.vat,
+          }
+          : null,
+        interestRateAnnual: account.interestRateAnnual,
+        clientName: client?.name ?? null,
+        /*
+         * THE THREE PEOPLE A LETTER CAN NAME. `agent` is whoever is composing -- here, the person
+         * at the keyboard. `collector` is whoever the ACCOUNT is assigned to, which follows the
+         * account when it is handed on; `liaison` looks after the CLIENT whose book it is. Left
+         * off, a letter keeps naming whoever held the account before it moved.
+         *
+         * The workflow runner passes the COLLECTOR as the agent, because on that path there is
+         * nobody at a keyboard and the message leaves by the collector's mailbox.
+         */
+        agent: currentUser ?? null,
+        collector: users.find((u) => u.id === account.assignedTo) ?? null,
+        liaison: users.find((u) => u.id === client?.accountOwnerId) ?? null,
+        debtorIdNumber: account.debtorIdNumber,
+        contacts: workspace?.contacts ?? [],
+        firm,
+        today: dayKey(clockNow()),
+        money: formatMoney,
+        /*
+         * THE INSTALMENT THE ARRANGEMENT NOTICES QUOTE: the earliest one not yet paid, decided by
+         * ptpSchedule and nowhere else. `PromiseToPay` satisfies `Arranged` structurally -- same
+         * eight names -- so there is no mapper here to fall behind the columns.
+         *
+         * `defaulted` COUNTS AS LIVE, because it is the 48 hours the default letter promises: the
+         * arrangement is still on its existing terms in that window and a payment revives it, so a
+         * collector composing inside it must be able to quote the instalment that was missed.
+         */
+        nextInstalment: nextUnpaid(liveArrangement(workspace?.promises ?? [])),
+        /*
+         * AND HOW OFTEN IT FALLS, OFF THE SAME ARRANGEMENT, UNDER THE SAME CONDITION.
+         *
+         * GATED ON THE INSTALMENT rather than on the arrangement being present, which is what makes
+         * the two impossible to disagree about. liveArrangement falls back to NO_ARRANGEMENT --
+         * whose shape is 'once_off' -- so an account with no arrangement asked directly would
+         * answer "as a single payment" beside a placeholder where the amount should be, and the
+         * notice would go out describing an arrangement nobody made.
+         */
+        arrangement: nextUnpaid(liveArrangement(workspace?.promises ?? []))
+          ? liveArrangement(workspace?.promises ?? []).arrangement : null,
+        /*
+         * WHAT A RECEIPT CONFIRMS, off the same statement the balance beside it comes from -- so the
+         * figure the debtor is thanked for and the balance under it cannot disagree.
+         *
+         * THE PAYMENT LINE, NOT THE RECEIPT-FEE LINE BESIDE IT. A payment carries two statement
+         * lines on purpose: the payment and the Annexure B item 8 receipt fee it attracts. They are
+         * different transactions with different payers, and thanking a debtor for the fee would be
+         * a receipt for the wrong number.
+         */
+        paymentReceived: [...(statement?.lines ?? [])]
+          .filter((l) => l.kind === 'payment').at(-1)?.credit ?? null,
+        /* Whatever state it is in -- accountMergeValues answers the three fields only off an
+           approved, unlapsed one, so a proposal on this screen cannot reach a debtor either. */
+        settlement,
+      })
+      : {},
+  /* Before the early returns below, because a hook cannot run conditionally -- which is also why
+     it reads `statement` rather than the `b` shorthand, which is only defined past them. */
+  /* `users` and client.accountOwnerId are in here because the collector and the liaison are read
+     out of them: left off, a letter keeps naming whoever held the account before it was handed
+     on, which is the one failure these fields exist to prevent. */
+  /* `promises` is in here because the arrangement's own two fields are read out of it: left off,
+     a reminder keeps quoting the instalment that was next before the last payment landed. */
+  }), [account, statement?.breakdown?.balance, statement?.lines, client?.name, client?.accountOwnerId, users,
+    workspace?.contacts, workspace?.promises, settlement,
+    currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
+
+
+  /*
+   * THE DEBTOR'S NAME, IN THE TOP BAR.
+   *
+   * THE FIRM: "the full name, Johannes van der Merwe -- you can put it in the hero section up
+   * there. And then where the debtor's details is, you can just say title, surname, first name,
+   * initials."
+   *
+   * The panel used to print the assembled name and the five parts it was assembled from directly
+   * underneath, which is the same words twice. Up here it is on screen whatever the page is
+   * scrolled to -- and a screen headed only "Account" is one somebody lands on from a link with
+   * no idea whose it is.
+   *
+   * BEFORE THE EARLY RETURNS, because it is a hook. Called after the `loading` branch it would
+   * run on some renders and not others, which React refuses outright.
+   */
+  const heroName = account
+    ? ([account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor')
+    : null
+  /* BACK GOES WHERE YOU CAME FROM (the firm, 10 Oct): "Back to Highveld Tyre Services CC" when the
+     account was opened from its client, "All accounts" when opened from the list or directly. */
+  useRecordName(heroName)
+  const back = useBackLink({ to: '/accounts', label: 'All accounts' })
+  useTitleSlot(
+    heroName ? (
+      <span className="min-w-0 flex items-baseline gap-2">
+        <span className="text-slate-300">&middot;</span>
+        <span className="text-lg font-semibold text-slate-800 truncate">{heroName}</span>
+        {account?.accountNumber && (
+          <span className="text-xs text-slate-400 tabular-nums shrink-0">{account.accountNumber}</span>
+        )}
+      </span>
+    ) : null,
+    [heroName, account?.accountNumber],
+  )
+
+  /*
+   * HOW FAR THROUGH THE DEBT THEY ARE. THE FIRM: "a progress report or a progress bar for a
+   * debtor that is paying."
+   *
+   * THE MONEY HALF COMES OFF THE BALANCE, so it cannot disagree with the figures printed beside
+   * it -- `payments` and `balance` are the same two the statement shows, and the bar is their
+   * ratio rather than a second opinion about the account.
+   *
+   * THE INSTALMENT HALF COMES OFF THE ARRANGEMENT the account is actually on. How many have
+   * fallen DUE is counted from the schedule rather than from a flag: an arrangement taken in June
+   * at R300 a month has had four instalments due by October whatever anybody has recorded, and a
+   * count that waited to be told would report a debtor as current on the day they stopped paying.
+   *
+   * ABOVE THE EARLY RETURNS, because it is a hook. Placed beside the panel it feeds -- which is
+   * after the `loading` branch -- it ran on some renders and not others, and React refuses that
+   * outright: the whole account screen threw and the browser check found the page empty.
+   */
+  const progress = useMemo((): PaymentProgress | null => {
+    const bal = statement?.breakdown
+    if (!bal) return null
+    /* The receipt fee on settling belongs in the bar -- the firm's own instruction. It comes off
+       the same breakdown as the balance, already capped under in duplum. See moneyProgress. */
+    const money = moneyProgress({
+      payments: bal.payments, balance: bal.balance, settlementFee: bal.settlementFee,
+    })
+    const live = (workspace?.promises ?? []).find((x) => x.status === 'open') ?? null
+    return {
+      money,
+      instalments: live
+        ? instalmentProgress({
+          amount: live.amount,
+          totalPromised: live.totalPromised,
+          instalmentsKept: live.instalmentsKept,
+          arrangement: live.arrangement,
+          due: instalmentsDue(live, clockToday()),
+        })
+        : null,
+    }
+  }, [statement, workspace])
+
+  /*
+   * WHAT RAPTOR KNOWS AT THE MOMENT A CALL CONNECTS, which decides which script pops.
+   *
+   * ASSEMBLED HERE AND NOT IN THE PANEL, because every one of these facts is already on this page
+   * -- the practitioner on the account, the open dispute, the arrangement, the workflow runs -- and
+   * a panel that fetched them would be a second opinion about whether this account may be rung.
+   *
+   * THE ORDER IS NOT HERE EITHER. scriptFor decides it, in the firm's own order, and these are
+   * only the facts. See callScripts.ts.
+   */
+  const callState = useMemo((): CallState => {
+    if (!account) return { debtorKind: 'individual' }
+    const written = queries.find((q) => q.kind === 'dispute' && q.status !== 'closed'
+      && q.inWriting && q.receivedOn !== null) ?? null
+    const live = liveArrangement(workspace?.promises ?? [])
+    const next = nextUnpaid(live)
+    const today = firmToday()
+    /* THE LAST NOTICE THE DEBTOR ACTUALLY RECEIVED, across every live sequence -- see nodeReached.
+       A held run's steps still count: the debtor is holding the letter either way. */
+    const node = nodeReached(runs.flatMap((r) => r.steps.map((st) => ({
+      label: st.label, sentAt: st.sentAt,
+    }))))
+    return {
+      debtorKind: account.debtorKind,
+      /*
+       * THE FOUR HARD STOPS, off the practitioner structure the book already carries rather than
+       * off a sub-status somebody typed. A curator is deliberately NOT one of them: a curator is
+       * somebody to deal with, and the account is still collectable through them.
+       */
+      deceased: account.dateOfDeath !== null || account.practitionerKind === 'executor',
+      underDebtReview: account.practitionerKind === 'debt_counsellor',
+      insolvent: account.practitionerKind === 'liquidator' || account.practitionerKind === 'trustee'
+        || account.practitionerKind === 'business_rescue',
+      /* IN WRITING AND RECEIVED. A verbal dispute suspends nothing -- that rule is the firm's and
+         is already load-bearing in the workflow triggers. */
+      writtenDisputeOpen: written !== null,
+      /* AN INSTALMENT DUE TODAY, AND ONE ALREADY MISSED, which are different calls. */
+      instalmentDueToday: next !== null && next.dueOn === today,
+      arrangementInDefault: next !== null && next.dueOn < today,
+      /* AN APPROVED FIGURE TO GET PAID, which is what pops the settlement script. Approved and not
+         lapsed only -- the script quotes {{settlement_amount}}, and a lapsed one is "the full
+         balance is owing again". The same predicate the merge fields answer off. */
+      settlementLive: isQuotable(settlement),
+      workflowNode: node,
+    }
+  }, [account, queries, workspace?.promises, runs, settlement])
+
+  /*
+   * THE CALL IS RECORDED, AND ONLY WHAT IS KNOWN IS WRITTEN.
+   *
+   * THE FIRM'S EIGHTH RULE: "record the outcome on the account the same day... an uncaptured call
+   * did not happen." So the code always goes on the timeline, in the firm's own words -- see
+   * dispositionNote.
+   *
+   * THE ACCOUNT ONLY MOVES WHERE THE BUTTON IS ENOUGH TO MOVE IT. A promise needs an amount and a
+   * date, a dispute needs a classification, and "cannot pay" needs the reason in the debtor's own
+   * words; recordOutcome refuses without them, and it is right to. A button that invented them
+   * would rebuild the imported book's problem -- 58 accounts claiming a promise to pay, 43
+   * promises behind them -- so the note lands, the account does not move, and the collector is
+   * told which thing is still outstanding. See needsMore.
+   */
+  const [callFollowUp, setCallFollowUp] = useState<string | null>(null)
+  const recordDisposition = useCallback(async (code: string) => {
+    if (!account) return
+    const actor = { id: currentUser?.id ?? null, name: currentUser?.name ?? null }
+    try {
+      await addNote({
+        accountId: account.id,
+        body: dispositionNote(code),
+        /* RAPTOR'S WORDS, NOT A PERSON'S -- the collector's own note about what was said goes in
+           the note box. Hidden when the timeline is set to show only what people wrote. */
+        source: 'system',
+        authorName: actor.name,
+        createdBy: actor.id,
+      })
+    } catch (e) {
+      setCallFollowUp(`The call was not recorded on the account: ${
+        e instanceof Error ? e.message : String(e)}`)
+    }
+    const outcome = outcomeFor(code)
+    const more = needsMore(code)
+    if (outcome && !more) {
+      const done = await recordOutcome({ accountId: account.id, outcome, actor })
+      setCallFollowUp(done.failed.length > 0
+        ? `The call was recorded, but ${done.failed.join(' and ')} could not be written.`
+        : null)
+    } else if (more) {
+      setCallFollowUp(`${code} is on the timeline. ${more}`)
+    }
+    await reload()
+  }, [account, currentUser?.id, currentUser?.name, reload])
 
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>
   if (error) return <Card className="border-negative-100 bg-negative-50"><p className="text-sm text-negative-700">{error}</p></Card>
@@ -214,21 +1042,72 @@ export function AccountDetail() {
 
   const b = statement?.breakdown
   const drift = hasCommissionDrift(account)
+  /* THE RATE AND WHERE IT CAME FROM, in one line (prompt 9): "21% — as billed in Swordfish (KIS
+     tier)", "25% — band R0–R25 000". A bare 21% beside a client card saying a scale left the reader
+     to work out which of the two was wrong. */
+  const commission = accountRate({
+    accountRate: account.commissionRate, capitalHandedOver: account.capitalHandedOver,
+    imported: !!account.importedAt || !!account.swordfishReference,
+    reference: account.swordfishReference, client: client ?? {},
+  })
+  /*
+   * THE CLERK THE ACCOUNT IS ACTUALLY ON, resolved from `assignedTo` -- the column allocating,
+   * the diary, the workflow and every desk list already turn on. `users` is the profiles AppStore
+   * already holds, so this costs no query.
+   */
+  const assignedName = account.assignedTo
+    ? (users.find((u) => u.id === account.assignedTo)?.name ?? 'Someone no longer here')
+    : null
+  /* The same authority as handing out from the accounts list, and now literally the same test. */
+  const mayHandOut = canHandOutAccounts(currentUser)
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
   const callContact = dialableNumber(workspace?.contacts ?? [])
   // One list for both: whatever you could SMS, you could ring.
   const smsNumbers = reachableNumbers(workspace?.contacts ?? [])
+  /*
+   * A CELL NUMBER A BUREAU CAN BE SEARCHED ON, where this account has one.
+   *
+   * THE FIRM: "the cell phone number can also be traced." Taken off the whole reachable list
+   * rather than the contacts labelled 'mobile', because half the imported book has every number
+   * under one label -- Swordfish carried a single telephone column -- so the cell number sitting
+   * there is usually filed as a "phone". traceableMobile decides what is actually a cell number,
+   * and refuses 086 and 087, which look exactly like one and belong to a switchboard.
+   */
+  const traceMobile = traceableMobile(smsNumbers.map((n) => n.value))
   // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
   // the debtor, and the one a query about the debt itself has to go to.
+  /*
+   * Derived here rather than read off a column, which is the rule for this vocabulary: it is a
+   * reading of several facts and storing it only creates a way for the reading and the facts to
+   * disagree. The bucket goes in because half the inherited book has no sub-status and Swordfish's
+   * own filing is the only record that a promise was made or broken.
+   */
+  /*
+   * ENDED BY RAPTOR IS CLOSED, WHATEVER THE INHERITED STATUS SAYS. withdraw_account (and the other
+   * endings) write `ended_as` and leave Swordfish's 'Active' where it was -- imported history is
+   * frozen -- so reading only the status reported a file the client had taken back as "New, nobody
+   * has made the first call" (the firm, 11 Oct, on SBB/2006). `closed` is the rung's own input.
+   */
+  const ended = accountEnded(account)
+  /* THE LIVE OFFER'S STATE, which the position and the client's sentence both read. */
+  const settlementState = settlement?.state ?? null
+  const position = deskPosition({
+    closed: ended,
+    status: account.status,
+    subStatus: account.subStatus,
+    bucket: account.bucket,
+    settlement: settlementState,
+    /* MONEY IS WORK. HTH/4004 had R7 000 in and read "New -- nobody has made the first call",
+       because only a logged action counted. A payment means somebody got through. */
+    everWorked: !!account.lastActionAt || (ledgers?.payments ?? []).some((p) => !p.reversedAt),
+  })
+
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
   const canDelete = ['Administrator', 'Sales Manager', 'Liaison Manager'].includes(currentUser?.role ?? '')
 
-  function chooseLayout(next: Layout) {
-    setLayout(next)
-    try { localStorage.setItem(LAYOUT_KEY, next) } catch { /* nothing to remember it with. */ }
-  }
+
 
   /*
    * The six panels, built once and placed by whichever layout is chosen.
@@ -237,9 +1116,151 @@ export function AccountDetail() {
    * trusted to stay the same page: a prop added to the promise panel cannot be added to one
    * arrangement and forgotten in the other two.
    */
+  /*
+   * WHO THEY ARE, AND THEN WHAT STANDS BEHIND AND AGAINST THEM. One column, in that order.
+   *
+   * Standing was in the right-hand column among the money panels, and the firm's word for it was
+   * "a weird place" — correctly. It is not a figure. It is the rest of the answer to "who am I
+   * ringing": the directors are how you reach a company at all, and the judgments say what you are
+   * joining a queue behind. Read next to the phone numbers it is part of one thought; read under
+   * the settlement figure it is an interruption.
+   *
+   * Wrapped, because RecordLayout's details slot is a single node and two of its three
+   * arrangements put no gap between siblings — the cards touched.
+   */
+  /*
+   * WHAT STANDS BEHIND AND AGAINST THEM -- the traces, the directors, the judgments.
+   *
+   * BUILT ONCE AND PLACED TWICE, which is this page's rule for every other panel. THE FIRM, having
+   * drawn a box in the empty half of the middle column: "in the three grid view, put the trace
+   * information here." They are reading a real imbalance: the details column is the longest thing
+   * on the page and the timeline beside it ends where the account's history ends, so on a young
+   * account half the middle column is white space while the left one runs off the bottom.
+   *
+   * ONLY IN THREE COLUMNS. `wide` stacks the details on top of the timeline in one column and
+   * `stacked` is one column by name -- in both there is nothing to move it to, so it stays where
+   * it has always been: directly under the debtor's own details, which is where it belongs when
+   * they are read one after another. It is not a figure; it is the rest of the answer to "who am
+   * I ringing".
+   */
+  const underTimeline = layout === 'columns'
+  const standingPanel = (
+    <StandingPanel account={account} standing={standing} position={position}
+      traces={traces}
+      /* OFF THE LEDGER THE PAGE ALREADY HOLDS, so saying what tracing cost needs no request of
+         its own. Counted exactly as the engine counts -- see tracingThisMonth. */
+      tracingMonth={ledgers
+        ? tracingThisMonth(ledgers.fees, clockNow().toISOString(),
+            MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)
+        : null}
+      traceAction={(
+        <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
+          /* For the sources searched on a name rather than a number -- a web search, SARS's VAT
+             vendor search. `name` is the same string the hero draws, so the two cannot differ. */
+          debtorName={name}
+          /* THE FALLBACK KEY, where there is no identity number and the bureau will take one.
+             See TraceButton.mobile. */
+          mobile={traceMobile}
+          label="Do the trace"
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
+          onDone={reload} onUpload={(f) => setTracing(f ?? true)}
+          onAskClient={setAskingTrace} />
+      )}
+      traceActionCompact={(
+        /* THE SAME CONTROL, HEADER-SIZED. A second instance rather than a style prop: they are
+           independent controls in independent places, and the picker each opens is its own. */
+        <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
+          debtorName={name}
+          mobile={traceMobile}
+          label="Do another"
+          className="text-[11px] font-medium px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:border-[#c9a052] hover:bg-gold-50 inline-flex items-center gap-1"
+          onDone={reload} onUpload={(f) => setTracing(f ?? true)}
+          onAskClient={setAskingTrace} />
+      )}
+      onUpload={() => setTracing(true)}
+      onOpenTrace={setOpenTrace}
+      onPractitioner={() => setPractitioner({ suggest: null })}
+      onAddDirector={() => setDirector({ editing: null })}
+      onEditDirector={(d) => setDirector({ editing: d })} />
+  )
+
   const detailsPanel = (
-    <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
-      userId={currentUser?.id ?? null} onEmail={setComposeTo} />
+    <div className="space-y-4">
+      <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
+        /* Only what they still own, across every trace on the account — see heldProperty. */
+        properties={heldProperty(traces.flatMap((t) => t.items))}
+        onOpenTrace={traces.length > 0 ? () => setOpenTrace(traces[0].id) : null}
+        userId={currentUser?.id ?? null} onEmail={setComposeTo}
+        /*
+         * AND THE ONE QUESTION A CORRECTED ADDRESS RAISES.
+         *
+         * noticeToReissue answers null on nearly every edit -- a typo, a second address, an
+         * account with no sequence on it -- which is what keeps this from being a box people
+         * learn to dismiss. It says yes only where a notice actually WENT to the address that
+         * has just been replaced.
+         */
+        onEmailChanged={(before, after) => {
+          const offer = noticeToReissue({ before, after, runs })
+          if (offer) setReissuing({ offer, before, after })
+        }} />
+      {/* UNDER THE DEBTOR'S OWN DETAILS, in the two arrangements that have nowhere else to put
+          it. In three columns it goes under the timeline instead -- see underTimeline above. */}
+      {!underTimeline && standingPanel}
+      {/*
+        WHO MAY BE TOLD ANYTHING, under the debtor's own details because that is what it is about:
+        the contacts above are people to DIAL, and this is permission. The call panel reads the
+        same rows before a collector may disclose anything.
+      */}
+      <AuthorisedContactsPanel accountId={account.id} contacts={authorised}
+        actorId={currentUser?.id ?? null} onChange={loadAuthorised} />
+      {/*
+        AND THE ESTATE, WHERE THERE IS ONE. Absent on a living debtor, which is nearly every
+        account -- a panel of empty estate fields on 23 000 files would be the column of dashes
+        this app keeps getting rid of.
+      */}
+      {(account.dateOfDeath !== null || account.practitionerKind === 'executor') && (
+        <EstatePanel account={account} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onChange={reload} />
+      )}
+      {/*
+        * RECORD A PAYMENT USED TO SIT HERE and the firm moved it: "record a payment, I think should
+        * be in this pane. Like you put it on the overview, but it should be in here. On the
+        * transactions list."
+        *
+        * They are right and the reason is what the button produces. A captured payment becomes a
+        * LINE ON THE STATEMENT, and the statement is on the Transactions tab -- so the press and
+        * its result now sit on one screen, where somebody can see what they just did instead of
+        * changing a tab to find out. See StatementTable.
+        */}
+      {/*
+        AGAINST SWORDFISH, where the firm asked for it: "Explain each gap on the account... A
+        balance the firm cannot explain must not reach a client statement or payover." Above the
+        ledgers because it is about the figure the ledgers produce.
+      */}
+      <SwordfishGapPanel account={account} breakdown={statement?.breakdown ?? null} />
+      <MoneyPanel accountId={account.id} />
+      <LedgerPanel accountId={account.id} />
+      {/* SENDING SOMETHING OUT TO BE SIGNED. With the money because that is what the firm is
+          signing ABOUT -- an acknowledgement of debt is an admission of a balance, and whoever
+          sends one has just been looking at it. */}
+      <SigningPanel accountId={account.id} values={letterContext.values} debtorName={name}
+        debtorKind={account.debtorKind}
+        /* OFF THE LEDGER, like the balance beside it and like the figure the document itself
+           quotes -- so the item 4(a) band and the instrument cannot disagree. */
+        claimAmount={statement?.breakdown?.balance ?? null}
+        caseNumber={account.caseNumber}
+        debtorEmail={emailContact?.value ?? null}
+        onEmail={(message) => {
+          startCompose()
+          setSigningEmail(message)
+          setComposeTo(emailContact?.value ?? '')
+        }}
+        /* The same address by SMS, into the box that knows the numbers and what a segment costs
+           the debtor. See SmsModal.initialText. */
+        onSms={(text) => { setSmsText(text); setSmsOpen(true) }} />
+    </div>
   )
   const timelinePanel = (
     <TimelinePanel
@@ -253,7 +1274,215 @@ export function AccountDetail() {
       setNoteOpen={setNoteOpen}
     />
   )
-  const summaryPanel = <SummaryPanel account={account} breakdown={b} />
+
+  const summaryPanel = (
+    <SummaryPanel account={account} breakdown={b} note={statement?.note} progress={progress} />
+  )
+
+  /*
+   * WHAT THE CLIENT WILL READ, shown to the person whose work produces it.
+   *
+   * Asked for directly: "the clerk can see what will go to the client". It costs nothing to show
+   * and it changes behaviour — an agent who can see that the client's line reads "No contact
+   * attempted" is an agent who rings somebody.
+   *
+   * Composed from records, never from the main comment. See accountNarrative.
+   */
+  /* THE PAYMENTS THAT STAND (prompt 11): a reversed one is not collected. Rejected copies never
+     reach the ledger at all (fetchLedgers). The figure beside it is the balance's own. */
+  const livePayments = (ledgers?.payments ?? []).filter((p) => !p.reversedAt).length
+  const clientReport = positionReport({
+    closed: ended,
+    status: account.status,
+    subStatus: account.subStatus,
+    settlement: settlementState,
+    paidInPeriod: false,
+    openQueryWithClient: account.clientActionAsk !== null,
+  })
+  const otherAccountsPanel = <OtherAccountsPanel key="others" rows={otherAccounts} />
+  /* Four lines saying which sequence is running, for the rail the track was too big for. See
+     WorkflowNowPanel: the tab keeps the work, the rail keeps the fact. */
+  const workflowNowPanel = <WorkflowNowPanel key="workflow-now" accountId={account.id} runs={runs} />
+  /* ONLY EVER ON A TEST ACCOUNT -- the panel draws nothing otherwise, the server refuses, and the
+     database refuses again. See TestClockPanel. */
+  const testClockPanel = (
+    <TestClockPanel key="test-clock" accountId={account.id} accountNumber={account.accountNumber}
+      isTestAccount={account.isTestAccount} onTick={reload} />
+  )
+
+  /*
+   * THE DEBTOR'S OWN TRACE, for the client line below.
+   *
+   * Grouped by subject here as well as in the panel, through the same function: a company account
+   * carries a report per director and those are other people. The first entry is the debtor, which
+   * is traceSubjects' own ordering.
+   *
+   * NOT A useMemo, AND THAT IS NOT LAZINESS. This sits BELOW the three early returns above --
+   * loading, error, no such account -- so a hook here is called on some renders and not others,
+   * which is the one thing React does not allow: it threw, and the whole account page rendered
+   * blank. (Found by the browser layer, which is exactly what it is for; every source check in
+   * the suite passed on it.) An account carries a handful of traces, so grouping them on each
+   * render costs nothing worth a hook in the wrong place.
+   */
+  const subjectsForClient = traceSubjects(traces)
+
+  const clientLinePanel = (
+    <ClientLinePanel
+      line={clientLine({
+        /*
+         * THE RUNG GOES IN, and without it the whole point of the rewrite was missing here.
+         *
+         * accountNarrative writes a different sentence per position — "the debtor advised that
+         * they are not in a position to pay", "the matter is being dealt with through the
+         * appointed practitioner" — and every one of them is guarded on this field. Left out, the
+         * function fell through to its last resort on every account: "We worked the account on
+         * 2 September". Which is the sentence the firm called stupid, and the reason those
+         * position sentences were written in the first place.
+         *
+         * Same value the panel's own heading uses, so the line and the label cannot disagree.
+         */
+        position: clientReport.position,
+        /* THE SETTLEMENT, in the firm's words for each state -- see accountNarrative. */
+        settlement: settlement && settlement.state !== 'declined' && settlement.state !== 'withdrawn'
+          ? { state: settlement.state, amount: settlement.amount, proposedOn: firmDay(settlement.proposedAt),
+              approvedOn: settlement.approvedAt ? firmDay(settlement.approvedAt) : null, expiresOn: settlement.expiresOn }
+          : null,
+        /*
+         * THE DISPUTE, AND WHETHER ANYTHING HAS ACTUALLY ARRIVED.
+         *
+         * THE FIRM, retiring the alleged-dispute sequence: "we keep the option to show that there's
+         * an alleged dispute, but what we would report to the client is the debtor disputes it, but
+         * we've never received anything in writing... an alleged dispute should be matched with a
+         * dispute."
+         *
+         * THE UNANSWERED ONE, not the newest. A dispute the firm has already decided is not what
+         * the account is doing now, and a client told about it would go looking for a live file
+         * that is finished. `outcome` is the decision, so no outcome is what "still open" means --
+         * there is no 'closed' stage, because the stage says who is HOLDING it rather than whether
+         * it is done.
+         */
+        ...(() => {
+          const open = queries.find((q) => q.allegedOn && q.outcome === null)
+          return open
+            ? { disputeRaisedOn: open.allegedOn, disputeInWriting: open.inWriting }
+            : {}
+        })(),
+        lastAttemptOn: account.lastActionAt,
+        // Deliberately not passed: the book records that something was done and never what came
+        // of it, so claiming a non-answer would be a statement about the debtor, not a record.
+        reached: null,
+        promise: due
+          ? { amount: due.amount, dueOn: due.dueOn, takenOn: due.createdAt?.slice(0, 10) ?? null,
+              status: due.status === 'broken' ? 'broken' : 'open', arrangement: due.arrangement }
+          : null,
+        /*
+         * The account knows WHEN it comes back but not WHY — the kind lives on the diary entry,
+         * which this page does not load. 'review' is the honest fallback: it produces "We will
+         * follow the account up on ...", which is true of every diary date whatever its kind.
+         */
+        next: account.diaryDate ? { kind: 'review', dueOn: account.diaryDate } : null,
+        /*
+         * WHAT THE TRACE CAME TO, which the client was never told.
+         *
+         * THE FIRM: "this information regarding the trace is very valuable information that we can
+         * possibly give to the client as well." The client line said "we lodged a trace on the
+         * 2nd" and nothing else -- the firm spending the client's money with no account of what it
+         * bought -- while the panel six inches away said twelve worked, none reaching the debtor,
+         * three still ringing.
+         *
+         * THE DEBTOR'S OWN REPORT, NOT A DIRECTOR'S. A company account carries a trace per
+         * director and those are other people; the sentence is about the debtor the client handed
+         * over. traceSubjects already groups them, and its first entry is the debtor.
+         *
+         * AND THE SAME READING THE PANEL DRAWS. traceRound is the one function that decides
+         * whether a trace has been worked through, so the client's copy and the collector's screen
+         * cannot come to different conclusions about it.
+         */
+        trace: (() => {
+          const debtor = subjectsForClient[0]
+          if (!debtor || debtor.kind !== 'debtor') return null
+          return {
+            lodgedOn: debtor.latest.enquiredOn ?? debtor.latest.createdAt.slice(0, 10),
+            round: traceRound(debtor.latest.items),
+          }
+        })(),
+        /*
+         * AND A TRACE THAT COULD NOT BE RUN AT ALL.
+         *
+         * THE FIRM: "we would need more information like an ID number... we haven't been able to
+         * trace the data on the information provided."
+         *
+         * READ OFF THE OPEN REQUEST, not off the missing column. Most of the book has no identity
+         * number and most of it is being collected perfectly well -- "we cannot trace this debtor"
+         * on an account that is paying would be the one dishonest line in the report. What makes
+         * it true is that the firm has recorded the attempt and ASKED for what it needs, and the
+         * request is that record. The sentence and the ask are then one fact and cannot drift.
+         *
+         * `askedClient` IS THE STAGE. A request still sitting with the collector or the liaison is
+         * the firm asking itself; "we have asked you" where nobody has is a claim the client can
+         * check and find false.
+         */
+        ...(() => {
+          const ask = queries.find((q) => q.kind === 'request' && q.outcome === null
+            && q.requestFor === TRACE_REQUEST_FOR)
+          return ask
+            ? { traceAttempt: {
+              attemptedOn: ask.raisedAt?.slice(0, 10) ?? null,
+              needs: traceNeeds(account.debtorKind),
+              askedClient: ask.stage === 'client',
+            } }
+            : {}
+        })(),
+        frozenReason: account.frozenReason,
+        frozenOn: account.frozenAt?.slice(0, 10) ?? null,
+        /*
+         * WHAT A FRESH HANDOVER HAS TO SAY FOR ITSELF.
+         *
+         * THE FIRM, looking at an account handed over that morning: "this new account says no
+         * contact attempt has been made... it's a very bad thing to say to the client. I think we
+         * should rather say the account has been handed over, the notifications of handover have
+         * gone out."
+         *
+         * Both facts, in the order they happen. The notices win where they have gone; the
+         * handover date is what there is before that, and it is still an event with a date rather
+         * than a report of the firm's own silence.
+         */
+        handedOverOn: account.handoverDate,
+        noticesSentOn: handoverNoticesSentOn(runs),
+        /*
+         * AND TODAY, SO A DATE THAT HAS PASSED STOPS BEING A PROMISE. The firm's point about the
+         * monthly report -- "the reports go out on the 11th" -- is true of this panel too: a
+         * follow-up booked for last Tuesday is not something the firm "will" do.
+         */
+        asAt: clockToday(),
+      })}
+      /*
+        CLIENT_POSITIONS here, deliberately, where every other position on this screen reads from
+        DESK_POSITIONS. This panel is what the CLIENT is shown, and the fourteenth rung is ours: a
+        never-worked account is "New" to a collector and "In progress" on the report. Two
+        vocabularies staying two is the rule this whole mapping exists to hold, and the one place
+        it would break is a panel reaching for whichever constant happened to be imported.
+      */
+      position={CLIENT_POSITIONS[clientReport.position]}
+      flag={clientReport.flag}
+      ask={account.clientActionAsk}
+      askDue={account.clientActionDue}
+      onAsk={() => setAskingClient(true)}
+    />
+  )
+  const settlementPanel = (
+    <SettlementPanel
+      accountId={account.id}
+      settlement={settlement}
+      balance={b?.balance}
+      open={!account.endedAs}
+      canApprove={canApproveSettlement(currentUser)}
+      canClose={canRecordPayment(currentUser)}
+      userId={currentUser?.id ?? null}
+      nameOf={(uid) => users.find((u) => u.id === uid)?.name ?? null}
+      onChange={reload}
+    />
+  )
   const promisePanel = (
     <PromisePanel
       accountId={account.id}
@@ -266,16 +1495,51 @@ export function AccountDetail() {
       successRatio={account.ptpSuccessRatio}
       balance={b?.balance}
       settlement={b?.settlement}
+      settlementFee={b?.settlementFee}
+      paidSoFar={b?.payments}
+      /* The very assembly the statement above was built from -- see `position`. */
+      position={statement?.input ?? null}
+      letterValues={letterContext.values}
+      letterReference={letterContext.reference}
+      audience={account.debtorKind}
+      /*
+       * THE PRESS THAT EMAILS A SIMULATION, owned here rather than in the panel.
+       *
+       * The calculator draws the PDF and merges the firm's own covering wording; this opens the
+       * one compose box on the account with both already on the message. So the simulation goes
+       * out through the collector's own mailbox, is filed on the account and is charged item 1(a)
+       * by exactly the path that charges every other email -- and a person reads it before it
+       * goes, which for a page of figures reaching a debtor mid-negotiation is the point.
+       *
+       * ADDRESSED TO THE DEBTOR, not to whoever was last composed to. Empty where the account has
+       * no email address, which leaves the box asking rather than quietly sending to nobody.
+       */
+      onEmailSimulation={(sim) => {
+        startCompose()
+        setSimulation(sim)
+        setComposeTo(emailContact?.value ?? '')
+      }}
     />
   )
   const disputesPanel = (
     <QueryPanel
       accountId={account.id}
-      accountLabel={account.accountNumber}
       queries={queries}
       users={users}
-      actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, role: currentUser?.role }}
+      actor={{
+        id: currentUser?.id ?? null,
+        name: currentUser?.name ?? null,
+        role: currentUser?.role,
+        /* The grants travel with the role or the panel answers "may you see the client?" off the
+           template alone, for the one person who was given it by hand. */
+        grants: currentUser?.grants,
+        revokes: currentUser?.revokes,
+      }}
       onChange={reload}
+      /* ONE BOX FOR RAISING A DISPUTE, and it is the Escalate one. The panel used to carry a form
+         of its own that asked less and said the wrong thing about the fee -- see QueryPanel's
+         onRaise. */
+      onRaise={() => setDisputing(true)}
       busy={queryBusy}
       run={runQuery}
       clientId={client?.id}
@@ -283,14 +1547,22 @@ export function AccountDetail() {
     />
   )
   const positionPanel = (
-    <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
-      clientLiaisonName={clientLiaison?.name ?? null} />
+    <PositionPanel account={account} commission={commission.label} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
+      clientLiaisonName={clientLiaison?.name ?? null}
+      onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null}
+      /* Closing an account is not freezing it: a freeze is reversible and an ending is not. Both
+         live beside the status because that is where work is stopped, not in the action row. */
+      onEnd={canRecordPayment(currentUser) ? () => setEnding(true) : null}
+      /* THE SAME TICK THE DATABASE ASKS FOR -- `book.freeze` -- so the button is not offered to
+         somebody the function would refuse. The function is still the guard; this is the courtesy. */
+      onHold={canFreezeAccounts(currentUser) ? () => setHolding(true) : null}
+      onRelease={canFreezeAccounts(currentUser) ? () => setReleasing(true) : null} />
   )
 
   return (
     <div className="space-y-4">
-      <Link to="/accounts" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={14} /> All accounts
+      <Link to={back.to} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700" data-testid="back-link">
+        <ArrowLeft size={14} /> {back.label}
       </Link>
 
       {/*
@@ -299,33 +1571,80 @@ export function AccountDetail() {
         whose debt this is. Hence "Debtor" on the band and the client named beneath.
       */}
       <DashboardHero
-        eyebrow="Debtor"
+        /*
+         * "Debtor" or "Company debtor", because the two are not chased the same way. A person is
+         * rung on their own numbers; a company is reached through its directors, and a collector
+         * opening one needs to know which kind of afternoon this is before they read anything
+         * else. The registration number reads as an ID number otherwise.
+         */
+        eyebrow={account.debtorKind === 'company' ? 'Company debtor' : 'Debtor'}
         title={
           <span className="inline-flex flex-wrap items-center gap-2">
             {name}
-            {account.accountNumber && (
-              <span className="font-mono text-[11px] font-bold text-navy-950 bg-gold-400 px-2 py-0.5 rounded-md align-middle"
-                title="Our reference for this account">
-                {account.accountNumber}
-              </span>
-            )}
+            {/*
+              THE CASE NUMBER, IN GOLD, AND IT IS OURS.
+              This badge showed `accountNumber` under a tooltip reading "our reference for this
+              account" -- which was true only when Raptor had generated one and false whenever the
+              client's sheet supplied it, because that column is the number on the agreement. The
+              firm hit the ambiguity twice: once as "I see the client ref, but I don't see the
+              Raptor reference", and again as "if they use the client reference it's more
+              difficult to find". caseNumber is unmistakably ours, on every account, and unique.
+            */}
+            <span className="font-mono text-[11px] font-bold text-navy-950 bg-gold-400 px-2 py-0.5 rounded-md align-middle"
+              title="Our case number. This is what every notice quotes.">
+              {account.caseNumber}
+            </span>
           </span>
         }
         subtitle={
           <span className="inline-flex flex-wrap items-center gap-x-1.5">
             <span className="text-white/50">Client</span>
             {client
-              ? canViewClients(currentUser?.role)
+              ? canViewClients(currentUser)
                 ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
                 : <span className="text-gold-400">{client.name}</span>
               : <span>Unknown</span>}
-            {account.clientReference && <><span className="text-white/30">·</span><span>their ref {account.clientReference}</span></>}
+            {/*
+              "CLIENT REF", NOT "THEIR REF". The firm's own word, marked on the screen. It sat
+              beside the gold account number, whose tooltip reads "our reference", and the pair
+              was meant to be read as ours/theirs — but "their" only resolves if you have already
+              read the word Client at the start of the line, and a collector quoting a reference
+              back to a client is scanning, not reading.
+            */}
+            {/* Both of the OTHER numbers, marked for what they are. The badge above is ours;
+                these two belong to the client and to the agreement, and a collector quoting one
+                back down the phone has to know which they are reading. */}
+            {account.accountNumber && (
+              <>
+                <span className="text-white/30">·</span>
+                <span title="The account number on the agreement, as the client gave it">
+                  account no. {account.accountNumber}
+                </span>
+              </>
+            )}
+            {account.clientReference && (
+              <>
+                <span className="text-white/30">·</span>
+                <span title="The client's own reference for this account">
+                  client ref {account.clientReference}
+                </span>
+              </>
+            )}
             {account.handoverDate && <><span className="text-white/30">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
           </span>
         }
       >
         <div className="flex items-center gap-2">
-          <StatusPill status={account.status} inDuplum={account.inDuplum} />
+          {/* HOW IT ENDED, NOT THE COLUMN IT CAME IN ON. A withdrawn account kept its green
+              'Active' pill from Swordfish; the pill is the first thing read on the page. */}
+          {account.endedAs
+            ? <span data-testid="account-ended-pill"
+                className="whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                {/* ONE WORD (the firm, 12 Oct: "you only have to say withdrawn, not withdrawn by the
+                    client"): the long label wrapped under the debtor's name on the iPad. */}
+                {ENDING_SHORT[account.endedAs] ?? ENDING_LABEL[account.endedAs]}{account.endedOn ? ` · ${formatDate(account.endedOn)}` : ''}
+              </span>
+            : <StatusPill status={account.status} inDuplum={account.inDuplum} />}
           {account.prescribed && (
             <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
               title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
@@ -342,12 +1661,74 @@ export function AccountDetail() {
           a different relationship, and it sits in the strip below with the other facts you check
           before picking up the phone — the band was starting to hold two of everything.
         */}
+        {/*
+          WHO HOLDS IT, AND THE WAY TO CHANGE THAT.
+
+          THE NAME WAS THE WRONG ONE. This read `swordfishAssignedTo`, which is the free-text name
+          off the legacy book — not `assignedTo`, which is the clerk the account is actually on in
+          Raptor. 20 302 accounts had a Raptor clerk and said "Unassigned" here, and on 670 more
+          it named a DIFFERENT person from the one holding the file. Allocating, the diary, the
+          workflow and the collector's own list all turn on `assigned_to`; only this line did not,
+          so the one place a person looks to see who has the account was the one place not
+          answering from the book.
+
+          THE FIRM: "if I'm an administrator and I want to reassign an account, I can click there
+          ... reassign and diarise". So it is the control as well as the label — and it opens the
+          SAME assign-and-refer screen the accounts list and the client screen use, because
+          commitHandOut is the only thing that allocates and it always diarises with it.
+        */}
         <div className="mt-2.5 text-right leading-tight ml-2">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
-          <p className="text-sm font-semibold text-white">{account.swordfishAssignedTo ?? 'Unassigned'}</p>
-          {account.swordfishAssignedTo && <p className="text-[11px] text-white/50">from Swordfish</p>}
+          {mayHandOut ? (
+            <button type="button" onClick={() => setHandOut(true)}
+              /* The name IS the button. A separate "reassign" link beside it would be a second
+                 thing to find, and the firm pointed at the name itself. */
+              className="text-sm font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
+              title={assignedName ? `${assignedName} holds this account. Give it to somebody else.` : 'Nobody holds this account. Give it to somebody.'}>
+              {assignedName ?? 'Unassigned'}
+            </button>
+          ) : (
+            <p className="text-sm font-semibold text-white">{assignedName ?? 'Unassigned'}</p>
+          )}
         </div>
       </DashboardHero>
+
+      {/*
+        ASSIGN AND REFER, on this one account.
+
+        The same screen as the accounts list and the client screen -- not a third allocation form.
+        `allocate_and_refer` is the only mode that can allocate (see HandOutMode), so reassigning
+        from here books the new clerk a diary date at the same time, which is the firm's rule:
+        an account with a clerk is an account in a diary.
+      */}
+      {handOut && (
+        <HandOutModal
+          selection={{ kind: 'ids', ids: [account.id] } as Selection}
+          selectedCount={1}
+          users={users}
+          teams={teams}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setHandOut(false)}
+          onDone={async () => {
+            setHandOut(false)
+            /* Re-read rather than patch the row in place: the diary entry, the position and the
+               timeline all move with the allocation, and half of them are derived. */
+            await reload()
+          }}
+        />
+      )}
+
+      {/*
+        Only when the account was opened FROM the diary. An account looked up by name is just an
+        account; one reached by working a queue gets the queue's controls.
+
+        Directly under the band, at the firm's instruction, and it has now been in three places:
+        fixed to the bottom of the window (which cost eighty pixels of every screen), then between
+        the comment and the actions. Here is right, and the reason is that it is not really about
+        this account at all — it says where you are in a queue of sixty-six and offers the way on.
+        That belongs with the page's chrome, in the first screenful, never scrolled past.
+      */}
+      <DiaryWorkBar account={account} onWorked={reload} />
 
       {/*
         One number, not two. "Balance" and "To settle today" differ by the receipt fee, and a
@@ -357,11 +1738,18 @@ export function AccountDetail() {
 
         Status and flags earn their place beside the money: they decide what the call is about.
       */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+      <RecordFigures count={5}>
         {/*
           The figure moves every day, so the tile says so. A collector who quotes a settlement and
           is asked "why is it more than yesterday" needs the answer on the same screen.
         */}
+        {/* A SETTLED ACCOUNT HAS NOTHING TO SETTLE. It said "R 7 980,14 to settle today" on
+            HTH/4004 the day the debtor paid the agreed R5 000 -- the remainder is what the client
+            gave up, and the tile says so rather than quoting it. */}
+        {b && account.endedAs === 'settled' ? (
+          <Figure label="Settled" value={formatMoney(b.balance)}
+            note={b.waived > 0 ? `${formatMoney(b.waived)} waived by the client` : 'nothing was waived'} strong />
+        ) : (
         <Figure label="To settle today" value={b ? formatMoney(b.settlement) : '—'}
           note={b
             ? `incl. ${formatMoney(b.settlementFee)} receipt fee`
@@ -369,22 +1757,30 @@ export function AccountDetail() {
                 ? ` · ${formatMoney(b.interestAccruing)} interest over ${b.interestAccruingDays} ${b.interestAccruingDays === 1 ? 'day' : 'days'}`
                 : '')
             : undefined} strong />
-        <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
+        )}
+        <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${livePayments} ${livePayments === 1 ? 'payment' : 'payments'}`} />
         <Figure
           label="Next promise"
           value={due ? formatMoney(due.amount) : '—'}
           note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
-          danger={!!due && isOverdue(due, TODAY)}
+          danger={!!due && isOverdue(due, TODAY())}
         />
         {/*
-          One block, because the band above already carries the top-level status and repeating it
-          here spent a whole tile saying "Active" twice. What is left is the part that differs
-          account to account: the sub-status and the flags.
+          THE POSITION, NOT THE COLUMN. This tile read "Active: Activated · no flags", which is
+          the firm's own definition of a screen that shows a person a column instead of an answer:
+          'Active: Activated' describes how the row got into the table and says nothing about the
+          debtor. The rung the account is reported on is what a collector opening it needs, and it
+          is the same word the client will see on their report.
+
+          The inherited status has not vanished — it is on the band at the top of the record and
+          on the Transactions tab. What it is not is the headline.
         */}
         <Figure
-          label="Status & flag"
-          value={account.subStatus || account.status || '—'}
-          note={accountFlagList(account).join(' · ') || 'no flags'}
+          label="Position"
+          value={DESK_POSITIONS[position].label}
+          note={account.clientActionAsk
+            ? `${CLIENT_FLAGS.client_action.label}: ${account.clientActionAsk}`
+            : DESK_POSITIONS[position].meaning}
           small
         />
         <Figure
@@ -393,29 +1789,125 @@ export function AccountDetail() {
           note={clientLiaison ? `for ${client?.name ?? 'this client'}` : 'set one on the client record'}
           small
         />
-      </div>
+      </RecordFigures>
+
+      {/* Said where the action bar is, because that is where the press was. */}
+      {sendProblem && (
+        <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-3 py-2.5 text-[13px] text-negative-700">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            The email went out, but it was not recorded on this account and no fee was raised:{' '}
+            {sendProblem}. Add it by hand before the client is invoiced.
+            <button type="button" onClick={() => setSendProblem(null)}
+              className="ml-2 underline underline-offset-2">Dismiss</button>
+          </span>
+        </div>
+      )}
+
+      {/*
+        WHAT A REFERRAL DID, said where the press was.
+
+        A REFERRAL THAT QUIETLY SUCCEEDED LOOKS EXACTLY LIKE ONE THAT QUIETLY FAILED, and this one
+        also says what did NOT happen -- the account has not moved -- so nobody refers a file
+        believing they have handed it over. See referralDone.
+      */}
+      {referred && (
+        <div className="flex items-start gap-2 rounded-lg border border-[var(--c-green)]/30
+          bg-[var(--c-green)]/5 px-3 py-2.5 text-[13px] text-slate-700">
+          <Check className="w-4 h-4 mt-0.5 shrink-0 text-[var(--c-green)]" />
+          <span className="min-w-0">
+            {referred}
+            <button type="button" onClick={() => setReferred(null)}
+              className="ml-2 underline underline-offset-2">Dismiss</button>
+          </span>
+        </div>
+      )}
+
+      {/*
+        WHAT A CALL CODE STILL NEEDS, said where the press was -- beside the action row rather than
+        inside the panel that has just closed.
+
+        GOLD RATHER THAN RED: nothing has failed. The call IS recorded; what is outstanding is the
+        half of it a button cannot carry, and a red box would teach people to dismiss it.
+      */}
+      {callFollowUp && (
+        <div className="flex items-start gap-2 rounded-lg border border-[#c9a052] bg-gold-50
+          px-3 py-2.5 text-[13px] text-slate-700">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-[var(--c-gold-deep)]" />
+          <span className="min-w-0">
+            {callFollowUp}
+            <button type="button" onClick={() => setCallFollowUp(null)}
+              className="ml-2 underline underline-offset-2">Dismiss</button>
+          </span>
+        </div>
+      )}
 
       <MainComment account={account} busy={savingComment}
-        onSave={(text) => runComment(() => saveMainComment(account.id, text, currentUser?.id ?? null))} />
+        onSave={(text) => runComment(
+          // The name goes with it so the timeline note says who changed it.
+          () => saveMainComment(account.id, text, currentUser?.id ?? null, currentUser?.name ?? null),
+        )} />
 
       <ActionBar
         callNumber={callContact?.value}
         callNumbers={smsNumbers}
+        whatsAppMessage={whatsAppOpening({ firstName: account.debtorFirstName, senderName: currentUser?.name, caseNumber: account.caseNumber })}
+        letterValues={letterContext.values as Record<string, string>}
+        letterReference={letterContext.reference}
+        onWhatsApp={(number, count, letter) => {
+          /* A charge that will not save is said on the page rather than lost. The balance is the
+             ledger's, as SigningPanel's 4(a) band is, for an acknowledgement of debt. */
+          void recordWhatsApp({ accountId: account.id, number, count, letter, claimAmount: statement?.breakdown?.balance ?? null, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
+            .then(() => reload())
+            .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+        }}
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
         onDispute={() => setDisputing(true)}
         onSms={() => setSmsOpen(true)}
+        onScript={() => setScriptOpen(true)}
+        onDiarise={() => setDiariseOpen(true)}
         accountId={account.id}
+        /* 'new' is a DESK rung and not one of the thirteen a client is reported on, so it is not
+           something the call box can mark or leave an account on. Everything else passes through. */
+        standing={position === 'new' ? null : position}
+        debtorName={name}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+        /* SO THE CALL BOX DOES NOT ASK FOR A PROMISE THAT ALREADY STANDS -- the firm's objection,
+           made about the diary and just as true on a call: "there's already a PTP in place, why do
+           you need to redo this?" `due` is the open one, soonest first. */
+        livePromise={due ? { amount: due.amount, dueOn: due.dueOn } : null}
+        idNumber={account.debtorIdNumber}
+        debtorKind={account.debtorKind}
+        traceMobile={traceMobile}
         onTraced={reload}
+        onUpload={() => setTracing(true)}
+        onAskClient={setAskingTrace}
+        /*
+         * REFERRING IS A TEAM LEADER'S ACT. canLeadCollections rather than canReassign, which is
+         * the same choice the floor's own screens make and for the firm's own reason: the
+         * pre-legal team leader leads a team and cannot reassign, and they are exactly the person
+         * who reads a file and wants somebody to ring the employer.
+         */
+        onTransfer={() => setReferring('transfer')}
+        startable={startable}
+        onStartWorkflow={(versionId) => {
+          /*
+           * ONE SEQUENCE IS ASKED HERE; SEVERAL IS STILL A TRIP TO THE TAB. A choice between two
+           * statutory sequences belongs where both are written out with the firm's own note under
+           * each -- that was true before and a modal does not make it less so.
+           */
+          const only = versionId ? startable.find((w) => w.versionId === versionId) : undefined
+          if (only) { setStartNow(only); return }
+          setTab('Workflow'); setAskStart(versionId || null)
+        }}
       />
+
 
       <OutcomeOutstanding queries={queries} accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         busy={queryBusy} run={runQuery} />
-
-      {statement?.note && <Banner>{statement.note}</Banner>}
 
       {drift && (
         <Banner title={`Billed at ${pct(account.commissionRate)}, but the mandate says ${pct(account.commissionRateExpected)}`}>
@@ -425,142 +1917,688 @@ export function AccountDetail() {
         </Banner>
       )}
 
-      <div className="flex gap-1 border-b border-slate-200">
-        {(['Overview', 'Transactions', 'Documents'] as Tab[]).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-              tab === t ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-            {t}
-            {t === 'Transactions' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{statement?.lines.length ?? 0}</span>}
-            {t === 'Documents' && <span className="ml-1.5 text-[11px] text-slate-400 tabular-nums">{documents.length}</span>}
-          </button>
-        ))}
+      <RecordTabs<Tab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Transactions', label: 'Transactions', count: statement?.lines.length ?? 0 },
+          { id: 'Emails', label: 'Emails', count: emails.length },
+          { id: 'Documents', label: 'Documents', count: documents.length },
+          /*
+            THE FIRM: "we should make like a separate little tab there for the workflow. Then we
+            have a whole pane there where we can see with the past workflows. And current ones."
+            And then, on where it sits: "move the tab behind the documents tab. So to the right of
+            the documents tab is the last tab there."
 
-        {/*
-          How to see it, on the row that already says what you are seeing.
+            LAST, WHICH IS ALSO WHAT IT IS. The four before it are the account's own record --
+            what it owes, what was written, what was filed. A workflow is a thing being DONE to
+            the account, and the one line of it anybody needs before acting is on the Overview.
 
-          Only on Overview, because it is the only tab with anything to arrange — offering it over
-          a statement would be a control that does nothing. Icons rather than words: this sits on
-          a tab row, and three labelled buttons would read as three more tabs.
+            THE COUNT IS RUNS AND THE MARK IS WORK. "Workflow 2" says two sequences have been on
+            this account and nothing about whether either has stopped — so the gold dot carries
+            what the rail used to shout, and the one thing here that is somebody's job is not
+            something you have to open a tab to find.
+          */
+          { id: 'Workflow', label: 'Workflow', count: runs.length, alert: waitingOnMe > 0 },
+        ]}
+        active={tab}
+        onChange={setTab}
+        /* Only on Overview, because it is the only tab with anything to arrange — offering it
+           over a statement would be a control that does nothing. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
+      />
 
-          Hidden on a phone, where three tabs already fill the row and adding 95px to it pushed the
-          whole page sideways — measured, not guessed. Nothing is lost: every layout collapses to
-          one column below lg anyway, and the choice is remembered per browser, so a collector who
-          sets it at their desk still has it on the iPad.
-        */}
-        {tab === 'Overview' && (
-          <div className="ml-auto mb-1 hidden sm:flex items-center gap-0.5 self-end rounded-lg border border-slate-200 p-0.5">
-            {LAYOUTS.map((l) => (
-              <button key={l.id} type="button" onClick={() => chooseLayout(l.id)}
-                title={`${l.label} — ${l.hint}`} aria-label={l.label} aria-pressed={layout === l.id}
-                className={`p-1.5 rounded-md ${layout === l.id
-                  ? 'bg-navy-950 text-white'
-                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
-                <l.icon size={15} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {tab === 'Workflow' && (
+        /*
+         * `reload`, NOT `loadRuns`, AND THE DIFFERENCE IS EVERY OTHER PANEL ON THIS PAGE.
+         *
+         * THE FIRM: "when I started the workflow for the section 129, the charges didn't go... it
+         * didn't show it immediately." The charges HAD gone -- R25 under item 1(a) and R3.50 under
+         * item 1(c), both on the account within five seconds. What had not happened is this: the
+         * panel refreshed the RUNS and nothing else, so the transactions list, the balance, the
+         * settlement figure, the emails tab and the timeline all went on showing the account as it
+         * was before the demand was issued.
+         *
+         * A WORKFLOW ACTION IS NOT A WORKFLOW-ONLY ACTION. Starting a sequence or releasing a held
+         * step sends an email, sends an SMS, raises two Annexure B fees, files a Sent copy and
+         * writes a note. Six panels move; one was being told.
+         *
+         * THIS IS THE OTHER DIRECTION OF A BUG ALREADY FIXED ONCE. `reload` was made to include
+         * loadRuns so that recording a promise refreshed this tab. The reverse -- this tab
+         * refreshing everything else -- is the same fault seen from the other end, and it was left
+         * standing. The two now go through one function, which is the only arrangement where they
+         * cannot drift apart again.
+         */
+        <WorkflowRunPanel accountId={account.id} runs={runs} offers={startable}
+          error={runsError} onChanged={reload} importedAt={account.importedAt}
+          askingFor={askStart} onAsked={() => setAskStart(null)} />
+      )}
 
       {tab === 'Transactions' && (
-        <Card><StatementTable statement={statement?.lines ?? []} account={account} breakdown={b} /></Card>
+        <Card>
+          {/* PAYMENTS FIRST, EACH WITH REVERSE (prompt 11): the account is where a debtor's "that
+              payment isn't mine" lands, and it was the one place a payment could not be undone. */}
+          <AccountPaymentsList accountId={account.id} mayReverse={canReversePayment(currentUser)}
+            onReversed={reload} />
+          <StatementTable statement={statement?.lines ?? []} account={account} breakdown={b}
+            handedOver={account.capitalHandedOver}
+            /* The day the figures were struck, printed on the page. The same one the statement
+               above was computed to, so the PDF and the table cannot disagree about "as at". */
+            asAt={firmToday()}
+            money={formatMoney}
+            values={letterContext.values}
+            reference={letterContext.reference}
+            audience={account.debtorKind}
+            /* The firm's own word for where the account stands -- derived, never stored. */
+            status={DESK_POSITIONS[position]?.label ?? null}
+            onRecordPayment={canRecordPayment(currentUser) ? () => setPayingIn(true) : null}
+            /*
+             * THE PRESS THAT EMAILS ONE. The control draws the PDF and merges the firm's covering
+             * wording; this opens the one compose box on the account with both already on the
+             * message, so it goes out through the collector's own mailbox, is filed on the
+             * account and is charged item 1(a) by the path that charges every other email.
+             */
+            onEmail={(doc) => {
+              startCompose()
+              setSimulation({ ...doc, values: letterContext.values })
+              setComposeTo(emailContact?.value ?? '')
+            }}
+          />
+        </Card>
+      )}
+
+      {tab === 'Emails' && (
+        <EmailsPanel
+          emails={emails}
+          canSend={!!mailbox}
+          /* "This is a dispute" / "This is a request" opens the Escalate box on the message
+             rather than raising anything -- the buttons used to post straight to the endpoint and
+             produce a dispute with no classification, nobody's name on it and no chase date, with
+             item 3 charged on the press. See EmailsPanel's onClassify. */
+          onClassify={(e, k) => setClassifying({ email: e, kind: k })}
+          onCompose={() => { startCompose(); setComposeTo(emailContact?.value ?? '') }}
+          onReply={(e) => { startCompose(); setReplyTo(e); setComposeTo(e.debtorAddress) }}
+          /*
+           * EVERYBODY WHO WAS ON IT, worked out by the same helper the mailbox uses. It drops our
+           * own addresses (or every reply-all copies us back into our own inbox and the thread
+           * doubles each round) and promotes the sender to To.
+           */
+          onReplyAll={(e) => {
+            const { to, cc } = replyAllTo({
+              from: { name: e.sentByName, address: e.debtorAddress },
+              to: e.toRecipients,
+              cc: e.ccRecipients,
+              mine: [e.ourAddress, mailbox, currentUser?.email].filter((a): a is string => !!a),
+            })
+            startCompose()
+            setReplyTo(e)
+            setComposeTo(to[0]?.address ?? e.debtorAddress)
+            setComposeCc(recipientLine(cc))
+          }}
+          /* NOT threaded and NOT addressed: a forward goes to somebody who was not in the
+             conversation, so In-Reply-To would put our message inside a thread they have never
+             seen, and a prefilled To would be the wrong person. */
+          onForward={(e) => { startCompose(); setForwardOf(e); setComposeTo('') }}
+          /*
+           * Marked read where it is actually read, with the row updated in place rather than by
+           * reloading the account — a full reload here would collapse the message the moment
+           * somebody opened it.
+           */
+          onRead={(e) => {
+            setEmails((list) => list.map((x) => (
+              x.id === e.id ? { ...x, readAt: new Date().toISOString() } : x
+            )))
+            void markRepliesRead([e.id])
+          }}
+          /*
+           * Back onto the unread list, with the row updated in place for the same reason reading
+           * one is: reloading the account here would close the message somebody just decided to
+           * come back to.
+           */
+          onUnread={(e) => {
+            setEmails((list) => list.map((x) => (x.id === e.id ? { ...x, readAt: null } : x)))
+            void markRepliesUnread([e.id])
+          }}
+        />
       )}
 
       {tab === 'Documents' && (
         <DocumentsPanel accountId={account.id} documents={documents} onChange={reload}
-          userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} canDelete={canDelete} />
+          userId={currentUser?.id ?? null} userName={currentUser?.name ?? null} canDelete={canDelete}
+          /*
+           * A TRACE IS NOT A BLOB. Choosing it here opens the reader rather than filing the PDF
+           * unread — the firm paid for the search, and a trace that goes into the bucket without
+           * being read is the exact waste this was built to end. The reader files the PDF here
+           * afterwards under the same kind, so nothing is lost either way.
+           */
+          onUploadTrace={() => setTracing(true)} />
       )}
 
-      {tab === 'Overview' && layout === 'columns' && (
-        // Three columns only from xl. At iPad width the fixed side columns leave the timeline
-        // about 120px wide, which is not a narrow column — it is unreadable. So lg drops to two
-        // columns with the timeline full-width underneath, and anything narrower stacks.
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)_minmax(0,19rem)]">
-          <div className="lg:order-1 xl:order-none">{detailsPanel}</div>
-          <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">{timelinePanel}</div>
-          <div className="space-y-4 lg:order-2 xl:order-none">
-            {summaryPanel}
-            {promisePanel}
-            {disputesPanel}
-            {positionPanel}
-          </div>
-        </div>
+      {tab === 'Overview' && (
+        /*
+          The same three arrangements every record page now offers, from the same component.
+
+          Defining the panels once above and letting RecordLayout place them is the whole reason
+          the layouts can be trusted to stay the same page: a prop added to the promise panel
+          cannot be added to one arrangement and forgotten in the other two — a bug that is
+          invisible until somebody switches layout.
+        */
+        <RecordLayout
+          layout={layout}
+          details={detailsPanel}
+          main={timelinePanel}
+          /*
+            THE CLIENT'S LINE FIRST, above the figures.
+            
+            It went in second, under the Account summary, and the firm could not find it — which
+            on an iPad is the honest outcome: the summary is a dozen rows of money and this is
+            three lines under it. A panel nobody scrolls to is a panel that does not exist, and
+            this one only works if the person doing the work reads it.
+          */
+          /*
+           * THE WORKFLOW SITS BELOW THE PROMISE AND THE DISPUTE, at the firm's asking: "I think a
+           * promise to pay and a dispute holds more weight than that."
+           *
+           * They are right about which is which. A promise is the thing this account is measured
+           * by and a dispute is the thing that stops it; the workflow is a record of what has
+           * already gone out by itself, which is worth seeing and never the first thing to act on.
+           */
+          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel, settlementPanel,
+            disputesPanel, workflowNowPanel, testClockPanel, positionPanel]}
+          /*
+           * THE TRACE, THE DIRECTORS AND THE JUDGMENTS, under the timeline where the firm asked
+           * for them -- and null in the other two arrangements, where the same panel is already
+           * drawn inside `details`. One panel, one place, whichever arrangement is on.
+           */
+          underMain={underTimeline ? standingPanel : null}
+        />
       )}
 
-      {tab === 'Overview' && layout === 'stacked' && (
-        // One column, in the firm's own reading order: who they are, what they owe, what has
-        // happened, what they promised, what they are arguing about, where the account stands.
-        // Capped to a readable measure — a full-width timeline on a 27" screen is a worse read
-        // than a narrow one, not a better one.
-        <div className="mx-auto w-full max-w-5xl space-y-4">
-          {detailsPanel}
-          {summaryPanel}
-          {timelinePanel}
-          {promisePanel}
-          {disputesPanel}
-          {positionPanel}
-        </div>
+      {ending && (
+        <EndAccountModal
+          accountId={account.id}
+          caseNumber={account.caseNumber}
+          debtorName={name}
+          /* THE WHOLE BALANCE, not the capital: "this will be regarding the total outstanding
+             balance ... inclusive of fees, interest, capital" (the firm, 12 Oct). The capital
+             alone read nil on accounts that still owed their fees. */
+          balance={statement?.breakdown.balance ?? account.capitalOutstanding ?? 0}
+          canWriteOff={canViewFinance(currentUser)}
+          onClose={() => setEnding(false)}
+          onDone={() => { setEnding(false); reload() }}
+        />
       )}
 
-      {tab === 'Overview' && layout === 'wide' && (
-        // Two thirds and one third. The work — who to ring and what was said — gets the width;
-        // the money sits beside it and stays in view while you scroll the history.
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            {detailsPanel}
-            {timelinePanel}
-          </div>
-          <div className="space-y-4">
-            {summaryPanel}
-            {promisePanel}
-            {disputesPanel}
-            {positionPanel}
-          </div>
-        </div>
+      {holding && (
+        <HoldAccountModal
+          accountId={account.id}
+          caseNumber={account.caseNumber}
+          onClose={() => setHolding(false)}
+          onDone={() => { setHolding(false); reload() }}
+        />
+      )}
+
+      {releasing && (
+        <ReleaseAccountModal
+          accountId={account.id}
+          caseNumber={account.caseNumber}
+          from={account.book === 'closed' ? 'closed' : 'on_hold'}
+          onClose={() => setReleasing(false)}
+          onDone={() => { setReleasing(false); reload() }}
+        />
+      )}
+
+      {freezing && (
+        <FreezeModal
+          accountId={account.id}
+          accountLabel={`${[account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ')} \u00b7 ${account.accountNumber}`}
+          frozen={account.frozenBy || /^frozen/i.test(account.status)
+            ? { by: account.frozenBy, reason: account.frozenReason }
+            : null}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setFreezing(false)}
+          onDone={reload}
+        />
+      )}
+
+      {askingClient && (
+        <ClientActionModal
+          accountId={account.id}
+          accountLabel={`${[account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ')} \u00b7 ${account.accountNumber}`}
+          outstanding={account.clientActionAsk
+            ? { ask: account.clientActionAsk, dueOn: account.clientActionDue }
+            : null}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setAskingClient(false)}
+          onDone={reload}
+        />
+      )}
+
+      {/*
+        THE SAME BOX, OPENED ON A MESSAGE.
+        
+        Not a second modal: everything it asks -- the classification, the dictated issue, who gets
+        it, when it comes back -- is the same question whether the dispute arrived by telephone or
+        by email, and two boxes asking it would be two boxes to keep in step. What the email adds
+        is the words already in the box, the attachments that come across with it, and the option
+        of adding it to the dispute already open instead of raising a second one.
+      */}
+      {startNow && (
+        <Modal title={`Start ${startNow.name}?`} onClose={() => setStartNow(null)} width={460}>
+          <StartWorkflowAsk accountId={account.id} offer={startNow} autoFocus
+            onStarted={reload} onCancel={() => setStartNow(null)} />
+        </Modal>
+      )}
+
+      {payingIn && (
+        <RecordPaymentModal
+          fixedAccount={{
+            id: account.id,
+            caseNumber: account.caseNumber,
+            accountNumber: account.accountNumber,
+            name: [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'No name',
+          }}
+          onClose={() => setPayingIn(false)}
+          onDone={reload}
+        />
+      )}
+
+      {classifying && (
+        <EscalateModal
+          accountId={account.id}
+          /* Only so the owner's notification can name whose account it is. See tellTheOwner. */
+          debtorName={name}
+          users={users}
+          clientLiaison={clientLiaison}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
+          alreadyDisputed={openDisputeOn(queries) !== null}
+          fromEmail={{
+            id: classifying.email.id,
+            subject: classifying.email.subject,
+            body: classifying.email.body,
+            attachmentNames: classifying.email.attachmentNames,
+          }}
+          initialKind={classifying.kind}
+          openQueries={queries}
+          onClose={() => setClassifying(null)}
+          onDone={reload}
+        />
+      )}
+
+      {/*
+        ASKING THE CLIENT FOR WHAT THE TRACE NEEDS.
+
+        THE SAME BOX AS EVERY OTHER REQUEST, opened with two of its answers already filled in:
+        WHAT is being asked for ("Debtor details") and WHY (the trace that could not be run). Who
+        answers it, when it is chased and whether anything is charged are still asked, which is
+        what this box is for -- and a request has to reach somebody by name. See
+        TraceButton.onAskClient.
+      */}
+      {askingTrace !== null && (
+        <EscalateModal
+          accountId={account.id}
+          debtorName={name}
+          users={users}
+          clientLiaison={clientLiaison}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
+          alreadyDisputed={openDisputeOn(queries) !== null}
+          initialRequestFor={TRACE_REQUEST_FOR}
+          initialDescription={askingTrace}
+          onClose={() => setAskingTrace(null)}
+          onDone={reload}
+        />
+      )}
+
+      {reissuing && (
+        <ReissueNoticeModal
+          accountId={account.id}
+          offer={reissuing.offer}
+          before={reissuing.before}
+          after={reissuing.after}
+          onClose={() => setReissuing(null)}
+          /* The whole page, not only the runs: marking a notice unserved and starting a fresh
+             sequence sends today's steps, which writes notes, fees and emails. */
+          onDone={reload}
+        />
       )}
 
       {disputing && (
         <EscalateModal
           accountId={account.id}
+          /* Only so the owner's notification can name whose account it is. See tellTheOwner. */
+          debtorName={name}
           users={users}
           clientLiaison={clientLiaison}
-          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          /* teamId is what makes "your team leader" answerable rather than "every team leader in
+             the firm" -- see EscalateModal's own note. */
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
+          /* One dispute at a time -- the box does not offer a second. See openDisputeOn. */
+          alreadyDisputed={openDisputeOn(queries) !== null}
           onClose={() => setDisputing(false)}
           onDone={reload}
         />
       )}
 
       {smsOpen && (
-        <SmsModal accountId={account.id} numbers={smsNumbers} onClose={() => setSmsOpen(false)} onDone={reload} />
+        <SmsModal accountId={account.id} debtorKind={account.debtorKind} numbers={smsNumbers}
+          values={letterContext.values}
+          /* Empty for the ordinary SMS button, which opens on the template picker; written where
+             the signing panel opened this to send a link it has just made. */
+          initialText={smsText ?? undefined}
+          onClose={() => { setSmsOpen(false); setSmsText(null) }} onDone={reload} />
       )}
 
-      {composeTo && (
+      {/*
+        Reading the PDF the firm has already paid for. Charges nothing — see TraceUploadModal; the
+        search is charged on the Trace button, where it is run.
+      */}
+      {tracing && (
+        <TraceUploadModal
+          accountId={account.id}
+          debtorKind={account.debtorKind}
+          registrationNumber={account.debtorKind === 'company' ? account.debtorIdNumber : null}
+          directors={standing.directors}
+          hasPractitioner={account.practitionerKind !== null || account.practitionerName !== null}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          initialFile={tracing instanceof File ? tracing : null}
+          onClose={() => setTracing(false)}
+          onDone={reload}
+          onAddPractitioner={(kind) => setPractitioner({ suggest: kind })}
+          /*
+            Straight from filing into working it, which is the firm's flow. reload() first, or the
+            workspace opens against the traces this screen held BEFORE the import and cannot find
+            the one it was just handed.
+          */
+          onWork={(traceId) => { void reload().then(() => setOpenTrace(traceId)) }}
+        />
+      )}
+
+      {/*
+        Working inside a trace: ring a number, say what happened, put the ones that are real onto
+        the account. Opened from the panel's summary — see TraceWorkspaceModal.
+      */}
+      {openTrace !== null && traces.some((t) => t.id === openTrace) && (
+        <TraceWorkspaceModal
+          traces={traces}
+          openId={openTrace}
+          onOpen={setOpenTrace}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setOpenTrace(null)}
+          onChanged={reload}
+          /* A SPENT ROUND OFFERS A FRESH SEARCH, from inside the trace that is spent -- which is
+             where somebody is standing when they find out. See traceRound. */
+          onUploadNew={() => { setOpenTrace(null); setTracing(true) }}
+          /*
+           * AND THE TWO ENDINGS A SPENT TRACE HAS, which it had none of: park it with a date to
+           * come back and trace again, or ask the client for the instruction to write it off as
+           * uncontactable. Both open the same box; neither does anything on its own. See
+           * dormancy.ts.
+           */
+          onPark={() => { setOpenTrace(null); setParking('park') }}
+          onAskWriteOff={() => { setOpenTrace(null); setParking('write_off') }}
+          /*
+           * AND WHOSE DESK IT SHOULD BE ON. THE FIRM: "if an individual has worked through a trace
+           * twice, it could go to the next person." Counted on the person who PULLED the reports,
+           * which is who worked them, and only on rounds that reached nobody -- a hard trace that
+           * found the debtor is not a reason to take a file away. See reallocationLine.
+           */
+          reallocation={reallocationLine(traces, currentUser?.id ?? null)}
+        />
+      )}
+
+      {/*
+        THE BOX THAT ENDS A SPENT TRACE. Opened from inside the trace, confirmed here, because one
+        of its two answers takes the account off the floor and the other asks a client to give up
+        money.
+      */}
+      {parking !== null && (
+        <ParkTraceModal
+          accountId={account.id}
+          accountLabel={`${name} · ${account.caseNumber ?? account.accountNumber ?? ''}`.trim()}
+          mode={parking}
+          /* ROUNDS THAT REACHED NOBODY, across every trace on the account rather than per person:
+             this is what the CLIENT is told, and the client does not care whose desk it was on. */
+          rounds={traces.filter((t) => traceRound(t.items).state === 'spent').length}
+          /* WHAT THE ACCOUNT HAS ACTUALLY BEEN CHARGED FOR, off the fee ledger the page already
+             holds -- never a count of reports, because a report somebody uploaded twice is one
+             search and the client is quoted what they paid for. */
+          searches={(ledgers?.fees ?? []).filter((f) => f.annexureItem === '4c' && f.billed).length}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setParking(null)}
+          onDone={reload} />
+      )}
+
+      {/*
+        PUTTING THE ACCOUNT ON SOMEBODY ELSE'S DAY. One box for both, because they are one act with
+        two sentences and two dates -- see accountReferral.ts.
+      */}
+      {referring !== null && (
+        <ReferAccountModal
+          accountId={account.id}
+          accountLabel={`${name} \u00b7 ${account.caseNumber ?? account.accountNumber ?? ''}`.trim()}
+          kind={referring}
+          /* WHO IT CAN GO TO: the people who work accounts. A referral to somebody who never
+             opens the diary is a referral into a drawer. */
+          users={users.filter((u) => isAssignableOwner(u.role))}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          /* THE NUMBER THE CALLER IS ON, so a dropped transfer is recoverable. The same contact
+             the Call button dials, which is the one reception would have answered. */
+          callerNumber={callContact?.value ?? null}
+          onClose={() => setReferring(null)}
+          onDone={async (message) => { setReferred(message); await reload() }} />
+      )}
+
+      {/* Who to deal with when it is no longer the debtor. Typed by a person — it is not on a PDF. */}
+      {practitioner && (
+        <PractitionerModal
+          account={account}
+          suggestKind={practitioner.suggest}
+          onClose={() => setPractitioner(null)}
+          onDone={reload}
+        />
+      )}
+
+      {director && (
+        <DirectorModal
+          accountId={account.id}
+          director={director.editing}
+          onClose={() => setDirector(null)}
+          onSaved={reload}
+        />
+      )}
+
+      {/*
+        WORKED, AND NO DAY TO COME BACK ON.
+
+        THE FIRM: "I'm confirming that with you when you rediarise. Or if you go out of the account.
+        To confirm the status of the account. And also if you want to rediarise."
+
+        A BAR RATHER THAN A PROMPT ON THE WAY OUT, and the reason is honest rather than a design
+        choice: blocking a navigation needs react-router's useBlocker, which needs a data router,
+        and this app is on <BrowserRouter>. Converting it is a change to App.tsx -- a file CLAUDE.md
+        says to touch lightly -- for one prompt. So the question is asked where it cannot be missed
+        instead of where it cannot be escaped, and the interception is a separate piece of work.
+
+        IT ONLY APPEARS WHERE ALL FOUR ARE TRUE, which is what stops it being noise. See
+        shouldAskOnLeaving: something was done, it is this person's account, it is not closed, and
+        there is no entry already.
+      */}
+      {account && shouldAskOnLeaving({
+        worked: touched,
+        hasOpenEntry: hasEntry !== false,
+        mine: account.assignedTo === currentUser?.id,
+        closed: isWrittenOff(account.status),
+      }) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg
+          border border-[#c9a052] bg-gold-50 px-3 py-2">
+          <span className="text-xs text-slate-700">
+            You have worked this account and it has no date to come back on.
+          </span>
+          <button type="button" onClick={() => setLeavingOpen(true)}
+            className="text-xs font-medium text-[var(--c-steel)] hover:underline">
+            Give it a date
+          </button>
+        </div>
+      )}
+
+      {leavingOpen && account && (
+        <LeavingModal
+          standing={position === 'new' ? null : position}
+          accountLabel={[name, account.accountNumber].filter(Boolean).join(' · ')}
+          onDiarise={() => { setLeavingOpen(false); setDiariseOpen(true) }}
+          /* WHERE A STATUS IS ACTUALLY CHANGED, which is by recording what happened. The box
+             deliberately offers no list of rungs -- see LeavingModal. */
+          onRecord={() => { setLeavingOpen(false); setTab('Overview'); setNoteOpen(true) }}
+          onClose={() => setLeavingOpen(false)}
+        />
+      )}
+
+      {/* Choosing when it comes back. Charges nothing — it is a note about a day, not an action
+          against the debtor. */}
+      {diariseOpen && (
+        <DiariseModal
+          accountId={account.id}
+          accountLabel={[name, account.accountNumber].filter(Boolean).join(' · ')}
+          prescriptionDate={account.prescriptionDate}
+          onClose={() => setDiariseOpen(false)}
+          onDone={reload}
+        />
+      )}
+
+      {scriptOpen && (
+        <CallScriptPanel
+          values={letterContext.values}
+          debtorKind={account.debtorKind}
+          state={callState}
+          authorised={authorised}
+          /*
+           * OPENED BY HAND, SO NO DISPOSITION IS DEMANDED.
+           *
+           * THE FIRM'S RULE IS ABOUT A CALL: "the call cannot be closed without a disposition
+           * code." A collector reading a script before they dial, or to see what the firm says at
+           * a stage, has had no call -- and demanding a record of one is how the book filled with
+           * 58 promises to pay that have 43 promises behind them. The dialler opens it live.
+           */
+          live={false}
+          /* THE REFERENCE IS ALL THE PANEL MAY SHOW BEFORE THE VERIFICATION TICK. */
+          reference={account.caseNumber}
+          onDisposition={(code) => { void recordDisposition(code) }}
+          onClose={() => setScriptOpen(false)} />
+      )}
+
+      {composeTo !== null && (
         <ComposeEmailModal
           to={composeTo}
+          /* THE SIMULATION'S FIGURES WIN WHILE ONE IS ATTACHED, so a letter picked afterwards is
+             merged against the same offer the covering email quotes rather than against an
+             account that has no arrangement on it yet. */
+          letterContext={simulation
+            ? { ...letterContext, values: simulation.values }
+            : letterContext}
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
-          initialSubject={`Account ${account.accountNumber ?? ''} - ${name}`.trim()}
-          contextNote="Sent from this account. A note recording what was sent is added to the timeline."
-          onClose={() => setComposeTo(null)}
-          onSent={(subject, bodyText) => {
+          initialSubject={signingEmail
+            ? signingEmail.subject
+            : simulation
+            ? simulation.subject
+            : forwardOf
+              ? forwardSubject(forwardOf.subject)
+              : replyTo
+                ? replySubject(replyTo.subject)
+                : `Account ${account.accountNumber ?? ''} - ${name}`.trim()}
+          /*
+           * A FORWARD IS THE ONE THAT CARRIES THE ORIGINAL. A reply does not, and that is a
+           * decision explained below. A forward has to: the person receiving it was not in the
+           * conversation, so without the original quoted under it they are reading an answer to
+           * a question they never saw.
+           */
+          initialBody={signingEmail
+            ? signingEmail.body
+            : simulation
+            ? simulation.body
+            : forwardOf
+            ? forwardBody(
+              {
+                fromName: forwardOf.direction === 'in' ? forwardOf.sentByName : (currentUser?.name ?? null),
+                fromAddress: forwardOf.direction === 'in'
+                  ? forwardOf.debtorAddress
+                  : (forwardOf.ourAddress ?? mailbox ?? ''),
+                subject: forwardOf.subject,
+                occurredAt: forwardOf.occurredAt,
+              },
+              forwardOf.body ?? '',
+            )
+            : undefined}
+          initialCc={composeCc}
+          /* THE BUTTON, under whatever they type. See ComposeEmailModal.appendHtml for why it
+             cannot travel in the body. */
+          appendHtml={signingEmail?.appendHtml}
+          appendNote={signingEmail?.note}
+          /*
+           * THE SIMULATION, ALREADY DRAWN AND ALREADY ON THE MESSAGE. It cannot come through the
+           * template picker like every other attachment: a stored letter is merged against the
+           * account, and this one is ARITHMETIC whose length is the answer -- only the calculator
+           * has the figures. Removable in the box like anything else.
+           */
+          /* The signed copy wins where there is one: it is the message's whole reason. */
+          initialAttachments={signingEmail?.attachments
+            ?? (simulation ? [simulation.file] : undefined)}
+          /* And whatever the firm's own covering template asked for that this account could
+             not answer, named rather than left standing in the middle of a sentence. */
+          initialMissing={simulation?.missing}
+          /*
+           * No quoted history, on a reply or anything else. The box starts empty.
+           *
+           * Quoting looked helpful and was not. A debtor's reply already carries their own
+           * client's quoted chain, so quoting it again produced a reply that opened with two
+           * layers of "> Awe" and a stray "> <signature.png>" before the agent had typed a
+           * word. The message being answered is on the page behind this modal anyway.
+           */
+          inReplyTo={replyTo?.messageId ?? null}
+          contextNote={signingEmail
+            ? `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). The acknowledgement of debt has already been issued and charged under item 4(a); this is the covering message.`
+            : simulation
+            ? `The payment simulation is attached. Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). It is a simulation, so nothing is recorded as an arrangement until you record one.`
+            : `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
+          onClose={() => { setComposeTo(null); startCompose() }}
+          onSent={(rawSubject, bodyText, messageId, from) => {
             const to = composeTo
+            const answering = replyTo
             setComposeTo(null)
-            // The account's own record of the message, and a person's note rather than an
-            // automatic one: the words in it are theirs, so it survives "just what people wrote".
-            //
-            // A note rather than a fee. An outgoing email IS chargeable -- item 1(a), "necessary
-            // ordinary letter, registered letter, facsimile or e-mail", R25; the comment here
-            // used to say item 4, which is the acknowledgement of debt. Raising it is still the
-            // collections engine's decision rather than a side effect of a Send button, which
-            // does leave Email as the one channel that does not bill itself while SMS does.
-            void addNote({
+            startCompose()
+            /*
+             * Charged, recorded and put on the timeline — see recordSentEmail.
+             *
+             * Item 1(a), R25, on every message we send, at the firm's instruction: "25 rand for
+             * every email sent or responded to". A reply is a letter under 1(a) exactly as a
+             * first email is, so it charges the same.
+             *
+             * The subject arrives with the modal's own "Email sent: " framing, which is the CRM
+             * activity convention and means nothing on an account. Stripped here so the debtor's
+             * own subject line is what gets stored.
+             */
+            void recordSentEmail({
               accountId: account.id,
-              body: `Email sent to ${to}\nSubject: ${subject}\n\n${bodyText}`,
-              authorName: currentUser?.name ?? null,
-              createdBy: currentUser?.id ?? null,
-            }).then(reload)
+              to,
+              from: from ?? mailbox,
+              subject: rawSubject.replace(/^Email sent: /, ''),
+              body: bodyText,
+              messageId: messageId ?? null,
+              inReplyTo: answering?.messageId ?? null,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+            })
+              .then(reload)
+              /*
+               * THE MESSAGE HAS ALREADY GONE, so this is never a reason to look like the send
+               * failed -- it is a reason to say the RECORD did. Named separately because the two
+               * need different things done about them: a failed send is re-sent, and this is
+               * re-entered by hand before anybody invoices the client.
+               */
+              .catch((e: unknown) => {
+                setSendProblem(e instanceof Error ? e.message : String(e))
+              })
           }}
         />
       )}
@@ -589,25 +2627,65 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, accountId, actor, onTraced }: {
+function ActionBar({ callNumber, callNumbers, whatsAppMessage, onWhatsApp, letterValues, letterReference, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow, onTransfer }: {
+  /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
+  idNumber: string | null
+  /** Which number that field is meant to hold: an ID, or a registration number. */
+  debtorKind: 'individual' | 'company'
   /** The number SMS goes to, and what the row shows when there is no number at all. */
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
   callNumbers: { label: string; value: string }[]
+  /** The opening line WhatsApp opens with (S9), and what is recorded once it is opened. */
+  whatsAppMessage: string
+  /** How many went, said on the way back from WhatsApp, and the letter if one went. */
+  onWhatsApp: (number: string, count: number, letter: { name: string; seedKey: string | null } | null) => void
+  /** What a letter sent by WhatsApp is filled with, and its filename (S9). */
+  letterValues: Record<string, string>
+  letterReference: string | null
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
   onDispute: () => void
   onSms: () => void
+  /** The firm's wording for the call, merged against this debtor. Charges nothing: it is read,
+      not sent, and Annexure B prices actions rather than reading. */
+  onScript: () => void
+  /** Put the account in somebody's diary. Charges nothing — it is a note about when, not an action. */
+  onDiarise: () => void
   /** The account being worked, and who is working it — Call and Trace both charge fees. */
   accountId: string
   actor: { id: string | null; name: string | null }
   /** Reload after anything that writes a note or a fee — a trace, a call. */
+  /** Passed straight to CallButton, which asks nothing where one already stands. */
+  livePromise: { amount: number; dueOn: string } | null
+  /* WHERE THE ACCOUNT STANDS, for the call box to say so rather than ask blind -- the rail has
+     already derived it and two derivations of one position drift. See OutcomePicker.current. */
+  standing: ClientPosition | null
+  /** What they are called, for the trace sources searched on a name. See TraceButton.debtorName. */
+  debtorName: string | null
+  /** The cell number a bureau can be searched on where there is no ID. See TraceButton.mobile. */
+  traceMobile: string | null
   onTraced: () => Promise<void>
+  /** Transfer a caller who is on the line now. Offered to everybody: reception has no role of
+      its own, and the person who answers the switchboard is whoever picked up. */
+  onTransfer: () => void
+  /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
+  onUpload: () => void
+  /** Opens the Escalate box on a request for what the trace needs. See TraceButton.onAskClient. */
+  onAskClient: (description: string) => void
+  /**
+   * THE WORKFLOWS A PERSON MAY START HERE, WHICH IN PRACTICE IS THE SECTION 129.
+   *
+   * THE FIRM PUT IT IN THIS ROW: "where would we fit in 129? Like I think 129, promise to pay and
+   * escalate is kind of like, it's three workflows actually, so they should be together."
+   */
+  startable: StartableWorkflow[]
+  /** Goes to the Workflow tab and opens the confirmation there. See WorkflowRunPanel.askingFor. */
+  onStartWorkflow: (versionId: string) => void
 }) {
-  const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
-    <div className="flex flex-wrap gap-2">
+    <RecordActions>
       {/*
         The same PhoneLink the number in Debtor details uses, wearing the action row's clothes —
         so this button and that number cannot disagree about what dialling does. Without BuzzBox
@@ -620,10 +2698,19 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       {callNumber
         ? (
           <CallButton accountId={accountId} numbers={callNumbers} actor={actor}
+            livePromise={livePromise} standing={standing}
             className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
         )
         : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}
-      <Action icon={MessageCircle} label="WhatsApp" title={soon} />
+      {/* Beside Call, because it is what somebody opens on their way into one. */}
+      <Action icon={ScrollText} label="Call script" onClick={onScript}
+        title="The firm's wording, with this debtor's figures in it" />
+      {/* WHATSAPP (S9, 19 Oct): opens WhatsApp on the debtor's cellphone with the opening line
+          typed in. Free to send; recorded and charged under 1(c) on the press -- see
+          accountWhatsApp.ts. */}
+      <AccountWhatsApp numbers={callNumbers} opening={whatsAppMessage} values={letterValues}
+        audience={debtorKind} reference={letterReference} onSent={onWhatsApp}
+        className={`${ACTION_BASE} ${ACTION_ENABLED}`} />
       {/* The number the SMS goes to is the same one Call rings: one number on file, one thing
           that happens when you reach for it. */}
       <Action icon={MessageSquare} label="SMS" onClick={callNumber ? onSms : undefined}
@@ -633,60 +2720,110 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />
       <Action icon={Check} label="Promise to Pay" onClick={onPromise} title="Record what they agreed to" primary />
       {/*
-        The front door to the dispute system. It said "Escalate", which described what happens to
-        the record rather than what happened on the phone -- a collector who has just been told
-        "I don't owe this" is looking for the word the debtor used, not for a workflow verb.
+        The front door to the ticket system, and it has been called three things.
+
+        It was "Escalate", then "Dispute" — because a collector who has just been told "I don't owe
+        this" looks for the debtor's word, not a workflow verb — then "Escalate" again, once the
+        box behind it did four jobs rather than one and could not be named after any of them.
+
+        AND "ESCALATE" WAS STILL WRONG, WHICH THE FIRM CAUGHT: "if you create this as a dispute and
+        you're handling it yourself, I mean what are we doing for the wording?" The contradiction
+        was inside the box all along — it asks "What happens to it now? Escalate it / Keep it, I
+        will deal with it myself" — so escalating was one of the ANSWERS and the door was named
+        after it.
+
+        THE RULE, AND EVERYTHING ELSE FOLLOWS IT: you RAISE a ticket, always; you ESCALATE it when
+        you hand it to somebody else. A dispute recorded and kept is raised and not escalated.
+
+        "TICKET" IS THE FIRM'S OWN WORD, not one invented here — "we could create the ticket like
+        it already exists for the dispute", "the ticket can be, the information request can be
+        deleted". The dispute is still the first and default option inside, which keeps the common
+        case one glance away rather than a hunt.
       */}
-      <Action icon={ShieldAlert} label="Dispute" onClick={onDispute}
-        title="The debtor disputes this account — raise it and give it to someone" />
-      <TraceButton accountId={accountId} actor={actor} className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
-    </div>
+      <Action icon={ShieldAlert} label="Raise a ticket" onClick={onDispute}
+        title="A dispute, a request for information, a question for a team leader, or a recommendation to sue" />
+      {/*
+        AND THE THIRD OF THE THREE, BESIDE THE OTHER TWO.
+        
+        THE FIRM, HAVING JUST STARTED ONE FROM THE WORKFLOW TAB: "on this page where the account
+        is, I think we should have like something here that says, like start the section 129...
+        where would we fit in 129? Like I think 129, promise to pay and escalate is kind of like,
+        it's three workflows actually, so they should be together."
+        
+        THEY ARE RIGHT ABOUT WHY. A promise, an escalation and a section 129 are the three things a
+        collector does that change what the SYSTEM will do next on its own -- the first two stop a
+        sequence and the third starts one. Every other button in the row is one message to one
+        debtor. So the grouping is the firm's reading of their own work, not a tidy-up.
+        
+        NOTHING WHERE THERE IS NOTHING TO START, rather than a button that is always there and
+        usually dead. This is the row's own rule -- a disabled button is dashed and carries its
+        reason -- but the reason here is never about this debtor: the section 129 is missing from
+        the row because the account has already been through it, and a permanently dashed "Section
+        129" on the thousands of accounts that have is noise in the one place that must stay
+        trustworthy. The Workflow tab carries the run and says what happened to it.
+        
+        SEVERAL ON OFFER IS ONE BUTTON TO THE TAB. Two by-hand sequences is a choice, and a choice
+        belongs where both are written out with the firm's own note under each.
+      */}
+      {startable.length === 1 && startable[0] && (
+        <Action icon={Gavel} label={startShortLabel(startable[0].name)}
+          onClick={() => onStartWorkflow(startable[0]!.versionId)}
+          title={`Start ${startable[0].name} \u2014 ${startSentence(todayIso(), startable[0].firstStepOn, startable[0].dayUnit, startable[0].firstStepNeedsRelease)}`} />
+      )}
+      {startable.length > 1 && (
+        <Action icon={Gavel} label="Start workflow" onClick={() => onStartWorkflow('')}
+          title={`${startable.length} sequences can be started on this account`} />
+      )}
+      {/*
+        TRANSFERRING A CALLER, AND NOT REFERRING -- which lost a button.
+
+        THE FIRM: "you can remove that Refer button on the debtor's pane, because I forgot that if
+        you tick on the agent's name, as a team leader or anybody -- well, except being another
+        agent -- then you can refer it."
+
+        THEY ARE RIGHT, AND IT WAS THE SAME ACT TWICE. The agent's name in the hero opens the
+        hand-out box, whose "Refer only" is exactly what this button did: it books somebody to work
+        the account and does not change whose it is. Two doors onto one act is two places to keep
+        in step, and the hero's is the one that also knows how to ALLOCATE -- which is the other
+        half of the decision a team leader is making when they look at who holds a file.
+
+        TRANSFER STAYS, and it is not the same thing. Somebody is on the telephone now; it is
+        dated today by that fact, it carries the caller's number in case the line drops, and it is
+        everybody's to press because the person who answered the switchboard is whoever picked up.
+        See accountReferral.ts, which still writes both sentences.
+      */}
+      <Action icon={PhoneForwarded} label="Transfer" onClick={onTransfer}
+        title="The caller is on the line: hand the account to whoever you are putting them through to." />
+      <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
+        debtorName={debtorName} mobile={traceMobile}
+        className={`${ACTION_BASE} ${ACTION_ENABLED}`}
+        onDone={onTraced} onUpload={onUpload} onAskClient={onAskClient} />
+      {/*
+        When this account comes back, and why. Sits with the other actions rather than in a
+        corner because it is the last thing done to an account before it is left alone, and an
+        account left with no date on it is one nobody returns to.
+      */}
+      {/*
+        One button for both horizons. It was two — Diarise and Remind me — and the firm's point
+        was that the row had grown to ten buttons while those two asked the same question: when
+        does this come back? The box behind it answers it at either scale, and the scale is the
+        first thing it asks.
+      */}
+      <Action icon={CalendarClock} label="Diarise" onClick={onDiarise}
+        title="When this comes back — a day in your diary, or a nudge later today" />
+
+    </RecordActions>
   )
 }
 
-/** Shared with the Call button above, which is a PhoneLink rather than an Action. */
-const ACTION_BASE = 'inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-colors'
-const ACTION_ENABLED = 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'
 
-function Action({ icon: Icon, label, onClick, title, primary }: {
-  icon: typeof Phone; label: string; onClick?: () => void; title?: string; primary?: boolean
-}) {
-  const disabled = !onClick
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`${ACTION_BASE} ${
-        disabled
-          ? 'border-dashed border-slate-200 text-slate-300 cursor-not-allowed'
-          : primary
-            ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
-            : ACTION_ENABLED}`}
-    >
-      <Icon size={14} /> {label}
-    </button>
-  )
-}
 
 /* ---------- small shared pieces ---------- */
-
-/**
- * One figure. `small` is for the two that hold words rather than money — a status set at the
- * size of a rand amount reads as the most important thing on the page, and it is not.
+/*
+ * Action and Figure used to live here. They are now in components/record/RecordShell, which the
+ * Lead and Client pages use as well — the firm asked for one grammar across the app, and a shared
+ * component the model page keeps a private copy of drifts inside a month.
  */
-function Figure({ label, value, note, strong, danger, small }: {
-  label: string; value: string; note?: string; strong?: boolean; danger?: boolean; small?: boolean
-}) {
-  return (
-    <div className={`card px-3.5 py-2.5 ${strong ? 'border-gold-100' : ''}`}>
-      <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`font-semibold mt-0.5 ${small ? 'text-sm leading-snug' : 'text-lg tabular-nums'} ${
-        danger ? 'text-negative' : strong ? 'text-navy-950' : 'text-slate-800'}`}>{value}</p>
-      {note && <p className={`text-[11px] mt-0.5 leading-snug ${danger ? 'text-negative-700' : 'text-slate-500'}`}>{note}</p>}
-    </div>
-  )
-}
 
 function Banner({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
@@ -711,14 +2848,30 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
   )
 }
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Field({ label, value, note, action }: {
+  label: string
+  value?: string | null
+  /** A second line under the value — why it is what it is, rather than more of what it is. */
+  note?: string
+  /** Lets a field be changed where it is shown, instead of from a button somewhere else. */
+  action?: { label: string; onClick: () => void }
+}) {
   return (
     // flex-wrap, so a value too wide to sit beside its label drops to its own full-width line
     // instead of being squeezed and broken mid-way. A reference number split across two lines
     // with one stray digit is a number someone will read out wrong over the phone.
     <div className="flex flex-wrap justify-between gap-x-3 text-sm">
       <span className="text-slate-500 shrink-0">{label}</span>
-      <span className="text-slate-800 text-right min-w-0 break-words ml-auto">{value || '—'}</span>
+      <span className="text-slate-800 text-right min-w-0 break-words ml-auto">
+        {value || '\u2014'}
+        {note && <span className="block text-[11px] text-slate-400 font-normal">{note}</span>}
+        {action && (
+          <button type="button" onClick={action.onClick}
+            className="block ml-auto text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+            {action.label}
+          </button>
+        )}
+      </span>
     </div>
   )
 }
@@ -762,6 +2915,11 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
    * A timeline that quietly hides rows the first time you open it is a timeline you cannot trust
    * to be complete, and "why is the trace not showing" is a worse afternoon than a long list.
    * The choice is remembered per browser, because whoever turns it off means it.
+   *
+   * AND IT IS NOT WHERE THE CHARGE LINES WENT. The firm asked for those off the timeline -- "still
+   * showing the charges on the notes is not necessary" -- and buildTimeline no longer puts a fee
+   * Raptor raised on the list at all. Turning this on instead would have hidden the sentences
+   * Raptor composes along with them, the trace's own note among them. See accountTimeline.
    */
   const [showAutomated, setShowAutomated] = useState(() => {
     try { return window.localStorage.getItem(AUTOMATED_KEY) !== 'hide' } catch { return true }
@@ -824,7 +2982,7 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
           Just what people wrote{' '}
           <span className="text-slate-400">
             {showAutomated
-              ? '— hides fee lines and the notes Raptor writes itself'
+              ? '— hides the notes Raptor writes itself and the actions logged on the old system'
               : hidden > 0
                 ? `— ${hidden.toLocaleString('en-ZA')} automatic ${hidden === 1 ? 'entry' : 'entries'} hidden`
                 : '— nothing automatic on this account'}
@@ -861,12 +3019,12 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
         </p>
       )}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {days.map((day) => (
           <div key={day.date}>
-            <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">{formatDate(day.date)}</p>
-            <div className="space-y-2.5">
-              {day.entries.map((e) => <TimelineRow key={e.id} entry={e} />)}
+            <p className="text-[11px] text-slate-400 mb-1 border-b border-slate-100 pb-0.5">{formatDate(day.date)}</p>
+            <div className="divide-y divide-slate-50">
+              {day.entries.map((e) => <div key={e.id} className="py-1 hover:bg-slate-50"><TimelineRow entry={e} /></div>)}
             </div>
           </div>
         ))}
@@ -894,65 +3052,160 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
  */
 const CLAMP_AT = 150
 
+/*
+ * ONE LINE AN ENTRY, AT THE FIRM'S ASKING. "Wherever in this whole app there are a lot of things
+ * listed under each other... it should look like the checking list: thin, sleek, easy to read."
+ * This was a 28px icon and two lines a row -- the title, then who and how under it -- so a
+ * fortnight of work filled the screen. Now the title, then the detail and the author after it in
+ * grey, then the money hard right, on one line. Nothing is dropped: a closed row truncates with the
+ * whole of it on the title, and a long one still opens in place (click it, or Show more) to its
+ * full wrapped text. A newline counts as long too, because a typed note's second line is the one a
+ * single line hides.
+ */
 function TimelineRow({ entry }: { entry: TimelineEntry }) {
   const style = styleFor(entry)
   const Icon = style.icon
   const reversed = entry.status === 'reversed'
   const [open, setOpen] = useState(false)
-  const long = entry.title.length > CLAMP_AT
-  const wraps = entry.kind === 'note' || entry.kind === 'query'
+  const long = entry.title.length > CLAMP_AT || entry.title.includes('\n')
+  const wraps = entry.kind === 'note' || entry.kind === 'query' || entry.kind === 'main_comment'
+  const aside = [entry.detail, entry.by].filter(Boolean).join(' · ')
   return (
-    <div className="flex gap-3">
-      <div className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${style.ring}`}>
-        <Icon size={13} className={style.fg} />
+    <div className={`flex gap-2 text-[12.5px] ${open ? 'items-start' : 'items-center'}`}>
+      <div className={`w-5 h-5 rounded-full grid place-items-center shrink-0 ${style.ring}`}>
+        <Icon size={11} className={style.fg} />
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <p
-            onClick={long ? () => setOpen((v) => !v) : undefined}
-            className={`text-sm min-w-0 wrap-anywhere ${wraps ? 'whitespace-pre-wrap' : ''} ${
-              long ? 'cursor-pointer' : ''} ${long && !open ? 'line-clamp-3' : ''} ${
-              reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}
-          >
-            {entry.title}
-            {entry.status && entry.kind === 'promise' && <PromiseChip status={entry.status} />}
-          </p>
-          <span className="text-sm tabular-nums shrink-0">
-            {entry.amount != null
-              ? <span className={entry.kind === 'payment' && !reversed ? 'text-positive-700 font-medium' : 'text-slate-600'}>
-                  {formatMoney(entry.amount)}
-                </span>
-              : entry.free
-                ? <span className="text-slate-300 text-xs" title="Work done past the Annexure B ceiling. Real history, no money.">not charged</span>
-                : null}
-          </span>
-        </div>
-        {long && (
-          <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-brand-600 hover:underline">
-            {open ? 'Show less' : 'Show more'}
-          </button>
-        )}
-        {(entry.detail || entry.by) && (
-          <p className="text-[11px] text-slate-400 mt-0.5">
-            {[entry.detail, entry.by].filter(Boolean).join(' · ')}
-          </p>
-        )}
-      </div>
+      <p
+        onClick={long ? () => setOpen((v) => !v) : undefined}
+        title={open ? undefined : [entry.title, aside].filter(Boolean).join(' · ')}
+        className={`min-w-0 flex-1 ${open ? `wrap-anywhere ${wraps ? 'whitespace-pre-wrap' : ''}` : 'truncate'} ${
+          long ? 'cursor-pointer' : ''} ${
+          reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}
+      >
+        {entry.title}
+        {entry.status && entry.kind === 'promise' && <PromiseChip status={entry.status} />}
+        {aside && <span className="text-slate-400"> · {aside}</span>}
+      </p>
+      {long && (
+        <button onClick={() => setOpen((v) => !v)}
+          className="shrink-0 text-[11px] text-brand-600 hover:underline">
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
+      <span className="tabular-nums whitespace-nowrap text-right shrink-0">
+        {entry.amount != null
+          ? <span className={entry.kind === 'payment' && !reversed ? 'text-positive-700 font-medium' : 'text-slate-600'}>
+              {formatMoney(entry.amount)}
+            </span>
+          : entry.free
+            ? <span className="text-slate-300 text-[11px]" title="Work done past the Annexure B ceiling. Real history, no money.">not charged</span>
+            : null}
+      </span>
     </div>
   )
 }
 
 function PromiseChip({ status }: { status: string }) {
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded ml-1.5 align-middle ${PROMISE_CHIP[status] ?? ''}`}>{status}</span>
+  /* The firm's word for the state, not the column's -- see PROMISE_WORDS. Falls back to the column
+     so a state nobody has named yet is visible rather than blank. */
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded ml-1.5 align-middle ${PROMISE_CHIP[status] ?? ''}`}>
+      {PROMISE_WORDS[status] ?? status}
+    </span>
+  )
+}
+
+/**
+ * The one line this account contributes to the client's monthly report.
+ *
+ * Read-only here. It is not an editable note and must not become one: the moment somebody can
+ * type into it, it stops being a faithful reading of the records and becomes a second place
+ * where the truth is kept. What changes it is doing the work — ringing the debtor, taking the
+ * promise, setting the next date — which is the point of showing it.
+ */
+function ClientLinePanel({ line, position, flag, ask, askDue, onAsk }: {
+  line: ClientLine
+  position: { label: string; meaning: string }
+  flag: ClientFlag
+  /** What is outstanding from the client, or null when nothing is. */
+  ask: string | null
+  askDue: string | null
+  onAsk: () => void
+}) {
+  const f = CLIENT_FLAGS[flag]
+  return (
+    <Card>
+      <PanelTitle>What the client sees</PanelTitle>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <p className="text-xs font-medium text-[var(--c-steel)]">{position.label}</p>
+        {/*
+          The dot and the words together. A colour alone is not a flag on a page somebody reads
+          aloud down a telephone, and it is not a flag at all to anyone who cannot see colour.
+        */}
+        <p className={`text-[11px] font-medium ${flag === 'client_action' ? 'text-[var(--c-rust-deep)]' : 'text-slate-400'}`}>
+          {f.dot} {f.label}
+        </p>
+      </div>
+      <p className="text-[11px] text-slate-400 mb-2">{position.meaning}</p>
+
+      {/*
+        THE ASK, WORD FOR WORD. It is the one line on a client report that asks them to do
+        something, so it is shown exactly as they will read it rather than summarised.
+      */}
+      {ask && (
+        <p className="text-sm text-[var(--c-rust-deep)] bg-[var(--tint-rust-deep)] rounded-lg px-3 py-2 mb-2">
+          {ask}
+          {askDue && <span className="block text-[11px] mt-0.5 opacity-80">Needed by {formatDate(askDue)}</span>}
+        </p>
+      )}
+      {/*
+        Quoted and set apart, because it is not this page talking — it is a preview of another
+        document. An agent should be able to tell at a glance that these are the words leaving
+        the building.
+      */}
+      <div className="text-sm border-l-2 border-slate-200 pl-3 space-y-0.5">
+        <p className="text-slate-700">{line.happened}</p>
+        {/* The commitment on its own line — run into the sentence above, it stops being read. */}
+        {line.next && <p className="font-medium text-slate-800">{line.next}</p>}
+      </div>
+      <button type="button" onClick={onAsk}
+        className="mt-2.5 text-xs font-medium text-[var(--c-steel)] hover:underline">
+        {ask ? 'The client came back' : 'Ask the client for something'}
+      </button>
+    </Card>
+  )
 }
 
 /* ---------- right: the figures ---------- */
 
-function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdown: BalanceBreakdown | undefined }) {
+function SummaryPanel({ account, breakdown, note, progress }: {
+  account: DebtorAccount
+  breakdown: BalanceBreakdown | undefined
+  /** How far through the debt they are. Null where nothing has been paid. */
+  progress?: PaymentProgress | null
+  /**
+   * Why the figures above stop where they do — the in duplum ceiling, or a write-off date.
+   *
+   * It used to be a banner of its own, sitting between the action row and the tabs, which is
+   * nowhere: a sentence about capital and interest, floating a long way from any of the numbers
+   * it is about. Here it sits under the very figures it explains and beside the VAT footnote
+   * that plays the same role, and it reads as part of the statement rather than as an alert
+   * about the page.
+   */
+  note?: string
+}) {
   const b = breakdown
   return (
     <Card>
       <PanelTitle>Account summary</PanelTitle>
+      {/*
+        One column, deliberately, however wide the card gets.
+
+        This is a small financial statement, and the figures being in a single right-hand column
+        is what makes it scannable — you read down the money, not across it. Splitting it two up
+        was tried and it broke that alignment, so the width is used by putting the whole card
+        beside the details panel instead. See the Overview layouts.
+      */}
       <div className="space-y-1.5">
         <Money label="Original amount" value={b?.capital} />
         <Money label="Interest accrued" value={b?.interest} note={`${account.interestRateAnnual}% a year`} />
@@ -963,13 +3216,104 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
           Fees and receipt fees are shown including VAT
           {b ? <> &mdash; {formatMoney(b.vat)} of the above is VAT</> : null}. Capital and interest carry none.
         </p>
+        {/*
+          Amber rather than grey, and above the divider: the VAT line explains how a figure is
+          PRESENTED, this one explains that money the firm has charged cannot be collected. Same
+          place, different weight.
+        */}
+        {note && (
+          <p className="flex items-start gap-1.5 text-[11px] text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-2.5 py-2 mt-1">
+            <AlertTriangle size={12} className="shrink-0 mt-px" />
+            <span>{note}</span>
+          </p>
+        )}
         <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
-          <Money label="Balance" value={b?.balance} strong />
-          <Money label="Receipt fee if settled" value={b?.settlementFee} />
-          <Money label="To settle today" value={b?.settlement} strong />
+          {/* A SETTLED ACCOUNT SHOWS THE DISCOUNT AND ENDS AT NIL -- quoting a figure to settle on
+              one is the R7 980 the firm found on HTH/4004 (12 Oct). */}
+          {b && b.waived > 0 ? (
+            <>
+              <Money label="Waived by the client on settlement" value={-b.waived} />
+              <Money label="Balance" value={b.balance} strong />
+            </>
+          ) : (
+            <>
+              <Money label="Balance" value={b?.balance} strong />
+              <Money label="Receipt fee if settled" value={b?.settlementFee} />
+              <Money label="To settle today" value={b?.settlement} strong />
+            </>
+          )}
         </div>
+        {/*
+          HOW FAR THROUGH IT THEY ARE. THE FIRM: "a progress report or a progress bar for a debtor
+          that is paying."
+          
+          UNDER THE FIGURES IT IS MADE OF, so it can be checked rather than believed. A bar with
+          only a percentage on it is one nobody can add up, and this arithmetic goes on a section
+          129 and on a client's report next -- both read by people entitled to check it.
+          
+          DRAWN ONLY WHERE SOMETHING HAS BEEN PAID -- see hasProgress. An empty bar on every
+          account in the book is a thing people stop seeing.
+        */}
+        {progress && hasProgress(progress) && (
+          <div className="border-t border-slate-100 pt-2.5 mt-2">
+            <PaymentProgressBar progress={progress} />
+          </div>
+        )}
       </div>
     </Card>
+  )
+}
+
+/**
+ * The bar itself.
+ *
+ * TWO MEASURES, ONE ABOVE THE OTHER, at the firm's asking. They answer different questions and
+ * the money one alone cannot answer the second: a debtor 60% paid who has missed the last three
+ * instalments is not the same account as one 60% paid and current, and a single bar reports them
+ * identically.
+ *
+ * NO PERCENTAGE WITHOUT ITS FIGURES. The words under it are what somebody checks the bar against.
+ */
+export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) {
+  const pct = progressPercent(progress.money)
+  const run = progress.instalments
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-slate-400">Paid so far</span>
+        <span className="text-[13px] font-semibold text-slate-700 tabular-nums">{pct}%</span>
+      </div>
+      {/* aria-hidden on the bar and the numbers in words beside it: a bar is a picture of a
+          figure that is already on the screen, and read aloud twice it is noise. */}
+      <div aria-hidden className="mt-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+        <div className="h-full rounded-full bg-[var(--c-green)]" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
+        {formatMoney(progress.money.recovered)} of {formatMoney(progress.money.charged)}
+        {/*
+          "TO SETTLE TODAY", NOT "STILL OWED", because that is now what the figure is: the balance
+          plus the item 9 fee on closing the account. The firm: "if the person was about to close
+          this account, in this scenario it would be 1350.28." A caption still reading "still
+          owed" beside the larger number would be the old wording on the new arithmetic, which is
+          worse than either.
+        */}
+        {progress.money.owed > 0 && <> &middot; {formatMoney(progress.money.owed)} to settle today</>}
+      </p>
+      {run && (
+        <p className="text-[11px] text-slate-500 mt-1">
+          {/*
+            SAID IN WORDS, NOT AS A SECOND BAR. The instalments are a handful of events, and four
+            ticks is a picture of a number small enough to read as a number. What matters is
+            whether any were MISSED, which a bar cannot say at a glance and a sentence can.
+          */}
+          <span className={run.missed > 0 ? 'font-medium text-[var(--c-gold-dark)]' : ''}>
+            {run.kept} of {run.planned} instalments kept
+            {run.missed > 0 && <>, {run.missed} missed</>}
+          </span>
+          {run.toCome > 0 && <span className="text-slate-400">, {run.toCome} still to come</span>}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -980,7 +3324,7 @@ function SummaryPanel({ account, breakdown }: { account: DebtorAccount; breakdow
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation }: {
   accountId: string
   promises: PromiseToPay[]
   userName: string | null
@@ -994,6 +3338,33 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   balance: number | undefined
   /** What it takes to close the account today, including the item 9 receipt fee on settling. */
   settlement: number | undefined
+  /** That receipt fee on its own, for the calculator's progress bar. See moneyProgress. */
+  settlementFee: number | undefined
+  /** Payments received, for the calculator's progress bar. Off the same breakdown as `balance`. */
+  paidSoFar: number | undefined
+  /**
+   * THE STATEMENT'S OWN ASSEMBLY, for the repayment calculator under the form.
+   *
+   * PASSED WHOLE AND ALREADY BUILT. The projection runs the same computeBalance the statement runs,
+   * period by period, so the quotation a collector reads down the telephone and the balance printed
+   * beside it are one piece of arithmetic. Reassembled here it would be a second opinion about the
+   * same money, and the drift would be invisible because both would look like figures about this
+   * account.
+   */
+  position: Omit<BalanceInput, 'accrueTo'> | null
+  /** The account's merge values, for the schedule PDF. See RepaymentCalculator. */
+  letterValues: Record<string, string>
+  /** What the debtor knows the account by. Goes in the PDF's filename, not in the letter. */
+  letterReference: string | null
+  /** Which half of the covering email the debtor gets. See RepaymentCalculator. */
+  audience?: 'individual' | 'company' | null
+  /**
+   * THE CALCULATOR'S SIMULATION, ON ITS WAY TO THE COMPOSE BOX.
+   *
+   * PASSED STRAIGHT THROUGH, because the box it opens belongs to the page above this panel: one
+   * compose modal on the account, one place that sends, one place that raises item 1(a).
+   */
+  onEmailSimulation?: React.ComponentProps<typeof RepaymentCalculator>['onEmail']
 }) {
   /*
    * The arrangement is chosen first, and the amount follows from it.
@@ -1002,15 +3373,30 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
    * whole debt or a monthly instalment, so it could neither fill it in nor object to it. Asked
    * this way round a once-off can quote itself, and an instalment can be held to the balance.
    */
+  /* The caller's own session, so the confirmation is sent as them rather than waiting for the
+     morning sweep. See recordPromise's `accessToken`. */
+  const { session } = useAuth()
   const [arrangement, setArrangement] = useState<Arrangement | ''>('')
   const [amount, setAmount] = useState('')
   const [dueOn, setDueOn] = useState('')
   const [onLastDay, setOnLastDay] = useState(false)
   const [charged, setCharged] = useState<string | null>(null)
+  /*
+   * WHICH ARRANGEMENT IS BEING CANCELLED, or null. See CancelArrangementModal for why cancelling
+   * is no longer one press: the cause decides what the account does next, so the box has to ask.
+   */
+  const [cancelling, setCancelling] = useState<PromiseToPay | null>(null)
   const { busy, err, run } = useWriter(onChange)
 
-  const outstanding = promises.filter((p) => p.status === 'open')
-  const past = promises.filter((p) => p.status !== 'open')
+  /*
+   * A DEFAULTED ARRANGEMENT IS STILL OUTSTANDING, NOT PAST. It is the 48 hours the default letter
+   * gives, the arrangement is still on its existing terms, and a payment inside the window revives
+   * it -- so it belongs in the list a collector works, not in the history below it. Filed as past,
+   * the two days when a phone call is worth most are the two days it is off the screen.
+   */
+  const live = (s: string) => s === 'open' || s === 'defaulted'
+  const outstanding = promises.filter((p) => live(p.status))
+  const past = promises.filter((p) => !live(p.status))
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1025,6 +3411,9 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
         dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
         dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
         actor: { id: userId, name: userName },
+        /* So the confirmation goes out on the press rather than on the morning sweep -- the
+           database starts the run, and this is what dates it and sends what is due. */
+        accessToken: session?.access_token ?? null,
       })
       message = chargeMessage(charge, PROMISE_ITEM_ID)
     })
@@ -1121,7 +3510,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               )}
               <label className="block text-[11px] text-slate-500">
                 {arrangement === 'once_off' ? 'Due on' : 'First instalment due on'}
-                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
+                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY()}
                   className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
               </label>
               {arrangement !== 'once_off' && dueOn && (
@@ -1140,6 +3529,57 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               </p>
             </>
           )}
+          {/*
+            WHAT THE OFFER ACTUALLY DOES, BEFORE IT IS RECORDED.
+            
+            THE FIRM ASKED FOR IT HERE: "the guy owes 10 000 rand, he wants to pay 500 rand a
+            month, take into account interest... how long will it take him?"
+            
+            IT READS THIS FORM rather than asking again, so the figures are about the arrangement
+            that is going to be saved -- a second set of inputs would let somebody quote one
+            arrangement and record a different one.
+          */}
+          {position && (
+            <RepaymentCalculator
+              account={position}
+              amount={Number(amount)}
+              schedule={arrangement && dueOn
+                ? {
+                  arrangement,
+                  dueOn,
+                  onLastDay: arrangement === 'monthly' && onLastDay,
+                  dayOfMonth: arrangement === 'monthly' && !onLastDay ? Number(dueOn.slice(8, 10)) : null,
+                  dayOfWeek: arrangement === 'weekly' ? isoWeekday(dueOn) : null,
+                }
+                : null}
+              money={formatMoney}
+              /* The same merge values every other letter on this account is drawn with, so the
+                 trust account on this schedule is the trust account on the section 129. */
+              values={letterValues}
+              reference={letterReference}
+              balanceToday={balance}
+              /* The fee on settling belongs in the bar -- the firm's instruction, and the same
+                 figure the statement above quotes as "Receipt fee if settled". */
+              settlementFeeToday={settlementFee}
+              /* What has already been paid, for the progress bar. The same figure the statement
+                 above shows, off the same breakdown. */
+              paidSoFar={paidSoFar}
+              /* Which half of the covering email the debtor gets -- "Dear" against "To the
+                 directors of", the same split as every other collections template. */
+              audience={audience}
+              /*
+               * AND THE PRESS THAT SENDS IT. The calculator draws the PDF and merges the firm's
+               * own covering wording; this opens the compose box with both already on it, so what
+               * goes out is read by a person before it goes and is charged by the one path that
+               * charges every email on this account.
+               *
+               * TO THE DEBTOR'S OWN ADDRESS, not to whoever was last composed to. Empty where the
+               * account has none, which leaves the box asking for it rather than silently
+               * addressing a simulation to nobody.
+               */
+              onEmail={onEmailSimulation}
+            />
+          )}
           <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
             {busy ? 'Saving...' : 'Record promise'}
@@ -1157,7 +3597,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
 
       <div className="space-y-2">
         {outstanding.map((p) => {
-          const late = isOverdue(p, TODAY)
+          const late = isOverdue(p, TODAY())
           return (
             <div key={p.id} className={`p-3 rounded-lg border ${late ? 'border-negative-100 bg-negative-50' : 'border-gold-100 bg-gold-50'}`}>
               <div className="flex items-baseline justify-between gap-2">
@@ -1171,16 +3611,66 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                   p.instalmentsKept > 0 ? `${p.instalmentsKept} paid so far` : null]
                   .filter(Boolean).join(' · ')}
               </p>
+              {/*
+                THE 48 HOURS, ON THE ROW, WHILE THEY ARE RUNNING.
+                
+                THE FIRM'S OWN NOTICE PROMISES THEM -- "payment within 48 hours and the arrangement
+                continues on its existing terms" -- and a collector ringing this debtor has to know
+                that the window is open, because it is the whole of what they have to offer. The
+                account also reads as still arranged throughout, which is correct and would
+                otherwise look like a mistake.
+              */}
+              {p.status === 'defaulted' && (
+                <p className="mt-1.5 rounded border border-negative-100 bg-white px-2 py-1 text-[11px] leading-snug text-negative-700">
+                  The arrangement has lapsed and the notice of default has gone. Payment of
+                  {' '}{formatMoney(p.amount)} within 48 hours puts it back on its existing terms.
+                  {' '}After that it breaks and the collection steps carry on.
+                </p>
+              )}
               <div className="flex gap-1.5 mt-2">
                 <button disabled={busy} onClick={() => run(() => keepInstalment(p, userId))}
                   className="flex-1 text-[11px] font-medium py-1 rounded border border-positive-100 text-positive-700 hover:bg-positive-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
-                  <Check size={11} /> {p.arrangement === 'once_off' ? 'Kept' : 'Instalment paid'}
+                  <Check size={11} /> {p.status === 'defaulted'
+                    ? 'Payment received'
+                    : p.arrangement === 'once_off' ? 'Kept' : 'Instalment paid'}
                 </button>
-                <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'broken', userId))}
-                  className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
-                  <XCircle size={11} /> Broken
-                </button>
-                <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'cancelled', userId))}
+                {/*
+                  A MISSED PAYMENT GOES TO `defaulted`, NOT STRAIGHT TO `broken`, and this button is
+                  where the firm's 48 hours actually begin.
+                  
+                  IT IS ALSO WHAT SENDS THE NOTICE. workflow_start_on_promise_broken fires on this
+                  transition, so the press is the moment the debtor is told -- by email, with the
+                  notice of default attached, and by SMS behind it.
+                  
+                  WHY NOT `broken` HERE. A broken promise is not a live arrangement, so ptpSchedule
+                  would stop answering {{ptp_amount}} and {{ptp_date}} -- and the notice quoting the
+                  missed instalment would hold on its own merge fields. It would also resume the
+                  section 129 immediately, which means sending a final notice to somebody the firm
+                  has just given two days to put it right.
+                */}
+                {p.status !== 'defaulted' && (
+                  <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'defaulted', userId))}
+                    className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+                    <XCircle size={11} /> Payment missed
+                  </button>
+                )}
+                {/* AND THE 48 HOURS CAN BE ENDED BY HAND. The sweep does it each morning, which is
+                    the right grain for a two-day window; a collector who has been told there is no
+                    money coming should not have to wait for it. */}
+                {p.status === 'defaulted' && (
+                  <button disabled={busy} onClick={() => run(() => resolvePromise(p.id, 'broken', userId))}
+                    className="flex-1 text-[11px] font-medium py-1 rounded border border-negative-100 text-negative-700 hover:bg-negative-50 disabled:opacity-50 inline-flex items-center justify-center gap-1">
+                    <XCircle size={11} /> Break it now
+                  </button>
+                )}
+                {/*
+                  NOT ONE PRESS ANY MORE. It was, and the firm found what that costs: the
+                  arrangement's own sequence went on reminding a debtor about a payment nobody was
+                  going to make, the section 129 the promise had paused stayed paused for an
+                  arrangement that no longer existed, and nothing recorded why. See
+                  CancelArrangementModal.
+                */}
+                <button disabled={busy} onClick={() => setCancelling(p)}
                   className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
                   Cancel
                 </button>
@@ -1204,16 +3694,909 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
           </div>
         )}
       </div>
+
+      {/*
+        CANCELLING, AND THE THREE THINGS THAT FOLLOW FROM WHY.
+        
+        THE ORDER IS THE POINT. The arrangement is cancelled FIRST -- that write is what fires
+        workflow_on_promise_cancelled, which stops the arrangement's own sequence and hands back
+        the collection sequence the promise was holding. The dispute is raised after it, and only
+        after it succeeded: a dispute raised against an arrangement that is still live is a
+        contradiction on the file, and the firm's own rule is that a written dispute stops the
+        sequence, which cannot be decided while there is still a promise holding it.
+        
+        AND A DISPUTE THAT WILL NOT SAVE DOES NOT UNDO THE CANCELLATION. It is reported instead,
+        with the box still open -- the arrangement really is cancelled and saying otherwise would
+        be a lie about the file. The firm asked for the dispute to be raised; a collector told it
+        was not can raise it from Escalate, which is two inches away.
+      */}
+      {cancelling && (
+        <CancelArrangementModal
+          amount={`${formatMoney(cancelling.amount)} · ${describeArrangement(cancelling)}`}
+          onClose={() => setCancelling(null)}
+          onConfirm={async ({ cause, reason, category }) => {
+            try {
+              await resolvePromise(cancelling.id, 'cancelled', userId, { cause, reason })
+            } catch (e) {
+              return e instanceof Error ? e.message : String(e)
+            }
+            let problem: string | null = null
+            if (cause === 'disputed') {
+              try {
+                await raiseQuery({
+                  accountId,
+                  description: reason.trim(),
+                  kind: 'dispute',
+                  /* THE CLASSIFICATION THE BOX ASKED FOR. Not guessed here: raiseQuery refuses a
+                     dispute without one, and the box will not let the cancellation through until it
+                     has been answered. */
+                  category,
+                  raisedBy: userId,
+                  raisedByName: userName,
+                  /* NOT CHARGED. Item 3 is for a dispute taken up with somebody else; one written
+                     down at the collector's own desk mid-call is the job. Same call recordOutcome
+                     makes, for the same reason. */
+                  charge: false,
+                })
+              } catch (e) {
+                problem = `The arrangement was cancelled, but the dispute was not raised: ${
+                  e instanceof Error ? e.message : String(e)}`
+              }
+            }
+            /* THE PAGE RELOADS EITHER WAY, because the cancellation landed and the panel beside
+               this box is still showing a live arrangement. */
+            await onChange()
+            return problem
+          }}
+        />
+      )}
     </Card>
   )
 }
 
-function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: {
+/**
+ * Who is behind this debtor, and what is already against them.
+ *
+ * Three facts that change what the call is, and none of which the book could hold until now:
+ *
+ *   - An appointed practitioner. The debt is still owed, but the DEBTOR IS NO LONGER THE PERSON
+ *     TO ASK — the claim goes to a liquidator, trustee, curator, executor, business rescue
+ *     practitioner or debt counsellor. A collector who rings the company instead has wasted the
+ *     call at best.
+ *   - The directors of a company, because a company is not rung; its people are. Active first:
+ *     one real profile carries six directors of whom four have resigned, and a list that mixes
+ *     them is four wasted calls.
+ *   - Judgments other creditors already hold. The firm has said plainly that these will drive an
+ *     internal likelihood of collection reported back to clients, so they are shown as rows — who
+ *     sued, for what, how long ago — and NOT as a score. See BACKLOG: a number that goes on a
+ *     client report has to be calibrated against the firm's own recovered outcomes first.
+ *
+ * Absent on nearly every account, and silent when absent.
+ */
+function StandingPanel({
+  account, standing, position, traces, traceAction, traceActionCompact, tracingMonth,
+  onUpload, onOpenTrace, onPractitioner,
+  onAddDirector, onEditDirector,
+}: {
   account: DebtorAccount
+  standing: AccountStanding
+  /** The rung the account sits on, so a missing practitioner can be a warning only when it is one. */
+  position: DeskPosition
+  /** Every trace filed on this account, newest first, with everything each one found. */
+  traces: FiledTrace[]
+  /**
+   * The Trace button itself, rendered by the account screen and handed in.
+   *
+   * Handed in rather than rebuilt here so there is one of it: it copies the ID number, opens XDS,
+   * asks how many searches were run and raises item 4(c). A second copy of that in this file
+   * would be a second place for the charge to drift.
+   */
+  traceAction: React.ReactNode
+  /** The same control at header size, for the row beside "Upload a trace". */
+  traceActionCompact: React.ReactNode
+  /** What tracing has cost on this account this month, or null while it is unknown. */
+  tracingMonth: TracingMonth | null
+  /** Read a bureau PDF onto the account. See TraceUploadModal. */
+  onUpload: () => void
+  /** Open one for working: ring its numbers, record what happened, promote the real ones. */
+  onOpenTrace: (traceId: string) => void
+  /** Record who to deal with instead of the debtor. Not on any PDF — see PractitionerModal. */
+  onPractitioner: () => void
+  /** Put a director on the account by hand, where no trace has been bought. */
+  onAddDirector: () => void
+  /** Correct one that was typed in. Bureau-reported directors are not editable — see below. */
+  onEditDirector: (director: AccountDirector) => void
+}) {
+  const kindLabel = practitionerLabel(account.practitionerKind)
+  const hasPractitioner = !!(kindLabel || account.practitionerName || account.practitionerFirm)
+  const { directors, judgments } = standing
+  /*
+   * SPLIT BEFORE ANYTHING IS COUNTED. A director's own judgments are on this account because the
+   * director is, and they are real — but they are not judgments against the debtor. Counted in,
+   * a company with a clean record reads as having two because somebody who signed for it does,
+   * and that is the number the firm has said will drive what it reports to clients.
+   */
+  const { own: ownJudgments, byDirector: directorJudgments } = splitJudgments(judgments)
+  const summary = judgmentSummary(ownJudgments)
+  /*
+   * A WARNING THAT ONLY FIRES WHEN SOMETHING IS ACTUALLY WRONG.
+   *
+   * The account reports as under administration — somebody else is running the debtor's affairs
+   * — and there is no record of who. That is a claim nobody can submit, and it is the one state
+   * worth interrupting a collector about. On every other rung a missing practitioner is simply
+   * the normal case, and saying so would train people to stop reading.
+   */
+  const claimNobodyCanMake = position === 'under_administration' && !hasPractitioner
+
+  /*
+   * EVERY ACCOUNT GETS THIS PANEL, empty or not.
+   *
+   * It used to be hidden on an individual with nothing on it, on the reasoning that an empty card
+   * across several hundred thousand accounts is a card people stop seeing. The firm asked for it
+   * back -- "put it there as an empty box where you can upload a trace or do the trace" -- and the
+   * old reasoning was answering the wrong question. It is not an empty card; it is where the work
+   * starts. An individual with no bureau profile is precisely the account where somebody needs to
+   * run a search, and hiding the way to do it does not make the account less empty.
+   */
+  const bare = !hasPractitioner && directors.length === 0 && judgments.length === 0
+    && traces.length === 0 && !claimNobodyCanMake
+
+  /*
+   * WHAT THE SECOND SEARCH BOUGHT.
+   *
+   * THE FIRM: "if we have to update a trace, let's say three months later we do a trace and we
+   * can update it -- like, okay, well, there's a new trace. And then it should compare it with
+   * the data from the old trace and show you if there's any new data."
+   *
+   * A profile pulled three months after the first is mostly the same profile, and a collector who
+   * has already worked those numbers is being asked to read forty lines to find the two that
+   * changed. The account is charged Annexure B item 4(c) for the second search, so what it bought
+   * is the fair question to answer here.
+   *
+   * READ AGAINST THE SAME SUBJECT, never simply the trace before it -- a company account carries
+   * one report for the company and one per director, and paired by date alone every finding on
+   * both would be reported as new. See previousTraceFor.
+   */
+  /* Everything still owned, across the company's own report and every director's. */
+  const ownedProperty = useMemo(() => propertyAcross(traces), [traces])
+
+  /*
+   * ONE CARD PER PERSON, NOT PER REPORT.
+   *
+   * THE FIRM, looking at an account traced twice: "there should not be two traces on a single
+   * individual... one person can have one trace on the trace results. If it's the second one, a
+   * next of kin, it opens a new trace."
+   *
+   * AND THE COMPARISON MOVED ONTO THE CARD WITH IT. It was a banner over the whole panel, which
+   * was the only honest place for it while the panel drew a card per report -- with two cards for
+   * one person there was no card it belonged to. Grouped by subject there is, and on a company
+   * account with four directors a single banner was answering for whichever of them happened to
+   * be traced last.
+   */
+  const subjects = useMemo(() => traceSubjects(traces), [traces])
+
+  return (
+    /*
+      A CONTAINER, so the blocks inside can lay themselves out on THIS PANEL'S width rather than
+      the screen's. The two are not the same thing: in the three-column layout this card is about
+      19rem wide on a 27" monitor, and a screen-width breakpoint would cheerfully put four columns
+      inside it. Named, because @container/details on the debtor card is a different box and a
+      variant naming that one from in here would never match anything.
+    */
+    <Card className="@container/trace">
+      {/*
+        THE WAY IN HAS TO BE A BUTTON. It was a line of small text inside a summary block, and the
+        firm's report was "I don't know how to open that area where all the information is" —
+        which is the only verdict that matters on a control nobody found. Uploading is the smaller
+        job once a trace exists, so it gives up the emphasis.
+      */}
+      {/*
+        THE HOUSE SCALE, not the mockup's.
+
+        This shipped at the size the design was drawn at -- an 18px heading, a 20px number, 18px
+        icons -- and the firm's verdict was "super bulky". They were right, and the mistake was
+        mine twice over: a mockup is drawn full-bleed and this panel is a 19rem column, and every
+        other card beside it already had a settled scale. A survey of the screen afterwards found
+        exactly three pieces of oversized type on it and all three were this panel's.
+
+        So: an 11px uppercase heading like every other panel, 11px labels, 13px values. What is
+        KEPT from the design is the shape -- the bordered card, the icon in the gutter, the rules
+        between findings, the two columns -- because that was never the problem.
+      */}
+      <PanelTitle action={
+        <span className="inline-flex items-center gap-2">
+          {/*
+            ONE PLACE TO UPLOAD, NOT TWO. THE FIRM: "you should be able to upload a trace, of
+            course, but there's not necessary to have two places to do that."
+            
+            With an empty panel there are two buttons in the middle of it -- "Do the trace" and
+            "Upload a trace I already have" -- which are the ones somebody with no trace is
+            looking at, and they say what they do at full size. This link sat above them saying
+            the same thing in eleven-point grey. It is what is left once a trace exists and the
+            empty state is gone, so it appears only then.
+          */}
+          {!bare && (
+            <button type="button" onClick={onUpload}
+              className="text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+              Upload a trace
+            </button>
+          )}
+          {/*
+            AND ANOTHER SEARCH, WHICH WAS UNREACHABLE THE MOMENT THE FIRST ONE LANDED.
+
+            THE FIRM: "I still don't see where the other traces are... you should always have an
+            option. Now you've done one trace, and now you can't upload other traces or get other
+            information."
+
+            THE BUTTON WAS INSIDE THE EMPTY STATE. `bare` is false once a single trace exists, so
+            the whole block went -- and with it the ONLY door to the source picker, which is where
+            SASSA, the voters' roll, CIPC, the VAT vendor search and a web search live. Both halves
+            of what the firm is describing are this one bug: the second search was gone, and so was
+            every source that is not XDS.
+
+            IT BELONGS IN THE HEADER FOR THE SAME REASON "Upload a trace" DOES -- it is what is
+            left once the empty state has been replaced by results, and a trace panel is exactly
+            where somebody stands when they decide to look somewhere else.
+          */}
+          {!bare && traceActionCompact}
+          {traces.length > 0 && (
+            <button type="button" onClick={() => onOpenTrace(traces[0].id)}
+              className="text-[11px] font-medium px-2 py-1 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 inline-flex items-center gap-1">
+              <Search size={11} /> Open {traces.length > 1 ? `${traces.length} traces` : 'the trace'}
+            </button>
+          )}
+        </span>
+      }>Trace information</PanelTitle>
+
+      {/*
+        WHAT THE TRACING ON THIS ACCOUNT HAS COST.
+
+        THE FIRM, having run three searches: "I don't see any charges that were run for the traces
+        that I've done. It wasn't charged."
+
+        IT WAS CHARGED. Three fees, all billed -- R16, R16 and R32. What they could not find was
+        where it says so, and that is of my own making: the firm asked for the charge lines off the
+        account timeline ("still showing the charges on the notes is not necessary"), and the trace
+        fee went with the rest. Correct for a call, where the note beside it already says a call
+        happened; wrong for a trace, where the panel is the only place the work lives.
+
+        SO THE TOTAL GOES WHERE THE TRACES ARE, not back on the timeline. It is also the running
+        count against the firm's own four a month -- see MONTHLY_LIMIT -- so the panel answers "has
+        it been charged" and "how many are left" with one line instead of neither.
+      */}
+      {tracingMonth !== null && tracingMonth.used > 0 && (
+        <p className="mb-3 text-[11px] text-slate-500">
+          <span className="font-medium text-slate-700">
+            {tracingMonth.used} of {tracingMonth.limit} tracing charges
+          </span>
+          {' '}used this month &middot; R{tracingMonth.charges
+            .reduce((t, c) => t + c.exclVat, 0).toFixed(2)} plus VAT
+        </p>
+      )}
+
+      {bare && (
+        <div className="rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center">
+          <p className="text-sm text-slate-600 font-medium">No trace on this account yet</p>
+          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+            {account.debtorKind === 'company'
+              ? 'A company is reached through its directors. Run a search and they land here, with the judgments against it.'
+              : 'Numbers, addresses, employment and next of kin all come off a bureau profile.'}
+          </p>
+          <div className="mt-3 flex flex-wrap items-start justify-center gap-2">
+            {/*
+              THE SEARCH FIRST. Uploading is what you do with a PDF you already have; running one
+              is what somebody with an empty panel actually needs, and it is the one that costs
+              money -- so it is the one that gets the weight and the confirmation behind it.
+            */}
+            {traceAction}
+            <button type="button" onClick={onUpload}
+              className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+              Upload a trace I already have
+            </button>
+          </div>
+        </div>
+      )}
+
+      {claimNobodyCanMake && (
+        <div className="mb-3 rounded-lg border border-gold-300 bg-gold-50 px-2.5 py-2">
+          <p className="text-xs font-medium text-navy-900 inline-flex items-center gap-1.5">
+            <AlertTriangle size={13} className="text-gold-600 shrink-0" /> Nobody recorded to claim from
+          </p>
+          <p className="text-[11px] text-slate-600 mt-0.5">
+            Somebody else is administering this debtor&rsquo;s affairs, and the account does not say
+            who. The claim cannot be submitted until it does.
+          </p>
+          {/* The warning carries the thing that clears it. A notice with no way out is a nag. */}
+          <button type="button" onClick={onPractitioner}
+            className="mt-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+            Add the practitioner
+          </button>
+        </div>
+      )}
+
+      {hasPractitioner && (
+        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+          <p className="text-xs font-semibold text-navy-900">
+            Deal with the {(kindLabel ?? 'practitioner').toLowerCase()}, not the debtor
+          </p>
+          {practitionerMeaning(account.practitionerKind) && (
+            <p className="text-[11px] text-slate-500 mt-0.5">{practitionerMeaning(account.practitionerKind)}</p>
+          )}
+          <div className="space-y-1.5 mt-2">
+            <Field label={kindLabel ?? 'Appointed'} value={account.practitionerName} note={account.practitionerFirm ?? undefined} />
+            <Field label="Their reference" value={account.practitionerReference} />
+            <Field label="Phone" value={account.practitionerPhone} />
+            <Field label="Email" value={account.practitionerEmail} />
+            <Field label="Appointed" value={account.practitionerAppointedOn ? formatDate(account.practitionerAppointedOn) : null}
+              action={{ label: 'Change', onClick: onPractitioner }} />
+          </div>
+        </div>
+      )}
+
+      {/*
+        WHAT THE TRACE FOUND, in a few lines, at the firm's instruction: "a principal telephone
+        number, a principal address, property interests if they have properties, and next of kins"
+        — and where they work, which they added.
+
+        A SUMMARY, NOT THE TRACE. One real profile carries twenty-six numbers, eleven addresses
+        and thirty directorships; the whole of it belongs behind the link, not on a panel a
+        collector reads between calls.
+      */}
+      {/*
+        WHAT ANYBODY CONNECTED TO THIS ACCOUNT STILL OWNS, ONCE, ABOVE THE REPORTS.
+        
+        THE FIRM: "if the directors of these companies, and we see that they have properties,
+        that is displayed on the main page."
+        
+        Each trace already showed its own. What it could not show was the answer: a company with
+        three directors traced draws four panels, each naming one property, and "is there
+        anything here worth attaching" was spread across them and never added up.
+        
+        WHOSE IT IS IS ON EVERY ROW. A judgment against the company does not attach a director's
+        house -- that takes a suretyship, or piercing -- so a collector who cannot see whose name
+        is on the deed cannot tell which of those they are looking at.
+        
+        ONLY WHERE THERE IS MORE THAN ONE OWNER IN PLAY. On a plain consumer account the one
+        trace panel below says it already, and a summary of one line above one line is noise.
+      */}
+      {ownedProperty.length > 0 && new Set(ownedProperty.map((p) => p.owner)).size > 1 && (
+        <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden">
+          <Finding icon={<Home size={12} />} label="Property held, across every trace">
+            {/* One line a property: the deed, then whose it is after a dot -- the firm's "thin,
+                sleek" list. The whole line rides on the title where the panel truncates it. */}
+            <ul>
+              {ownedProperty.slice(0, 5).map((p) => {
+                const whose = [
+                  p.owner ?? (p.ownerKind === 'director' ? 'a director' : 'the debtor'),
+                  p.ownerKind === 'director' ? 'director' : null,
+                  p.item.amount !== null ? `bought for ${formatMoney(p.item.amount)}` : null,
+                ].filter(Boolean).join(' \u00b7 ')
+                return (
+                  <li key={`${p.traceId}:${p.item.id}`} className="min-w-0">
+                    <button type="button" onClick={() => onOpenTrace(p.traceId)}
+                      title={`${p.item.value} \u00b7 ${whose}`}
+                      className="block text-left w-full truncate py-0.5 text-[12.5px] hover:underline">
+                      <span className="text-slate-800">{p.item.value}</span>
+                      <span className="text-[11px] text-slate-400"> · {whose}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            {ownedProperty.length > 5 && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                and {ownedProperty.length - 5} more on the reports below
+              </p>
+            )}
+          </Finding>
+        </div>
+      )}
+
+      {subjects.map((subject) => (
+        <TraceFound key={subject.key} subject={subject}
+          onOpen={() => onOpenTrace(subject.latest.id)} />
+      ))}
+
+      {/*
+        DIRECTORS CAN BE TYPED IN, not only read off a bureau PDF.
+
+        They arrived one way until now: parsed from a commercial trace. That works once a trace
+        has been bought, and the firm's ask is the case where one has not — "if there's a company,
+        the ID numbers of the directors should also be stored". A collector reading a letterhead,
+        a CIPC disclosure or a signed suretyship has the names, and often the numbers, long before
+        anybody pays a bureau for them. The ID number is the point of the exercise: it is what
+        makes a director traceable in their own right, and on a suretyship it is who actually owes
+        the money.
+
+        Offered on a company only. A director on an individual's account is not a thing.
+      */}
+      {(directors.length > 0 || account.debtorKind === 'company') && (
+        <div className="mb-3">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 inline-flex items-center gap-1.5">
+              <Users size={12} /> Directors
+            </p>
+            {account.debtorKind === 'company' && (
+              <button type="button" onClick={onAddDirector}
+                className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+                <Plus size={12} /> Add
+              </button>
+            )}
+          </div>
+          {directors.length === 0 && (
+            <p className="text-xs text-slate-400 mb-2">
+              Nobody recorded yet. Add them off a letterhead or a CIPC disclosure, or run a
+              commercial trace and they land here with the judgments against them.
+            </p>
+          )}
+          {/* ONE LINE A DIRECTOR -- the firm's "thin, sleek, easy to read". The ID number, their
+              other companies and anything against them personally used to stack under the name;
+              they follow it now, each truncated with the whole of it on its title. */}
+          <ul className="divide-y divide-slate-50">
+            {directors.map((d) => (
+              <li key={d.id} className="flex items-center gap-2 py-1 text-[12.5px] whitespace-nowrap min-w-0 hover:bg-slate-50">
+                <span className={`min-w-0 truncate ${d.status === 'Resigned' ? 'text-slate-400' : 'text-slate-800'}`}
+                  title={[d.fullName, d.idNumber].filter(Boolean).join(' · ')}>
+                  {d.fullName}
+                  {/* The ID number is why a director is stored at all: their own trace is keyed on it. */}
+                  {d.idNumber && <span className="text-[11px] text-slate-400 font-mono"> · {d.idNumber}</span>}
+                </span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full shrink-0 ${
+                  d.status === 'Resigned' ? 'bg-slate-100 text-slate-500' : 'bg-positive-50 text-positive-700'
+                }`}>
+                  {d.status ?? 'Unknown'}
+                </span>
+                <Directorships companies={d.companies} />
+                {/*
+                  THEIR OWN JUDGMENTS, under their own name and nowhere near the company's.
+                  A director who has been sued personally is a different conversation — and on a
+                  suretyship it is the same debt — but it is not a judgment against the debtor.
+                */}
+                <PersonalJudgments judgments={directorJudgments.get(d.id) ?? []} />
+                {/*
+                  Correcting one is offered where it was TYPED, not where a bureau reported it.
+                  A trace's own reading of a name is evidence and editing it in place would leave
+                  the account disagreeing with the PDF filed against it, with nothing to say which
+                  had been changed.
+                */}
+                {d.source === 'manual' && (
+                  <button type="button" onClick={() => onEditDirector(d)}
+                    className="text-[11px] text-slate-400 hover:text-brand-600 hover:underline">
+                    Edit
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/*
+        JUDGMENTS, laid out as the firm drew them: a heading that carries the count and the newest
+        date, then each one as four labelled columns.
+
+        THE LABELS ARE THE POINT. "22 Apr 2025 · Levies · Judgement By Default · case 2334/2025"
+        is four facts run together in a grey line, and a collector reading it has to work out which
+        is which. Named columns are read at a glance, and this is the block that decides whether an
+        account is worth attaching.
+      */}
+      {ownJudgments.length > 0 && (
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 border-b border-slate-100">
+            <p className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-400">
+              <Gavel size={12} />
+              Judgments
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 normal-case tracking-normal">
+                {summary.count}
+              </span>
+            </p>
+            <p className="text-[11px] text-slate-400 shrink-0">
+              {summary.newest
+                ? `most recent ${formatDate(summary.newest)}`
+                : 'no filing date recorded'}
+            </p>
+          </div>
+
+          {/*
+            The total says "at least" where an amount is missing. A judgment recorded without one
+            is not nothing, and a figure that quietly left it out would be read as the whole.
+          */}
+          {summary.total > 0 && (
+            <p className="px-2.5 pt-2 text-[11px] text-slate-400">
+              {summary.withoutAmount > 0 ? 'At least ' : ''}
+              <span className="font-medium text-slate-600">{formatMoney(summary.total)}</span>
+              {summary.withoutAmount > 0 && ` \u2014 ${summary.withoutAmount} without a recorded amount`}
+            </p>
+          )}
+
+          {/*
+            ONE LINE A JUDGMENT, the checking list's shape, which is what the firm asked every list
+            in the app to be. The four labelled columns they drew are still the four columns --
+            they are simply a table's headings now rather than four little labels repeated in
+            every card, which is what made one judgment five lines tall. The creditor leads and
+            the amount closes, so the eye reads who and how much at the two ends. Too wide for
+            the panel, it scrolls sideways inside it rather than wrapping.
+          */}
+          <div className="overflow-x-auto">
+            <table className="w-full list-table whitespace-nowrap">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-400">
+                  <th className="px-3 py-1.5 text-left font-medium">Creditor</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Date</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Type</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Outcome</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Case number</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownJudgments.map((j) => (
+                  <tr key={j.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    {/*
+                      THE ROW AS THE BUREAU PRINTED IT, where its columns could not be split. Shown
+                      as the bureau's own words rather than dressed up as a plaintiff -- a judgment
+                      nobody could parse is still a judgment, and who sued is the part worth having.
+                    */}
+                    <td className="px-3 py-1.5 max-w-[16rem] truncate font-medium text-slate-800"
+                      title={j.plaintiff ?? (j.sourceText !== null ? `As printed: \u201c${j.sourceText}\u201d` : undefined)}>
+                      {j.plaintiff === null && j.sourceText !== null
+                        ? <span className="font-normal italic text-slate-500">As printed: &ldquo;{j.sourceText}&rdquo;</span>
+                        : j.plaintiff ?? <span className="font-normal text-slate-400">Plaintiff not recorded</span>}
+                    </td>
+                    <JudgmentCell label="Date" value={j.filedOn ? formatDate(j.filedOn) : null} />
+                    {/*
+                      WHAT THE DEBT WAS, then WHAT THE COURT DID. The bureau's two columns are
+                      caseReason ("Levies") and caseType ("Judgement By Default"), and they answer
+                      those two different questions in that order.
+                    */}
+                    <JudgmentCell label="Type" value={j.caseReason} />
+                    <JudgmentCell label="Outcome" value={j.caseType} />
+                    <JudgmentCell label="Case number" value={j.caseNumber} />
+                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-700">
+                      {j.amount !== null ? formatMoney(j.amount) : '\u2014'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/**
+ * What one filed trace found, in the few lines that change what a collector does next.
+ *
+ * EVERY LINE HERE IS A FACT SOMEBODY CAN ACT ON. A number to ring, an address to serve at, an
+ * employer to garnishee, a property that is an asset, a relative who might know where they are.
+ * The bureau's twenty-odd other numbers are not on this panel and are not lost — they are one
+ * click away, in the trace itself, where they can be worked.
+ */
+function TraceFound({ subject, onOpen }: {
+  subject: TraceSubject<FiledTrace>
+  onOpen: () => void
+}) {
+  const trace = subject.latest
+  const found = traceSummary(trace.items)
+  /* WHERE THIS ATTEMPT STANDS. Derived, never stored -- see traceRound. */
+  const round = traceRound(trace.items)
+  const who = subject.name
+  const kin = found.relatives[0] ?? null
+
+  /*
+   * WHAT THE LATEST REPORT ADDED, listed rather than counted.
+   *
+   * THE FIRM: "it only shows the new results -- oh, there's a new phone number, or oh, there's a
+   * new address, or oh, this guy bought a new property -- and it kind of flags that, puts it on
+   * top, like new info."
+   *
+   * THE COUNT WAS NOT THE ANSWER. "4 new findings on this report" still leaves somebody reading
+   * the whole card to find the four, which is the work the firm was complaining about. So the four
+   * are named, at the top, before anything they have already seen.
+   */
+  const since = subject.previous
+    ? compareTraceReports(trace.items, subject.previous.items)
+    : null
+  const added = since ? since.changes.filter((c) => c.state === 'new') : []
+  const earlierOn = subject.previous
+    ? (subject.previous.enquiredOn ?? subject.previous.createdAt.slice(0, 10))
+    : null
+
+  return (
+    <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden">
+      {/*
+        WHOSE TRACE THIS IS, and only where it is not obvious. The debtor's own report needs no
+        heading -- their name is the heading of the account -- and a strip saying so on every
+        ordinary card is exactly the bulk the firm asked to be rid of.
+      */}
+      {(who || reportsLine(subject)) && (
+        <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 flex flex-wrap
+          items-baseline justify-between gap-x-2">
+          {who && <span className="text-[11px] font-medium text-slate-600">{who}</span>}
+          {reportsLine(subject) && (
+            <span className="text-[10px] text-slate-400">{reportsLine(subject)}</span>
+          )}
+        </div>
+      )}
+
+      {/*
+        NEW INFORMATION, ON TOP, IN GREEN.
+
+        ABSENT WHERE THERE IS NOTHING NEW TO SAY -- which is not the same as absent where there is
+        no new finding. A second search the account has been charged for under item 4(c) that found
+        nothing the first one did not is a fact worth putting in front of whoever decides to run a
+        third, so that case gets one quiet grey line rather than silence.
+
+        AND NOTHING HERE CALLS A FINDING DEAD. A number on the earlier report and not on this one
+        is not a disconnected number: bureaux age records out and two profiles carry different
+        columns. Only a collector who dialled it may say otherwise, which is what an outcome is
+        for -- so a dropped finding is not drawn here at all.
+      */}
+      {since && added.length > 0 && (
+        <div className="px-2.5 py-2 bg-[var(--c-green)]/5 border-b border-[var(--c-green)]/20">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--c-green)]">
+            New since {earlierOn ? formatDate(earlierOn) : 'the last report'}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {added.slice(0, 4).map((c) => (
+              <li key={`${c.kind}:${c.value}`} className="text-sm text-slate-800 break-words">
+                <span className="text-[11px] text-slate-500">{newFindingWord(c.kind)}: </span>
+                {c.value}
+              </li>
+            ))}
+          </ul>
+          {added.length > 4 && (
+            <p className="text-[11px] text-slate-500 mt-0.5">and {added.length - 4} more</p>
+          )}
+        </div>
+      )}
+      {since && added.length === 0 && (
+        <p className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] text-slate-500">
+          Nothing on this report the one before it did not already have.
+        </p>
+      )}
+
+      <Finding icon={<Phone size={12} />} label="Phone number"
+        action={(
+          /*
+            ONE LINK, AND IT OPENS THE TRACE. The firm: "I'd rather just leave one, like open the
+            trace, not review trace." It said Review, which reads as something you do once and are
+            finished with -- and there were two of them on the screen because there were two cards
+            for one person.
+          */
+          <button type="button" onClick={onOpen}
+            className="text-[11px] font-medium text-[var(--c-steel)] hover:underline shrink-0">
+            Open the trace &rarr;
+          </button>
+        )}>
+        {found.phone === null ? (
+          <p className="text-sm text-slate-400">No number on this trace</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/*
+              The gutter already has a telephone on it, so PhoneLink is given its own content:
+              its default is "<icon> number" and the row was showing two receivers.
+            */}
+            <span className="text-sm font-medium text-navy-950">
+              <PhoneLink number={found.phone.value}>{found.phone.value}</PhoneLink>
+            </span>
+            {/* Confirmed means somebody rang it and reached them, not that a bureau printed it. */}
+            {found.phone.outcome === 'verified' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-positive-50 text-positive-700">
+                <CheckCircle2 size={10} /> Confirmed
+              </span>
+            )}
+            {found.phone.promotedContactId !== null && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">On account</span>
+            )}
+          </div>
+        )}
+      </Finding>
+
+      {found.address && (
+        <Finding icon={<MapPin size={12} />} label="Address" divider>
+          <p className="text-sm text-slate-800 break-words">{found.address.value}</p>
+          {found.address.label && <p className="text-[11px] text-slate-400">{found.address.label}</p>}
+        </Finding>
+      )}
+
+      {found.employer && (
+        <Finding icon={<Building2 size={12} />} label="Employer" divider>
+          <p className="text-sm text-slate-800 break-words">{found.employer.value}</p>
+          {found.employer.label && <p className="text-[11px] text-slate-400">{found.employer.label}</p>}
+        </Finding>
+      )}
+
+      {/*
+        PROPERTY AND NEXT OF KIN SIDE BY SIDE, which is the firm's own layout. They are the two
+        findings that change what KIND of account this is rather than how to reach them: something
+        to attach, and somebody else who might know where they are.
+      */}
+      {(found.properties.length > 0 || kin !== null) && (
+        <div className="grid @sm/trace:grid-cols-2 border-t border-slate-100 divide-y @sm/trace:divide-y-0 @sm/trace:divide-x divide-slate-100">
+          {found.properties.length > 0 && (
+            <Finding icon={<Home size={12} />} label="Property">
+              <p className="text-sm text-slate-800 break-words">{found.properties[0].value}</p>
+              <p className="text-[11px] text-slate-400">
+                {[
+                  found.properties[0].amount !== null
+                    ? `bought for ${formatMoney(found.properties[0].amount)}` : null,
+                  found.properties.length > 1 ? `and ${found.properties.length - 1} more` : null,
+                ].filter(Boolean).join(' \u00b7 ')}
+              </p>
+            </Finding>
+          )}
+          {kin !== null && (
+            <Finding icon={<User size={12} />} label="Possible next of kin">
+              <p className="text-sm text-slate-800 break-words">{kin.value}</p>
+              {/*
+                "Unverified" is the whole point of the word "possible". A shared surname is
+                evidence of a family connection and not proof of one, and a collector who opens a
+                call to somebody's sister as though it were established has made it worse.
+              */}
+              <p className="text-[11px] text-slate-400">
+                {found.relatives.length > 1
+                  ? `unverified \u00b7 and ${found.relatives.length - 1} more`
+                  : 'unverified relationship'}
+              </p>
+            </Finding>
+          )}
+        </div>
+      )}
+
+      {found.directorships.length > 0 && (
+        <Finding icon={<Building2 size={12} />} label="Directs" divider>
+          <p className="text-sm text-slate-800 break-words">
+            {found.directorships.slice(0, 3).map((d) => d.value).join(', ')}
+            {found.directorships.length > 3 && (
+              <span className="text-slate-400"> and {found.directorships.length - 3} more</span>
+            )}
+          </p>
+        </Finding>
+      )}
+
+      {/*
+        WHERE THIS ATTEMPT STANDS, AND IT NO LONGER GOES QUIET WHEN IT IS FINISHED.
+        
+        THE FIRM: "if we've worked through an entire trace, it should mention that the entire trace
+        has been worked through."
+        
+        WHAT WAS HERE WAS A COUNT THAT DISAPPEARED. "12 findings nobody has tried yet" vanished the
+        moment the last one was answered, so finished and never-started read identically -- silence
+        -- and the fact a team leader most needs was the one the panel stopped showing.
+        
+        AND SPENT IS LOUD. A trace worked through that reached nobody is the firm's money gone and
+        a debtor still missing; drawn in the same grey as "4 of 11 tried" it would be a sentence
+        nobody reads.
+      */}
+      {round.workable > 0 && (
+        <button type="button" onClick={onOpen}
+          className={`w-full text-left px-2.5 py-1.5 border-t border-slate-100 text-[11px] font-medium hover:brightness-95 ${
+            round.state === 'spent'
+              ? 'bg-[var(--tint-rust)] text-[var(--c-rust-deep)]'
+              : round.state === 'worked_through'
+                ? 'bg-[var(--c-green)]/10 text-[var(--c-green)]'
+                : 'bg-slate-50/70 text-[var(--c-steel)]'}`}>
+          {roundLine(round)} &rarr;
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** One labelled finding: an icon in the gutter, a quiet label, and the fact itself. */
+function Finding({ icon, label, children, action, divider }: {
+  icon: React.ReactNode
+  label: string
+  children: React.ReactNode
+  action?: React.ReactNode
+  divider?: boolean
+}) {
+  return (
+    <div className={`flex items-start gap-2 px-2.5 py-2 ${divider ? 'border-t border-slate-100' : ''}`}>
+      <span className="shrink-0 text-slate-400 mt-0.5">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-slate-400">{label}</p>
+        {children}
+      </div>
+      {action}
+    </div>
+  )
+}
+
+/** One column of a judgment, as a table cell. Absent values say so rather than leaving a blank
+ *  under a heading; the label rides on the title for whoever is reading a cell scrolled away from
+ *  its heading. */
+function JudgmentCell({ label, value }: { label: string; value: string | null }) {
+  return (
+    <td title={value ? `${label}: ${value}` : label}
+      className={`px-2 py-1.5 max-w-[12rem] truncate ${value ? 'text-slate-800' : 'text-slate-400'}`}>
+      {value ?? 'Not recorded'}
+    </td>
+  )
+}
+
+
+/**
+ * The other companies a director sits on.
+ *
+ * THE FIRM'S OWN SHAPE FOR THIS: "We could mention the active directorships. But if there are
+ * other directorships where he's not active, there can be a little sign that says there are other
+ * directors that he's not active anymore."
+ *
+ * So the live ones are named — those are companies that could actually be approached — and the
+ * resigned ones are one short line. One real profile carries thirty directorships; listed in full
+ * they bury the account under somebody's CV and the two that matter are lost in it.
+ */
+/*
+ * FOUR NAMES IS A SENTENCE; TWENTY-FIVE IS A WALL.
+ *
+ * One real director on the firm's own book actively directs twenty-five companies. Named in full
+ * they take more vertical space than the whole rest of the panel, and the point of naming them —
+ * that here are companies somebody could actually approach — is lost in the reading. The newest
+ * appointments are named because those are the live concerns, and the rest are a count.
+ */
+/**
+ * What a director has against them personally.
+ *
+ * One line, named by plaintiff, and deliberately quiet. It is context a collector wants before
+ * ringing somebody — and it is the thing that must never be counted as the company's, which is
+ * why it renders here rather than in the block above.
+ */
+function PersonalJudgments({ judgments }: { judgments: AccountJudgment[] }) {
+  if (judgments.length === 0) return null
+  const newest = judgments.reduce((a, b) => ((b.filedOn ?? '') > (a.filedOn ?? '') ? b : a))
+  const said = `${judgments.length === 1 ? 'A judgment against them personally' : `${judgments.length} judgments against them personally`}${
+    newest.plaintiff ? ` — ${newest.plaintiff}` : ''}${newest.filedOn ? `, ${formatDate(newest.filedOn)}` : ''}`
+  /* Inline and truncated, on the director's own line -- see the directors list. */
+  return (
+    <span className="min-w-0 truncate text-[11px] text-negative-700" title={said}>{said}</span>
+  )
+}
+
+const NAME_AT_MOST = 4
+
+function Directorships({ companies }: { companies: DirectorCompany[] }) {
+  if (companies.length === 0) return null
+  const { active, resigned } = directorshipSummary(companies)
+  const named = active.slice(0, NAME_AT_MOST)
+  const unnamed = active.length - named.length
+  const resignedLine = resigned > 0
+    ? `${active.length > 0 ? 'and has resigned from' : 'Has resigned from'} ${resigned} other${resigned === 1 ? ' company' : ' companies'}`
+    : null
+  /* Inline and truncated, on the director's own line, with the whole sentence on the title. */
+  const said = [
+    named.length > 0 ? `Also directs ${named.map((c) => c.companyName).join(', ')}${unnamed > 0 ? ` and ${unnamed} more` : ''}` : null,
+    resignedLine,
+  ].filter(Boolean).join(' ')
+  return (
+    <span className="min-w-0 truncate text-[11px] text-slate-500" title={said}>
+      {named.length > 0 && <>Also directs {named.map((c) => c.companyName).join(', ')}{unnamed > 0 && ` and ${unnamed} more`}</>}
+      {resignedLine && <span className="text-slate-400">{named.length > 0 ? ' ' : ''}{resignedLine}</span>}
+    </span>
+  )
+}
+
+function PositionPanel({
+  account, commission, ceiling, chargedExclVat, clientLiaisonName, onFreeze, onEnd, onHold, onRelease,
+}: {
+  account: DebtorAccount
+  commission: string
   ceiling: { limit: number } | null
   chargedExclVat: number
   clientLiaisonName: string | null
+  /** Null where this person may not stop work — the field then simply has no control on it. */
+  onFreeze: (() => void) | null
+  onEnd: (() => void) | null
+  onHold: (() => void) | null
+  onRelease: (() => void) | null
 }) {
+  const handedOver = account.handoverDate
+    ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
+    : null
+
   return (
     <Card>
       <PanelTitle>Position</PanelTitle>
@@ -1239,9 +4622,78 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: 
         </div>
       )}
       <div className="space-y-1.5">
-        <Field label="Commission" value={account.commissionRate === null ? 'not resolved' : pct(account.commissionRate)} />
-        <Field label="Status" value={[account.status, account.subStatus].filter(Boolean).join(' · ')} />
+        <Field label="Commission" value={commission} />
+        {/*
+          THE STATUS IS WHERE WORK IS STOPPED, not the action row.
+
+          The row is already nine buttons and the firm has said so. More to the point, a freeze
+          IS the status — changing it anywhere else would be a control that acts on a field
+          somewhere else on the page, which is how people end up unsure whether it worked.
+        */}
+        <Field
+          label="Status"
+          value={[account.status, account.subStatus].filter(Boolean).join(' · ')}
+          note={account.frozenBy || account.frozenReason
+            ? [frozenByLabel(account.frozenBy), account.frozenReason].filter(Boolean).join(' — ')
+            : undefined}
+          action={onFreeze
+            ? { label: account.frozenBy || /^frozen/i.test(account.status) ? 'Restart' : 'Stop work',
+                onClick: onFreeze }
+            : undefined}
+        />
+        {/*
+          HOW IT ENDED, OR THE WAY TO END IT. One field rather than a button that appears and
+          disappears: an account that is finished has to SAY so wherever somebody looks at it, and
+          "Closed as written off — Uncontactable" is the answer to the question they came with.
+        */}
+        {/*
+          WHICH BOOK IT IS IN, which is the first thing anybody wants off this panel and the one
+          thing the screen could not say. Read off the database's own generated column, never
+          computed here: a screen that worked it out again would be the second source of truth the
+          firm said not to build.
+        */}
+        <Field
+          label="Book"
+          value={bookLabel(account.book)}
+          note={account.book === 'on_hold'
+            ? [holdLabel(account.holdReason), account.holdNote,
+               account.holdReviewOn ? `look again ${formatDate(account.holdReviewOn)}` : null]
+              .filter(Boolean).join(' \u2014 ')
+            : undefined}
+          action={account.book === 'active'
+            ? (onHold ? { label: 'Put on hold', onClick: onHold } : undefined)
+            : (onRelease
+              ? { label: account.book === 'closed' ? 'Re-open' : 'Back to active', onClick: onRelease }
+              : undefined)}
+        />
+        <Field
+          label="Ending"
+          value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
+          note={account.endedAs
+            ? [account.endedReason, account.endedOn ? formatDate(account.endedOn) : null]
+              .filter(Boolean).join(' \u2014 ')
+            : undefined}
+          action={!account.endedAs && onEnd
+            ? { label: 'Close it', onClick: onEnd }
+            : undefined}
+        />
         <Field label="Bucket" value={account.bucket} />
+        {/*
+          HANDED OVER, and it belongs above the other dates because it is the one they are all
+          measured from — prescription runs from it, and how long an account has sat on the desk
+          is judged against it.
+
+          It was only in the hero band, which is the first thing off the top of the screen: the
+          moment somebody scrolls to the figures they are working from, the date the clock
+          started is gone. Shown with its age because that is the question actually being asked
+          — "how long have we had this one" — and nobody counts months off a date in their head
+          while a debtor is on the phone.
+        */}
+        {/* BOTH DATES, AND NAMED APART (prompt 11): interest runs from the handover, never from the
+            default, which is the client's record of when the debt fell due. */}
+        <Field label="Date of default" value={account.defaultDate ? formatDate(account.defaultDate) : null}
+          note={account.defaultDate ? 'A record — nothing accrues from it' : undefined} />
+        <Field label="Handed over" value={handedOver} />
         <Field label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
         <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
         <Field label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
@@ -1260,49 +4712,105 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName }: 
  * Deliberately plain — printable as it stands, no colour carrying meaning that would be lost in
  * black and white.
  */
-function StatementTable({ statement, account, breakdown }: {
+function StatementTable({
+  statement, account, breakdown, handedOver, asAt, money, values, reference, audience, status,
+  onEmail, onRecordPayment,
+}: {
   statement: StatementLine[]
   account: DebtorAccount
   breakdown: BalanceBreakdown | undefined
+  /** Everything the two documents beside the Print button are drawn from. See AccountDocuments. */
+  handedOver: number
+  asAt: string
+  money: (n: number) => string
+  values?: Record<string, string>
+  reference?: string | null
+  audience?: 'individual' | 'company' | null
+  status?: string | null
+  onEmail?: React.ComponentProps<typeof AccountDocuments>['onEmail']
+  /** Null where the signed-in person may not capture one -- see canRecordPayment. */
+  onRecordPayment?: (() => void) | null
 }) {
   if (statement.length === 0) return <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account.</p>
   return (
     <>
-      <div className="flex items-center justify-between mb-3 print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 print:hidden">
         <p className="text-xs text-slate-400">
           {statement.length} movements. Every line traces to a payment, a fee or an accrual.
         </p>
-        <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-          <Printer size={13} /> Print
-        </button>
+        {/*
+          THE TWO DOCUMENTS BESIDE THE PRINT BUTTON, which is exactly where the firm drew them:
+          "summary or statement", pencilled over this row. Print puts the TABLE on paper; these
+          two put the firm's own letterhead on it and can go to the debtor.
+        */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AccountDocuments
+            breakdown={breakdown} lines={statement} handedOver={handedOver} asAt={asAt}
+            money={money} values={values} reference={reference} audience={audience}
+            status={status} onEmail={onEmail} />
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Printer size={13} /> Print
+          </button>
+          {/*
+            AND THE ONE PRESS THAT ADDS A LINE TO THIS TABLE, at the firm's asking. It is the gold
+            one because it is the only thing on this row that CHANGES the account -- the other
+            three read it out. Absent, not disabled, for anybody who may not capture: a button that
+            cannot be pressed is a promise the app will not keep.
+          */}
+          {onRecordPayment && (
+            <button type="button" onClick={onRecordPayment}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg
+                border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+              <Banknote size={13} /> Record a payment
+            </button>
+          )}
+        </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full list-table whitespace-nowrap">
           <caption className="sr-only">Statement for account {account.accountNumber}</caption>
           <thead>
-            <tr className="text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200">
-              <th className="text-left px-3 py-2 font-medium">Date</th>
-              <th className="text-left px-3 py-2 font-medium">Detail</th>
-              <th className="text-right px-3 py-2 font-medium">Debit</th>
-              <th className="text-right px-3 py-2 font-medium">Credit</th>
-              <th className="text-right px-3 py-2 font-medium">Balance</th>
+            <tr className="text-slate-400 border-b border-slate-100">
+              <th className="text-left px-3 py-1.5 font-medium">Date</th>
+              <th className="text-left px-2 py-1.5 font-medium">Detail</th>
+              <th className="text-right px-2 py-1.5 font-medium">Debit</th>
+              <th className="text-right px-2 py-1.5 font-medium">Credit</th>
+              <th className="text-right px-3 py-1.5 font-medium">Balance</th>
             </tr>
           </thead>
           <tbody>
             {statement.map((l, i) => (
-              <tr key={i} className="border-b border-slate-50 last:border-0">
+              <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{formatDate(l.date)}</td>
-                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700' : 'text-slate-700'}`}>
+                {/* ONE LINE A MOVEMENT (the firm: "thin, sleek, easy to read"). The note on the
+                    running interest line used to sit under it; it follows it now, and a long
+                    description truncates with the whole of it on the title. */}
+                <td className={`px-2 py-1.5 max-w-[28rem] truncate ${l.kind === 'payment' ? 'text-positive-700'
+                  : l.kind === 'fee-no-charge' ? 'text-slate-500' : 'text-slate-700'}`}
+                  title={l.kind === 'interest-accruing'
+                    ? `${l.description} · Running since the last monthly posting. It will be charged as part of this month.`
+                    : l.description}>
                   {l.description}
                   {l.kind === 'interest-accruing' && (
-                    <span className="block text-[11px] text-slate-400">
-                      Running since the last monthly posting. It will be charged as part of this month.
+                    <span className="text-[11px] text-slate-400">
+                      {' · '}Running since the last monthly posting. It will be charged as part of this month.
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{l.debit ? formatMoney(l.debit) : ''}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatMoney(l.balance)}</td>
+                {/*
+                  A CAPPED ACTION READS "no charge", NOT AS A BLANK.
+                  
+                  THE FIRM: "a lot of things happened after that, now I can't see them... maybe we
+                  put it there and we have a zero charge that reflects on the statement." Left
+                  blank it would read as a number somebody forgot to fill in, on the one page whose
+                  whole job is to be checkable; the words say the work happened and earned nothing.
+                */}
+                <td className={`px-2 py-1.5 text-right tabular-nums whitespace-nowrap ${
+                  l.kind === 'fee-no-charge' ? 'text-slate-400' : 'text-slate-700'}`}>
+                  {l.kind === 'fee-no-charge' ? 'no charge' : l.debit ? formatMoney(l.debit) : ''}
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-900">{formatMoney(l.balance)}</td>
               </tr>
             ))}
           </tbody>
@@ -1315,7 +4823,10 @@ function StatementTable({ statement, account, breakdown }: {
             would charge a fee for a payment nobody has made.
           */}
           {breakdown && breakdown.balance > 0 && (
-            <tfoot>
+            /* The quotation keeps its explanatory sentence free to wrap: it is a footnote under
+               the movements, not one of them, and held to one line it would widen the Detail
+               column for every row above it. */
+            <tfoot className="whitespace-normal">
               <tr className="border-t-2 border-slate-200">
                 <td className="px-3 pt-3 text-slate-500 text-xs" colSpan={2}>Balance outstanding</td>
                 <td colSpan={2} />
@@ -1359,10 +4870,90 @@ function StatementTable({ statement, account, breakdown }: {
       </div>
       {breakdown && breakdown.balance > 0 && (
         <p className="text-[11px] text-slate-400 mt-3">
-          Quoted as at {formatDate(TODAY)}. Interest continues to run, so a settlement paid later
+          Quoted as at {formatDate(TODAY())}. Interest continues to run, so a settlement paid later
           will differ.
         </p>
       )}
     </>
+  )
+}
+
+/**
+ * RAPTOR'S BALANCE AGAINST THE ONE THAT CAME ACROSS.
+ *
+ * THE FIRM: "Balances disagree with Swordfish, mainly on fees... Explain each gap on the account,
+ * or fix the rebuild. A balance the firm cannot explain must not reach a client statement or
+ * payover."
+ *
+ * ABSENT WHERE THERE IS NOTHING TO COMPARE, and absent where the two AGREE. An account opened in
+ * Raptor has no imported figure, and a panel reading "no difference" on every one of twenty-three
+ * thousand accounts is the warning that fires when nothing is wrong. It draws when there is
+ * something to say.
+ *
+ * AND IT NAMES THE KNOWN REASON FIRST. Most of the difference is not a disagreement at all:
+ * Swordfish reports one "Fees & Expenses" column with the receipt fees inside it, and Raptor keeps
+ * item 9 apart because it is charged per receipt. Measured on the firm's own five accounts, the two
+ * with NO payments differ by R577.30 to the cent -- one settlement receipt fee at the R502 cap plus
+ * VAT -- and the three with payments differ by that plus the fee on each receipt.
+ */
+function SwordfishGapPanel({ account, breakdown }: {
+  account: DebtorAccount
+  breakdown: { balance: number; fees: number; receiptFees: number } | null
+}) {
+  if (!breakdown) return null
+  const gap = compareWithSwordfish({
+    swordfishBalance: account.swordfishBalanceAtImport,
+    swordfishFees: account.swordfishFeesAtImport,
+    balance: breakdown.balance,
+    fees: breakdown.fees,
+    receiptFees: breakdown.receiptFees,
+  })
+  if (!gap || gap.agrees) return null
+
+  return (
+    <Card className="p-5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+        Against Swordfish
+      </div>
+      <div className="flex flex-wrap items-end gap-8">
+        <Figure2 label="Raptor says" value={rand(breakdown.balance)} />
+        <Figure2 label="Swordfish said, at import"
+          value={rand(account.swordfishBalanceAtImport ?? 0)} />
+        <Figure2 label="Difference" value={rand(gap.difference)} tone />
+      </div>
+      {account.swordfishFeesAtImport !== null && (
+        <div className="mt-3 text-[12.5px] text-slate-600 tabular-nums">
+          Fees and receipt fees together: {rand(gap.feesLikeSwordfish)} against
+          Swordfish&rsquo;s {rand(account.swordfishFeesAtImport)}.
+        </div>
+      )}
+      <ul className="mt-3 space-y-1.5">
+        {gap.reasons.map((why) => (
+          <li key={why} className="text-[12.5px] text-slate-500 leading-relaxed">&middot; {why}</li>
+        ))}
+      </ul>
+      {/*
+        THE IMPORTED FIGURE IS THE RECORD AND SAYS SO. CLAUDE.md: what was imported is what the
+        client was invoiced on, so the difference is REPORTED rather than reconciled away -- and
+        correcting one is the firm's decision, case by case, never a migration that sweeps.
+      */}
+      <p className="mt-3 pt-3 border-t border-slate-100 text-[12px] text-slate-500 leading-relaxed">
+        Swordfish&rsquo;s figure is what the client was invoiced on, so it stays as it is. This
+        says where the two differ; it does not change either.
+      </p>
+    </Card>
+  )
+}
+
+function Figure2({ label, value, tone }: { label: string; value: string; tone?: boolean }) {
+  return (
+    <div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+        {label}
+      </div>
+      <div className={`text-[19px] font-medium tabular-nums ${tone ? 'text-gold-800' : 'text-slate-800'}`}>
+        {value}
+      </div>
+    </div>
   )
 }

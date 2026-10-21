@@ -49,9 +49,30 @@ export function signatureHtml(
   return html
 }
 
-/** Body and signature, with the two blank lines a person expects between them. */
-export function composeBody(bodyHtml: string, signature: string): string {
-  return signature ? `${bodyHtml}<br><br>${signature}` : bodyHtml
+/**
+ * Body and signature, with the two blank lines a person expects between them — and the firm's
+ * font around the pair of them.
+ *
+ * AT THE FIRM'S QUESTION: "which font is it put into the emails?" Until `style` existed the
+ * answer was NONE. This function concatenated two strings of HTML and `send.ts` handed the result
+ * to nodemailer, so the message went out unstyled and every reader's mail client picked its own
+ * default — Gmail draws unstyled HTML in Arial, Outlook in Calibri, Apple Mail in Helvetica. The
+ * firm's letters are Georgia and its emails were whatever the reader happened to run.
+ *
+ * AN INLINE STYLE ON A WRAPPER, not a <style> block, because Gmail strips <head> and every
+ * stylesheet in it before it draws anything. An inline style on a containing element is the only
+ * thing every mail client honours, which is why every newsletter in the world is built this way.
+ *
+ * THE SIGNATURE IS INSIDE THE WRAPPER, deliberately. Styling only the body would leave the
+ * sender's name and numbers in the reader's default face — the two halves of one message set in
+ * two different fonts, which looks like a fault rather than a choice.
+ *
+ * Empty `style` leaves the HTML exactly as it was. A send must never fail, or change shape, over
+ * a font.
+ */
+export function composeBody(bodyHtml: string, signature: string, style?: string | null): string {
+  const joined = signature ? `${bodyHtml}<br><br>${signature}` : bodyHtml
+  return style ? `<div style="${style}">${joined}</div>` : joined
 }
 
 /**
@@ -61,15 +82,37 @@ export function composeBody(bodyHtml: string, signature: string): string {
  * what it did before and is still better than dropping the signature. A send must not fail
  * because a picture was slow.
  */
+/**
+ * ONLY THE FIRM'S OWN STORAGE IS FETCHED (security audit C-04, 5 Oct; built 18 Oct).
+ *
+ * The URL is whatever a person saved on their profile, and this runs on the SERVER, so an unchecked
+ * fetch is a door into whatever the server can reach (a metadata address, an internal service) --
+ * server-side request forgery. A signature image only ever comes from the email-signatures bucket,
+ * so the rule is narrow rather than a deny-list of private ranges that has to be complete to work:
+ * https, on a Supabase host (the project's own or any *.supabase.co), no credentials in the URL, no
+ * port. Anything else is not fetched and the caller links the image instead, as it does when a fetch
+ * fails. Redirects are refused too, or an allowed host could hand the request on somewhere that is not.
+ */
+export function isFetchableSignatureUrl(url: string, projectUrl = process.env.VITE_SUPABASE_URL ?? ''): boolean {
+  let u: URL
+  try { u = new URL(url) } catch { return false }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return false
+  const host = u.hostname.toLowerCase()
+  let own = ''
+  try { own = projectUrl ? new URL(projectUrl).hostname.toLowerCase() : '' } catch { own = '' }
+  return host === own || /^[a-z0-9-]+\.supabase\.co$/.test(host)
+}
+
 export async function fetchSignatureImage(
   url: string,
 ): Promise<{ content: Buffer; contentType: string } | null> {
+  if (!isFetchableSignatureUrl(url)) return null
   try {
     // Bounded, because this sits in the path of every send and the storage host is not ours to
     // rely on.
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(url, { signal: controller.signal })
+    const res = await fetch(url, { signal: controller.signal, redirect: 'error' })
     clearTimeout(timer)
     if (!res.ok) return null
 

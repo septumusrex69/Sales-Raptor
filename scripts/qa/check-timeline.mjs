@@ -10,11 +10,13 @@
  *   node --experimental-strip-types scripts/qa/check-timeline.mjs
  */
 import { buildTimeline, filterTimeline, groupByDay } from '../../src/lib/accountTimeline.ts'
+import { feeIsTheOnlyRecord, IMPORTED_FEE_SOURCES } from '../../src/lib/accountBalance.ts'
 import { styleFor } from '../../src/pages/accounts/timelineStyle.ts'
 
 let failed = 0
+let passed = 0
 function check(name, ok, detail) {
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok && detail) console.log(`        ${detail}`)
 }
@@ -26,9 +28,15 @@ const ledgers = {
     { id: 'p1', receivedAt: '2026-08-05T00:00:00+00:00', amount: 1500, method: 'Direct', reference: 'EFT 1', details: null, paidToClient: false, reversedAt: null },
     { id: 'p2', receivedAt: '2026-04-05', amount: 1500, method: 'Direct', reference: 'EFT 2', details: null, paidToClient: false, reversedAt: '2026-04-12' },
   ],
+  /*
+   * IMPORTED, AND THAT IS NOW LOAD-BEARING RATHER THAN SCENERY. The midnight timestamps above
+   * already said these two came across from Swordfish; `source` is what the timeline reads, and
+   * without it they are fees Raptor raised and do not reach the list at all. See
+   * feeIsTheOnlyRecord.
+   */
   fees: [
-    { id: 'f1', incurredAt: '2026-08-05T00:00:00+00:00', description: 'Letter of Demand', amountExclVat: 96, vatAmount: 14.4, billed: true, actionCode: 'LOD', segments: 1, cancelledAt: null, performedBy: 'Amanda' },
-    { id: 'f2', incurredAt: '2026-08-05T00:00:00+00:00', description: 'SMS', amountExclVat: 0, vatAmount: 0, billed: false, actionCode: 'SMS', segments: 1, cancelledAt: null, performedBy: 'Amanda' },
+    { id: 'f1', incurredAt: '2026-08-05T00:00:00+00:00', description: 'Letter of Demand', amountExclVat: 96, vatAmount: 14.4, billed: true, actionCode: 'LOD', segments: 1, cancelledAt: null, performedBy: 'Amanda', source: 'swordfish' },
+    { id: 'f2', incurredAt: '2026-08-05T00:00:00+00:00', description: 'SMS', amountExclVat: 0, vatAmount: 0, billed: false, actionCode: 'SMS', segments: 1, cancelledAt: null, performedBy: 'Amanda', source: 'swordfish' },
   ],
   accruals: [{ id: 'i1', accruedOn: '2026-08-05', days: 30, amountAccrued: 370, amountRecoverable: 370 }],
   totals: { paid: 0, feesExclVat: 0, feesInclVat: 0, interest: 0, feeCount: 2 },
@@ -92,6 +100,67 @@ check('interest accruals stay out', !t.some((e) => /interest/i.test(e.title)))
   check('unbilled action carries no amount', sms?.amount == null && sms?.free === true)
   const lod = t.find((e) => e.title === 'Letter of Demand')
   check('billed action carries VAT-inclusive amount', Math.abs((lod?.amount ?? 0) - 110.4) < 0.005)
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * THE CHARGE LINES, AND THE ONE KIND THAT STAYS
+ *
+ * THE FIRM, reading RRC00005 where three rows stood for one telephone call -- "Called 011 592
+ * 0520", "No answer on 011 592 0520", "Telephone call  R 28,75": "still showing the charges on the
+ * notes is not necessary." They had said it once already of the workflow notes.
+ *
+ * IT IS NOT "HIDE EVERY FEE", AND THAT IS THE WHOLE DIFFICULTY. On a migrated account the fee
+ * ledger IS the contact history -- 59 215 fees came across against 1 523 notes -- so hiding all of
+ * them empties six years of work off the timeline, and the account reads as one nobody ever
+ * worked. The question is whether anything ELSE on the list says the action happened, and `source`
+ * is what answers it.
+ * ------------------------------------------------------------------------------------------- */
+
+{
+  const ours = { payments: [], accruals: [], totals: { paid: 0, feesExclVat: 0, feesInclVat: 0, interest: 0, feeCount: 1 } }
+  const fee = (over) => ({
+    id: 'f', incurredAt: '2026-10-02T11:00:00Z', description: 'Telephone call', amountExclVat: 25,
+    vatAmount: 3.75, billed: true, actionCode: 'phone_call', segments: 1, cancelledAt: null,
+    performedBy: 'Stephan', ...over,
+  })
+  const drawn = (over) => buildTimeline({ ...ours, fees: [fee(over)] }, [], [])
+
+  /* THE COMPLAINT, AS AN ABSENCE. The charge beside a call Raptor logged is gone from the list. */
+  check('a fee Raptor raised is not on the timeline', drawn({ source: 'raptor' }).length === 0)
+  /* AND THE WORKFLOW'S, which is the same fee raised by the runner rather than by a collector --
+     #14 took these out of the notes' WORDS and left the row standing underneath. */
+  check('...nor one the workflow raised', drawn({ source: 'workflow' }).length === 0)
+  /* UNATTRIBUTED COUNTS AS OURS. account_fees defaults source to 'action' and nothing writes it
+     deliberately; a row we cannot vouch for is still on the statement, where money belongs. */
+  check('...nor one whose source is the table default', drawn({ source: 'action' }).length === 0)
+  check('...nor one with no source at all', drawn({ source: null }).length === 0)
+
+  /* AND THE IMPORTED ONE IS STILL THERE, which is the half that stops this being a deletion. */
+  const imported = drawn({ source: 'swordfish' })
+  check('an imported fee is the only record, so it stays', imported.length === 1)
+  check('...and still says what it was', imported[0]?.title === 'Telephone call')
+  check('...and still carries the money', Math.abs((imported[0]?.amount ?? 0) - 28.75) < 0.005)
+
+  /* THE PREDICATE ITSELF, both ways, because the timeline is not the only thing that may ever
+     ask it and a list with 'raptor' quietly added to it would empty the migrated book's story. */
+  check('the predicate agrees', feeIsTheOnlyRecord({ source: 'swordfish' }) === true)
+  check('...and refuses ours', ['raptor', 'workflow', 'action', null, undefined]
+    .every((source) => !feeIsTheOnlyRecord({ source })))
+  check('...and the list of systems is exactly the old one',
+    IMPORTED_FEE_SOURCES.join(',') === 'swordfish', `got ${IMPORTED_FEE_SOURCES.join(',')}`)
+
+  /*
+   * AND A NOTE RAPTOR WROTE IS NOT TOUCHED BY ANY OF THIS, which is why the firm's complaint could
+   * not be answered by defaulting the "just what people wrote" switch on. The two travel together
+   * under that switch and only one of them was asked about: a collector reads "Trace done".
+   */
+  const alongside = buildTimeline(
+    { ...ours, fees: [fee({ source: 'raptor' })] },
+    [{ id: 'sys', accountId: 'a', body: 'Trace done — 4 credit bureau searches.', pinned: false, authorName: 'Stephan', createdBy: null, createdAt: '2026-10-02T11:00:00Z', source: 'system' }],
+    [],
+  )
+  check('the note Raptor composed survives the fee going',
+    alongside.map((e) => e.id).join(',') === 'note:sys', `got ${alongside.map((e) => e.id).join(',')}`)
 }
 
 /* A reversed payment still appears -- it happened -- but is marked. */
@@ -174,5 +243,153 @@ check('reversed payment is kept and flagged',
     styleFor(row('Outbound Telephone Call', null)).ring === styleFor(row('x', 'phone_call')).ring)
 }
 
+
+/* ---------------------------------------------------- when the account opened, and when it came */
+
+/*
+ * THE FIRM: "on the activity timeline in a debtor, it doesn't show which date it's imported --
+ * date it handed over, and imported."
+ *
+ * The timeline began at the first fee or the first note, so an account with neither had an empty
+ * one and an account with both started in the middle of its own story.
+ */
+{
+  const opened = buildTimeline(null, [], [], {
+    handoverDate: '2026-03-18', importedAt: '2026-09-22T11:04:41Z', batchReference: 'handover 1.xlsx',
+  })
+  check('an account with no history still has its opening', opened.length === 1)
+  const first = opened[0]
+  check('...headed for what it is', first?.title === 'Handed over')
+  check('...naming the day the debt fell due', /18\/03\/2026/.test(first?.detail ?? ''),
+    first?.detail)
+  check('...and the day it reached us', /22\/09\/2026/.test(first?.detail ?? ''), first?.detail)
+  /* TWO DIFFERENT DAYS, and the entry is worthless if it conflates them: one is what interest,
+     in duplum and prescription run from, the other is when the sheet arrived. */
+  check('...which are not the same date', !/18\/03\/2026[\s\S]*18\/03\/2026/.test(first?.detail ?? ''))
+  check('...and the batch it came in on', /handover 1\.xlsx/.test(first?.detail ?? ''), first?.detail)
+  /*
+   * DATED AT THE HANDOVER, not at the import. Dated at the import it would jump to the TOP of a
+   * book brought across from Swordfish and bury six years of history under a row saying the
+   * account exists.
+   */
+  check('...dated at the handover so it sits where the story starts', first?.date === '2026-03-18')
+  /*
+   * NOT AUTOMATED, although Raptor wrote it. That flag hides bookkeeping about actions somebody
+   * else took; this is the account's first fact, and hidden it would take the answer with it.
+   */
+  check('...and not hidden with the automated bookkeeping', first?.automated === false)
+  check('...so it survives the filter the firm asked for',
+    filterTimeline(opened, { automated: false }).length === 1)
+}
+
+/* IT SITS UNDER EVERYTHING ELSE, which is the whole reason for dating it at the handover. */
+{
+  const withWork = buildTimeline(
+    { fees: [{
+      id: 'f1', incurredAt: '2026-06-01T09:00:00Z', description: 'Letter', amountExclVat: 25,
+      vatAmount: 3.75, billed: true, actionCode: 'letter', segments: null, cancelledAt: null,
+      performedBy: 'A Clerk',
+    }], payments: [], accruals: [] },
+    [], [],
+    { handoverDate: '2026-03-18', importedAt: '2026-09-22T11:04:41Z' },
+  )
+  check('the opening is the oldest thing on the account',
+    withWork[withWork.length - 1]?.id === 'opened', withWork.map((e) => e.id).join(','))
+}
+
+/*
+ * NOTHING TO SAY, NOTHING SAID. An account with neither date gets no entry rather than one
+ * reading "no date of default is recorded" over an empty timeline.
+ *
+ * CAUGHT, NOT CALLED BARE. Removing the guard does not make this return a bad entry -- it makes
+ * buildTimeline THROW, on `dayOf(null)`, which kills the process before anything is printed: a
+ * stack trace with no failing assertion in it. CLAUDE.md names that one, and this file earned it.
+ */
+const built = (...args) => { try { return buildTimeline(...args) } catch (e) { return String(e) } }
+check('an account with neither date gets no opening entry',
+  built(null, [], [], { handoverDate: null, importedAt: null }).length === 0,
+  built(null, [], [], { handoverDate: null, importedAt: null }))
+check('...and so does one that was never asked about the opening',
+  buildTimeline(null, [], []).length === 0)
+/* One of the two is enough: an account keyed in by hand has no import date worth showing. */
+check('one date alone is still worth an entry',
+  buildTimeline(null, [], [], { handoverDate: '2026-03-18', importedAt: null }).length === 1)
+
+/* ---------------------------------------------------------------- what somebody decided ---- */
+
+/*
+ * VERIFYING AND RETIRING A NUMBER ARE THINGS A PERSON DID, AND THEY LEFT NO TRACE.
+ *
+ * THE FIRM, having retired an email as a wrong address: "it doesn't show in my activity timeline.
+ * It should show things like this -- oh, I just verified an email address on this date, or I just
+ * retired this and the retire reason is there."
+ *
+ * IT MATTERS MORE THAN IT LOOKS. A verified number is the one the Call button dials and the one a
+ * notice quotes; a retired one is deliberately never offered again. Neither was recorded
+ * anywhere a person reads, so an address that stopped being used had no answer to "who decided
+ * that, and why" -- which is the question asked eighteen months later when a debtor says nobody
+ * ever contacted them.
+ */
+const contact = (over) => ({
+  id: 'c1', accountId: 'a', kind: 'email', value: 'debtor@example.co.za', label: null,
+  personName: null, personRole: null, isPrimary: false,
+  verifiedAt: null, retiredAt: null, retiredReason: null, notes: null,
+  createdAt: '2026-01-01T00:00:00Z', ...over,
+})
+
+const verified = buildTimeline(null, [], [], null, [
+  contact({ verifiedAt: '2026-09-20T10:00:00Z' }),
+])
+check('verifying a contact lands on the timeline', verified.length === 1,
+  JSON.stringify(verified))
+check('...saying what was verified, in words',
+  verified[0]?.title === 'Verified the email address debtor@example.co.za',
+  verified[0]?.title)
+/*
+ * NOT AUTOMATED. The "just what people wrote" filter exists to hide bookkeeping about actions
+ * somebody else took -- a fee line beside the call that caused it. This IS the action.
+ */
+check('...and survives the "just what people wrote" filter',
+  filterTimeline(verified, false).length === 1)
+
+const retired = buildTimeline(null, [], [], null, [
+  contact({ retiredAt: '2026-09-26T16:40:00Z', retiredReason: 'wrong email' }),
+])
+check('retiring a contact lands on the timeline too', retired.length === 1)
+/* THE REASON IS THE POINT. "Retired" says a thing happened; "wrong email" says why, and it is
+   the only thing that stops the next collector using it all over again. */
+check('...carrying the reason somebody typed', retired[0]?.detail === 'wrong email',
+  retired[0]?.detail)
+check('...dated when it was retired, not when it was added',
+  retired[0]?.date === '2026-09-26', retired[0]?.date)
+
+/* Both, on one contact, are two entries: they happened on different days and each is a decision. */
+const both = buildTimeline(null, [], [], null, [
+  contact({ verifiedAt: '2026-09-20T10:00:00Z', retiredAt: '2026-09-26T16:40:00Z', retiredReason: 'wrong email' }),
+])
+check('a contact verified and later retired is two entries', both.length === 2)
+check('...newest first, like everything else', both[0]?.date === '2026-09-26')
+
+/*
+ * AND ADDING ONE IS NOT AN ENTRY, which is the half that keeps the timeline readable. The book
+ * came across from Swordfish with its numbers already on it; one entry per imported contact would
+ * bury six years of history under a list of telephone numbers dated the day of the import.
+ */
+/*
+ * READ DEFENSIVELY. Removing the two guards makes buildTimeline hand a null date to dayOf, which
+ * throws -- and a thrown check file prints a stack and NO COUNT, which run-all reads as zero and
+ * cannot tell from a healthy file. Found by break-testing this very assertion.
+ */
+let untouched = null
+try { untouched = buildTimeline(null, [], [], null, [contact({})]).length }
+catch (e) { untouched = `threw: ${String(e).slice(0, 80)}` }
+check('a contact nobody has acted on says nothing', untouched === 0, String(untouched))
+
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

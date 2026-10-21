@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Loader2, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import { mayPoolDisputes, visibleDisputeOwners } from '../../lib/permissions'
 import { formatDate } from '../../data/mockData'
 import {
   ageInDays, canSendToClient, fetchAllQueries, isStale, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL, type QueryStage, type QueueRow,
 } from '../../lib/accountQueries'
+import { escalationCard } from '../../lib/disputeCategories'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * The columns, in the order a dispute travels.
@@ -71,7 +76,19 @@ export function DisputesBoard() {
    * filter: the first thing anyone does is clear it to see what else is queued.
    */
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
+  /*
+   * STARTS ON THE PERSON THEMSELVES, not on "All Owners" -- the firm opened the board as a new
+   * user and read the whole floor's disputes. Applied in an effect rather than as the initial
+   * value because `currentUser` is null on the first render (the profile fetch is async), and
+   * only ONCE, so it never stomps on a filter somebody has since changed by hand.
+   */
   const [owner, setOwner] = useState('All')
+  const defaulted = useRef(false)
+  useEffect(() => {
+    if (defaulted.current || !currentUser) return
+    defaulted.current = true
+    setOwner(currentUser.id)
+  }, [currentUser])
   const [stage, setStage] = useState<'' | Column>('')
   const [dragging, setDragging] = useState<string | null>(null)
   const [moving, setMoving] = useState<string | null>(null)
@@ -86,19 +103,86 @@ export function DisputesBoard() {
 
   useEffect(() => { void load() }, [load])
 
+  /*
+   * Whose disputes this person may look at -- themselves, their team one at a time, or everybody
+   * if they are an Administrator. See visibleDisputeOwners for the firm's wording.
+   */
+  const owners = useMemo(
+    () => visibleDisputeOwners(currentUser, users),
+    [currentUser, users],
+  )
+  const mayPool = mayPoolDisputes(currentUser)
+
+  /*
+   * AND THE FILTER IS HELD TO THAT LIST. Without this the scope would be a dropdown rather than a
+   * rule: ?owner= in the URL, or a stale value left over from a role change, would put somebody
+   * else's board on the screen. Falls back to the person themselves, never to "All".
+   */
+  const scope = useMemo(() => {
+    if (owner === 'All') return mayPool ? 'All' : (currentUser?.id ?? 'All')
+    return owners.some((u) => u.id === owner) ? owner : (currentUser?.id ?? 'All')
+  }, [owner, owners, mayPool, currentUser])
+
+  /*
+   * WHOSE IT IS: TO ANSWER, OR TO FOLLOW.
+   *
+   * THE FIRM, having raised a request from an account: "the ticket was created and then it doesn't
+   * display in the debt collector's situation."
+   *
+   * IT WAS ON THE BOARD. IT WAS ON SOMEBODY ELSE'S. A request is raised by a collector and GIVEN to
+   * the liaison who has to answer it, so `owner_id` is the liaison from the moment it is saved —
+   * and this board scopes on owner and opens on the signed-in person. The collector pressed Raise
+   * a ticket, watched it save, went to look for it, and found an empty board.
+   *
+   * AN OWNER IS WHO MUST ACT; A RAISER IS WHO IS WAITING ON IT. Both are still working the same
+   * ticket, and the second has every reason to come back to it — it is their account, their call,
+   * and the thing holding up their collection. So "mine" means either.
+   *
+   * AND A THIRD: WHOSE DESK THE ACCOUNT IS ON TODAY.
+   *
+   * THE FIRM: "if an account is reshuffled to another person, the dispute raised goes to the new
+   * owner of the account."
+   *
+   * A ticket records who raised it ON THE DAY, and the firm reshuffles the book in bulk — so an
+   * account that moves from one collector to another leaves its open disputes behind on the old
+   * one's board and arrives on the new one's with nothing. The new collector rings a debtor who
+   * says "I already disputed this", and the only place that fact lives is somebody else's screen.
+   *
+   * DERIVED, NEVER COPIED ONTO THE TICKET. Reading the account's current owner on every fetch is
+   * right the moment the account moves and cannot drift; a stored third id would be a third thing
+   * every hand-out had to rewrite, and the one it forgot would be invisible. Same reasoning the
+   * diary applies to a missed entry.
+   *
+   * IT DOES NOT LEAVE THE RAISER. They asked for it, they may still be waiting on the answer, and
+   * dropping it off their board the moment the book is shared out would lose the one person who
+   * knows why it was raised. If the firm would rather it moved outright, that is `||` to `?:` on
+   * one line.
+   *
+   * THE SIDEBAR BADGE IS DELIBERATELY NOT CHANGED. nav_counts stays `owner_id = auth.uid()`,
+   * because a badge counts work waiting on YOU and a ticket sitting with the liaison is not that.
+   * A badge you cannot clear by doing your own work is a badge people stop reading — which is the
+   * argument written beside that very query. Looking is this board's job; the badge's job is
+   * nagging, and they are not the same job.
+   */
+  const isMine = useCallback(
+    (r: QueueRow, who: string) =>
+      r.ownerId === who || r.raisedBy === who || r.accountOwnerId === who,
+    [],
+  )
+
   const filtered = useMemo(() => {
     if (!rows) return []
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
-      if (owner !== 'All' && r.ownerId !== owner) return false
+      if (scope !== 'All' && !isMine(r, scope)) return false
       if (stage && columnOf(r) !== stage) return false
       if (q) {
-        const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''}`.toLowerCase()
+        const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''} ${r.kind}`.toLowerCase()
         if (!haystack.includes(q)) return false
       }
       return true
     })
-  }, [rows, owner, stage, search])
+  }, [rows, scope, stage, search, isMine])
 
   /*
    * Three numbers, and none of them is money.
@@ -108,15 +192,24 @@ export function DisputesBoard() {
    * one about to become a complaint.
    */
   const totals = useMemo(() => {
-    const all = rows ?? []
+    /*
+     * COUNTED OVER WHOSE BOARD THIS IS, not over the firm. The strip said "Total Disputes 26"
+     * above four cards the moment the board stopped showing everybody -- a number that belongs
+     * to somebody else's work, at the top of yours.
+     *
+     * SCOPED BY OWNER ONLY, deliberately: the stage and search boxes narrow what you are LOOKING
+     * at, and "how much is open, how much has gone quiet, how old is the oldest" is a fact about
+     * the work you carry, not about the box you just typed in.
+     */
+    const all = (rows ?? []).filter((r) => scope === 'All' || isMine(r, scope))
     const open = all.filter((r) => r.status !== 'closed')
     return {
       count: all.length,
       open: open.length,
-      stale: open.filter((r) => isStale(r, TODAY)).length,
+      stale: open.filter((r) => isStale(r, TODAY())).length,
       oldest: open.reduce((m, r) => Math.max(m, ageInDays(r)), 0),
     }
-  }, [rows])
+  }, [rows, scope, isMine])
 
   async function moveTo(id: string, to: Column) {
     const row = rows?.find((r) => r.id === id)
@@ -167,10 +260,29 @@ export function DisputesBoard() {
           <option value="">All Stages</option>
           {COLUMNS.map((c) => <option key={c} value={c}>{COLUMN_LABEL[c]}</option>)}
         </select>
-        <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
-          <option value="All">All Owners</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        {/*
+          * ONE PERSON AT A TIME, unless you are an Administrator. "All Owners" is not offered to a
+          * leader at all -- the firm ruled the pooled view out in the same breath as granting them
+          * their team, and leaving it in would put it at the top of the list as the easiest thing
+          * to click. Hidden entirely rather than disabled: a control that refuses reads as a fault.
+          *
+          * A person with nobody else to look at gets no picker, not a picker with one name in it.
+          *
+          * AND THE PICKER IS LABELLED BY WHAT IT ACTUALLY DOES. A name on it now selects tickets
+          * that person OWNS OR RAISED — see isMine — and a dropdown reading only a name would make
+          * the extra rows look like a leak. "(mine — owned or raised)" is four words and it is the
+          * difference between a filter somebody trusts and one they work around.
+        */}
+        {owners.length > 1 && (
+          <select value={scope} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
+            {mayPool && <option value="All">All Owners</option>}
+            {owners.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.id === currentUser?.id ? `${u.name} (mine — owned or raised)` : `${u.name} (owned or raised)`}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="flex items-center bg-slate-100 rounded-lg p-1">
           <button onClick={() => setView('kanban')} title="Board" className={`p-1.5 rounded-md ${view === 'kanban' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400'}`}>
             <LayoutGrid size={15} />
@@ -200,7 +312,7 @@ export function DisputesBoard() {
                   <span className="text-sm font-semibold text-slate-700">{COLUMN_LABEL[col]}</span>
                   <span className="text-xs text-slate-400">({cards.length})</span>
                 </div>
-                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2.5">
+                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1.5">
                   {cards.map((q) => (
                     <DisputeCard
                       key={q.id}
@@ -208,7 +320,7 @@ export function DisputesBoard() {
                       ownerName={q.ownerId ? userById(q.ownerId)?.name ?? null : null}
                       busy={moving === q.id}
                       onDragStart={() => setDragging(q.id)}
-                      onOpen={() => navigate(`/accounts/${q.accountId}`)}
+                      onOpen={() => navigate(`/queries/${q.id}`)}
                     />
                   ))}
                   {cards.length === 0 && (
@@ -224,40 +336,56 @@ export function DisputesBoard() {
       ) : (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/*
+              ONE LINE A DISPUTE, the checking list's shape -- the firm: "thin, sleek, easy to read."
+              The account number used to sit under the debtor and the classification under the
+              chip; both follow on the same line now, after a dot, and a long description
+              truncates with the whole of it on the title.
+            */}
+            <table className="w-full list-table whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
-                  <th className="font-medium px-5 py-2.5">Debtor</th>
-                  <th className="font-medium px-3 py-2.5">Dispute</th>
-                  <th className="font-medium px-3 py-2.5">Owner</th>
-                  <th className="font-medium px-3 py-2.5">Sitting with</th>
-                  <th className="font-medium px-3 py-2.5">Chase</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Age</th>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="font-medium px-3 py-1.5">Debtor</th>
+                  <th className="font-medium px-2 py-1.5">Dispute</th>
+                  <th className="font-medium px-2 py-1.5">Owner</th>
+                  <th className="font-medium px-2 py-1.5">Sitting with</th>
+                  <th className="font-medium px-2 py-1.5">Chase</th>
+                  <th className="font-medium px-3 py-1.5 text-right">Age</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((q) => (
-                  <tr key={q.id} onClick={() => navigate(`/accounts/${q.accountId}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
-                    <td className="px-5 py-2">
-                      <Link to={`/accounts/${q.accountId}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
-                        {q.debtorName}
-                      </Link>
-                      <span className="block text-xs text-slate-400">{q.accountNumber}</span>
+                  <tr key={q.id} onClick={() => navigate(`/queries/${q.id}`)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+                    <td className="px-3 py-1.5 max-w-[16rem] truncate" title={[q.debtorName, q.accountNumber].filter(Boolean).join(' · ')}>
+                      {/* A query about a whole handover sheet has no account, so it is named
+                          rather than linked to /accounts/null -- which renders as a page saying
+                          the account is gone. */}
+                      {q.accountId ? (
+                        <Link to={`/accounts/${q.accountId}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+                          {q.debtorName}
+                        </Link>
+                      ) : <span className="font-medium text-slate-700">{q.debtorName}</span>}
+                      {q.accountNumber && <span className="text-slate-400"> · {q.accountNumber}</span>}
                     </td>
-                    <td className="px-3 py-2 text-slate-600 max-w-[26rem]">
-                      <span className="line-clamp-2 wrap-anywhere">{q.description}</span>
-                      {q.category && <span className="block text-xs text-slate-400">{q.category}</span>}
+                    <td className="px-2 py-1.5 text-slate-600 max-w-[26rem] truncate"
+                      title={[q.description, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}>
+                      {/* The same chip as the card, from the same record -- see DisputeCard. */}
+                      <span className={`mr-1.5 text-[10px] font-semibold uppercase tracking-wide inline-block px-1.5 py-0.5 rounded align-middle ${escalationCard(q.kind).tint}`}>
+                        {escalationCard(q.kind).label}
+                      </span>
+                      {q.description}
+                      {q.kind === 'dispute' && q.category && <span className="text-slate-400"> · {q.category}</span>}
                     </td>
-                    <td className="px-3 py-2 text-slate-500">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
-                    <td className="px-3 py-2"><StageChip column={columnOf(q)} /></td>
-                    <td className={`px-3 py-2 ${isStale(q, TODAY) ? 'text-negative-700 font-medium' : 'text-slate-500'}`}>
+                    <td className="px-2 py-1.5 text-slate-500 max-w-[10rem] truncate">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
+                    <td className="px-2 py-1.5"><StageChip column={columnOf(q)} /></td>
+                    <td className={`px-2 py-1.5 tabular-nums ${isStale(q, TODAY()) ? 'text-negative-700 font-medium' : 'text-slate-500'}`}>
                       {q.chaseOn ? formatDate(q.chaseOn) : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{ageInDays(q)}d</td>
+                    <td className="px-3 py-1.5 text-right text-slate-500 tabular-nums">{ageInDays(q)}d</td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No disputes match.</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">No disputes match.</td></tr>
                 )}
               </tbody>
             </table>
@@ -285,7 +413,7 @@ function StageChip({ column }: { column: Column }) {
     client: 'bg-gold-100 text-[var(--c-gold-deep)]',
     resolved: 'bg-positive-100 text-positive-700',
   }
-  return <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${chip[column]}`}>{COLUMN_LABEL[column]}</span>
+  return <span className={`inline-block text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${chip[column]}`}>{COLUMN_LABEL[column]}</span>
 }
 
 function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
@@ -301,21 +429,44 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       draggable={!closed && !busy}
       onDragStart={onDragStart}
       onClick={onOpen}
-      className={`bg-white rounded-lg border border-slate-200 p-3 cursor-pointer hover:border-slate-300 hover:shadow-sm transition ${busy ? 'opacity-60' : ''}`}
+      title={[q.description, q.debtorName, q.accountNumber, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}
+      className={`bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 cursor-pointer hover:border-slate-300 hover:shadow-sm transition ${busy ? 'opacity-60' : ''}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[12px] text-slate-500 truncate">{q.debtorName}</span>
-        <span className="text-xs text-slate-400 shrink-0 tabular-nums">{ageInDays(q)}d</span>
+      {/*
+        TWO SHORT LINES A CARD, at the firm's asking ("thin, sleek, easy to read"): it was seven --
+        debtor, account number, two of description, the chip, the classification, then owner and
+        chase. Now WHAT on the first (the kind's chip, the description, the age) and WHO and WHEN on
+        the second. Every fact is still on the card; what does not fit is on its title.
+
+        EVERY KIND WEARS ITS OWN CHIP, AND THEY ARE DIFFERENT COLOURS. This board carries four
+        things that are not all disputes, and it used to name only two of them -- with a chain
+        that fell through, so a request announced itself as a recommendation to sue. The words
+        and the tint now live on the kind (escalationCard), which is a record: a new kind is a
+        type error rather than somebody else's label.
+
+        The firm asked for the colour: "a request and a dispute looks exactly the same." They are
+        not the same object -- a dispute holds every collection sequence on the account and a
+        request holds nothing -- so the one that stops the work wears the rust and the rest stay
+        quiet. A dispute still shows its classification, which is the line people already read.
+      */}
+      <div className="flex items-center gap-1.5 whitespace-nowrap min-w-0">
+        <span className={`shrink-0 text-[9.5px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
+          {escalationCard(q.kind).label}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-navy-950">{q.description}</span>
+        <span className="text-[11px] text-slate-400 shrink-0 tabular-nums">{ageInDays(q)}d</span>
       </div>
-      <p className="text-[11px] text-slate-300">{q.accountNumber}</p>
-      <p className="text-[13px] font-semibold leading-snug text-navy-950 mt-1.5 line-clamp-2 wrap-anywhere">{q.description}</p>
-      {q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>}
-      <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
-        <span className="text-slate-500 truncate">{ownerName ?? 'Unassigned'}</span>
+      <div className="flex items-center gap-1.5 mt-0.5 text-[11px] whitespace-nowrap min-w-0">
+        <span className="min-w-0 flex-1 truncate text-slate-400">
+          <span className="text-slate-600">{q.debtorName}</span>
+          {q.accountNumber && <> · {q.accountNumber}</>}
+          {q.kind === 'dispute' && q.category && <> · {q.category}</>}
+          {' · '}<span className="text-slate-500">{ownerName ?? 'Unassigned'}</span>
+        </span>
         {closed
           ? <span className="text-[var(--c-green)] shrink-0">{q.outcome ? QUERY_OUTCOME_LABEL[q.outcome] : 'Closed'}</span>
           : q.chaseOn
-            ? <span className={`shrink-0 ${isStale(q, TODAY) ? 'text-negative-700 font-medium' : 'text-slate-400'}`}>Chase {formatDate(q.chaseOn)}</span>
+            ? <span className={`shrink-0 ${isStale(q, TODAY()) ? 'text-negative-700 font-medium' : 'text-slate-400'}`}>Chase {formatDate(q.chaseOn)}</span>
             : <span className="text-slate-300 shrink-0">No chase date</span>}
       </div>
     </div>

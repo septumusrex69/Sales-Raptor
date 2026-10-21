@@ -4,11 +4,15 @@ import { Loader2 } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { formatDate } from '../../data/mockData'
 import {
-  ageInDays, fetchQueriesForClient, isStale,
-  QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL, type QueryStage, type QueueRow,
+  ageInDays, clientSection, fetchQueriesForClient, isStale,
+  QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
+  type ClientSection, type QueryStage, type QueueRow,
 } from '../../lib/accountQueries'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /** The app's own palette, same as the board and the card on the account. */
 const STAGE_CHIP: Record<QueryStage, string> = {
@@ -18,8 +22,34 @@ const STAGE_CHIP: Record<QueryStage, string> = {
   client: 'bg-gold-100 text-[var(--c-gold-deep)]',
 }
 
+/** The words each section uses. One place, because the whole point is that they differ. */
+const SECTION = {
+  dispute: {
+    title: "Disputes on this client's book",
+    nothing: 'Nothing has been escalated to the liaison on this client.',
+    empty: 'Nothing escalated to the liaison on this client.',
+    waiting: 'waiting on this client',
+  },
+  query: {
+    title: 'Queries with this client',
+    nothing: 'Nothing outstanding with this client.',
+    empty: 'Nothing outstanding with this client.',
+    waiting: 'waiting on this client',
+  },
+} as const
+
 /**
- * This client's queries and disputes.
+ * This client's disputes, or this client's queries — one section each.
+ *
+ * THE FIRM: "there's a difference between a client dispute, a client query, and a debtor's
+ * dispute. Queries are for clients and disputes are for debtors ... there should be two different
+ * sections on the client portal about which ones are their open disputes and which ones are their
+ * open queries. This would fall under a query, for example, the import that's not completed."
+ *
+ * It was one section headed "Disputes on this client's book" holding everything escalated to a
+ * liaison, so an import correction — the firm asking the CLIENT to check their own data — was
+ * shown to them as a DEBTOR disputing the debt. See clientSection() for which kind goes where;
+ * this file renders whichever it is given and never decides.
  *
  * Its own section rather than a line among the notes. A liaison opening Accelerate Fitness wants
  * one question answered — what is outstanding with them — and a note stream cannot answer it,
@@ -29,7 +59,10 @@ const STAGE_CHIP: Record<QueryStage, string> = {
  * belongs to the debt it disputes; this is a second way of reading the same record, not a second
  * copy of it.
  */
-export function ClientQueries({ companyId }: { companyId: string }) {
+export function ClientQueries({ companyId, section }: {
+  companyId: string
+  section: ClientSection
+}) {
   const [rows, setRows] = useState<QueueRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showClosed, setShowClosed] = useState(false)
@@ -66,21 +99,35 @@ export function ClientQueries({ companyId }: { companyId: string }) {
    * Stage carries over when a dispute closes, so one that was resolved inside the firm stays
    * hidden and one that reached the liaison stays visible — no extra column needed to remember it.
    */
-  const escalated = rows.filter((q) => q.stage === 'liaison' || q.stage === 'client')
+  const escalated = rows.filter((q) => (q.stage === 'liaison' || q.stage === 'client')
+    /* AND OF THIS SECTION'S KIND. Without it both lists would show everything twice, which is
+       worse than the one list it replaced. */
+    && clientSection(q.kind) === section)
   const open = escalated.filter((q) => q.status === 'open')
   const closed = escalated.filter((q) => q.status === 'closed')
   const withClient = open.filter((q) => q.stage === 'client')
   const shown = showClosed ? closed : open
+  const words = SECTION[section]
+
+  /*
+   * AN EMPTY QUERIES CARD IS NOT DRAWN AT ALL, and an empty DISPUTES card is.
+   *
+   * They are not the same kind of fact. "No disputes on this book" is a steady state a liaison
+   * wants stated; "no queries" is the ordinary case on nearly every client, and a second empty
+   * card under the first is the page getting longer to say nothing. The firm has already said
+   * this page is crowded on an iPad.
+   */
+  if (section === 'query' && escalated.length === 0) return null
 
   return (
     <Card padded={false}>
       <div className="p-5 pb-0">
         <CardHeader
-          title="Disputes on this client's book"
+          title={words.title}
           subtitle={
             open.length === 0
-              ? 'Nothing has been escalated to the liaison on this client.'
-              : `${open.length} open${withClient.length ? `, ${withClient.length} waiting on this client` : ''}.`
+              ? words.nothing
+              : `${open.length} open${withClient.length ? `, ${withClient.length} ${words.waiting}` : ''}.`
           }
           action={
             closed.length > 0 ? (
@@ -94,47 +141,82 @@ export function ClientQueries({ companyId }: { companyId: string }) {
 
       {shown.length === 0 ? (
         <p className="text-sm text-slate-400 py-8 text-center">
-          {showClosed ? 'Nothing closed yet.' : 'Nothing escalated to the liaison on this client.'}
+          {showClosed ? 'Nothing closed yet.' : words.empty}
         </p>
       ) : (
-        <div className="divide-y divide-slate-50">
-          {shown.map((q) => {
-            const stale = isStale(q, TODAY)
-            return (
-              <div key={q.id} className="px-5 py-3 flex flex-wrap items-start gap-x-4 gap-y-1.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-800 line-clamp-3 wrap-anywhere">{q.description}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
-                      {q.debtorName}
-                    </Link>
-                    {q.accountNumber && <> · {q.accountNumber}</>}
-                    {q.category && <> · {q.category}</>}
-                    {q.raisedByName && <> · raised by {q.raisedByName}</>}
-                  </p>
-                  {q.outcomeAction && (
-                    <p className="text-[11px] text-slate-500 mt-0.5">Outcome: {q.outcomeAction}</p>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  {q.status === 'open' ? (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${STAGE_CHIP[q.stage]}`}>
-                      {QUERY_STAGE_LABEL[q.stage]}
-                    </span>
-                  ) : q.outcome ? (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-                      {QUERY_OUTCOME_LABEL[q.outcome]}
-                    </span>
-                  ) : null}
-                  <p className={`text-[11px] mt-0.5 ${stale ? 'text-negative' : 'text-slate-400'}`}>
-                    {q.status === 'closed'
-                      ? formatDate(q.closedAt ?? q.raisedAt)
-                      : stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
-                  </p>
-                </div>
-              </div>
-            )
-          })}
+        // A ROW A QUERY, the checking list's shape, which the firm asked for on every list in
+        // the app. The description used to run to three lines with the debtor, the account and
+        // who raised it as a fourth under it; each is now a column, and the description is one
+        // line with the whole of it in its tooltip and on the query's own page a click away.
+        <div className="overflow-x-auto">
+          <table className="w-full list-table whitespace-nowrap">
+            <thead>
+              <tr className="border-b border-slate-100 text-slate-400">
+                <th className="px-3 py-1.5 text-left font-medium">Query</th>
+                <th className="px-2 py-1.5 text-left font-medium">Debtor</th>
+                <th className="px-2 py-1.5 text-left font-medium">Account</th>
+                <th className="px-2 py-1.5 text-left font-medium">Category</th>
+                <th className="px-2 py-1.5 text-left font-medium">Raised by</th>
+                <th className="px-2 py-1.5 text-left font-medium">Outcome</th>
+                <th className="px-2 py-1.5 text-left font-medium">Stage</th>
+                <th className="px-3 py-1.5 text-right font-medium">Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((q) => {
+                const stale = isStale(q, TODAY())
+                return (
+                  <tr key={q.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <td className="px-3 py-1.5">
+                      {/*
+                        THE QUERY OPENS THE QUERY. THE FIRM: "if you click on that little query for
+                        this date's handover sheet, then it goes in there." It used to link only to
+                        the account, which answers a different question -- and a query about a whole
+                        handover sheet has no account to open at all.
+                      */}
+                      <Link to={`/queries/${q.id}`} title={q.description}
+                        className="block max-w-[20rem] truncate text-slate-800 hover:text-brand-600">
+                        {q.description}
+                      </Link>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {/* The debtor still goes to the debtor. A batch has none, so it is named
+                          without a link rather than linked to nothing. */}
+                      <span className="block max-w-[14rem] truncate" title={q.debtorName}>
+                        {q.accountId ? (
+                          <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
+                            {q.debtorName}
+                          </Link>
+                        ) : <span className="text-slate-500">{q.debtorName}</span>}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 text-slate-500 tabular-nums">{q.accountNumber}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{q.category}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{q.raisedByName}</td>
+                    <td className="px-2 py-1.5 text-slate-500">
+                      {q.outcomeAction && <span className="block max-w-[14rem] truncate" title={`Outcome: ${q.outcomeAction}`}>Outcome: {q.outcomeAction}</span>}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {q.status === 'open' ? (
+                        <span className={`text-[11px] px-2 py-0.5 rounded ${STAGE_CHIP[q.stage]}`}>
+                          {QUERY_STAGE_LABEL[q.stage]}
+                        </span>
+                      ) : q.outcome ? (
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500">
+                          {QUERY_OUTCOME_LABEL[q.outcome]}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${stale ? 'text-negative' : 'text-slate-400'}`}>
+                      {q.status === 'closed'
+                        ? formatDate(q.closedAt ?? q.raisedAt)
+                        : stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>

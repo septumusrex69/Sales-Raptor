@@ -2,13 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import { Dashboard } from './Dashboard'
 import { CommunicationsDashboard } from './CommunicationsDashboard'
-import { CommunicationsSnapshot } from '../components/dashboard/CommunicationsSnapshot'
 import { useTitleSlot } from '../components/layout/TitleSlot'
 
-type View = 'overview' | 'sales' | 'communications'
+/*
+ * NO "OVERVIEW" ANY MORE (the firm, 18 Oct: "there's a communications area in the sales thing. I don't
+ * think it should be there"). It was the sales dashboard with a Communications block stacked into it;
+ * now an Administrator picks one department or the other, each whole.
+ */
+type View = 'sales' | 'communications'
 
 const VIEWS: { key: View; label: string; hint: string }[] = [
-  { key: 'overview', label: 'Overview', hint: 'Sales, with the key communications figures' },
   { key: 'sales', label: 'Sales', hint: 'The full sales dashboard' },
   { key: 'communications', label: 'Communications', hint: 'The full communications dashboard' },
 ]
@@ -22,7 +25,7 @@ const VIEWS: { key: View; label: string; hint: string }[] = [
  * dashboards stay one click away.
  */
 export function AdminOverview() {
-  const [view, setView] = useState<View>('overview')
+  const [view, setView] = useState<View>('sales')
 
   // Which dashboard you're looking at is part of the page's identity, so the control sits on
   // the title rather than among the filters inside the page.
@@ -30,15 +33,7 @@ export function AdminOverview() {
 
   if (view === 'communications') return <CommunicationsDashboard />
 
-  return (
-    <Dashboard
-      communicationsSnapshot={
-        view === 'overview'
-          ? (period) => <CommunicationsSnapshot period={period} onOpenFull={() => setView('communications')} />
-          : undefined
-      }
-    />
-  )
+  return <Dashboard />
 }
 
 function ViewMenu({ view, onChange }: { view: View; onChange: (v: View) => void }) {

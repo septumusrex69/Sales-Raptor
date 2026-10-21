@@ -1,0 +1,12 @@
+{
+  "email-s129-cover-individual": "letter-s129-individual",
+  "email-demand-cover-company": "letter-demand-company",
+  "email-reminder-individual": "letter-s129-individual",
+  "email-reminder-company": "letter-demand-company",
+  "email-final-notice-individual": "letter-final-notice-individual",
+  "email-final-notice-company": "letter-final-notice-company",
+  "email-listing-confirmed-individual": "letter-listing-individual",
+  "email-listing-confirmed-company": "letter-listing-company",
+  "email-summons-individual": "letter-summons-individual",
+  "email-summons-company": "letter-summons-company"
+}

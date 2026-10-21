@@ -3,6 +3,7 @@ import { Modal, FormField, inputClass } from './ui/Modal'
 import { services } from '../data/mockData'
 import { isHandoverService } from '../lib/dealKind'
 import type { ProductService } from '../types'
+import { clockNow } from '../lib/clock.ts'
 
 /**
  * The small "write a line about what happened" capture used by every quick-log action —
@@ -197,7 +198,7 @@ export function AddDealModal({
             handoverAmount: isHandover && form.handoverAmount !== '' ? Number(form.handoverAmount) : undefined,
             accountsCount: isHandover && form.accountsCount !== '' ? Number(form.accountsCount) : undefined,
             notes: form.notes.trim() || undefined,
-            expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
+            expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : clockNow().toISOString(),
           })
           onClose()
         }}

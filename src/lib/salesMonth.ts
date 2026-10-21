@@ -79,7 +79,7 @@ export function getLastNSalesMonthsRange(referenceDate: Date, count: number): Sa
   return {
     start,
     end,
-    label: `Last ${count} Sales Months`,
+    label: `Last ${count} months`,
     rangeLabel: `${format(start, 'd MMM yyyy')} – ${format(end, 'd MMM yyyy')}`,
     key: `last-${count}`,
   }
@@ -145,4 +145,24 @@ export function decodeSalesMonthParam(param: string | null | undefined): SalesMo
   } catch {
     return undefined
   }
+}
+
+/**
+ * THE MONTHS A PERIOD'S TARGET IS MADE OF, OR NULL WHERE IT HAS NONE (the firm, 13 Oct, on "All time"
+ * reading 101.4% of one month's target: "it still calculates the one month ... against the progress
+ * for one month").
+ *
+ * Targets are set month by month, the 11th to the 10th. So:
+ *   - one month is measured against that month's target;
+ *   - "last 3/6/12 months" against the sum of each of those months' targets;
+ *   - all time, year to date and custom dates against nothing. All time has no first month, year to
+ *     date starts on 1 January where no month does, and custom dates cut months in half. A total
+ *     drawn against one month's target was a number, not a measure, so the screen shows what was
+ *     collected and no progress, rather than a percentage that means nothing.
+ */
+export function targetMonthsOf(period: SalesMonthPeriod): SalesMonthPeriod[] | null {
+  if (/^\d{4}-\d{2}$/.test(period.key)) return [period]
+  const last = /^last-(\d+)$/.exec(period.key)
+  if (last) return listRecentSalesMonths(period.end, Number(last[1]))
+  return null
 }

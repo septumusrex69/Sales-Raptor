@@ -1,0 +1,620 @@
+/**
+ * What a diary entry is, how urgent it is, and how a day's work is ordered.
+ *
+ * Pure on purpose: no database, no clock of its own, no imports outside this file and the
+ * working-day calendar. Everything takes and returns 'YYYY-MM-DD'. That is what lets the
+ * ordering be tested against real dates without a server, and what lets the same ladder be
+ * stated once and checked against the SQL.
+ *
+ * THE LADDER IS DUPLICATED IN SQL, in public.diary_priority(). It has to be: the book will
+ * reach six figures, so the day list is ordered and paged in the database, not in the browser.
+ * scripts/qa/check-diary-priority.mjs reads both and fails if they drift apart.
+ */
+import { isWorkingDay } from './workingDays.ts'
+import { clockNow } from './clock.ts'
+
+/**
+ * The kinds of work that land in a collections diary.
+ *
+ * The order of this list is the firm's order of importance, and it is not arbitrary:
+ *
+ * A BROKEN PROMISE comes before everything. That debtor answered the phone, agreed to pay, and
+ * then did not -- which makes them the most collectable person on the book and the most likely
+ * to slip away if nobody rings the day it fails. One rung covers both a promise made on a call
+ * and an instalment on a running arrangement, at the firm's instruction: either way a payment
+ * they committed to did not come, and splitting that across two rungs only split the queue.
+ *
+ * A NEW ACCOUNT is next, and it is deliberately high. Debt collects best when it is fresh, and
+ * a clerk can be handed twenty in a morning -- a band that arrives in bulk and goes cold quietly
+ * is exactly the one a ladder has to protect.
+ *
+ * A ROUTINE REVIEW comes last however long it has waited. This is the point of having a ladder
+ * at all: without one, a day that opens oldest-first buries a promise that broke this morning
+ * under two hundred chases from last year.
+ */
+export type DiaryKind =
+  | 'promise_broken'
+  | 'new_account'
+  | 'promise_due'
+  | 'callback'
+  | 'dispute_chase'
+  | 'no_contact'
+  | 'trace'
+  | 'review'
+
+/** Lower is sooner. Mirrors public.diary_priority() exactly. */
+export const DIARY_PRIORITY: Record<DiaryKind, number> = {
+  promise_broken: 10,
+  new_account: 20,
+  promise_due: 30,
+  callback: 40,
+  dispute_chase: 50,
+  no_contact: 55,
+  trace: 60,
+  review: 70,
+}
+
+interface KindMeta {
+  /** What it says in the day list. */
+  label: string
+  /** Why it is where it is on the ladder, shown as the row's tooltip. */
+  why: string
+}
+
+/*
+ * THE LABELS ARE THE FIRM'S OWN WORDS; the keys underneath them are not.
+ *
+ * `promise_broken` and the rest are stored in diary_entries.kind, checked by a constraint, and
+ * fed to diary_priority() in the database. Renaming what an agent reads is a change to this
+ * file; renaming the keys would be a migration across every row, the CHECK, the function and
+ * the type, to no one's benefit. Nobody outside this file ever sees a key.
+ */
+export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
+  promise_broken: {
+    /*
+     * ONE RUNG, NOT TWO. There was a separate 'payment_default' — "Arrangement default", then
+     * "Missed instalment" — for an instalment on a running arrangement that did not come off.
+     * The firm collapsed them: "if you've missed an instalment or you missed a PTP, you've
+     * missed a payment that you've made."
+     *
+     * They are right, and the split was costing more than it explained. Two rungs for one fact
+     * put the same debtor in two places on the ladder depending on which word the last agent
+     * reached for, and split every count run off the diary. Whether the figure was agreed on a
+     * call or set up as a debit order six months ago, the fact is the same one: they engaged,
+     * they committed, the money did not come — and that is what makes them the most collectable
+     * person on the book.
+     *
+     * The merge is in the database too, in diary_entries.kind and diary_priority(). See the
+     * migration diary_merge_payment_default_into_promise_broken.
+     */
+    label: 'Broken PTP',
+    why: 'They agreed to pay and the money did not come — a promise made on a call, or an instalment on a running arrangement. Most collectable person on the book, and the quickest to go quiet.',
+  },
+  new_account: {
+    label: 'New account',
+    why: 'Freshly handed over and never worked. Debt collects best while it is new.',
+  },
+  promise_due: {
+    label: 'PTP due',
+    why: 'The day the money was promised for. Check it arrived, before it becomes a broken PTP.',
+  },
+  callback: {
+    label: 'Callback requested',
+    why: 'The debtor asked to be rung on this day. Their appointment, not ours.',
+  },
+  dispute_chase: {
+    label: 'Dispute follow-up',
+    why: 'The seven working days the debtor was given are running out.',
+  },
+  no_contact: {
+    /*
+     * The commonest real outcome of a day on the phone, and until the firm named it there was
+     * nowhere to put it — it went into the catch-all, where it was indistinguishable from
+     * "nothing happened, look again in sixty days". A book you cannot reach is a book going
+     * cold, and that is worth seeing as its own number.
+     */
+    label: 'No contact — retry',
+    why: 'Rang out, dead number, nobody home. Still ours to chase — try again before it goes cold.',
+  },
+  trace: {
+    label: 'Trace follow-up',
+    why: 'Waiting on a tracing result.',
+  },
+  review: {
+    /*
+     * The catch-all, named honestly.
+     *
+     * It was "Review", which nobody could define — including the firm, who asked what it meant.
+     * A vocabulary needs somewhere to put "nothing specific happened, look at this again in
+     * sixty days", or an agent with exactly that has to pick something untrue, and then it sits
+     * in the queue claiming to be a callback and corrupts both the order and any report run off
+     * it. Bottom of the ladder, so it can never jump a broken PTP.
+     */
+    label: 'Follow-up',
+    why: 'The ordinary diarised chase, where nothing more specific applies.',
+  },
+}
+
+export const DIARY_KIND_ORDER: DiaryKind[] = (Object.keys(DIARY_PRIORITY) as DiaryKind[])
+  .sort((a, b) => DIARY_PRIORITY[a] - DIARY_PRIORITY[b])
+
+export function priorityOf(kind: DiaryKind): number {
+  return DIARY_PRIORITY[kind] ?? DIARY_PRIORITY.review
+}
+
+/* ---------- ordering a day ---------- */
+
+export interface DiaryOrderable {
+  kind: DiaryKind
+  dueOn: string
+  /** The account's prescription date, if it has one. */
+  prescriptionOn?: string | null
+}
+
+/**
+ * How close to prescription an account has to be before it jumps the queue.
+ *
+ * Three years after the last payment or acknowledgement the debt cannot be enforced at all, and
+ * the work that interrupts prescription has to happen BEFORE the date, not on it. Sixty days is
+ * enough to get a letter out, get it delivered, and get an acknowledgement back.
+ */
+export const PRESCRIPTION_WARNING_DAYS = 60
+
+const DAY = 86_400_000
+const at = (date: string): number => Date.parse(`${date}T00:00:00Z`)
+
+/** Whole days from `from` to `to`. Negative when `to` is in the past. */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((at(to) - at(from)) / DAY)
+}
+
+/**
+ * Is this account close enough to prescribing that it should be worked ahead of its band?
+ *
+ * Returns false for an account with no prescription date rather than guessing one -- a missing
+ * date is a gap in the imported data, and inventing urgency from a gap would push real work down
+ * the list for no reason.
+ */
+export function nearPrescription(prescriptionOn: string | null | undefined, today: string): boolean {
+  if (!prescriptionOn) return false
+  const left = daysBetween(today, prescriptionOn)
+  return left <= PRESCRIPTION_WARNING_DAYS
+}
+
+/**
+ * The order an agent's day is worked in.
+ *
+ * Prescription first, then the ladder, then oldest first inside a band.
+ *
+ * Prescription overrides the ladder because it is the one deadline the firm cannot argue with:
+ * a routine review on an account that prescribes in three weeks is worth more than a broken
+ * promise on one that has years to run, because after that date the first is worth nothing at
+ * all. Everything else is a judgement about collectability; this one is a judgement about
+ * whether the debt still exists.
+ */
+export function compareDiary(a: DiaryOrderable, b: DiaryOrderable, today: string): number {
+  const ap = nearPrescription(a.prescriptionOn, today)
+  const bp = nearPrescription(b.prescriptionOn, today)
+  if (ap !== bp) return ap ? -1 : 1
+  if (ap && bp) {
+    // Both running out: the one running out sooner.
+    const ad = daysBetween(today, a.prescriptionOn as string)
+    const bd = daysBetween(today, b.prescriptionOn as string)
+    if (ad !== bd) return ad - bd
+  }
+  const pd = priorityOf(a.kind) - priorityOf(b.kind)
+  if (pd !== 0) return pd
+  return at(a.dueOn) - at(b.dueOn)
+}
+
+export function sortDiary<T extends DiaryOrderable>(entries: T[], today: string): T[] {
+  return [...entries].sort((x, y) => compareDiary(x, y, today))
+}
+
+/* ---------- how full a day is ---------- */
+
+/**
+ * What the firm assumes a day holds when nobody has set a figure for this person.
+ *
+ * The company standard, in the firm's own words: 500 accounts on the book and 50 worked a day.
+ * It does NOT vary by grade — a junior and an elite collector carry the same volume, and the
+ * grade decides which ACCOUNTS they may be given, never how many. Individuals differ, and that
+ * is what the per-person override on profiles.diary_capacity is for.
+ */
+export const DEFAULT_DIARY_CAPACITY = 50
+
+/**
+ * The smallest and largest working rate a person may set for themselves.
+ *
+ * Bounded because the number is a denominator. Zero divides every load sentence by nothing and
+ * makes an empty day read as over capacity; five hundred is not a working rate, it is a
+ * mistyped thirty with a stuck key. Either one is a typo, and a typo silently accepted becomes
+ * a figure nobody can explain three weeks later when a team leader asks why one desk is green.
+ */
+export const MIN_DIARY_CAPACITY = 1
+export const MAX_DIARY_CAPACITY = 200
+
+/**
+ * A capacity somebody typed, or null if it is not one.
+ *
+ * REFUSES rather than clamps. Clamping 500 to 200 stores a number the person never chose and
+ * never sees themselves choosing; refusing puts their old number back and lets them try again.
+ */
+export function validCapacity(raw: string | number): number | null {
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n)) return null
+  if (n < MIN_DIARY_CAPACITY || n > MAX_DIARY_CAPACITY) return null
+  return n
+}
+
+/**
+ * Is this day already at or past the working rate?
+ *
+ * The test the warnings use, in one place so the box that warns and the test that proves it
+ * warns cannot drift apart. At — not past: the thirtieth account of a thirty-a-day desk is the
+ * one worth mentioning, because the thirty-first is the one that will not get worked.
+ */
+export function atCapacity(load: { booked: number; capacity: number }): boolean {
+  return load.booked >= load.capacity
+}
+
+export type DayLoadLevel = 'free' | 'filling' | 'full' | 'over'
+
+export interface DayLoad {
+  date: string
+  booked: number
+  capacity: number
+  level: DayLoadLevel
+  /** A weekend or a public holiday: nobody is at a desk. */
+  closed: boolean
+}
+
+/**
+ * How full a day is, as something a colour can be chosen from.
+ *
+ * The thresholds are proportions rather than counts so they hold for an agent set to 15 a day
+ * and one set to 60. "Filling" starts at three quarters, which is late enough not to nag and
+ * early enough to still pick a different day.
+ */
+export function dayLoad(input: { date: string; booked: number; capacity?: number | null }): DayLoad {
+  const capacity = input.capacity && input.capacity > 0 ? input.capacity : DEFAULT_DIARY_CAPACITY
+  const closed = !isWorkingDay(input.date)
+  const ratio = input.booked / capacity
+  const level: DayLoadLevel = input.booked >= capacity
+    ? (ratio >= 1.25 ? 'over' : 'full')
+    : ratio >= 0.75 ? 'filling' : 'free'
+  return { date: input.date, booked: input.booked, capacity, level, closed }
+}
+
+/**
+ * What to say about a day in one line, under the date.
+ *
+ * Written as a sentence rather than "18/30" because the number on its own does not tell somebody
+ * who has never seen their capacity setting whether eighteen is a lot.
+ */
+export function dayLoadSentence(load: DayLoad): string {
+  if (load.closed) return 'Nobody is at a desk'
+  if (load.booked === 0) return 'Nothing booked'
+  const each = load.booked === 1 ? '1 account' : `${load.booked} accounts`
+  switch (load.level) {
+    case 'over': return `${each} — well over a day`
+    case 'full': return `${each} — a full day`
+    case 'filling': return `${each} of ${load.capacity}`
+    default: return `${each} booked`
+  }
+}
+
+/**
+ * The next working day an agent has room on, starting from `from`.
+ *
+ * Used to suggest a date rather than to impose one: an agent who wants the 5th because that is
+ * what they told the debtor gets the 5th. This only stops the app suggesting a Sunday, or the
+ * day that already has forty accounts on it.
+ */
+export function firstDayWithRoom(
+  from: string,
+  loads: Map<string, number>,
+  capacity: number | null | undefined,
+  limit = 60,
+): string {
+  let date = from
+  for (let i = 0; i < limit; i += 1) {
+    const load = dayLoad({ date, booked: loads.get(date) ?? 0, capacity })
+    if (!load.closed && (load.level === 'free' || load.level === 'filling')) return date
+    date = nextDate(date)
+  }
+  return from
+}
+
+export function nextDate(date: string): string {
+  const d = new Date(at(date) + DAY)
+  return d.toISOString().slice(0, 10)
+}
+
+export function shiftDate(date: string, days: number): string {
+  return new Date(at(date) + days * DAY).toISOString().slice(0, 10)
+}
+
+/**
+ * The days to show in the picker's strip: whole weeks, so the columns line up under Mon-Sun
+ * headings, starting from the Monday of the week `from` falls in.
+ */
+export function calendarStrip(from: string, weeks: number): string[] {
+  const start = new Date(at(from))
+  // getUTCDay: 0 is Sunday. Monday-first means Sunday counts as the seventh day.
+  const back = (start.getUTCDay() + 6) % 7
+  const first = shiftDate(from, -back)
+  return Array.from({ length: weeks * 7 }, (_, i) => shiftDate(first, i))
+}
+
+/* ---------- what a missed entry is ---------- */
+
+/**
+ * Missed is not a state anybody writes down: it is an open entry whose day has gone.
+ *
+ * Deliberately derived rather than stored. A stored flag needs something to set it, which means
+ * a nightly job, which means a night it does not run is a night the diary quietly lies. This
+ * cannot drift because there is nothing to drift from.
+ */
+export function isMissed(entry: { state: string; dueOn: string }, today: string): boolean {
+  return entry.state === 'open' && entry.dueOn < today
+}
+
+/** How overdue, in words, for the row that says so. */
+export function overdueBy(dueOn: string, today: string): string {
+  const days = daysBetween(dueOn, today)
+  if (days <= 0) return ''
+  if (days === 1) return '1 day late'
+  if (days < 14) return `${days} days late`
+  if (days < 60) return `${Math.round(days / 7)} weeks late`
+  if (days < 365) return `${Math.round(days / 30)} months late`
+  const years = (days / 365).toFixed(days < 730 ? 1 : 0)
+  return `${years} year${days < 730 ? '' : 's'} late`
+}
+
+/* ---------- spreading a backlog over real days ---------- */
+
+/**
+ * `count` consecutive WORKING days, starting at or after `start`.
+ *
+ * The whole point of the bulk re-diarise tool. Moving 214 missed accounts onto one date is what
+ * produced the problem in the first place — one agent came across from the old system carrying
+ * 44 accounts on a single day, none of which were worked. So the tool never offers a single day;
+ * it offers a run of them, and weekends and public holidays are simply not in the run.
+ */
+export function workingDaysFrom(start: string, count: number, limit = 400): string[] {
+  const days: string[] = []
+  let date = start
+  for (let i = 0; i < limit && days.length < count; i += 1) {
+    if (isWorkingDay(date)) days.push(date)
+    date = nextDate(date)
+  }
+  return days
+}
+
+export interface SpreadPlan {
+  days: string[]
+  perDay: number
+  /** How many land on the last day, which is usually fewer than the rest. */
+  onLastDay: number
+}
+
+/**
+ * What re-diarising a pile will actually do, worked out before anybody presses the button.
+ *
+ * Returned rather than described so the modal can say "214 accounts across 8 working days,
+ * 15 September to 24 September, 30 a day" — which is a sentence somebody can disagree with,
+ * unlike a button that silently does something to two hundred records.
+ */
+export function planSpread(total: number, start: string, perDay: number): SpreadPlan {
+  const safePerDay = Math.max(1, Math.floor(perDay))
+  const needed = Math.max(1, Math.ceil(total / safePerDay))
+  const days = workingDaysFrom(start, needed)
+  const onLastDay = total === 0 ? 0 : total - safePerDay * (days.length - 1)
+  return { days, perDay: safePerDay, onLastDay }
+}
+
+/* ---------- choosing what to look at first ---------- */
+
+/**
+ * How an agent wants their day ordered.
+ *
+ * The ladder is the right DEFAULT and the wrong law. A collector who has a settlement meeting at
+ * eleven wants the big balances; one chasing a bad month wants every promise that is due; one
+ * coming back from leave wants the oldest thing first. The firm asked to choose, and choosing is
+ * not the same as filtering — nothing is hidden, it is only reordered.
+ */
+export type DiaryOrder =
+  | 'urgent'
+  | 'amount'
+  | 'oldest'
+  /** 'first:<kind>' floats one kind to the top and leaves the ladder alone underneath it. */
+  | `first:${DiaryKind}`
+
+/**
+ * The order the firm recommends, and the one anybody who has never chosen gets.
+ *
+ * Named rather than written as 'urgent' in six places, because the whole point of a house order
+ * is that there is exactly one of it and everybody can see which one it is.
+ */
+export const FIRM_DIARY_ORDER: DiaryOrder = 'urgent'
+
+export interface DiaryOrderOption {
+  id: DiaryOrder
+  /** What it says in the menu, under its heading. */
+  label: string
+}
+
+export interface DiaryOrderGroup {
+  heading: string
+  /** One line under the heading, where the group needs explaining. */
+  note?: string
+  options: DiaryOrderOption[]
+}
+
+/**
+ * The orders on offer, in three groups, because they are three different kinds of thing.
+ *
+ * They used to be one flat list of thirteen, where "Most urgent first" and "Broken PTP first"
+ * sat as peers — which reads as thirteen alternatives to choose between when it is really one
+ * house order, two ways to sort the whole day, and nine ways to float a single kind to the top
+ * while leaving the house order intact underneath. Nobody could tell from the list which of
+ * those they were picking.
+ */
+export const DIARY_ORDER_GROUPS: DiaryOrderGroup[] = [
+  {
+    heading: 'The firm’s order',
+    note: 'What the ladder says, with anything about to prescribe pulled above it.',
+    options: [{ id: 'urgent', label: 'Most urgent first' }],
+  },
+  {
+    heading: 'Sort the whole day instead',
+    options: [
+      { id: 'amount', label: 'Biggest balance first' },
+      { id: 'oldest', label: 'Longest waiting first' },
+    ],
+  },
+  {
+    heading: 'Or bring one kind to the top',
+    note: 'Everything else keeps the firm’s order underneath it. Nothing is hidden either way.',
+    // Short labels here: under this heading "Broken PTP" is the sentence, and "Broken PTP
+    // first first" is what appending the suffix would amount to.
+    options: DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: DIARY_KINDS[k].label })),
+  },
+]
+
+/**
+ * Every order on offer, flat, each with a label that stands on its own.
+ *
+ * The standalone form — "Broken PTP first", not "Broken PTP" — because this is what a control
+ * shows when it has to say which order is in force without the menu's headings around it.
+ */
+export const DIARY_ORDER_LABELS: { id: DiaryOrder; label: string }[] = [
+  { id: 'urgent', label: 'Most urgent first' },
+  { id: 'amount', label: 'Biggest balance first' },
+  { id: 'oldest', label: 'Longest waiting first' },
+  ...DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: `${DIARY_KINDS[k].label} first` })),
+]
+
+/** How the order in force reads on a button. Falls back to the firm's own, never to a blank. */
+export function orderLabel(order: DiaryOrder): string {
+  return DIARY_ORDER_LABELS.find((o) => o.id === order)?.label
+    ?? DIARY_ORDER_LABELS.find((o) => o.id === FIRM_DIARY_ORDER)!.label
+}
+
+/** A stored order string, or null if it is not one we still offer. */
+export function validOrder(raw: string | null | undefined): DiaryOrder | null {
+  if (!raw) return null
+  return DIARY_ORDER_LABELS.some((o) => o.id === raw) ? (raw as DiaryOrder) : null
+}
+
+/** The kind a 'first:<kind>' order floats, or null for the orders that do not float one. */
+export function floatedKind(order: DiaryOrder): DiaryKind | null {
+  if (!order.startsWith('first:')) return null
+  const kind = order.slice('first:'.length) as DiaryKind
+  return kind in DIARY_PRIORITY ? kind : null
+}
+
+export interface DiaryOrderable2 extends DiaryOrderable {
+  /** What is still owed. Only consulted by the 'amount' order. */
+  outstanding?: number
+}
+
+/**
+ * Order a day the way the agent asked.
+ *
+ * Every order falls back to the ladder once its own question is settled, so a list is never
+ * arbitrary below the fold: "biggest balance first" still puts a broken promise above a review
+ * when two accounts owe the same, and floating callbacks to the top leaves everything under them
+ * in the order it would have been anyway.
+ *
+ * Prescription is NOT overridden by any of this. An account that stops being enforceable next
+ * month is not a matter of preference — see compareDiary.
+ */
+export function orderDiary<T extends DiaryOrderable2>(entries: T[], order: DiaryOrder, today: string): T[] {
+  const ladder = (a: T, b: T) => compareDiary(a, b, today)
+
+  if (order === 'amount') {
+    return [...entries].sort((a, b) => {
+      const pa = nearPrescription(a.prescriptionOn, today)
+      const pb = nearPrescription(b.prescriptionOn, today)
+      if (pa !== pb) return pa ? -1 : 1
+      const d = (b.outstanding ?? 0) - (a.outstanding ?? 0)
+      return d !== 0 ? d : ladder(a, b)
+    })
+  }
+
+  if (order === 'oldest') {
+    return [...entries].sort((a, b) => {
+      const pa = nearPrescription(a.prescriptionOn, today)
+      const pb = nearPrescription(b.prescriptionOn, today)
+      if (pa !== pb) return pa ? -1 : 1
+      return a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : ladder(a, b)
+    })
+  }
+
+  const floated = floatedKind(order)
+  if (floated) {
+    return [...entries].sort((a, b) => {
+      // Prescription first here too. Floating "broken promises" must not bury an account that
+      // stops being enforceable next month underneath one that has four years to run.
+      const pa = nearPrescription(a.prescriptionOn, today)
+      const pb = nearPrescription(b.prescriptionOn, today)
+      if (pa !== pb) return pa ? -1 : 1
+      const fa = a.kind === floated
+      const fb = b.kind === floated
+      if (fa !== fb) return fa ? -1 : 1
+      return ladder(a, b)
+    })
+  }
+
+  return sortDiary(entries, today)
+}
+
+/* ---------- a month at a time ---------- */
+
+/**
+ * The whole grid a month calendar needs: complete weeks, Monday first, covering every day of the
+ * month `anchor` falls in plus the few days either side that finish the first and last weeks.
+ *
+ * Always six weeks, never five. A grid that changes height as you page through the year makes
+ * the rows jump under the cursor, and the day you were about to click moves.
+ */
+export function monthGrid(anchor: string): string[] {
+  const first = `${anchor.slice(0, 7)}-01`
+  const start = calendarStrip(first, 1)[0]
+  return Array.from({ length: 42 }, (_, i) => shiftDate(start, i))
+}
+
+/** Is this day part of the month being shown, or one of the greyed neighbours? */
+export function inMonth(date: string, anchor: string): boolean {
+  return date.slice(0, 7) === anchor.slice(0, 7)
+}
+
+/** The first of the month `months` away from the one `anchor` is in. */
+export function shiftMonth(anchor: string, months: number): string {
+  const year = Number(anchor.slice(0, 4))
+  const month = Number(anchor.slice(5, 7)) - 1 + months
+  const d = new Date(Date.UTC(year, month, 1))
+  return d.toISOString().slice(0, 10)
+}
+
+/** Today, as the app means it: the local day, not a UTC timestamp. */
+export function todayIso(now = clockNow()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * What to call the day being looked at.
+ *
+ * "Today" and "Tomorrow" by name, because that is what somebody means when they say they are
+ * going to work tomorrow's diary; anything further out gets its date, because "in 9 days" is not
+ * something anyone plans against.
+ */
+export function dayName(date: string, today: string): string {
+  const away = daysBetween(today, date)
+  if (away === 0) return 'Today'
+  if (away === 1) return 'Tomorrow'
+  if (away === -1) return 'Yesterday'
+  return ''
+}

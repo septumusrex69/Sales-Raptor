@@ -7,10 +7,29 @@
  * queries are right, because no query leaves the browser.
  */
 import { execSync, spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 const OUT = process.env.QA_OUT ?? '/tmp'
-const REF = 'kvkajxpremantdkhmjvb'
+/*
+ * THE REF COMES FROM .env.local, not from a constant here.
+ *
+ * Both the request stub and the seeded session are keyed on the project ref, and the dev server
+ * reads its URL from that file -- which the e2e harness rewrites to a placeholder project when it
+ * runs. Hardcoded, the two drifted apart silently: the session went into localStorage under a key
+ * the app never looked at, every page redirected to the login screen, and the tool reported
+ * thirty missing buttons on a screenshot of the sign-in form.
+ */
+const REF = (() => {
+  try {
+    const m = /VITE_SUPABASE_URL=https:\/\/([^.\s]+)\./.exec(readFileSync('.env.local', 'utf8'))
+    if (m) return m[1]
+  } catch { /* no .env.local: fall through to staging, which is what a developer run means. */ }
+  return 'kvkajxpremantdkhmjvb'
+})()
 const ACC = '11111111-1111-4111-8111-111111111111'
+/* A second account, a company, for the things only a company has: directors, and a liquidation
+ * with nobody appointed to claim from. */
+const ACC2 = '11111111-1111-4111-8111-111111111112'
 const COMPANY = '22222222-2222-4222-8222-222222222222'
 const USER = '33333333-3333-4333-8333-333333333333'
 
@@ -53,6 +72,25 @@ const account = {
   account_flags: 'Debtor avoiding contact; Section 129 in process',
   account_rating: 7, last_contact_method: 'Email (Outgoing)', ptp_success_ratio: 7,
   diary_date: '2026-09-22', last_action_at: '2026-09-02', last_payment_at: '2026-08-05',
+  debtor_kind: 'individual',
+  /* Under debt review: the debt is still owed, but the proposal comes through the counsellor. */
+  practitioner_kind: 'debt_counsellor', practitioner_name: 'L. Pretorius',
+  practitioner_firm: 'Pretorius Debt Counselling', practitioner_reference: 'NCRDC1882/T4471',
+  practitioner_phone: '+27 12 345 6789', practitioner_email: 'admin@pdc.example.co.za',
+  practitioner_appointed_on: '2026-02-11',
+}
+
+/* A company in final liquidation with nobody recorded to claim from -- the one state the
+ * Standing panel interrupts a collector about. */
+const company = {
+  ...account,
+  id: ACC2, account_number: 'ABS-009104', swordfish_reference: '9104', client_reference: 'KOP-0041',
+  debtor_first_name: null, debtor_surname: 'Kopano Freight Services (Pty) Ltd', debtor_id_number: '2016/2...',
+  debtor_kind: 'company', sub_status: 'Liquidation/Sequestration',
+  main_comment: 'Final liquidation confirmed on the bureau profile. No liquidator on file yet.',
+  practitioner_kind: null, practitioner_name: null, practitioner_firm: null,
+  practitioner_reference: null, practitioner_phone: null, practitioner_email: null,
+  practitioner_appointed_on: null,
 }
 
 const payments = [
@@ -128,6 +166,16 @@ const profiles = [{
   role: 'Administrator', team_id: null, avatar_url: null, is_active: true,
 }]
 
+/* A company's contacts, which belong to PEOPLE — the thing a flat list cannot say. */
+const companyContacts = [
+  { id: 'cc1', account_id: ACC2, kind: 'work', value: '011 000 0148', label: null, person_name: null, person_role: null, is_primary: false, verified_at: '2026-09-10T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:00:00Z' },
+  { id: 'cc2', account_id: ACC2, kind: 'address', value: '4 Marula Crescent, Bryanston, Sandton, 2191', label: null, person_name: null, person_role: null, is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:01:00Z' },
+  { id: 'cc3', account_id: ACC2, kind: 'mobile', value: '083 000 0148', label: null, person_name: 'Peter Smith', person_role: 'Accounts manager', is_primary: true, verified_at: '2026-09-11T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:02:00Z' },
+  { id: 'cc4', account_id: ACC2, kind: 'email', value: 'peter@example.com', label: null, person_name: 'Peter Smith', person_role: 'Accounts manager', is_primary: false, verified_at: '2026-09-11T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:03:00Z' },
+  { id: 'cc5', account_id: ACC2, kind: 'mobile', value: '076 000 0263', label: null, person_name: 'Sipho Radebe', person_role: 'Director', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:04:00Z' },
+  { id: 'cc6', account_id: ACC2, kind: 'other', value: 'Nomsa Radebe', label: 'Director · Karoo Bulk Haul', person_name: 'Nomsa Radebe', person_role: 'Next of kin', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-09-01T09:05:00Z' },
+]
+
 const contacts = [
   { id: 'c1', account_id: ACC, kind: 'mobile', value: '+27 82 123 4567', label: null, is_primary: true, verified_at: '2026-08-06T09:00:00Z', retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:00:00Z' },
   { id: 'c2', account_id: ACC, kind: 'work', value: '+27 11 987 6543', label: 'Build It Construction', is_primary: false, verified_at: null, retired_at: null, retired_reason: null, notes: null, created_at: '2026-08-06T09:05:00Z' },
@@ -148,9 +196,78 @@ const promises = [
   { id: 'pr3', account_id: ACC, amount: 1500, due_on: '2026-04-05', method: 'EFT', status: 'broken', resolved_at: '2026-04-12T10:00:00Z', notes: null, created_by: null, created_at: '2026-03-18T09:00:00Z' },
 ]
 
+const directors = [
+  { id: 'dir1', account_id: ACC2, id_number: '8506105...', full_name: 'Sipho Radebe', status: 'Active', appointed_on: '2016-05-20', source: 'xds', traced_at: '2026-09-16T14:31:00Z', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dir2', account_id: ACC2, id_number: '7711220...', full_name: 'Elmarie du Toit', status: 'Resigned', appointed_on: '2016-05-20', source: 'xds', traced_at: null, created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dir3', account_id: ACC2, id_number: '9002145...', full_name: 'Yolanda Pillay', status: 'Resigned', appointed_on: '2016-05-20', source: 'xds', traced_at: null, created_at: '2026-09-16T14:31:00Z' },
+]
+
+/* Neither carries an amount, which is the common case off a summary profile -- and the case the
+ * total has to describe as a floor rather than as the figure. */
+const judgments = [
+  { id: 'j1', account_id: ACC2, case_number: '40021/2024', case_type: 'Judgement by default', case_reason: 'Credit agreement', plaintiff: 'Bosveld Plant Hire (Pty) Ltd', filed_on: '2024-10-04', amount: null, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+  { id: 'j2', account_id: ACC2, case_number: '40990/2023', case_type: 'Judgement by default', case_reason: 'VAT', plaintiff: 'SARS', filed_on: '2023-11-08', amount: 412870.44, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+  /*
+   * AGAINST THE DIRECTOR, NOT THE COMPANY. It must show under his name and must not be counted
+   * among the company's — a clean company reading as having three because somebody who signed for
+   * it has been sued is the exact failure the column exists to prevent.
+   */
+  { id: 'j4', account_id: ACC2, against_director_id: 'dir1', case_number: '77401/2025', case_type: 'Judgement by default', case_reason: 'Credit agreement', plaintiff: 'Sandton Credit Solutions', filed_on: '2025-06-11', amount: 88300, source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+  /* One the reader could not split into columns: kept in the bureau's own words, never guessed. */
+  { id: 'j3', account_id: ACC2, case_number: '31188/2022', case_type: null, case_reason: null, plaintiff: null, filed_on: '2022-05-19', amount: null, source_text: 'ORDER IN TERMS OF RULE 46A MARICO CIVILS CC', source: 'xds', recorded_at: '2026-09-16T14:31:00Z' },
+]
+
+/* One active directorship and three resigned: enough to show the named list and the little sign. */
+const directorCompanies = [
+  { id: 'dc1', director_id: 'dir1', company_name: 'Kopano Freight Services (Pty) Ltd', status: 'Active', appointed_on: '2019-04-02', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc2', director_id: 'dir1', company_name: 'Marico Civils CC', status: 'Resigned', appointed_on: '2011-08-15', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc3', director_id: 'dir1', company_name: 'Setlogelo Holdings', status: 'Resigned', appointed_on: '2013-02-01', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc4', director_id: 'dir1', company_name: 'Vaalkop Transport', status: 'Resigned', appointed_on: '2015-06-30', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  /* Enough live ones to run past the cap, because one real director on the book has twenty-five. */
+  { id: 'dc5', director_id: 'dir1', company_name: 'Thekwini Plant Services', status: 'Active', appointed_on: '2021-11-08', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc6', director_id: 'dir1', company_name: 'Lebone Energy', status: 'Active', appointed_on: '2022-03-14', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc7', director_id: 'dir1', company_name: 'Naledi Logistics', status: 'Active', appointed_on: '2023-07-01', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc8', director_id: 'dir1', company_name: 'Umsinga Holdings', status: 'Active', appointed_on: '2024-02-20', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+  { id: 'dc9', director_id: 'dir1', company_name: 'Karoo Bulk Haul', status: 'Active', appointed_on: '2025-01-09', registration_number: null, source: 'xds', created_at: '2026-09-16T14:31:00Z' },
+]
+
+/* A filed trace on the company account, shaped like one a real report produces. */
+const TRACE = 'trace-1'
+const traces = [{
+  id: TRACE, account_id: ACC2, subject_kind: 'director', director_id: 'dir1', report_kind: 'consumer',
+  subject_name: 'Sipho Radebe', id_number: '8506105000085', registration_number: null,
+  company_status: null, contact_score: 'Fair', risk_score: 'Medium Risk',
+  enquired_on: '2026-09-16', document_id: null, created_at: '2026-09-16T14:31:00Z',
+}, {
+  /* The company's own profile. A commercial report carries no contacts at all -- it is here so
+     the switcher has two to move between and the empty state has something to explain. */
+  id: 'trace-2', account_id: ACC2, subject_kind: 'debtor', director_id: null, report_kind: 'commercial',
+  subject_name: 'Kopano Freight Services', id_number: null, registration_number: '2016/880431/07',
+  company_status: 'Final Liquidation', contact_score: null, risk_score: null,
+  enquired_on: '2026-09-16', document_id: null, created_at: '2026-09-16T14:30:00Z',
+}]
+
+const traceItems = [
+  { id: 'ti1', trace_id: TRACE, account_id: ACC2, kind: 'mobile', value: '0821110001', label: null, people_linked: 2, seen_on: '2026-09-07', amount: null, status: null, outcome: 'verified', outcome_at: '2026-09-16T15:00:00Z', outcome_note: null, promoted_contact_id: null },
+  { id: 'ti2', trace_id: TRACE, account_id: ACC2, kind: 'mobile', value: '0821110002', label: null, people_linked: 9, seen_on: '2026-08-02', amount: null, status: null, outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti3', trace_id: TRACE, account_id: ACC2, kind: 'work', value: '0111110003', label: null, people_linked: 1, seen_on: '2026-05-19', amount: null, status: null, outcome: 'not_theirs', outcome_at: '2026-09-16T15:02:00Z', outcome_note: null, promoted_contact_id: null },
+  { id: 'ti4', trace_id: TRACE, account_id: ACC2, kind: 'address', value: '14 MOROKA AVE, KLIPTOWN, 1811', label: 'Gauteng', people_linked: null, seen_on: '2026-06-16', amount: null, status: null, outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti5', trace_id: TRACE, account_id: ACC2, kind: 'employer', value: 'Thekwini Plant Services', label: 'Operations Manager', people_linked: null, seen_on: '2026-09-07', amount: null, status: null, outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti6', trace_id: TRACE, account_id: ACC2, kind: 'property', value: '12, ALOE, STREET, BENONI', label: 'Buyer', people_linked: null, seen_on: '2014-03-11', amount: 985000, status: 'current owner', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti7', trace_id: TRACE, account_id: ACC2, kind: 'property', value: '3, PROTEA, ROAD, SPRINGS', label: 'Seller', people_linked: null, seen_on: '2009-01-20', amount: 410000, status: 'past', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti8', trace_id: TRACE, account_id: ACC2, kind: 'link', value: 'Nomsa Radebe', label: 'Director · Karoo Bulk Haul', people_linked: null, seen_on: null, amount: null, status: 'relative', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti9', trace_id: TRACE, account_id: ACC2, kind: 'link', value: 'Pieter Grobler', label: 'Telephone · 0821110001', people_linked: null, seen_on: null, amount: null, status: 'link', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+  { id: 'ti10', trace_id: TRACE, account_id: ACC2, kind: 'directorship', value: 'Karoo Bulk Haul', label: null, people_linked: null, seen_on: '2025-01-09', amount: null, status: 'Active', outcome: null, outcome_at: null, outcome_note: null, promoted_contact_id: null },
+]
+
 const TABLES = {
-  debtor_accounts: [account],
-  account_contacts: contacts,
+  debtor_accounts: [account, company],
+  account_traces: traces,
+  account_trace_items: traceItems,
+  account_directors: directors,
+  account_director_companies: directorCompanies,
+  account_judgments: judgments,
+  account_contacts: [...contacts, ...companyContacts],
   account_queries: [
     { id: 'q1', account_id: ACC, description: 'Says she already paid R3,000 of this directly to the client in March and it was never credited.', category: 'Already paid', status: 'open', stage: 'client', sent_to_client_at: '2026-08-20T09:00:00Z', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-08-18T09:00:00Z', chase_on: '2026-09-01', outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false, closed_at: null, closed_by_name: null },
     { id: 'q2', account_id: ACC, description: 'Disputed the delivery of two of the items invoiced.', category: 'Goods or service', status: 'closed', stage: 'liaison', owner_id: USER, raised_by_name: 'Amanda Coertze', raised_at: '2026-05-02T09:00:00Z', chase_on: null, outcome: 'partly_valid', outcome_action: 'Reduce the capital by the two items', outcome_amount: 1840, outcome_done: false, closed_at: '2026-06-11T09:00:00Z', closed_by_name: 'Stephan Bredell' },
@@ -212,8 +329,17 @@ const serve = (route) => {
     return json({ capital: 18500, spent_on_item: 0, towards_ceiling: 0 })
   }
   if (route.request().method() === 'POST') {
-    posted.push({ table, body: route.request().postData() ?? '' })
-    const sent = JSON.parse(route.request().postData() || '{}')
+    const raw = route.request().postData() ?? ''
+    posted.push({ table, body: raw })
+    /*
+     * NOT EVERY POST IS JSON. A file going to Storage is multipart, and JSON.parse on its body
+     * throws inside the route handler -- which kills the whole run with a stack trace pointing at
+     * the stub rather than at whatever was being tested.
+     */
+    if (!/^\s*[[{]/.test(raw)) {
+      return json({ Key: `${table}/stubbed` }, 200)
+    }
+    const sent = JSON.parse(raw || '{}')
     const row = { id: `qa-${posted.length}`, created_at: new Date().toISOString(), ...(Array.isArray(sent) ? sent[0] : sent) }
     // Kept, not just echoed. A stub that forgets what was inserted cannot tell the difference
     // between a page that refetched after a write and one that did not -- which is the whole
@@ -271,6 +397,100 @@ const seed = ({ ref, user }) => {
   localStorage.setItem(`sb-${ref}-auth-token`, JSON.stringify(session))
 }
 await page.addInitScript(seed, { ref: REF, user: USER })
+
+/* Working inside a filed trace: the numbers, what came of them, and what can be promoted. */
+await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(1200)
+{
+  await page.waitForFunction(() => /Open \d+ traces|Open the trace/.test(document.body.innerText), { timeout: 10000 }).catch(() => {})
+  /* Not anchored: the button carries an icon, so its text is not exactly the label. */
+  const open = page.locator('button').filter({ hasText: /Open \d+ traces|Open the trace/ })
+  if (await open.count()) {
+    await open.first().click()
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: `${OUT}/trace-workspace.png`, fullPage: true })
+    const body = await page.locator('[data-modal-open]').innerText()
+    console.log('\n== Trace workspace ==')
+    for (const want of ['Numbers', 'Addresses', 'Employment', 'People linked', 'Property', 'Reached them', 'Add to contact details', 'Add as next of kin', 'Kopano Freight Services']) {
+      console.log(`   ${want}:`, new RegExp(want, 'i').test(body))
+    }
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(200)
+  } else {
+    console.log('!! no way in to the trace from the panel')
+    const panel = await page.locator('body').innerText()
+    console.log('   panel mentions Standing:', /STANDING/i.test(panel))
+    console.log('   panel mentions a trace:', /Trace/i.test(panel))
+    console.log('   buttons:', (await page.locator('button').allInnerTexts()).filter((t) => /trace|open/i.test(t)).join(' | ') || 'none')
+  }
+}
+
+/* The company first and on its own: it is the only one with directors, and the only one where
+ * the "nobody recorded to claim from" warning can fire. */
+await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(1500)
+await page.screenshot({ path: `${OUT}/account-company.png`, fullPage: true })
+await page.evaluate(() => {
+  const h = [...document.querySelectorAll('p')].find((n) => /^WHO TO ASK FOR$/i.test(n.textContent ?? ''))
+  h?.scrollIntoView({ block: 'center' })
+})
+await page.waitForTimeout(300)
+await page.screenshot({ path: `${OUT}/account-people.png` })
+await page.evaluate(() => {
+  const h = [...document.querySelectorAll('h3')].find((n) => /^Standing$/.test(n.textContent ?? ''))
+  h?.scrollIntoView({ block: 'center' })
+})
+await page.waitForTimeout(400)
+await page.screenshot({ path: `${OUT}/account-standing-panel.png` })
+
+/*
+ * Uploading a trace, when a real bureau PDF is to hand.
+ *
+ * Point RAPTOR_TRACE_PDF at one. Not committed and never will be: this repo is public and a
+ * bureau profile is somebody's ID number, their addresses and where they work.
+ */
+if (process.env.RAPTOR_TRACE_PDF) {
+  await page.goto(`${ORIGIN}/accounts/${ACC2}`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const opener = page.getByRole('button', { name: /Upload a trace/ })
+  if (await opener.count()) {
+    await opener.first().click()
+    await page.waitForTimeout(300)
+    await page.locator('input[type="file"]').setInputFiles(process.env.RAPTOR_TRACE_PDF)
+    try {
+      await page.waitForFunction(() => /Who is this trace for|does not look like/.test(document.body.innerText), { timeout: 30000 })
+    } catch {
+      console.log('!! the trace never finished reading')
+      console.log('   modal says:', (await page.locator('[data-modal-open]').innerText()).slice(0, 300))
+      console.log('   console:', errors.slice(-6).join(' | ') || 'no errors')
+    }
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${OUT}/trace-upload.png`, fullPage: true })
+    const body = await page.locator('body').innerText()
+    console.log('\n== Trace upload ==')
+    // innerText returns text as CSS transforms it, and this label is `uppercase` in the design.
+    console.log('   asks who it is for:', /Who is this trace for/i.test(body))
+    console.log('   names the subject:', /Company profile|Consumer profile/.test(body))
+    for (const section of ['Directors', 'Judgments', 'Numbers and email', 'Addresses']) {
+      console.log(`   found ${section}:`, new RegExp(section, 'i').test(body))
+    }
+    const file = page.getByRole('button', { name: /File what is ticked/ })
+    if (await file.count()) {
+      await file.first().click()
+      await page.waitForFunction(() => /Filed|error/i.test(document.body.innerText), { timeout: 20000 })
+      await page.waitForTimeout(300)
+      console.log('   filed:', /Filed[:.]/.test(await page.locator('body').innerText()))
+      const wrote = posted.filter((x) => ['account_directors', 'account_judgments', 'account_contacts', 'account_notes'].includes(x.table))
+      console.log('   wrote to:', [...new Set(wrote.map((w) => w.table))].join(', ') || '!! nothing')
+      await page.screenshot({ path: `${OUT}/trace-filed.png`, fullPage: true })
+    } else {
+      console.log('!! no file button')
+    }
+    await page.keyboard.press('Escape')
+  } else {
+    console.log('!! no "Upload a trace" button on the company account')
+  }
+}
 
 for (const tab of ['Overview', 'Transactions', 'Documents']) {
   await page.goto(`${ORIGIN}/accounts/${ACC}`, { waitUntil: 'networkidle' })

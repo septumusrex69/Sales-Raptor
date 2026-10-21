@@ -1,8 +1,60 @@
 @import "tailwindcss";
 @import "./styles/raptor.css";
+@import "./styles/desert.css";
+@import "./styles/glass-mountain.css";
+@import "./styles/ocean.css";
+
+/*
+ * CHARTER, THE FACE THE FIRM'S NOTICES ARE SET IN.
+ *
+ * Declared here rather than fetched from a font service: a letterhead and a statutory demand
+ * should not depend on somebody else's CDN being up, and the licence lets this repository ship
+ * the files (public/fonts/charter/LICENCE.txt travels with them). The same outlines are embedded
+ * in the PDF as .ttf, so what is typed on the sheet is what prints -- see charter.ts.
+ *
+ * `font-display: swap` because these are only ever used on the letter sheet: a collector typing
+ * a notice may see one reflow, which is better than an editor that is blank while a font loads.
+ * NOTHING ELSE IN RAPTOR USES CHARTER -- the app is Inter -- so a browser fetches these four
+ * files only on the page where somebody is actually writing a letter.
+ */
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Charter";
+  src: url("/fonts/charter/charter-bold-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /*
+   * "Inter Variable" FIRST, and that name is not a typo. @fontsource-variable/inter registers the
+   * family as `Inter Variable`, so a stack that asks only for "Inter" matches nothing and falls
+   * through to ui-sans-serif — which is what this did: the token named Inter, nothing fetched it
+   * for months, and then the fetch was added and it STILL was not used because of the name. Both
+   * spellings are listed so either package satisfies it.
+   */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   --color-navy-950: #0f161d;
   --color-navy-900: #151f29;
@@ -43,6 +95,47 @@
 
   --color-gold-50: #faf5ea;
   --color-gold-100: #f4ead3;
+
+  /*
+   * THE REST OF EACH RAMP, and these are here because of what their absence did.
+   *
+   * A Tailwind utility naming a token that does not exist COMPILES TO NOTHING -- no warning, no
+   * error, no class in the stylesheet. `bg-rust-600 text-white` is therefore white text on
+   * whatever is behind it, and on a white modal that is an INVISIBLE BUTTON. The firm found one:
+   * the confirm on Reverse this payment, which they read, correctly, as "you can't reverse a
+   * payment". Ninety-odd utilities across the app were naming a shade nobody had defined; most
+   * were a tint or a border and merely did not draw, and two were a control that could not be
+   * seen at all.
+   *
+   * DERIVED FROM THE FAMILY, NOT PICKED -- the same rule as the tints above. A generic Tailwind
+   * red or emerald dropped in beside this navy reads as another app's palette pasted in.
+   *
+   * `rust` WAS NEVER A FAMILY AT ALL. It exists as --c-rust in the skin tokens below, and the
+   * finance pages spelled Tailwind classes for it; `negative` is that same colour (#794234 is
+   * --c-rust-deep), so those classes now name the family that always held it.
+   */
+  --color-brand-200: #cbd8e3;
+  --color-brand-300: #a7bccd;
+  --color-brand-400: #6e8ba5;
+  --color-brand-800: #0f161d;
+
+  --color-gold-200: #f0e3c5;
+  --color-gold-700: #8a6a26;
+  --color-gold-800: #6b521d;
+
+  --color-navy-50: #f2f5f8;
+
+  --color-negative-200: #e0c3b9;
+  --color-negative-300: #cda293;
+  --color-negative-400: #ae7562;
+  --color-negative-500: #8f5443;
+  /* 600 IS THE FAMILY'S OWN COLOUR. --color-negative carries no number and is what every
+     destructive control asks for by name; a 600 that was a shade off it would put two reds on
+     one screen. */
+  --color-negative-600: #794234;
+
+  --color-positive-600: #3b6550;
+  --color-positive-800: #2a4739;
 }
 
 /*
@@ -139,6 +232,44 @@
   --skin-hero-background: linear-gradient(120deg, #12212f 0%, #2c4054 52%, #46607b 100%);
   --skin-hero-radius: 1rem;
 
+  /*
+   * The Collections hero's photograph and the wash over it, as tokens.
+   *
+   * THEY WERE WRITTEN INTO THE RULE, on the reasoning that this picture never changes. A second
+   * skin with its own photograph falsifies that, and the alternative -- a whole second copy of
+   * `.collections-hero` under a [data-theme] selector -- would be the panel's geometry written
+   * twice, where only the picture differs.
+   *
+   * THE SCRIM IS A TOKEN FOR THE SAME REASON AND ONE MORE: it is tuned to the photograph behind
+   * it. A cold blue wash over a warm picture reads as a screen with the colour wrong, so a skin
+   * that changes the image has to be able to change the wash with it.
+   */
+  --skin-collections-hero-image: url('/brand/collections-hero.webp');
+  --skin-collections-hero-ground: #07141d;
+  /*
+   * HOW TALL THE PANEL STANDS, and the default is the height the firm fought for.
+   *
+   * They sent back a version with the photograph shortened -- "you changed some shit... you made
+   * the picture smaller. Keep that." -- so 540 and 700 are an instruction, not a layout choice,
+   * and nothing may quietly reduce them.
+   *
+   * IT IS A TOKEN BECAUSE A PHOTOGRAPH HAS AN ASPECT AND THIS PANEL DOES NOT. `cover` on a box
+   * 1.3:1 shows barely a third of a picture that is 3:1, and which third is all a background
+   * position can decide. A skin that brings its own photograph has to be able to bring the shape
+   * that suits it, or it is choosing between a crop and a stretch.
+   */
+  --skin-collections-hero-min: 540px;
+  --skin-collections-hero-min-lg: 700px;
+  --skin-collections-scrim:
+    linear-gradient(
+      90deg,
+      rgba(5, 16, 25, 0.82) 0%,
+      rgba(5, 16, 25, 0.4) 42%,
+      rgba(5, 16, 25, 0.15) 70%,
+      rgba(5, 16, 25, 0.38) 100%
+    ),
+    linear-gradient(to bottom, rgba(5, 16, 25, 0) 0%, rgba(5, 16, 25, 0.12) 55%, rgba(5, 16, 25, 0.3) 100%);
+
   /* Decorative treatment at the foot of the sidebar. */
   --skin-sidebar-art: none;
   --skin-sidebar-art-opacity: 0;
@@ -228,6 +359,39 @@ select:autofill {
     border: 1px solid var(--skin-card-border);
     box-shadow: var(--skin-card-shadow);
   }
+
+  /*
+   * THE PRIMARY BUTTON, which three screens named and nothing defined. The Swordfish import's
+   * "Import 20 accounts", the handover import's write button and both of Hold account's actions
+   * all said `btn-primary`, and Tailwind drops a class it does not know without a word -- so the
+   * most consequential button on the import screen drew as plain text beside a link. The firm,
+   * circling it on the iPad: "Make the import more prominent."
+   *
+   * The same gold every other primary action already wears inline (New email, Add client), so a
+   * button that says btn-primary looks like the buttons that say it longhand. In the components
+   * layer, so a caller's own utilities still win.
+   */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--color-gold-500);
+    background-color: var(--color-gold-400);
+    color: var(--color-navy-950);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    transition: background-color 120ms ease-out;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--color-gold-500);
+  }
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 }
 
 /*
@@ -249,25 +413,178 @@ select:autofill {
  * never fetches a background on a display:none element, whereas it will happily download an
  * <img> inside one. A phone shouldn't pay for a picture it is never shown.
  *
- * Three declarations of one property, each overriding the last where it's understood. Anything
- * modern takes the standard image-set; Safari 14-16 takes the -webkit- form and gets the same
- * files; anything older keeps the plain JPEG. A browser that chokes on the last declaration
- * falls back to the one above it and still ends up with WebP, so the ordering is the safety
- * net rather than a guess about support.
+ * ONE PLAIN url(), AND NOT image-set(). This carried three declarations of one property on the
+ * theory that a browser which chokes on the last falls back to the one above it. The build
+ * falsifies that theory: Lightning CSS reads the three as one intent, drops the plain url()
+ * safety net, and emits a -webkit-image-set carrying type() -- which WebKit's prefixed form has
+ * never supported and therefore rejects. On any Safari that does not take the unprefixed form,
+ * both surviving declarations are invalid and the panel renders empty. The Collections hero had
+ * the identical rule and was reported blank on an iPad; this one is hidden below lg, which is
+ * the only reason nobody saw it here first.
  *
- * The 2x file is only ever fetched by a screen dense enough to need it — an ordinary monitor
- * pays 257KB, not 409KB.
+ * WebP has been read by Safari since 14, Chrome since 32 and Firefox since 65, so the JPEG is
+ * kept on disk for anything that links to it directly and is no longer in the cascade.
+ *
+ * THE 2x FILE IS STILL ONLY FETCHED BY A SCREEN DENSE ENOUGH TO NEED IT — an ordinary monitor
+ * pays 257KB, not 409KB. A resolution query does that in a way a minifier cannot collapse,
+ * because the two rules are not alternatives for one property, they are different conditions.
  */
 .login-photo {
-  background-image: url('/brand/raptor-login.jpg');
-  background-image: -webkit-image-set(url('/brand/raptor-login.webp') 1x, url('/brand/raptor-login@2x.webp') 2x);
-  background-image: image-set(
-    url('/brand/raptor-login.webp') type('image/webp') 1x,
-    url('/brand/raptor-login@2x.webp') type('image/webp') 2x,
-    url('/brand/raptor-login.jpg') type('image/jpeg') 1x
-  );
+  background-image: url('/brand/raptor-login.webp');
   background-size: cover;
   background-position: 32% center;
+}
+@media (min-resolution: 2dppx) {
+  .login-photo {
+    background-image: url('/brand/raptor-login@2x.webp');
+  }
+}
+
+/*
+ * The Collections hero photograph.
+ *
+ * Same bargain as the sign-in panel above: a background rather than an <img>, and one plain
+ * url() to a WebP for the reason set out on the declaration itself.
+ *
+ * THE SCRIM IS A PSEUDO-ELEMENT, NOT PART OF THE BACKGROUND, which is the one place this departs
+ * from the raptor skin's hero. That one composes gradient and photograph into a single background
+ * so the copy's contrast cannot drift as the image changes behind it; keeping the scrim separate
+ * here keeps a four-stop gradient out of the declaration that loads the picture.
+ *
+ * BOTH ARE TOKENS NOW. This read "the image never changes" until a second skin brought its own
+ * photograph, and the two have to move together: a wash tuned to a blue sunrise over a warm dune
+ * reads as a screen with its colour wrong. See --skin-collections-scrim.
+ *
+ * Darkest on the left, where the wordmark and the headline sit, and lifting through the middle so
+ * the sunrise survives. The right edge comes back down so the rail of small caps has something to
+ * sit on — over the brightest part of the sky, white type at that size disappears.
+ */
+.collections-hero {
+  /*
+   * THE PALETTE, SCOPED TO THIS PANEL. The firm gave exact values for the cinematic treatment and
+   * they are declared here rather than in the theme layer, because this is the only screen that
+   * wears them — putting a second gold in :root would leave two golds for the next person to
+   * choose between.
+   */
+  --ch-glass: rgba(7, 16, 24, 0.66);
+  --ch-edge: rgba(255, 255, 255, 0.08);
+  --ch-gold: #c9a04f;
+  --ch-champagne: #e4c68a;
+  --ch-muted: #aab3bd;
+
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--skin-hero-radius);
+  background-color: var(--skin-collections-hero-ground);
+  background-image: var(--skin-collections-hero-image);
+  background-size: cover;
+  background-position: center;
+}
+
+/*
+ * THE SCRIM, AND IT IS LIGHTER THAN THE ONE IT REPLACES.
+ *
+ * The brief is explicit that the photograph has to stay a major part of the page rather than a
+ * strip behind some widgets, so the wash runs heavy only where the headline sits and is almost
+ * nothing across the middle, where the sun is. The right edge comes back a little because the
+ * rail of small caps sits over bright cloud.
+ *
+ * THE TWO PASSES COMPOUND and that has been got wrong here twice. 0.82 across and 0.38 down are
+ * unremarkable apart and reach 0.89 where they meet, which is the darkest corner of the panel and
+ * is under the KPI row rather than under the picture.
+ */
+/*
+ * THE PANEL'S HEIGHT, OFF THE TOKEN ABOVE.
+ *
+ * ON THE CHILD, not on `.collections-hero` itself, because the child is what carries the padding
+ * and the max-width the brief caps the content at -- the same element the Tailwind `min-h-`
+ * classes are on.
+ *
+ * `.collections-hero > div` RATHER THAN A CLASS, and the specificity is the reason: an arbitrary
+ * Tailwind utility is one class (0,1,0) and this is a class plus an element (0,1,1), so it wins
+ * outright rather than on source order. `.collections-hero > *` next door already addresses the
+ * same child the same way.
+ */
+.collections-hero > div {
+  min-height: var(--skin-collections-hero-min);
+}
+@media (min-width: 1024px) {
+  .collections-hero > div {
+    min-height: var(--skin-collections-hero-min-lg);
+  }
+}
+
+.collections-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--skin-collections-scrim);
+}
+.collections-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+/*
+ * THE HEADLINE'S LETTER-SPACING, OWNED HERE RATHER THAN AS A UTILITY CLASS.
+ *
+ * The raptor skin sets `html[data-theme='raptor'] h1 { letter-spacing: -0.012em }` as a global
+ * typographic default, and that selector outranks any Tailwind class — so `tracking-[0.005em]` on
+ * the h1 was in the markup, was asserted by a source check, and was doing NOTHING. The rendered
+ * line was at -0.62px while the firm was being told it had been opened up.
+ *
+ * A display line is exactly the case that default is not written for, so it overrides it, at a
+ * specificity that actually wins and scoped to this panel so no other heading moves.
+ */
+html[data-theme='raptor'] .collections-hero h1,
+.collections-hero h1 {
+  letter-spacing: 0.005em;
+}
+
+/*
+ * GLASS, NOT A BOX. The firm's word for the version before this was "bulky": four opaque tiles
+ * across the middle of a photograph leave a strip of sky at the top and nothing else. A panel
+ * that the picture shows through is the difference between a dashboard with a background and a
+ * photograph with figures on it.
+ *
+ * backdrop-filter is a progressive enhancement, not a requirement: where it is unsupported the
+ * fill alone still carries the type, which is why the fill is 0.66 rather than 0.2 and a blur.
+ */
+.hero-glass {
+  background: var(--ch-glass);
+  border: 1px solid var(--ch-edge);
+  border-radius: 10px;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+/*
+ * THE CONTROLS AT THE FOOT OF THE HERO, DRAWN AS TEXT.
+ *
+ * The firm's design has that line reading as facts with an icon in front of each, not as a row of
+ * form fields — and one of the controls is the shared SalesMonthPicker, which eight other screens
+ * render inside ordinary cards where the box is exactly right. So the chrome comes off here, in a
+ * skin scoped to this panel, rather than as another variant on the component.
+ *
+ * WHAT DOES NOT COME OFF IS THE AFFORDANCE. A control that looks like text is a control nobody
+ * finds, so hover and keyboard focus put the box straight back.
+ */
+.hero-controls select,
+.hero-controls input[type='date'] {
+  border-color: transparent;
+  background-color: transparent;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  font-size: 0.75rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.hero-controls select:hover,
+.hero-controls input[type='date']:hover,
+.hero-controls select:focus-visible,
+.hero-controls input[type='date']:focus-visible {
+  border-color: rgba(255, 255, 255, 0.28);
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /*
@@ -480,4 +797,59 @@ select:autofill {
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/*
+ * DATE INPUTS ON iOS, which are a different control from the one every other browser draws.
+ *
+ * Safari on iOS sizes input[type="date"] from its own native widget rather than from the CSS
+ * width it is given, and that widget carries an intrinsic minimum. So `w-full` inside a grid
+ * column is honoured everywhere else and ignored there: the box grows past its column and sits
+ * under whatever label is next to it. The firm reported the same two fields overlapping three
+ * times, and neither moving from flex to grid nor min-w-0 on the grid ITEM touched it — the
+ * oversized element is the input, not its wrapper.
+ *
+ * appearance: none is what actually turns the native sizing off. min-width: 0 then lets it
+ * shrink, and the two webkit pseudo-elements stop iOS centring the value and reserving room for
+ * a spinner nobody asked for, so the field reads like every other box on the screen.
+ *
+ * Global rather than local: every date input in the app has this problem, and a fix applied only
+ * where somebody complained is a fix that waits to be reported again somewhere else.
+ */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  margin-inline-start: auto;
+  cursor: pointer;
+}
+
+/*
+ * EVERY LONG LIST IN THE APP, ONE SIZE (the firm, 10 Oct, of the accounts and clients lists on the
+ * iPad: "make these views a little bit bigger, the lines between them a little bit bigger").
+ *
+ * They were made thin earlier the same day ("it should look like the checking list") as literal
+ * 12.5px text and py-1.5 cells in 64 tables across 39 files, so "a little bigger" would have been 64
+ * edits that drift. Now every one of those tables carries `list-table` and the size lives here, once.
+ *
+ * UNLAYERED ON PURPOSE: Tailwind v4 puts its utilities in a cascade layer, and unlayered rules beat
+ * layered ones -- so a cell's own `py-1.5` cannot undo the row height set here. The rows still never
+ * wrap (whitespace-nowrap stays on each table), which is what made them "lines" in the first place.
+ */
+.list-table {
+  font-size: 13.5px;
+}
+.list-table th,
+.list-table td {
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
 }

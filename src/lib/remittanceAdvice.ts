@@ -1,0 +1,488 @@
+/**
+ * THE REMITTANCE ADVICE AS A MODEL, BEFORE ANYTHING DRAWS IT.
+ *
+ * Separated from the PDF for the reason letterDocument is separated from letterPdf: everything
+ * interesting here is a DECISION -- which lines appear, what a status is allowed to say, what the
+ * three headline figures are -- and none of it is testable through a renderer. The drawing code
+ * takes this and puts it on a page; the tests take this and check the arithmetic.
+ *
+ * IT IS A TAX INVOICE, so the header is not decoration. BF's name, address and VAT number, the
+ * client's name and VAT number where we have one, the invoice number, the issue date and the VAT
+ * amount all have to be on it, and `problems` says so out loud when one is missing rather than
+ * printing a blank where a statutory field belongs.
+ *
+ * FOUR FIXES OVER THE REPORT IT REPLACES, each of them a thing the firm found in a FileFish
+ * payover and had to explain to a client:
+ *   - A line with R0.00 capital received is not printed at all. There were rows for payments that
+ *     never reached capital, which read as "we collected nothing for you" beside a real payment.
+ *   - "Paid in full" appears only where the capital outstanding is nought. FileFish printed it
+ *     beside R5 635.80 still owing, because it was reading a stored status.
+ *   - A payment RECEIVED before the period started carries a note saying it was captured after the
+ *     previous cut-off. FileFish showed 27 December and 9 January payments in the 11 January run
+ *     with no explanation, which reads like a mistake and is not one.
+ *   - A reversal is a negative line and says what it is, rather than silently reducing a total.
+ */
+import { paymentReference } from './paymentsOut.ts'
+import type { RunPayment } from './payover'
+import { rand } from './money.js'
+import { buildXlsx, type Cell } from './xlsxWrite.js'
+import { clockNow } from './clock.js'
+
+export interface RemittanceFirm {
+  name: string
+  address: string | null
+  phone: string | null
+  email: string | null
+  vatNumber: string | null
+}
+
+export interface RemittanceClient {
+  name: string
+  code: string | null
+  vatNumber: string | null
+}
+
+export interface RemittanceRun {
+  invoiceNumber: string
+  periodStart: string
+  periodEnd: string
+  issuedOn: string
+  trustCapital: number
+  trustCommission: number
+  dueToClient: number
+  ptcReceived: number
+  ptcFeesTaken: number
+  ptcCapital: number
+  ptcCommission: number
+  dueToBf: number
+  commissionVat: number
+  carriedIn: number
+  /** Client charges taken off this payover (the run's own figure). Absent reads as nil. */
+  chargesSetOff?: number
+  /** Debtor overpayments released to the client: paid over whole, no commission. Absent reads as nil. */
+  excessReleased?: number
+  netPayover: number
+  commissionRate: number | null
+  paidAt: string | null
+  eftReference: string | null
+}
+
+/**
+ * AN OVERPAYMENT RELEASED TO THE CLIENT, named. The firm, 8 Oct: the payover report should say
+ * "there was an overpayment for one of the debtors, and this overpayment is this, and that's being
+ * paid over to you directly without any commission". Before this it was in the net and nowhere
+ * else, so the workings did not add up to what the client was paid.
+ */
+export interface ReleasedRow {
+  yourRef: string
+  ourRef: string
+  debtor: string
+  paid: string
+  amount: number
+}
+
+export interface CollectionRow {
+  yourRef: string
+  ourRef: string
+  debtor: string
+  status: string
+  handedOver: string
+  handoverAmount: number
+  paid: string
+  capitalReceived: number
+  commission: number
+  vat: number
+  capitalOutstanding: number
+  reversal: boolean
+  lateCapture: boolean
+  /** The line's VAT sentence, under the row (the firm, 10 Oct: "the VAT also needs to be there"). */
+  vatLine: string
+}
+
+/**
+ * THE PER-LINE VAT SENTENCE (the firm's mock-up; asked for on 10 Oct: "keep the outstanding column
+ * and the VAT also needs to be there"). What came off this collection and why, in one line under it:
+ * "Commission 20% R 60.00 + VAT 15% R 9.00 = R 69.00 deducted". The rate is the payment's own (an
+ * account can be on a band); VAT's rate is read off the two figures, so the sentence can never
+ * disagree with the columns beside it. A reversal says the same deduction is given back.
+ */
+export function vatLine(l: { commission: number; commissionVat: number; commissionRate?: number | null; toCapital: number }, reversal: boolean): string {
+  const c = Math.abs(l.commission)
+  const v = Math.abs(l.commissionVat)
+  const rate = l.commissionRate ?? (Math.abs(l.toCapital) > 0.004 ? c / Math.abs(l.toCapital) : null)
+  const pct = (x: number) => `${Math.round(x * 10000) / 100}%`
+  const vatPct = c > 0.004 ? pct(Math.round((v / c) * 100) / 100) : '15%'
+  const commission = `Commission${rate !== null ? ` ${pct(rate)}` : ''} ${rand(c)}`
+  return reversal
+    ? `${commission} + VAT ${vatPct} ${rand(v)} = ${rand(c + v)} given back with this reversal`
+    : `${commission} + VAT ${vatPct} ${rand(v)} = ${rand(c + v)} deducted`
+}
+
+export interface DirectRow {
+  yourRef: string
+  ourRef: string
+  debtor: string
+  paid: string
+  receivedByYou: number
+  annexureBFees: number
+  capitalPortion: number
+  commission: number
+  dueToUs: number
+  capitalOutstanding: number
+  reversal: boolean
+}
+
+export interface RemittanceAdvice {
+  firm: RemittanceFirm
+  client: RemittanceClient
+  run: RemittanceRun
+  /** The three figures page one carries, in the order prompt 7 stacks them. */
+  headline: {
+    collectedByBf: number
+    payments: number
+    paidDirectly: number
+    directNote: string | null
+    net: number
+    paidNote: string
+    /**
+     * WHICH WAY THE MONEY GOES (the firm, 10 Oct, of "Net amount we are paying you -R 14 162.50":
+     * "it could look like we are still owing the client money"). A run below nothing is the
+     * client owing the firm: said in words, with the amount as a positive figure.
+     */
+    clientOwes: boolean
+    /** The headline's own label: "Net amount we are paying you" or "Amount you owe us". */
+    netLabel: string
+  }
+  /** "How we got there", one line each, the last being the net. */
+  workings: { label: string; amount: number; emphasis?: boolean }[]
+  collections: CollectionRow[]
+  direct: DirectRow[]
+  released: ReleasedRow[]
+  /** Anything a tax invoice needs and does not have. Reported, never silently blank. */
+  problems: string[]
+}
+
+export const ANNEXURE_B_FOOTNOTE =
+  'Annexure B fees are the fees and interest recovered from a payment made directly to you, in '
+  + 'terms of the Debt Collectors Act regulations. They do not form part of the capital collected '
+  + 'on the handover amount.'
+
+/** "11 Nov 2024" — dates on a client document are written the way they are read aloud. */
+export function advDate(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+/**
+ * What a debtor's position is allowed to say on a client's statement.
+ *
+ * DERIVED, and the only phrase that can be earned rather than stored is "Paid in full". Everything
+ * else falls back to the account's own words, cleaned of the internal prefix a client has no use
+ * for: "Active: Unfrozen" is how a row got into the table, not a thing to print on an invoice.
+ */
+export function advStatus(row: Pick<RunPayment, 'paidInFull' | 'accountStatus'>): string {
+  if (row.paidInFull) return 'Paid in full'
+  const raw = (row.accountStatus ?? '').trim()
+  if (!raw) return 'In progress'
+  const after = (raw.includes(':') ? raw.slice(raw.indexOf(':') + 1).trim() : raw) || 'In progress'
+  /*
+   * AND THE STORED STATUS MAY NOT SAY IT EITHER. Dropping through to the account's own words was
+   * most of the fix and not all of it: FileFish's "Paid in Full" beside R5 635.80 outstanding came
+   * from a stored status, and a stored status can still hold those words. Where the capital is not
+   * nought the phrase is refused whatever the column says -- which is the whole point of deriving
+   * it. Caught by a break test that could not break, because the assertion asserted the bug.
+   */
+  return /paid\s*in\s*full/i.test(after) ? 'In progress' : after
+}
+
+export function buildRemittanceAdvice(input: {
+  firm: RemittanceFirm
+  client: RemittanceClient
+  run: RemittanceRun
+  lines: RunPayment[]
+}): RemittanceAdvice {
+  const { firm, client, run, lines } = input
+
+  const problems: string[] = []
+  if (!firm.vatNumber) problems.push('The firm has no VAT number on file, and a tax invoice must carry one.')
+  if (!firm.address) problems.push('The firm has no address on file.')
+  if (!client.vatNumber) problems.push(`${client.name} has no VAT number on file.`)
+  if (!client.code) problems.push(`${client.name} has no client code, so the invoice number is provisional.`)
+
+  /*
+   * NEVER A LINE WITH NO CAPITAL ON IT. A payment whose half B was entirely consumed before it
+   * reached capital gave the client a row saying R0.00, beside real ones -- which reads as "we
+   * collected nothing for you" rather than "this payment went to costs you do not pay". The money
+   * is still in the totals, where it belongs; it is the LINE that would mislead.
+   */
+  const collections: CollectionRow[] = lines
+    .filter((l) => (l.lineKind === 'trust' || (l.lineKind === 'reversal' && !l.paidToClient)))
+    .filter((l) => Math.abs(l.toCapital) > 0.004)
+    .map((l) => ({
+      yourRef: l.clientReference ?? '',
+      ourRef: l.caseNumber ?? '',
+      debtor: l.debtor,
+      status: advStatus(l),
+      handedOver: advDate(l.handoverDate),
+      handoverAmount: l.capitalHandedOver,
+      paid: advDate(l.receivedAt),
+      capitalReceived: l.toCapital,
+      commission: l.commission,
+      vat: l.commissionVat,
+      capitalOutstanding: l.capitalAfter,
+      reversal: l.lineKind === 'reversal',
+      lateCapture: l.lateCapture,
+      vatLine: vatLine(l, l.lineKind === 'reversal'),
+    }))
+
+  const direct: DirectRow[] = lines
+    .filter((l) => (l.lineKind === 'ptc' || (l.lineKind === 'reversal' && l.paidToClient)))
+    .filter((l) => Math.abs(l.paymentAmount) > 0.004)
+    .map((l) => ({
+      yourRef: l.clientReference ?? '',
+      ourRef: l.caseNumber ?? '',
+      debtor: l.debtor,
+      paid: advDate(l.receivedAt),
+      receivedByYou: l.paymentAmount,
+      /* ONLY WHAT THIS PAYMENT RECOVERED, never what the account still owes. The firm's own
+         wording in prompt 4: do not show other fees still outstanding on the account. */
+      annexureBFees: l.toInterest + l.toCosts,
+      capitalPortion: l.toCapital,
+      commission: l.commission,
+      dueToUs: l.toInterest + l.toCosts + l.commission,
+      capitalOutstanding: l.capitalAfter,
+      reversal: l.lineKind === 'reversal',
+    }))
+
+  const released: ReleasedRow[] = lines
+    .filter((l) => l.excessDisposal === 'released' && l.excessCredit > 0.004)
+    .map((l) => ({
+      yourRef: l.clientReference ?? '',
+      ourRef: l.caseNumber ?? '',
+      debtor: l.debtor,
+      paid: advDate(l.receivedAt),
+      amount: l.excessCredit,
+    }))
+
+  /* A RUN BELOW NOTHING: the client owes the firm, and the next run brings it forward. */
+  const clientOwes = run.netPayover < 0
+  const reference = paymentReference(run.invoiceNumber)
+  const paidNote = clientOwes
+    ? `Nothing is paid to you this period. It comes off your next payover`
+      + `${reference ? `, or pay us with reference ${reference}` : ''}.`
+    : run.paidAt
+    ? `Paid by EFT${run.eftReference ? ` ${run.eftReference}` : ''} on ${advDate(run.paidAt)}`
+    /* WITH THE REFERENCE IT WILL CARRY, so the client can find it on their own statement (the firm,
+       8 Oct: a payover goes out "with a client unique reference"). */
+    : `To be paid by EFT to your nominated account${paymentReference(run.invoiceNumber) ? `, reference ${paymentReference(run.invoiceNumber)}` : ''}`
+
+  const workings: { label: string; amount: number; emphasis?: boolean }[] = [
+    { label: 'Capital collected on your behalf', amount: run.trustCapital },
+    {
+      label: run.commissionRate != null
+        ? `Less our commission at ${fmtRate(run.commissionRate)}`
+        : 'Less our commission',
+      amount: -run.trustCommission,
+    },
+  ]
+  if (run.dueToBf > 0) {
+    workings.push({ label: 'Less our fees and commission on payments made to you directly', amount: -run.dueToBf })
+  }
+  workings.push({ label: 'Less VAT on commission', amount: -run.commissionVat })
+  if (run.carriedIn !== 0) {
+    workings.push({ label: 'Brought forward from your previous statement', amount: run.carriedIn })
+  }
+  /* BOTH WERE ALREADY IN THE NET AND IN NO LINE ABOVE IT, so the workings did not add up to what
+     the client was paid. Now every rand of the net has a line. */
+  const setOff = run.chargesSetOff ?? 0
+  const releasedTotal = run.excessReleased ?? 0
+  if (setOff !== 0) {
+    workings.push({ label: 'Less our charges set off against this payment', amount: -setOff })
+  }
+  if (releasedTotal !== 0) {
+    workings.push({ label: 'Add debtor overpayments paid over to you in full (no commission)', amount: releasedTotal })
+  }
+  workings.push(clientOwes
+    ? { label: 'Amount you owe us', amount: -run.netPayover, emphasis: true }
+    : { label: 'Net amount we are paying you', amount: run.netPayover, emphasis: true })
+
+  return {
+    firm,
+    client,
+    run,
+    headline: {
+      collectedByBf: run.trustCapital,
+      payments: collections.filter((c) => !c.reversal).length,
+      paidDirectly: run.ptcReceived,
+      directNote: run.ptcReceived > 0
+        ? 'Our fees and commission on these are set off below'
+        : null,
+      net: run.netPayover,
+      paidNote,
+      clientOwes,
+      netLabel: clientOwes ? 'Amount you owe us' : 'Net amount we are paying you',
+    },
+    workings,
+    collections,
+    direct,
+    released,
+    problems,
+  }
+}
+
+function fmtRate(fraction: number): string {
+  const pct = fraction * 100
+  return `${Number.isInteger(pct) ? pct : pct.toFixed(2).replace(/\.?0+$/, '')}%`
+}
+
+export function adviceSubject(adv: RemittanceAdvice): string {
+  return `Remittance advice ${adv.run.invoiceNumber} - ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}`
+}
+
+/**
+ * The covering message. SHORT, because the document is the thing: the net amount, when it is
+ * being paid, and where the detail is. The blank lines are content rather than a guess in a
+ * renderer -- emailBodyHtml turns each one into a paragraph, which is the firm's own rule after a
+ * final notice went out as a single block.
+ */
+export function adviceBody(adv: RemittanceAdvice): string {
+  const when = adv.run.paidAt
+    ? `on ${advDate(adv.run.paidAt)}`
+    : 'within our normal payment run'
+  return [
+    'Good day',
+    `Please find attached our remittance advice and tax invoice ${adv.run.invoiceNumber} for `
+      + `collections from ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}.`,
+    ...(adv.headline.clientOwes
+      ? [`Amount you owe us: ${rand(-adv.run.netPayover)}`
+          + '\nNothing is paid to you for this period. We will take it off your next payover'
+          + (paymentReference(adv.run.invoiceNumber) ? `, or you may pay it to us with reference ${paymentReference(adv.run.invoiceNumber)}.` : '.')]
+      : [`Net amount payable to you: ${rand(adv.run.netPayover)}`
+          + `\nPayment: by EFT to your nominated account, ${when}`
+          + (adv.run.eftReference ? `\nReference: ${adv.run.eftReference}` : '')]),
+    'The attached statement lists every payment behind that figure, account by account.',
+    'Kind regards\nBredell Ferreira',
+  ].join('\n\n')
+}
+
+/**
+ * THE SAME DETAIL AS A SPREADSHEET, because the PDF is for reading and this is for working.
+ *
+ * The firm asked for both. A bookkeeper reconciling a payover does not want a table in a PDF --
+ * they want to sort it by debtor, total a column and tick it off against their own ledger. So the
+ * amounts go in as NUMBERS (`{ n }`), which is the opposite of what the rejected-rows sheet wants
+ * and is the same argument pointing the other way: there, text protects a client's corrections
+ * from Excel; here, text would stop a bookkeeper summing a column.
+ *
+ * THE REFERENCES STAY TEXT for exactly that reason -- a client reference like 07062 is a string
+ * that looks like a number, and 40 of 42 phone numbers on one client's own sheet had already lost
+ * a leading zero to Excel deciding otherwise.
+ *
+ * ONE SHEET, NOT TWO, because buildXlsx writes one and because the two tables have different
+ * columns: they are separated by a heading row instead, which is what somebody scrolling expects.
+ */
+export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
+  const head = (t: string): Cell => ({ v: t, style: 'head' })
+  const rows: Cell[][] = []
+
+  rows.push([head(`${adv.client.name} — remittance advice ${adv.run.invoiceNumber}`)])
+  rows.push([`Collections ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}`])
+  rows.push([])
+
+  if (adv.collections.length) {
+    rows.push([head('Collections by us')])
+    rows.push([
+      head('Your ref'), head('Our ref'), head('Debtor'), head('Status'), head('Handed over'),
+      head('Handover amount'), head('Paid'), head('Capital received'), head('Commission'),
+      head('VAT'), head('Capital outstanding'), head('Commission and VAT'), head('Note'),
+    ])
+    for (const c of adv.collections) {
+      rows.push([
+        c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver,
+        { n: c.handoverAmount }, c.paid, { n: c.capitalReceived }, { n: c.commission },
+        { n: c.vat }, { n: c.capitalOutstanding }, c.vatLine,
+        [c.reversal ? 'reversal' : '', c.lateCapture ? 'captured after previous cut-off' : '']
+          .filter(Boolean).join(' · '),
+      ])
+    }
+    rows.push([])
+  }
+
+  if (adv.direct.length) {
+    rows.push([head('Paid to you directly')])
+    rows.push([
+      head('Your ref'), head('Our ref'), head('Debtor'), head('Paid'), head('Received by you'),
+      head('Annexure B fees'), head('Capital portion'), head('Commission'), head('Due to us'),
+      head('Capital outstanding'), head('Note'),
+    ])
+    for (const d of adv.direct) {
+      rows.push([
+        d.yourRef, d.ourRef, d.debtor, d.paid, { n: d.receivedByYou },
+        { n: d.annexureBFees }, { n: d.capitalPortion }, { n: d.commission }, { n: d.dueToUs },
+        { n: d.capitalOutstanding }, d.reversal ? 'reversal' : '',
+      ])
+    }
+    rows.push([])
+  }
+
+  if (adv.released.length) {
+    rows.push([head('Overpayments paid over to you in full')])
+    rows.push([head('Your ref'), head('Our ref'), head('Debtor'), head('Paid'), head('Overpayment, no commission')])
+    for (const r of adv.released) rows.push([r.yourRef, r.ourRef, r.debtor, r.paid, { n: r.amount }])
+    rows.push([])
+  }
+
+  rows.push([head('How we got there')])
+  for (const w of adv.workings) rows.push([w.label, { n: w.amount }])
+
+  return buildXlsx('Remittance', rows)
+}
+
+/** Where one send's copies live: the client's folder, then the invoice, then this send. */
+export function adviceCopyPaths(companyId: string, invoiceNumber: string, stamp: string): { pdf: string; xlsx: string } {
+  const base = `${companyId}/${invoiceNumber.replace(/[^A-Za-z0-9._-]/g, '_')}/${stamp}`
+  return { pdf: `${base}.pdf`, xlsx: `${base}.xlsx` }
+}
+
+/** A payover_runs row as the run page and the bulk send both read it. */
+export interface AdviceRunRow {
+  invoice_number: string; period_start: string; period_end: string
+  trust_capital: number; trust_commission: number; due_to_client: number
+  ptc_received: number; ptc_fees_taken: number; ptc_capital: number; ptc_commission: number
+  due_to_bf: number; commission_vat: number; carried_in: number
+  charges_set_off?: number | null; excess_released?: number | null
+  net_payover: number; approved_at: string | null; paid_at: string | null; eft_reference: string | null
+}
+
+/**
+ * ONE RUN INTO ONE ADVICE, IN ONE PLACE. The run page and the queue's bulk send both build the
+ * advice a client receives; written twice, the two would drift and a client sent in bulk would get
+ * a different statement from the one the firm previewed.
+ */
+export function adviceFromRun(
+  run: AdviceRunRow,
+  client: { name: string; code: string | null; vatNumber: string | null; rate: number | null },
+  firm: RemittanceFirm,
+  lines: RunPayment[],
+): RemittanceAdvice {
+  return buildRemittanceAdvice({
+    firm,
+    client: { name: client.name, code: client.code, vatNumber: client.vatNumber },
+    run: {
+      invoiceNumber: run.invoice_number,
+      periodStart: run.period_start, periodEnd: run.period_end,
+      issuedOn: (run.approved_at ?? clockNow().toISOString()).slice(0, 10),
+      trustCapital: run.trust_capital, trustCommission: run.trust_commission,
+      dueToClient: run.due_to_client, ptcReceived: run.ptc_received,
+      ptcFeesTaken: run.ptc_fees_taken, ptcCapital: run.ptc_capital,
+      ptcCommission: run.ptc_commission, dueToBf: run.due_to_bf,
+      commissionVat: run.commission_vat, carriedIn: run.carried_in,
+      chargesSetOff: Number(run.charges_set_off ?? 0), excessReleased: Number(run.excess_released ?? 0),
+      netPayover: run.net_payover, commissionRate: client.rate,
+      paidAt: run.paid_at, eftReference: run.eft_reference,
+    },
+    lines,
+  })
+}

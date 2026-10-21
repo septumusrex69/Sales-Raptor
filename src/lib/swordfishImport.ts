@@ -23,10 +23,13 @@
  *      client not in the configuration still imports, under its own name, loudly.
  */
 import { num, isoDate, text, type CsvRow } from './csv.ts'
+import { kindFromIdentity, normaliseRegistrationNumber } from './debtorIdentity.ts'
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
 import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
+import { cutoverDefault, settledThroughDefault } from './trustCycles.ts'
 import { readDebtorsPerClient, type ContactRow, type NoteRow, type PromiseRow } from './swordfishDebtors.ts'
+import { clockNow } from './clock.ts'
 
 export interface SwordfishExports {
   accounts: CsvRow[]
@@ -57,6 +60,8 @@ export interface CompanyRow {
   commission_bands: { upTo: number | null; rate: number }[] | null
   commission_bands_source: string | null
   commission_rate: number | null
+  /** The register's tiers, where a client is filed as several records at different rates. */
+  commission_tiers: { prefix: string; rate: number }[] | null
   registration_number: string | null
   vat_number: string | null
   banking_details: string | null
@@ -98,6 +103,13 @@ export interface DebtorAccountRow {
   debtor_first_name: string | null
   debtor_surname: string | null
   debtor_id_number: string | null
+  /*
+   * ONE COLUMN, TWO MEANINGS: an ID number on a person, a registration number on a company, and
+   * this says which. The merge fields read it -- {{debtor_reg_no}} resolves only on a company and
+   * {{debtor_id_masked}} only on an individual -- so an unset kind is a letter of demand to a
+   * company with a blank where its registration number belongs.
+   */
+  debtor_kind: 'individual' | 'company'
   capital_handed_over: number
   capital_outstanding: number
   in_duplum_ceiling: number
@@ -152,7 +164,23 @@ export interface PaymentRow {
   /** Swordfish's own key for the payment. Unique, so a re-import updates instead of duplicating. */
   swordfish_payment_id: string | null
   /** The receipt fee Swordfish actually charged, excluding VAT. Null on the older export. */
-  collection_commission: number | null
+  receipt_fee_legacy: number | null
+  /**
+   * ALREADY REMITTED TO THE CLIENT BY SWORDFISH, so Raptor must never remit it again.
+   *
+   * THE FIRM: "if the payments come from Swordfish, they're already in there and they've already
+   * been approved." A receipt carrying this never enters the approval queue, is never split, and
+   * can never be claimed by a payover run -- approve_payment refuses it outright.
+   */
+  paid_over_in_swordfish: boolean
+  /**
+   * When it was approved, or null for one that still needs a decision.
+   *
+   * THE DAY IT WAS RECEIVED, for a settled one, rather than the moment of the import: the firm DID
+   * approve these, in the old system, around then. Stamping them with the import time would say a
+   * person sat and approved ninety years of history in one second.
+   */
+  approved_at: string | null
 }
 
 export interface FeeRow {
@@ -193,6 +221,27 @@ export interface AccrualRow {
   source: string
 }
 
+/**
+ * A diary appointment carried across from Swordfish.
+ *
+ * The old book kept one date on the account and nothing else — no reason, no owner, no record of
+ * whether it was ever worked. That is why 279 of the 327 diarised accounts arrived overdue, 102
+ * of them by more than six months, and why nobody can say which were missed and which were dealt
+ * with off-system. Every one of these is written with source 'swordfish' so an inherited date is
+ * never mistaken for a commitment somebody in this firm made.
+ */
+export interface DiaryEntryRow {
+  id: string
+  account_id: string
+  owner_id: string | null
+  due_on: string
+  kind: string
+  reason: string | null
+  state: string
+  source: string
+  created_by_name: string | null
+}
+
 export interface ImportPlan {
   companies: CompanyRow[]
   handovers: HandoverRow[]
@@ -203,6 +252,7 @@ export interface ImportPlan {
   contacts: ContactRow[]
   promises: PromiseRow[]
   accountNotes: NoteRow[]
+  diaryEntries: DiaryEntryRow[]
   /** Things that need a person's attention. A plan with problems still imports; it just says so. */
   problems: string[]
   /** Things worth knowing that are not faults. */
@@ -227,7 +277,50 @@ export interface BuildOptions {
   /** Restrict to clients whose Swordfish name contains this. For a trial run on real data. */
   only?: string
   now?: Date
+  /**
+   * THE LAST DAY SWORDFISH PAID ITS CLIENTS OVER. Receipts up to and including it are history;
+   * everything after it lands in Raptor's approval queue.
+   *
+   * ASKED, NOT INFERRED. Raptor has no way to know when the old system last remitted -- only the
+   * firm does -- and it is the single most consequential number in the migration: too early and
+   * clients are paid twice for money they already had, too late and a month of collections is
+   * never remitted at all. `settledThroughDefault` offers the firm's own example as a starting
+   * point and the import screen lets them change it.
+   */
+  settledThrough?: string
+  /**
+   * A CLEAN BREAK (S8, the go-live plan agreed 10 Oct): `settledThrough` is then the CUT-OVER, and
+   * every receipt on or before it is Swordfish's to pay over -- paid already, or still to be paid by
+   * Swordfish's own runs (Camille keeps running those). Raptor splits only what arrives after it.
+   *
+   * THE SAME FLAG ON EVERY RECEIPT, on purpose. `paid_over_in_swordfish` is what keeps a receipt out
+   * of the split, the queue and every run (allocate_payment's first gate), and that is exactly what a
+   * clean break needs: Raptor must never pay over a receipt Swordfish will. What differs is only what
+   * the import SAYS, and what it does not complain about: in a clean break "nothing left to approve"
+   * is the expected shape of an import taken on the cut-over day, not a warning. The money Swordfish
+   * has not yet paid over is still in the trust account; it is ring-fenced by "Held for Swordfish
+   * payovers" (set_swordfish_holding), not by anything on the receipts.
+   */
+  cleanBreak?: boolean
+  /**
+   * RAPTOR'S USERS, so an account can go to the clerk Swordfish had it with. The firm, 8 Oct: "when
+   * an account is imported, it should go automatically to its swordfish clerk." Matched on the
+   * whole name only (see `clerkKey`); an unknown or inactive name is FLAGGED, never guessed at.
+   */
+  clerks?: { id: string; name: string; active: boolean }[]
 }
+
+/**
+ * A NAME AS A KEY: case and runs of spaces ignored, nothing else. Swordfish has "Leanette  Mathebe"
+ * with two spaces; that is the same person. "Itumeleng" is NOT "Itumeleng Masalesa" -- a first
+ * name is somebody's guess, and an account put on the wrong desk is worked by the wrong person.
+ */
+export function clerkKey(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/** Swordfish's word for an account on nobody's desk. */
+const NO_CLERK = new Set(['(none)', 'none', 'unassigned'])
 
 const newId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -240,10 +333,27 @@ function* walk(specs: SwordfishClientSpec[]): Generator<SwordfishClientSpec> {
 }
 
 export function buildImportPlan(exports: SwordfishExports, options: BuildOptions): ImportPlan {
-  const { ownerId, only: onlyRaw, now = new Date() } = options
+  const { ownerId, only: onlyRaw, now = clockNow() } = options
   const only = onlyRaw?.toLowerCase()
   const nowIso = now.toISOString()
   const today = nowIso.slice(0, 10)
+  /*
+   * WHERE THE OLD SYSTEM'S BOOKS STOP. Everything received up to and including this date was
+   * already paid over by Swordfish and is history; everything after it needs a decision in Raptor.
+   * See settledThroughDefault for why this is a date somebody states rather than one we work out.
+   */
+  const settledThrough = options.settledThrough
+    ?? (options.cleanBreak ? cutoverDefault(today) : settledThroughDefault(today))
+
+  /*
+   * WHOSE DESK. Active users by whole name; an inactive one is known but cannot work an account,
+   * so it is flagged with the unknown ones. Counted per name for the report, which is what lets
+   * the firm see a clerk who has left (or who was never added) before the accounts go unworked.
+   */
+  const clerkByKey = new Map((options.clerks ?? []).map((c) => [clerkKey(c.name), c]))
+  const unknownClerks = new Map<string, number>()
+  const inactiveClerks = new Map<string, number>()
+  let assignedToClerk = 0
 
   const problems: string[] = []
   const notes: string[] = []
@@ -284,6 +394,10 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       // A single rate only where there is genuinely one. A client on a scale has no flat rate,
       // and writing the first band's rate here would read as a fact when it is a guess.
       commission_rate: uniqueRate(spec.commissionByPrefix),
+      /* THE TIERS, KEPT where they differ -- see the register's copy of this below. */
+      commission_tiers: uniqueRate(spec.commissionByPrefix) === null && spec.commissionByPrefix
+        ? Object.entries(spec.commissionByPrefix).map(([prefix, rate]) => ({ prefix, rate }))
+        : null,
       registration_number: null,
       vat_number: null,
       banking_details: null,
@@ -424,6 +538,15 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
         commission_bands: null,
         commission_bands_source: null,
         commission_rate: rates.length === 1 ? rates[0] : null,
+        /*
+         * AND THE TIERS ARE KEPT, rather than thrown away (prompt 9). Kestrel is KIS 21%, KIS2 15%,
+         * KIS3 12%, KIS4 10% in the register, and with only `commission_rate` to hold it the client
+         * read "No rate" -- the scale survived only as each imported account's own rate, and any
+         * new handover got whatever single rate somebody typed. Kept in the register's order,
+         * highest rate first, which is the smallest debt. Prices nothing on its own: the rand
+         * boundaries are in the mandate, and are captured as commission_bands.
+         */
+        commission_tiers: rates.length > 1 ? tiers : null,
         registration_number: text(first['COMPANY REG/ID']),
         vat_number: text(first['VAT NO']),
         banking_details: text(first['BANKING DETAILS']),
@@ -546,6 +669,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
   /* --------------------------------------------------------------- accounts */
 
   const debtorAccounts: DebtorAccountRow[] = []
+  const diaryEntries: DiaryEntryRow[] = []
   const accountByRef = new Map<string, DebtorAccountRow>()
   let commissionDrift = 0
   let commissionUnknown = 0
@@ -585,6 +709,15 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       prescriptionDate = d.toISOString().slice(0, 10)
     }
 
+    const sfClerk = text(r['Assigned To'])
+    let clerkId: string | null = null
+    if (sfClerk && !NO_CLERK.has(clerkKey(sfClerk))) {
+      const c = clerkByKey.get(clerkKey(sfClerk))
+      if (c?.active) { clerkId = c.id; assignedToClerk++ }
+      else if (c) inactiveClerks.set(sfClerk, (inactiveClerks.get(sfClerk) ?? 0) + 1)
+      else unknownClerks.set(sfClerk, (unknownClerks.get(sfClerk) ?? 0) + 1)
+    }
+
     const a: DebtorAccountRow = {
       id: newId(),
       company_id: companyId,
@@ -596,7 +729,26 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
 
       debtor_first_name: text(r['First Name']),
       debtor_surname: text(r['Surname']),
-      debtor_id_number: text(r['ID Number']),
+      /*
+       * ONE COLUMN, TWO MEANINGS, AND THE KIND SAYS WHICH.
+       *
+       * THE FIRM, AFTER THE FIRST TEST IMPORT: "The Swordfish summary has no person/business
+       * field, so a registration number in 'ID Number' (e.g. 2016/482913/07) is dropped as 'not 13
+       * digits'. On import: if the value matches ^\d{4}/\d{6}/\d{2}$, store it as the company
+       * registration number and mark the debtor as a business. The letter of demand needs
+       * {{debtor_reg_no}}."
+       *
+       * The VALUE was in fact being stored -- three of the twenty test accounts carry one. What was
+       * not was the KIND, and that is what the merge fields read: `{{debtor_reg_no}}` resolves only
+       * where debtor_kind is 'company', so a letter of demand to a company printed nothing, and
+       * `{{debtor_id_masked}}` masked a registration number as though it were somebody's identity.
+       *
+       * NORMALISED ON THE WAY IN, because a bureau writes K2016/482913/07 and the firm does not;
+       * two spellings of one company must be one string or a lookup keyed on it misses.
+       */
+      debtor_id_number: normaliseRegistrationNumber(text(r['ID Number']))
+        ?? text(r['ID Number']),
+      debtor_kind: kindFromIdentity(text(r['ID Number'])) ?? 'individual',
 
       capital_handed_over: capital ?? 0,
       // At the opening position — the handover — capital outstanding is the capital handed over,
@@ -612,6 +764,12 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       commission_rate_source: schedule?.source ?? null,
 
       interest_rate_annual: num(r['Current Interest Rate']) ?? 24,
+      // WHAT THE CLIENT TOLD US, and the fallback is the HANDOVER rather than today -- loadDate is
+      // what handover_date below is set to, so an export with no Initial Interest Date lands on the
+      // firm's own rule ("normally, interest starts occurring from the date of handover") instead of
+      // on the day the file happened to be loaded. It is a record, not an instruction: on 63 of
+      // these rows the client's date is up to 95 days BEFORE the handover, so nothing accrues from
+      // it. See rule 2 in interestAccrual.ts.
       interest_from: isoDate(r['Initial Interest Date']) ?? loadDate,
 
       prescribed: r['Is Prescribed'] === 'Yes',
@@ -627,7 +785,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       status: text(r['Status']) ?? 'Active',
       sub_status: text(r['Sub-status']),
       bucket: text(r['Account Bucket']),
-      assigned_to: null,
+      assigned_to: clerkId,
       diary_date: isoDate(r['Diary Date']) ?? null,
 
       in_duplum: r['In Duplum'] === 'Yes',
@@ -651,6 +809,32 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     }
     debtorAccounts.push(a)
     accountByRef.set(ref, a)
+
+    /*
+     * Carry the diary date across as a real appointment.
+     *
+     * The date alone was never enough to work from — that is the whole reason diary_entries
+     * exists. What can be recovered is carried: the day, and the agent's name as Swordfish
+     * spelled it, so a leader handing the pile out can see whose it was. The owner is the clerk
+     * the account went to, where the name matched an active user exactly; otherwise null, and the
+     * name is flagged rather than guessed at (see `clerkKey`).
+     *
+     * Written as 'review' rather than a kind we cannot know, and marked 'swordfish' so nothing
+     * in this firm is ever blamed for a date it did not choose.
+     */
+    if (a.diary_date) {
+      diaryEntries.push({
+        id: newId(),
+        account_id: a.id,
+        owner_id: clerkId,
+        due_on: a.diary_date,
+        kind: 'review',
+        reason: text(r['Diary Note']) ?? text(r['Main Comment']) ?? null,
+        state: 'open',
+        source: 'swordfish',
+        created_by_name: text(r['Assigned To']) ?? null,
+      })
+    }
   }
 
   /* --------------------------------------------------------------- payments */
@@ -682,7 +866,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       // Only the newer export carries these two. The id makes a re-import idempotent; the
       // commission is the receipt fee as actually charged, which appears in no other report.
       swordfish_payment_id: text(p['Payment Unique ID']),
-      collection_commission: num(p['Payment Collection Commission']) ?? null,
+      receipt_fee_legacy: num(p['Payment Collection Commission']) ?? null,
       // The client took the money directly and owes us our share. Still a full payment on the
       // account; it settles in the month-end reconciliation rather than arriving in our trust
       // account. Read off Payment Type, which states it, rather than matched out of the free-text
@@ -693,7 +877,176 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       reversed_at: reversed ? `${reversed}T00:00:00Z` : null,
       reversal_reason: text(p['Reversal Reason']),
       source: 'swordfish',
+      /*
+       * THE LINE THE FIRM DREW, applied one receipt at a time.
+       *
+       * "If the payments come from Swordfish, they're already in there and they've already been
+       * approved... except for the ones that doesn't fall in the next payment run."
+       *
+       * ON OR BEFORE the cut-off, because the cut-off is the last day of a cycle Swordfish paid:
+       * a receipt dated that very day is inside it. Off by one here is a day of collections either
+       * remitted twice or never.
+       */
+      paid_over_in_swordfish: when <= settledThrough,
+      /* A settled receipt is approved as at the day it came in -- see PaymentRow. One after the
+         cut-off is left for a person, which is the queue the firm expects to find. */
+      approved_at: when <= settledThrough ? `${when}T00:00:00Z` : null,
     })
+  }
+
+  /*
+   * DO THE PAYMENT LINES ADD UP TO WHAT THE SUMMARY SAYS WAS PAID?
+   *
+   * THE FIRM, AFTER THE FIRST TEST IMPORT: "The real Swordfish exports fail one reconciliation
+   * check. APM20070, APM20097 and GPS4/10080: payment lines don't sum to Payments To Date (off by
+   * R400, R500 and R500). Find out why (reversals? different export dates?) before the real
+   * migration."
+   *
+   * THEY FOUND IT BY HAND, BECAUSE NOTHING CHECKED IT. Two exports describe the same money -- the
+   * summary's "Payments To Date" and every line in "All Payments Incl Balances" -- and the import
+   * read both without ever asking whether they agreed. A balance is built from the LINES, so where
+   * they are short the debtor is shown owing more than Swordfish says they do.
+   *
+   * REVERSALS ARE COUNTED IN, which is the first of the firm's own two hypotheses and the one that
+   * can be tested from here: if a reversed payment is the cause, the sum INCLUDING it matches and
+   * the sum excluding it does not. The report says which, so the answer is in the import's own
+   * problems rather than in a spreadsheet somebody builds afterwards.
+   *
+   * THE OTHER HYPOTHESIS CANNOT BE TESTED FROM INSIDE ONE IMPORT. Two exports taken on different
+   * days is a fact about the files, not about their contents -- a payment banked between the two
+   * appears in one and not the other -- so the message names it as the thing to check.
+   *
+   * REPORTED, NEVER CORRECTED. IMPORTED HISTORY IS FROZEN AT WHAT WAS IMPORTED, and which of the
+   * two figures is right is the firm's question for Swordfish.
+   */
+  {
+    const lineTotal = new Map<string, number>()
+    const lineTotalLive = new Map<string, number>()
+    for (const p of payments) {
+      lineTotal.set(p.account_id, (lineTotal.get(p.account_id) ?? 0) + p.amount)
+      if (!p.reversed_at) {
+        lineTotalLive.set(p.account_id, (lineTotalLive.get(p.account_id) ?? 0) + p.amount)
+      }
+    }
+    const off: { ref: string; summary: number; lines: number; reversalsExplain: boolean }[] = []
+    for (const a of debtorAccounts) {
+      if (a.payments_to_date === null) continue
+      const all = Math.round((lineTotal.get(a.id) ?? 0) * 100) / 100
+      const live = Math.round((lineTotalLive.get(a.id) ?? 0) * 100) / 100
+      const summary = Math.round(a.payments_to_date * 100) / 100
+      /* A CENT EITHER WAY IS ROUNDING across two systems, not a missing payment. */
+      if (Math.abs(all - summary) < 0.05) continue
+      off.push({
+        ref: a.swordfish_reference ?? a.account_number ?? '(no reference)',
+        summary, lines: all,
+        reversalsExplain: Math.abs(live - summary) < 0.05,
+      })
+    }
+    if (off.length > 0) {
+      const byReversal = off.filter((o) => o.reversalsExplain)
+      if (byReversal.length > 0) {
+        notes.push(
+          `${byReversal.length} account${byReversal.length === 1 ? '' : 's'} differ from "Payments `
+          + `To Date" by exactly their reversed payments, which is the explanation: the summary `
+          + `counts live payments and the line export carries the reversals too.`,
+        )
+      }
+      const unexplained = off.filter((o) => !o.reversalsExplain)
+      if (unexplained.length > 0) {
+        /*
+         * A PROBLEM, NOT A NOTE. The firm's own rule is that a balance they cannot explain must not
+         * reach a client statement or payover, and this is exactly that -- named account by account
+         * with both figures, because "three accounts disagree" sends somebody hunting for which.
+         */
+        const named = unexplained.slice(0, 10)
+          .map((o) => `${o.ref} (lines ${o.lines.toFixed(2)} against ${o.summary.toFixed(2)})`)
+          .join(', ')
+        problem(
+          `${unexplained.length} account${unexplained.length === 1 ? '' : 's'} where the payment `
+          + `lines do not add up to "Payments To Date", and reversals do not explain it: ${named}`
+          + `${unexplained.length > 10 ? ', and more' : ''}. The usual cause is the two exports `
+          + `being taken on different days, so a payment banked between them is in one and not the `
+          + `other -- check the dates on the files before importing. The balance is built from the `
+          + `LINES, so where they are short the debtor reads as owing more than Swordfish says.`,
+        )
+      }
+    }
+  }
+
+  /*
+   * SAY WHERE THE LINE FELL, BEFORE ANYBODY PRESSES IMPORT.
+   *
+   * This is the one number in the migration that cannot be checked afterwards by looking at the
+   * data: both answers import cleanly, and the difference only shows up as a client paid twice or
+   * a month never remitted. So the import states it in the firm's own terms -- how many receipts
+   * it is treating as history and how many it is putting in front of a person -- rather than
+   * leaving it to be discovered from a queue that is the wrong length.
+   */
+  const settledCount = payments.filter((p) => p.paid_over_in_swordfish).length
+  const toApprove = payments.length - settledCount
+  if (payments.length > 0 && options.cleanBreak) {
+    const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
+    const swordfish = payments.filter((p) => p.paid_over_in_swordfish)
+    /*
+     * WHAT SWORDFISH HAS NOT PAID OVER YET, as far as the firm's own rule can say: a cycle is paid on
+     * the 11th of the month after it closes (settledThroughDefault), so receipts after that day and up
+     * to the cut-over are still Swordfish's to pay. An ESTIMATE from the receipts' dates, and said to
+     * be one -- Swordfish cannot report what it owes per client ("Swordfish can do nothing"). Reported
+     * so the figure for "Held for Swordfish payovers" has something to be compared with; it is never
+     * written anywhere. PTCs are left out: that money went to the client, not into trust.
+     *
+     * JUDGED AT THE CUT-OVER, not on import day, because that is the day the holding is captured
+     * (with the bank's opening balance at its end). At the end of 10 Dec the 11 Dec run has not gone,
+     * so 11 Oct - 10 Dec is still Swordfish's to pay -- two cycles, paid 11 Dec and 11 Jan.
+     */
+    const paidBy = settledThroughDefault(settledThrough)
+    const stillOwed = swordfish.filter((p) => !p.paid_to_client && !p.reversed_at
+      && p.received_at.slice(0, 10) > paidBy)
+    notes.push(
+      `Clean break at the end of ${settledThrough}: ${swordfish.length} receipts up to that day `
+      + `(R${sum(swordfish).toFixed(2)}) are Swordfish's to pay over -- Raptor never splits them, and no `
+      + `payover run can claim them. ${toApprove} received after it (R${sum(payments.filter((p) => !p.paid_over_in_swordfish)).toFixed(2)}) `
+      + 'are Raptor\'s and need approving.',
+    )
+    if (stillOwed.length > 0) {
+      notes.push(
+        `Of Swordfish's, ${stillOwed.length} receipts into trust after ${paidBy} `
+        + `(R${sum(stillOwed).toFixed(2)}) fall in cycles Swordfish has not yet paid over, going by the `
+        + '11th-of-the-next-month rule. That money is still in the trust account and is Swordfish\'s '
+        + 'to pay: capture it under Trust settings → Held for Swordfish payovers (with the opening '
+        + 'balance at the cut-over), so the overview does not count it as anybody else\'s.',
+      )
+    }
+    if (settledCount === 0) {
+      problem(`Every receipt is dated after the cut-over (${settledThrough}), so the whole payment history `
+        + 'will land in the approval queue as Raptor\'s. Approving it would pay the clients for money '
+        + 'Swordfish has already remitted or will remit. Check the date before importing.')
+    }
+    /* Nothing after the cut-over is what an import ON the cut-over day looks like: no warning. */
+  } else if (payments.length > 0) {
+    const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
+    notes.push(
+      `${settledCount} receipts received up to ${settledThrough} (R${sum(payments.filter((p) => p.paid_over_in_swordfish)).toFixed(2)}) `
+      + 'are treated as already paid over in Swordfish: they stay out of the approval queue and no '
+      + `payover run can claim them. ${toApprove} received after it `
+      + `(R${sum(payments.filter((p) => !p.paid_over_in_swordfish)).toFixed(2)}) need approving in Raptor.`,
+    )
+    /*
+     * AND IT IS A WARNING WHEN NOTHING LANDS ON ONE SIDE, because both shapes are plausible and
+     * both are usually wrong. Nothing to approve means the cut-off is later than the firm's last
+     * payover and a month of collections will never be remitted; everything to approve means it is
+     * earlier than the book goes back and the queue is about to offer years of settled history.
+     */
+    if (toApprove === 0) {
+      problem(`Nothing was left to approve: every receipt is dated on or before ${settledThrough}. `
+        + 'If Swordfish has not in fact paid over up to that day, this would leave those '
+        + 'collections unremitted. Check the date before importing.')
+    }
+    if (settledCount === 0) {
+      problem(`Every receipt is dated after ${settledThrough}, so the whole payment history will `
+        + 'land in the approval queue. Approving it would pay the clients again for money '
+        + 'Swordfish has already remitted. Check the date before importing.')
+    }
   }
 
   /* ------------------------------------------------------------------- fees */
@@ -882,6 +1235,39 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     }
   }
 
+  /*
+   * A NAME RAPTOR DOES NOT KNOW IS FLAGGED. The firm: "there's a user mentioned here that's not on
+   * the system ... specifically valuable for old clerks that have already left the firm, or if we
+   * forget to upload their details." Their accounts arrive unassigned for a team leader; their
+   * history keeps their name as Swordfish wrote it (actions, notes, diary), so nothing they did is
+   * lost or credited to somebody else.
+   */
+  const named = (m: Map<string, number>) => [...m].sort((x, y) => y[1] - x[1])
+    .map(([n, k]) => `${n.replace(/\s+/g, ' ')} (${k})`).join(', ')
+  if (unknownClerks.size > 0) {
+    const n = [...unknownClerks.values()].reduce((x, y) => x + y, 0)
+    problem(`${n} ${n === 1 ? 'account is' : 'accounts are'} with ${unknownClerks.size === 1 ? 'a Swordfish clerk who is' : `${unknownClerks.size} Swordfish clerks who are`} not a Raptor user: `
+      + `${named(unknownClerks)}. Imported unassigned, with the clerk's name kept. Add them as users if they are still with the firm, then give the accounts to them.`)
+  }
+  if (inactiveClerks.size > 0) {
+    const n = [...inactiveClerks.values()].reduce((x, y) => x + y, 0)
+    problem(`${n} ${n === 1 ? 'account is' : 'accounts are'} with ${inactiveClerks.size === 1 ? 'a clerk whose' : 'clerks whose'} Raptor user is no longer active: `
+      + `${named(inactiveClerks)}. Imported unassigned for a team leader to hand out.`)
+  }
+  if (assignedToClerk > 0) {
+    notes.push(`${assignedToClerk.toLocaleString('en-ZA')} ${assignedToClerk === 1 ? 'account went to the clerk Swordfish had it' : 'accounts went to the clerk Swordfish had them'} with.`)
+  }
+  /* People named on imported actions who are not users: their history keeps their name. */
+  const actors = new Set<string>()
+  for (const f of fees) {
+    const who = f.performed_by
+    if (who && !NO_CLERK.has(clerkKey(who)) && !clerkByKey.has(clerkKey(who))) actors.add(who.replace(/\s+/g, ' '))
+  }
+  if (actors.size > 0) {
+    notes.push(`Actions name ${actors.size} ${actors.size === 1 ? 'person who is not a Raptor user' : 'people who are not Raptor users'}: `
+      + `${[...actors].sort().slice(0, 30).join(', ')}${actors.size > 30 ? ', …' : ''}. Their history is kept under their name.`)
+  }
+
   return {
     companies,
     handovers,
@@ -892,6 +1278,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     contacts,
     promises,
     accountNotes,
+    diaryEntries,
     problems,
     notes,
     stats: {
@@ -916,6 +1303,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
 export const IMPORT_TABLES = [
   'companies', 'handovers', 'debtor_accounts', 'account_payments', 'account_fees',
   'account_interest_accruals', 'account_contacts', 'promises_to_pay', 'account_notes',
+  'diary_entries',
 ] as const
 
 /**
@@ -925,6 +1313,7 @@ export const IMPORT_TABLES = [
  * configuration a person set up by hand, and an import must never be the thing that deletes them.
  */
 export const WIPE_TABLES = [
+  'diary_entries',
   'account_documents', 'account_notes', 'promises_to_pay', 'account_contacts',
   'account_interest_accruals', 'account_fees', 'payment_allocations', 'account_payments',
   'debtor_accounts', 'handovers', 'notifications', 'activities', 'tasks', 'proposals',
@@ -942,5 +1331,72 @@ export function planRows(plan: ImportPlan): Record<(typeof IMPORT_TABLES)[number
     account_contacts: plan.contacts,
     promises_to_pay: plan.promises,
     account_notes: plan.accountNotes,
+    diary_entries: plan.diaryEntries,
   }
+}
+
+/**
+ * WHAT "DELETE EVERYTHING FIRST" WOULD ACTUALLY DELETE, COUNTED BEFORE ANYBODY TICKS IT.
+ *
+ * THE FIRM, AFTER THE FIRST TEST IMPORT: "The 'Delete everything first' tickbox sits next to a
+ * normal import. One wrong tick wipes every client, lead, deal, contact, task, activity and
+ * account. Move it behind a 'Start over' link, say exactly what will be deleted ('1 client and 8
+ * accounts')."
+ *
+ * A LIST OF TABLE NAMES IS NOT A WARNING. "every client, lead, deal, contact, task, activity and
+ * account" is true of an empty database and of a live one, so it reads the same the day it costs
+ * nothing and the day it costs the firm its book. Four real numbers do not.
+ *
+ * HEAD COUNTS, so this is four cheap round trips rather than four tables pulled into a browser --
+ * and the only four the firm named, rather than all nineteen, because a reader counting rows in
+ * `account_interest_accruals` has stopped reading.
+ */
+export interface WipeToll {
+  clients: number
+  accounts: number
+  leads: number
+  deals: number
+}
+
+/*
+ * THE CLIENT IS PASSED IN rather than imported: this file is read by the QA layer, which cannot
+ * resolve the browser's Supabase client at all -- the same split emailStyle and firmSettingsRow are
+ * already in, for the same reason.
+ */
+export interface CountableDb {
+  from(table: string): {
+    select(columns: string, options: { count: 'exact'; head: true }):
+      PromiseLike<{ count: number | null; error: unknown }>
+  }
+}
+
+export async function countWhatAWipeWouldDelete(db: CountableDb): Promise<WipeToll> {
+  const one = async (table: string): Promise<number> => {
+    const { count, error } = await db.from(table).select('id', { count: 'exact', head: true })
+    /* A COUNT THAT FAILED IS NOT A ZERO. Zero reads as "nothing to lose", which is the one thing
+       this must never say wrongly, so an unreadable count comes back as -1 and the screen refuses
+       to offer the wipe at all. */
+    return error ? -1 : (count ?? 0)
+  }
+  const [clients, accounts, leads, deals] = await Promise.all([
+    one('companies'), one('debtor_accounts'), one('leads'), one('deals'),
+  ])
+  return { clients, accounts, leads, deals }
+}
+
+/** The toll in the firm's own words: "1 client and 8 accounts". */
+export function wipeTollLine(toll: WipeToll): string {
+  const n = (count: number, one: string, many: string) =>
+    `${count.toLocaleString('en-ZA')} ${count === 1 ? one : many}`
+  const parts = [n(toll.clients, 'client', 'clients'), n(toll.accounts, 'account', 'accounts')]
+  if (toll.leads > 0) parts.push(n(toll.leads, 'lead', 'leads'))
+  if (toll.deals > 0) parts.push(n(toll.deals, 'deal', 'deals'))
+  return parts.length === 2
+    ? parts.join(' and ')
+    : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
+/** True where any count failed to come back. The screen must not offer a wipe it cannot describe. */
+export function tollIsUnknown(toll: WipeToll): boolean {
+  return toll.clients < 0 || toll.accounts < 0 || toll.leads < 0 || toll.deals < 0
 }

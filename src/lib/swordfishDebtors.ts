@@ -12,6 +12,8 @@
  * number is how a balance starts disagreeing with itself.
  */
 import { num, isoDate, text, type CsvRow } from './csv.ts'
+import { normaliseRegistrationNumber } from './debtorIdentity.ts'
+import { clockNow } from './clock.ts'
 
 export interface ContactRow {
   account_id: string
@@ -48,6 +50,7 @@ export interface DebtorPatch {
   debtor_second_name?: string | null
   debtor_surname?: string | null
   debtor_id_number?: string | null
+  debtor_kind?: 'individual' | 'company'
   debtor_title?: string | null
   debtor_initials?: string | null
   main_comment?: string | null
@@ -56,6 +59,8 @@ export interface DebtorPatch {
   account_rating?: number | null
   last_contact_method?: string | null
   ptp_success_ratio?: number | null
+  /** Swordfish's filing. Set here only to file a promise brought in broken -- see pastDue. */
+  bucket?: string | null
 }
 
 export interface DebtorImport {
@@ -74,9 +79,19 @@ export interface DebtorImport {
     emails: number
     addresses: number
     promises: number
+    /** Open in Swordfish but already past their date when they came across -- brought in as broken. */
+    promisesPastDue: number
     mainComments: number
     importedNotes: number
     idsRejected: number
+    /** Rows where the ID Number cell was empty. See the coverage note. */
+    idsBlank: number
+    /** Rows holding twelve digits — an ID whose leading zero a spreadsheet ate. */
+    idsTwelveDigit: number
+    /** Rows whose "ID Number" is a company registration number. Not a reject: a different kind. */
+    registrationNumbers: number
+    /** True where the sheet has an ID Number column at all. */
+    idColumnPresent: boolean
   }
 }
 
@@ -112,8 +127,10 @@ function promiseStatus(raw: string): PromiseRow['status'] | null {
   }
 }
 
-export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorImport {
+export function readDebtorsPerClient(rows: CsvRow[], now = clockNow()): DebtorImport {
   const nowIso = now.toISOString()
+  /* The firm's day, not UTC's: a promise due "today" in Johannesburg is still live at 01:00. */
+  const today = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
   const out: DebtorImport = {
     patches: new Map(),
     contactsByRef: new Map(),
@@ -123,7 +140,23 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     notes: [],
     stats: {
       rows: 0, contacts: 0, mobiles: 0, emails: 0, addresses: 0,
-      promises: 0, mainComments: 0, importedNotes: 0, idsRejected: 0,
+      promises: 0, promisesPastDue: 0, mainComments: 0, importedNotes: 0, idsRejected: 0,
+      idsBlank: 0, idsTwelveDigit: 0, registrationNumbers: 0,
+      /*
+       * IS THE COLUMN EVEN THERE?
+       *
+       * THE FIRM, told what Raptor had: "I don't know why the ID numbers didn't pull in, but
+       * usually we have like 80% or 90% of all the ID numbers." The book Raptor imported had them
+       * on 3%, and nothing anywhere said which of the three possible reasons it was: the sheet has
+       * no such column, the column is there and mostly blank, or the column is there and we are
+       * rejecting what is in it. Those want three different people to do three different things,
+       * and a silent null looks identical for all of them -- which is this codebase's standing
+       * complaint about hand-written mappers, met in the one place it costs a whole book.
+       *
+       * READ OFF THE FIRST ROW'S KEYS, because every row of a parsed sheet carries every header.
+       * An empty export answers false, which is also the honest answer: there is no column there.
+       */
+      idColumnPresent: rows.length > 0 && Object.prototype.hasOwnProperty.call(rows[0], 'ID Number'),
     },
   }
 
@@ -138,7 +171,30 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
 
     const rawId = (text(r['ID Number']) ?? '').replace(/\s/g, '')
     const idNumber = isIdNumber(rawId) ? rawId : null
-    if (rawId && !idNumber) out.stats.idsRejected++
+    /*
+     * A REGISTRATION NUMBER IS NOT A REJECT. THE FIRM: "The Swordfish summary has no
+     * person/business field, so a registration number in 'ID Number' (e.g. 2016/482913/07) is
+     * dropped as 'not 13 digits'... The letter of demand needs {{debtor_reg_no}}."
+     *
+     * It is the same column holding a different kind of number, which is how debtor_accounts was
+     * always designed -- debtor_id_number plus debtor_kind, "cheaper and less error-prone than two
+     * columns of which one is always null". So it is kept, normalised (a bureau writes
+     * K2016/482913/07 and the firm does not), and the KIND is set, which is the half that was
+     * missing: without it {{debtor_reg_no}} prints nothing and {{debtor_id_masked}} masks a
+     * company's registration number as though it were somebody's identity.
+     */
+    const regNumber = idNumber ? null : normaliseRegistrationNumber(rawId)
+    if (!rawId) out.stats.idsBlank++
+    if (regNumber) out.stats.registrationNumbers++
+    if (rawId && !idNumber && !regNumber) out.stats.idsRejected++
+    /*
+     * TWELVE DIGITS IS THE ONE REJECTION WITH A KNOWN CAUSE, and it is worth counting apart.
+     * A spreadsheet reading an ID column as a NUMBER eats the leading zero, so every debtor born
+     * in a month or on a day that starts the number with 0 arrives one digit short. It is not a
+     * stray phone number and it is not bad data at the client -- it is the export's format, and
+     * whether to restore the zero is the firm's decision rather than a guess made here.
+     */
+    if (rawId && !idNumber && /^\d{12}$/.test(rawId)) out.stats.idsTwelveDigit++
 
     const patch: DebtorPatch = {
       debtor_first_name: text(r['First Name']),
@@ -157,6 +213,10 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     // right: the summary export's ID column is the one we have been using, and overwriting it
     // with something we have just rejected would be worse than not touching it.
     if (idNumber) patch.debtor_id_number = idNumber
+    if (regNumber) {
+      patch.debtor_id_number = regNumber
+      patch.debtor_kind = 'company'
+    }
     if (patch.main_comment) out.stats.mainComments++
     out.patches.set(ref, patch)
 
@@ -222,9 +282,37 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
 
     /* ---------- the promise they are on ---------- */
 
-    const status = promiseStatus(String(r['PTP Status'] ?? ''))
+    const swordfishStatus = promiseStatus(String(r['PTP Status'] ?? ''))
     const amount = num(r['PTP Amount'])
     const dueOn = dateOnly(r['PTP Due Date'])
+    /*
+     * "OPEN" IN SWORDFISH BUT ALREADY PAST ITS DATE COMES IN BROKEN -- the firm's decision.
+     *
+     * The test book had four: due 4 Sep, 30 Sep, 30 Sep and 4 Oct, all still "open" in the export
+     * on 6 Oct. Brought in open, each started the promise workflow and the debtor was sent a
+     * confirmation of an arrangement made weeks earlier whose payment day had already gone. The
+     * firm, asked whether such a promise should land in the collector's diary instead: "I'm just
+     * scared about ... how many broken promises there are actually going to be. So maybe it might
+     * fill up the collector's diary ... it should just change the status to a broken promise ...
+     * and then that person can filter it and allocate it themselves."
+     *
+     * BROKEN, NOT DEFAULTED, and the difference is what keeps this quiet. `defaulted` is a live
+     * promise somebody missed: it starts the broken-promise workflow, which writes to the debtor.
+     * `broken` is a promise recorded as history, which starts nothing (workflow_start_on_promise
+     * and workflow_start_on_promise_broken both say so). So these reach the Broken promises list
+     * and nobody's inbox, and nobody's diary until a collector puts them there.
+     *
+     * Due TODAY stays open: it has not been missed yet, and the workflow's due-today message is
+     * still true.
+     */
+    const pastDue = swordfishStatus === 'open' && !!dueOn && dueOn < today
+    const status = pastDue ? 'broken' : swordfishStatus
+    /*
+     * AND FILED WHERE THE FIRM WILL LOOK FOR IT. The Broken promises list reads Swordfish's bucket
+     * ('Failed PTPs'), not the promise's status -- see accountViews -- and Swordfish still has
+     * these filed as live promises. Without this they would be broken and on no list at all.
+     */
+    if (pastDue) patch.bucket = 'Failed PTPs'
     if (status && amount && amount > 0 && dueOn) {
       const origin = text(r['PTP Origin'])
       out.promisesByRef.set(ref, [{
@@ -233,11 +321,15 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
         method: null,
         origin: origin === 'N/A' ? null : origin,
         status,
-        notes: null,
+        notes: pastDue
+          ? `Still open in Swordfish, but due on ${dueOn} -- before it came across on ${today} -- so `
+            + 'brought in as a broken promise rather than chased.'
+          : null,
         source: 'swordfish',
         created_at: dateOnly(r['PTP Creation Date']) ? `${dateOnly(r['PTP Creation Date'])}T00:00:00Z` : nowIso,
       }])
       out.stats.promises++
+      if (pastDue) out.stats.promisesPastDue++
     }
 
     /* ---------- what was last said ---------- */
@@ -272,10 +364,62 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
   }
 
   if (missingRef) out.problems.push(`${missingRef} rows had no Swordfish Reference and were skipped.`)
+  /*
+   * WHAT THE ID COVERAGE ACTUALLY IS, SAID OUT LOUD.
+   *
+   * THE FIRM EXPECTS 80 TO 90 PER CENT and was surprised by what landed. The three reasons want
+   * three different answers, so they are reported apart rather than as one silence:
+   *   no column            a mapping fault, and the sheet should be exported again with it
+   *   column, mostly blank Swordfish's own data is thinner than the firm believes
+   *   column, rejected     our rule is refusing what is there, and the twelve-digit count says
+   *                        how much of that is a spreadsheet eating a leading zero
+   *
+   * A PROBLEM RATHER THAN A NOTE WHERE THE COLUMN IS MISSING: 97% of a book untraceable is not a
+   * footnote, and the import's problems are what somebody reads before deciding to go ahead.
+   */
+  if (!out.stats.idColumnPresent && out.stats.rows > 0) {
+    out.problems.push(
+      'This export has no "ID Number" column, so no identity numbers were imported at all. '
+      + 'Nothing on these accounts can be traced at a credit bureau until it is exported again '
+      + 'with that column.',
+    )
+  } else if (out.stats.rows > 0) {
+    const held = out.stats.rows - out.stats.idsBlank - out.stats.idsRejected
+    const pct = Math.round((held / out.stats.rows) * 100)
+    const line = `${held} of ${out.stats.rows} debtors (${pct}%) came with a usable identity number.`
+    /* THE FIRM'S OWN EXPECTATION IS THE THRESHOLD. Below it, this is something to look at before
+       the book is worked; at or above it, it is a figure for the record. */
+    if (pct < 80) out.problems.push(`${line} The firm expects 80–90%, so this export is worth checking.`)
+    else out.notes.push(line)
+    if (out.stats.idsBlank) {
+      out.notes.push(`${out.stats.idsBlank} had the ID Number cell empty in Swordfish.`)
+    }
+    /* COUNTED APART FROM BOTH, because a company has no identity number to be missing and
+       reporting it as a gap would send somebody looking for one. */
+    if (out.stats.registrationNumbers) {
+      out.notes.push(
+        `${out.stats.registrationNumbers} are companies: the ID Number cell held a registration `
+        + `number, which is stored as one and the debtor marked a business.`,
+      )
+    }
+  }
   if (out.stats.idsRejected) {
     out.notes.push(
-      `${out.stats.idsRejected} ID Number values were not 13 digits — 22 of them are the debtor's `
-      + `own cellphone number — so they were left off rather than stored as identity numbers.`,
+      `${out.stats.idsRejected} ID Number values were not 13 digits — some are the debtor's own `
+      + `cellphone number — so they were left off rather than stored as identity numbers.`,
+    )
+  }
+  /*
+   * AND THE ONE REJECTION WORTH ACTING ON. Twelve digits is almost always a leading zero a
+   * spreadsheet ate on export, not bad data: those debtors DO have identity numbers and Raptor is
+   * throwing them away. Restoring the zero is the firm's decision, so this says how many it is
+   * worth and does not do it.
+   */
+  if (out.stats.idsTwelveDigit) {
+    out.problems.push(
+      `${out.stats.idsTwelveDigit} of those are exactly twelve digits, which is what a spreadsheet `
+      + `leaves when it reads an ID column as a number and drops the leading zero. Re-export that `
+      + `column as text and they come in; nothing here guesses the missing digit.`,
     )
   }
   out.notes.push(
@@ -283,6 +427,11 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     + `${out.stats.addresses} addresses across ${out.stats.rows} debtors.`,
   )
   if (out.stats.promises) out.notes.push(`${out.stats.promises} promises to pay were still open or broken in Swordfish.`)
+  if (out.stats.promisesPastDue) {
+    out.notes.push(`${out.stats.promisesPastDue} of them were still open in Swordfish but already past their date, `
+      + 'so they come in as broken promises: on the Broken promises list, not in anybody\'s diary, '
+      + 'and nothing is sent to the debtor.')
+  }
 
   return out
 }

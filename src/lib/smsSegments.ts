@@ -71,3 +71,25 @@ export function unitsUntilNextSegment(text: string): number {
   const capacity = segments <= 1 ? SINGLE[encoding] : CONCATENATED[encoding] * segments
   return Math.max(0, capacity - units)
 }
+
+/**
+ * THE VALUES THE APP MERGED IN, MADE SAFE TO SEND — and only those.
+ *
+ * en-ZA groups thousands with a non-breaking space, so a merged `{{balance}}` arrives carrying
+ * U+00A0. That character is not in the GSM alphabet, so one of them drops the whole message to
+ * UCS-2 and cuts every segment from 160 characters to 70: a 94-character message goes from R3.50
+ * to R7.00, charged to the debtor under Annexure B item 1(c) for words nobody changed.
+ *
+ * ONLY WHAT THE APP PUT THERE. A curly apostrophe somebody TYPED is their sentence and the box
+ * warns about it rather than rewriting it — the firm's words are the firm's. A non-breaking space
+ * this app inserted while formatting a Rand amount was never anybody's choice, so substituting a
+ * plain one changes nothing a reader can see and halves the bill.
+ *
+ * Shared rather than done twice: SmsModal had it inline, and the workflow runner sends the same
+ * templates unattended. The one that drifted would be the one nobody is watching.
+ */
+export function smsSafeValues(values: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).map(([k, v]) => [k, v.replace(/ /g, ' ')]),
+  )
+}

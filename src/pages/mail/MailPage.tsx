@@ -1,0 +1,4602 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
+  Inbox, Link2, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
+  Forward as ForwardIcon,
+  Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
+  Filter, Info, UserPlus,
+} from 'lucide-react'
+import { Avatar } from '../../components/ui/Avatar'
+import { Card } from '../../components/ui/Card'
+import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
+import { Modal } from '../../components/ui/Modal'
+import {
+  inviteHeadline, inviteInstant, inviteWhen, parseInvite, type CalendarInvite,
+} from '../../lib/calendarInvite.ts'
+import { useFirmTimeZone } from '../../lib/firmSettings'
+import {
+  RESPONSE_WORD, canReplyTo, type InviteResponse,
+} from '../../lib/inviteReply.ts'
+import {
+  acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, replyToInvite,
+  type CalendarEvent,
+} from '../../lib/calendarEvents.ts'
+import { FileActions } from '../../components/ui/FileActions'
+import { useAuth } from '../../store/AuthContext'
+import { agoLabel, relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
+import { chargeMessage } from '../../lib/accountCharges'
+import { recordSentEmail, replySubject } from '../../lib/accountEmails'
+import {
+  bumpUnread, companyFromDomain, forwardBody, forwardQuoteHtml, forwardSubject, recipientLine,
+  recipientSummary,
+  replyAllTo, splitPersonName,
+} from '../../lib/emailRules'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import { sanitizeEmailFragment, sanitizeEmailHtml } from '../../lib/emailHtml'
+import { useEmailView } from '../../lib/emailView'
+import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
+import { ReadingPane } from '../../components/email/ReadingPane'
+import { ZoomableImage } from '../../components/ui/ZoomableImage'
+import {
+  blockedBy, blockSender,
+  countUnreadByTab, debtorFileFor, deleteMail, fetchMailItem, fetchSenderRules, tabOf,
+  domainBlockProblem, domainOf, emptyJunk, fetchAttachment, fetchBlockedSenders, fetchMail,
+  isSharedDomain,
+  fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
+  saveAccountContacts, setJunk, unblockSender, unmatchMail,
+  type BlockedSender, type DebtorFile, type InlineImage, type LinkedRecord,
+  type MailFilter, type MailItem,
+} from '../../lib/userMail'
+import { useAppStore } from '../../store/AppStore'
+import { LeadForm } from '../../components/layout/QuickAdd'
+import { isLeadIntake, parseLeadIntake } from '../../lib/leadIntake'
+import type { Lead, LeadSource } from '../../types'
+import {
+  findContactDetails, mergeCandidates, type ContactCandidate,
+} from '../../lib/signature'
+import { canRefileMail } from '../../lib/permissions'
+import { AttachmentLabel } from '../../components/AttachmentKindTag'
+
+/**
+ * HOW FAR AHEAD THE PAGE READS.
+ *
+ * SIX, which is roughly a screen of mail. Enough that the messages somebody is about to click are
+ * already held, few enough that opening the mailbox is not a dozen connections to a mail server
+ * that caps them -- and it only ever runs on rows Raptor does not already hold, so a mailbox that
+ * has been looked at once costs nothing.
+ */
+const WARM_AHEAD = 6
+
+/**
+ * AND HOW MANY IN ONE SITTING, WHATEVER HAPPENS.
+ *
+ * Every new list is another six -- a different tab, a search, the next page -- which is right, and
+ * unbounded it is a person leaving the mailbox open while something re-renders and a mail server
+ * being asked for a thousand messages nobody is reading. Forty is a morning's mail; past it the
+ * page stops reading ahead and everything still works the ordinary way.
+ */
+const WARM_SITTING_MAX = 40
+
+/**
+ * One agent's mailbox.
+ *
+ * It exists because of a hole the firm asked about: an email from a debtor that matches no
+ * account and no CRM record used to be skipped by the sync and lost. At 50 agents taking 50-100
+ * messages a day, nobody was ever going to find it by browsing 100 000 accounts.
+ *
+ * Three things happen here. A message is linked to a debtor account, which files it on that
+ * account and raises the item 6 correspondence fee. Or it is thrown away, which forgets it in
+ * Raptor and leaves it in Outlook. Or it is left alone, and the 30-day prune takes it.
+ *
+ * Your own mail only — enforced by the database, not by this page. Not even an administrator
+ * reads a colleague's inbox.
+ */
+/** 'blocked' is not a mail filter — it is the blocklist itself, shown in the same place. */
+type Pane = MailFilter | 'blocked'
+
+/*
+ * All first, and it is what the page opens on.
+ *
+ * The firm's call, and it follows from managing mail in one place: the tabs below All are
+ * filters on one mailbox, not four mailboxes, and opening onto a filtered view hides mail from
+ * somebody who came here to find a message. Every row carries its own state now — see
+ * MailStatus — so nothing is lost by looking at the lot.
+ */
+/*
+ * FOUR, AND THREE OF THEM WENT.
+ *
+ * THE FIRM: "match automatically what you can match, but everything doesn't need to be matched.
+ * It's irritating having to match everybody. Just keep everyone in your main mailbox. If you want
+ * to match someone, match them. You don't have a match section any more or a needs match section
+ * or an open mail section, but there is just an option to say match to a record... Open mail falls
+ * away. Matched falls away. Needs matching falls away."
+ *
+ * WHAT WAS WRONG WITH THEM WAS NOT THE TABS, IT WAS THE OBLIGATION BEHIND THEM. Needs matching was
+ * a QUEUE, and a queue has to be cleared -- so every newsletter, every colleague and every
+ * supplier was a thing somebody had to answer for, fifty to a hundred times a day across fifty
+ * agents. Matched was its scoreboard. Open mail existed only to let a message OUT of the queue
+ * without matching it, which is why it goes with the queue: a shelf for mail that is not waiting
+ * is just the mailbox.
+ *
+ * MATCHING ITSELF IS UNTOUCHED, and so is the automatic half -- the sync still files a debtor's
+ * reply onto their account off the reference, which is the firm's "match automatically what you
+ * can match". What changed is that NOT matching is no longer a loose end. Whether a message is on
+ * a record is still said on its row, because it is a useful fact; it is simply no longer a place
+ * mail goes and no longer something the screen asks anybody for.
+ *
+ * WHAT IS LEFT IS WHAT A MAIL SERVER ITSELF KEEPS: the mailbox, the junk folder and the sent
+ * folder. Blocked is not a filter at all -- it is the blocklist, shown in the same place.
+ */
+const TABS: { id: Pane; label: string; hint: string }[] = [
+  { id: 'all', label: 'All', hint: 'Your whole mailbox, junk aside' },
+  { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
+  /*
+   * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
+   * Outlook or a phone is here too. Its own tab and no other: sent mail is not waiting to be
+   * matched and is not part of the incoming working list.
+   */
+  { id: 'sent', label: 'Sent', hint: 'What you have sent, from anywhere' },
+  { id: 'blocked', label: 'Blocked', hint: 'Senders whose mail does not reach Raptor at all' },
+]
+
+/**
+ * How many messages a page holds, and what else is offered.
+ *
+ * The firm: "I see page one, page two -- if there's a page one or a page two, it should give you
+ * an option about how many emails to show you." The same pill control the account book uses, for
+ * the same reason and in the same shape: this is one question asked in two places and it should
+ * not look like two mechanisms.
+ *
+ * 50 is the default it has always used. 200 is the top because a page is fetched in one query and
+ * rendered in one go — beyond that the wait to see the first row stops being worth the scrolling
+ * it saves.
+ */
+const PAGE_SIZES = [25, 50, 100, 200]
+const PAGE = 50
+
+/*
+ * A colour per sender, the same one every time.
+ *
+ * The point of an avatar in a mail list is not decoration -- it is that the eye finds a
+ * correspondent before it reads a word, which is how anybody actually scans a mailbox. That only
+ * works if the colour is STABLE: derived from the address, so today's message from this debtor is
+ * the same colour as last week's, and a random or index-based colour would be worse than none.
+ *
+ * Deep enough to carry white initials at every one of them; the palette was picked for that and
+ * not for variety.
+ */
+const SENDER_COLOURS = [
+  '#1f3a5f', '#7a5230', '#3f5c3a', '#5a3a5c', '#2f5d5f', '#6b3b3b', '#3b4a6b', '#6b5a2f',
+]
+function senderColour(address: string): string {
+  let hash = 0
+  for (let i = 0; i < address.length; i += 1) hash = (hash * 31 + address.charCodeAt(i)) >>> 0
+  return SENDER_COLOURS[hash % SENDER_COLOURS.length]
+}
+
+/** A debtor by name, falling back to whatever else identifies the account. */
+const debtorLabel = (a: DebtorAccount) =>
+  [a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ')
+  || a.accountNumber
+  || 'Unnamed debtor'
+
+export function MailPage() {
+  const { currentUser, session } = useAuth()
+  // Only for logging a reply on a lead, deal, client or contact — see the reply handler.
+  const { addActivity } = useAppStore()
+  const navigate = useNavigate()
+  const [filter, setFilter] = useState<Pane>('all')
+  /*
+   * Unread, and whether the list is narrowed to it.
+   *
+   * A toggle rather than a sixth tab: "unread junk" and "unread that still needs filing" are
+   * both real questions, and a tab could only ever answer one of them. The count is scoped to
+   * whichever tab and search are active, so the number on the button is the number of rows
+   * pressing it leaves behind.
+   */
+  /*
+   * Unread PER TAB, not one number for the mailbox. The firm: "the junk email doesn't indicate to
+   * me if there's anything that's unread, the open mail also not." One number on All said the
+   * mailbox had unread mail and nothing about where -- and a client's reply that a spam filter
+   * misfiled sat in Junk with nothing anywhere saying so.
+   */
+  const [unreadByTab, setUnreadByTab] = useState<Record<MailFilter, number>>(
+    { all: 0, junk: 0, sent: 0 },
+  )
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  /* The count for the tab you are standing on, which is what the Unread only option applies to. */
+  const unread = filter === 'blocked' ? 0 : unreadByTab[filter]
+
+  /*
+   * Selection mode, off by default.
+   *
+   * The firm's call, and it buys back the left gutter: a tick box on every row, every day, to
+   * serve the rare bulk action was the most prominent thing in the list and said nothing about
+   * the message. That space now shows whether a message is unread — which is what somebody
+   * scanning the list is actually looking for. Press Select and the boxes come back.
+   */
+  const [selecting, setSelecting] = useState(false)
+  const [blocking, setBlocking] = useState<MailItem | null>(null)
+  const [blocked, setBlocked] = useState<BlockedSender[]>([])
+  /** The message being settled — the box that also offers to settle the sender for good. */
+  /*
+   * The senders already set to "always junk", held so the box that offers to make that rule can
+   * say when it is already there rather than offering to make it twice. Loaded beside the
+   * no-record rules, off the same version counter, because it is the same question asked of the
+   * same table.
+   */
+  const [alwaysJunked, setAlwaysJunked] = useState<Set<string>>(new Set())
+  /** The messages somebody has pressed Junk on, while the box asks how far it should go. */
+  const [junking, setJunking] = useState<MailItem[] | null>(null)
+  const [emptying, setEmptying] = useState(false)
+  /*
+   * WHAT IS IN THE BOX, AND WHAT HAS BEEN ASKED OF THE DATABASE. They are not the same thing
+   * while somebody is still typing.
+   *
+   * `search` is the box. `asked` is what `load` runs on, and it follows a third of a second
+   * behind -- so a six-letter search is one query rather than six, and the list stops rearranging
+   * itself under the words as they are typed. A mailbox is searched in the database, over every
+   * message in it, and a request per keystroke is six of those for one question.
+   *
+   * THE BOX IS NEVER THE DEBOUNCED VALUE. Feeding the input `asked` would put the caret back a
+   * third of a second behind the typing, which is the other way of making a search box unusable.
+   */
+  const [search, setSearch] = useState('')
+  const [asked, setAsked] = useState('')
+  useEffect(() => {
+    /* Cleared instantly: emptying the box is somebody wanting their mailbox back, not a search. */
+    if (search === '') { setAsked(''); return }
+    const t = setTimeout(() => setAsked(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+  /*
+   * A search looks at the WHOLE mailbox, not the tab you happen to be standing on.
+   *
+   * The firm's question gave it away: "if you search, can you only search in a specific folder, or
+   * can you search across the whole mailbox?" It was the tab -- which is the wrong default for a
+   * search box. Somebody looking for a message knows the sender and the subject and has no idea
+   * which of six tabs it settled in, and a search that quietly excludes junk is worst of all,
+   * because junk is exactly where a message goes missing.
+   *
+   * Switchable, because "only the tab I am on" is a real question too -- just not the common one.
+   */
+  const [searchEverywhere, setSearchEverywhere] = useState(true)
+  const [items, setItems] = useState<MailItem[]>([])
+  const [more, setMore] = useState(false)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(PAGE)
+  const [loading, setLoading] = useState(true)
+  /** The last load threw. Distinct from `error`, which any action can set. */
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
+  const [linking, setLinking] = useState<MailItem | null>(null)
+  /** The message a new lead is being made out of. See CreateLeadFromMailModal. */
+  const [creatingLead, setCreatingLead] = useState<MailItem | null>(null)
+  /** The lead that came out of it, until somebody says where they would rather be. */
+  const [createdLead, setCreatedLead] = useState<Lead | null>(null)
+  /*
+   * Set when the link modal was opened by Reply rather than by the Link button, so that filing
+   * the message hands straight over to the composer instead of dropping you back on the list to
+   * find it again.
+   */
+  const [linkThenReply, setLinkThenReply] = useState(false)
+  const [replying, setReplying] = useState<MailItem | null>(null)
+  /** Whether the open reply is answering everybody. Decides the Cc the composer opens with. */
+  const [replyAll, setReplyAll] = useState(false)
+  /*
+   * WHICH ADDRESS IS ME.
+   *
+   * Asked of the mailbox rather than taken from the login, because they are not always the same
+   * person's: mail can be read from a connected mailbox that differs from the address somebody
+   * signs in with. Both are used, because either one being on the original is enough to mean "me"
+   * -- and being copied on your own reply-all doubles the thread every round.
+   */
+  const [mailbox, setMailbox] = useState<string | null>(null)
+  /**
+   * WHEN THIS MAILBOX WAS LAST READ.
+   *
+   * THE FIRM: "not having to go and sync and blah blah blah." The answer is not a better button --
+   * it is knowing there is no need to press one. The sweep reaches every mailbox in the firm every
+   * few minutes now; saying so where the button is turns the button into an impatience control.
+   */
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+  /*
+   * AND THE LABEL AGES WHILE THE PAGE IS OPEN. A mailbox left open all afternoon that still says
+   * "just now" is worse than one that says nothing: somebody would stop pressing the button on
+   * the strength of it. A minute is the resolution agoLabel works at, so a minute is the tick.
+   */
+  const [, setClockTick] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTick((n) => n + 1), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    let cancelled = false
+    void fetch('/api/email/status', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((b: { email?: string | null; lastSyncedAt?: string | null }) => {
+        if (cancelled) return
+        setMailbox(b.email ?? null)
+        setCheckedAt(b.lastSyncedAt ?? null)
+      })
+      /* Not knowing costs a reply-all one address it might have dropped, not the mailbox. */
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [session])
+  /** A brand-new message to anybody. Not a reply, so it carries no thread and no record. */
+  const [composing, setComposing] = useState(false)
+  /** A message being passed on, with the original underneath it. */
+  const [forwarding, setForwarding] = useState<{
+    mail: MailItem; body: string; complete: boolean
+    /** The original as markup, already cleaned, where it was written in HTML. */
+    html: string | null
+  } | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
+  /*
+   * ONE MESSAGE, ASKED FOR BY THE PAGE THAT SENT YOU HERE.
+   *
+   * THE FIRM, having clicked a meeting on the calendar: "it takes me to the emails. But it doesn't
+   * take me to that specific email." The meeting now opens as a meeting (see MeetingModal), and
+   * the invitation behind it is one press -- which has to land on the MESSAGE, or it is the same
+   * complaint with an extra step.
+   *
+   * READ ONCE AND CLEARED. A message id that stayed in the address would re-open and re-mark-read
+   * on every refresh, and would fight the person the moment they clicked a different message.
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [wanted, setWanted] = useState<string | null>(() => searchParams.get('message'))
+  /* The asked-for row, fetched by id when the page the tab loaded does not hold it. See below. */
+  const [wantedRow, setWantedRow] = useState<MailItem | null>(null)
+  const lookedUp = useRef(false)
+  /* Which tab the list in hand was loaded for -- not `filter`, which changes a render before the
+     list does, and a row put into the old list is thrown away by the load that follows. */
+  const [loadedTab, setLoadedTab] = useState<Pane | null>(null)
+  /*
+   * Bodies, once fetched, kept for as long as the page is up.
+   *
+   * Each one is an IMAP round trip, so collapsing a message and opening it again should not pay
+   * for it twice. Not cached beyond the page: it was never ours to store, which is the whole
+   * reason it is fetched.
+   */
+  const [bodies, setBodies] = useState<Record<string, string>>({})
+  /** Contact details read off each message's hrefs, keyed the same way as the bodies. */
+  const [linkedDetails, setLinkedDetails] = useState<Record<string, ContactCandidate[]>>({})
+  /**
+   * The pictures drawn into each message, keyed the same way again.
+   *
+   * Signatures, in practice — and a signature that is a picture used to leave a blank where the
+   * sender's name and number should be, which is exactly the part a collector needs.
+   */
+  const [bodyImages, setBodyImages] = useState<Record<string, InlineImage[]>>({})
+  /** Pictures that were in the message and were too large to carry, so the page can say so. */
+  const [imagesSkipped, setImagesSkipped] = useState<Record<string, number>>({})
+  /**
+   * Each message as it was actually written, where it was written in HTML.
+   *
+   * Kept BESIDE the flattened text rather than instead of it: the text is what a forward quotes
+   * and what the contact-form parser reads, and neither of those wants markup.
+   */
+  const [htmlBodies, setHtmlBodies] = useState<Record<string, string>>({})
+  /**
+   * Which messages the reader has asked to fetch pictures for.
+   *
+   * Off for every message until somebody presses the button, and never remembered past this page
+   * — the decision is about ONE message. A remote picture is how a sender finds out their mail
+   * was opened and when, which in this trade tells a debtor's attorney the letter landed and was
+   * read at 14:12 on Tuesday. So the default is the quiet one and the choice is taken each time.
+   */
+  const [showPictures, setShowPictures] = useState<Record<string, boolean>>({})
+  /** The raw ICS of a meeting request, kept beside its text. Parsed on render — see parseInvite. */
+  const [calendars, setCalendars] = useState<Record<string, string>>({})
+  /*
+   * This person's own calendar, so an invite already accepted says so rather than offering to add
+   * it a second time. Loaded once; accepting one adds to it in place.
+   */
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+
+  /**
+   * Put a meeting request on this person's own calendar.
+   *
+   * The event is added to the list in place rather than by refetching: the card is looking at
+   * `events` to decide whether to say "in your calendar", and a round trip there would leave the
+   * button reading "Add" for a second after somebody pressed it.
+   */
+  async function accept(invite: CalendarInvite, mailId: string) {
+    if (!currentUser) return
+    const event = await acceptInvite({ invite, ownerId: currentUser.id, userEmailId: mailId })
+    setEvents((list) => [...list.filter((e) => e.id !== event.id), event])
+    setStatus(`Added to your Raptor calendar${event.startsAt || event.startsOn ? '' : ' \u2014 without a time, because the invite did not give one in any timezone'}.`)
+  }
+
+  /**
+   * Answer the organiser, and put an accepted meeting in the day.
+   *
+   * THE REPLY IS THE POINT, and it goes first. The firm: "I need to click on that and it needs
+   * to accept the meeting and let them know that the meeting has been accepted." Adding it to
+   * the calendar told nobody anything — the organiser's own tracking list went on saying "No
+   * response", which is how somebody ends up sitting in a meeting room on their own.
+   *
+   * An accept or a tentative also lands on the Raptor calendar; a decline does not, and takes it
+   * off again if it was already there. Declining and keeping the meeting in your day is not a
+   * state anybody meant to be in.
+   */
+  async function respond(invite: CalendarInvite, response: InviteResponse, mail: MailItem) {
+    const token = session?.access_token
+    if (!token || !currentUser) return
+    await replyToInvite({
+      invite,
+      response,
+      /* Both, because mail arrives at the connected mailbox and the sign-in address is not always
+         the same one — the reply has to go out as the address the organiser actually invited. */
+      myAddresses: [mailbox, currentUser.email].filter((a): a is string => !!a),
+      mailId: mail.id,
+      accessToken: token,
+      when: inviteWhen(invite.when),
+    })
+
+    if (response === 'declined') {
+      const on = eventForInvite(events, invite)
+      if (on) await dropEvent(on.id)
+    } else {
+      const event = await acceptInvite({ invite, ownerId: currentUser.id, userEmailId: mail.id })
+      setEvents((list) => [...list.filter((e) => e.id !== event.id), event])
+    }
+
+    /* The card reads its state off the row, so the row has to hear about it without a reload. */
+    setItems((list) => list.map((m) => (
+      m.id === mail.id ? { ...m, inviteResponse: response } : m
+    )))
+    setStatus(
+      response === 'declined' ? 'Declined, and the organiser has been told.'
+        : response === 'tentative' ? 'Answered as tentative, and it is in your Raptor calendar.'
+          : 'Accepted. The organiser has been told and it is in your Raptor calendar.',
+    )
+  }
+
+  async function dropEvent(id: string) {
+    await removeCalendarEvent(id)
+    setEvents((list) => list.filter((e) => e.id !== id))
+    setStatus('Taken off your Raptor calendar.')
+  }
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchCalendarEvents(currentUser.id)
+      .then((list) => { if (!cancelled) setEvents(list) })
+      /* A calendar we could not read costs a button its "already added" state, not the mailbox. */
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [currentUser])
+  const [reading, setReading] = useState<string | null>(null)
+  /** Messages whose body is being fetched right now — see the guard in `toggleTo`. */
+  const fetchingBody = useRef<Set<string>>(new Set())
+  /**
+   * Messages the page has already read ahead for in this sitting.
+   *
+   * A REF, BECAUSE THE LIST IS NOT THE RECORD OF IT. The write-back lands in the database and the
+   * `items` already in hand still say "not held", so the row cannot answer "have we done this
+   * one" -- and a re-render on every search keystroke would otherwise fetch the same six messages
+   * again and again.
+   */
+  const warmed = useRef<Set<string>>(new Set())
+  const [readError, setReadError] = useState<Record<string, string>>({})
+  const [view, setView] = useEmailView()
+
+  const load = useCallback(async (at = 0) => {
+    if (!currentUser) return
+    setLoading(true)
+    setError(null)
+    try {
+      // The blocklist is a list of senders, not of mail: the effect below owns it, for every tab.
+      if (filter === 'blocked') {
+        setItems([])
+        setMore(false)
+        setPage(0)
+        setChosen(new Set())
+        return
+      }
+      const res = await fetchMail({
+        userId: currentUser.id, filter, search: asked, unreadOnly, everywhere: searchEverywhere,
+        offset: at * pageSize, limit: pageSize,
+      })
+      setItems(res.items)
+      setLoadedTab(filter)
+      setMore(res.more)
+      setPage(at)
+      setChosen(new Set())
+      setLoadFailed(false)
+      /* Every tab, so each one can say whether anything on it is waiting to be read. */
+      void countUnreadByTab(currentUser.id, asked).then(setUnreadByTab).catch(() => {})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      /*
+       * Remembered separately from `error`, which every action shares.
+       *
+       * Without it a FAILED load fell through to the empty state, and the page cheerfully said
+       * "Nothing waiting. Every email has been filed or thrown away." over a mailbox that had
+       * simply not loaded. That is the worst possible thing to say when something is broken: it
+       * is reassuring, it is wrong, and it sends somebody looking for their mail in Outlook
+       * instead of telling us. It happened for real — see the leads.company fix.
+       */
+      setLoadFailed(true)
+      setItems([])
+      setMore(false)
+    } finally {
+      setLoading(false)
+    }
+  }, [currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere])
+
+  useEffect(() => { void load(0) }, [load])
+
+  /*
+   * WARMING THE TOP OF THE LIST, WHICH IS WHAT MAKES THE BACKLOG FAST TOO.
+   *
+   * THE FIRM, asked where the worst wait still is: "clicking on a mail to read it." Keeping the
+   * body at sync time fixes every message that arrives from now on, and the write-back fixes a
+   * message the SECOND time it is opened -- but the mail already sitting in the mailbox is still
+   * a trip to the mail server the first time somebody clicks it, which is most of what anybody is
+   * reading this week.
+   *
+   * SO THE PAGE READS AHEAD. Each one is the same fetch that clicking would have made, made
+   * before the click instead of during it, and it is written back -- so a mailbox gets faster
+   * every time somebody looks at it and never gets slower.
+   *
+   * ONE AT A TIME, AND A HANDFUL. Mail servers cap concurrent connections per account, which is
+   * the thing that made three simultaneous syncs queue behind each other and took the mailbox
+   * down with them. Serialised, this is no heavier than a person reading six messages, and the
+   * cost decays to nothing as the rows fill in.
+   *
+   * NEWEST FIRST, because that is the order the list is in and the order people read. The row
+   * already says which are held -- `cached`, off body_cached_at -- so nothing is fetched twice and
+   * a warmed mailbox warms nothing.
+   */
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token || items.length === 0) return
+    let stopped = false
+    /*
+     * AND NEVER THE SAME MESSAGE TWICE IN ONE SITTING.
+     *
+     * `items` changes on every filter, every search keystroke that lands and every page -- and the
+     * ROW still says "not held", because the write-back lands in the database rather than in the
+     * list already in hand. Without this the warmer would re-fetch the same six messages every
+     * time somebody typed in the search box, which is the opposite of the point: a mail server
+     * opening connections for mail nobody is reading is what makes a mailbox slow for the person
+     * who IS reading.
+     */
+    if (warmed.current.size >= WARM_SITTING_MAX) return
+    const queue = items
+      .filter((m) => !m.cached && !warmed.current.has(m.id))
+      .slice(0, WARM_AHEAD)
+    if (queue.length === 0) return
+
+    const run = async () => {
+      for (const mail of queue) {
+        if (stopped) return
+        /* A MESSAGE SOMEBODY IS OPENING RIGHT NOW TAKES PRIORITY, and the same ref that stops a
+           double-click stops the warmer racing it for the same connection. */
+        if (fetchingBody.current.has(mail.id)) continue
+        warmed.current.add(mail.id)
+        fetchingBody.current.add(mail.id)
+        try {
+          const got = await fetchMailBody(mail.id, token)
+          if (stopped) return
+          /*
+           * HELD IN THE PAGE AS WELL AS WRITTEN BACK. The write-back makes the NEXT visit fast;
+           * this makes the next click fast, which is the one the person is about to make.
+           */
+          setBodies((b) => (b[mail.id] === undefined ? { ...b, [mail.id]: got.text } : b))
+          setHtmlBodies((h) => (h[mail.id] === undefined ? { ...h, [mail.id]: got.html } : h))
+          setCalendars((c) => (c[mail.id] === undefined ? { ...c, [mail.id]: got.calendar } : c))
+          setLinkedDetails((d) => (d[mail.id] === undefined ? { ...d, [mail.id]: got.details } : d))
+          setBodyImages((i) => (i[mail.id] === undefined ? { ...i, [mail.id]: got.images } : i))
+          setImagesSkipped((n) => (n[mail.id] === undefined ? { ...n, [mail.id]: got.imagesSkipped } : n))
+        } catch {
+          /*
+           * SILENT, AND DELIBERATELY SO. Nobody asked for this message -- they have not clicked
+           * it. An error here would be a warning about a thing that has not gone wrong yet, and
+           * if they do click it the ordinary path runs and says so properly.
+           */
+        } finally {
+          fetchingBody.current.delete(mail.id)
+        }
+      }
+    }
+    void run()
+    return () => { stopped = true }
+    /*
+     * KEYED ON WHICH MESSAGES ARE ON SCREEN, NOT ON THE ARRAY.
+     *
+     * `items` is rebuilt whenever a flag on one row changes -- marking a message read maps the
+     * whole list -- so depending on it meant every CLICK read ahead for six more messages. The ids
+     * are what this effect is actually about: a different tab, a search or the next page is a new
+     * list and deserves warming; the same list with one row now read is not.
+     */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.map((m) => m.id).join(','), session?.access_token])
+
+  /*
+   * The blocklist, loaded on every tab rather than only on the Blocked one.
+   *
+   * Every row now says whether its sender is blocked, so the list has to be in hand wherever
+   * mail is shown. It is one small query per agent — their own patterns, nothing else — and it
+   * reloads only when a block is added or removed, not on every page of mail.
+   */
+  /*
+   * THE "STILL WAITING" COUNT WENT WITH THE QUEUE.
+   *
+   * It was a gold badge on All answering the firm's earlier ask -- "a small thing by the All if
+   * there is a message outstanding that needs to be attended to" -- and it counted mail on nobody's
+   * file. That question has been withdrawn: "it's irritating having to match everybody. Just keep
+   * everyone in your main mailbox." A number somebody is meant to work down to zero IS the
+   * obligation, drawn in one digit, so leaving it would have kept the thing that was removed.
+   *
+   * The unread badges stay. Unread is a fact about whether somebody has looked, which is what a
+   * mailbox has always counted and what nobody has asked to stop seeing.
+   */
+
+
+  const [blocksVersion, setBlocksVersion] = useState(0)
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchBlockedSenders(currentUser.id)
+      .then((list) => { if (!cancelled) setBlocked(list) })
+      // A blocklist we could not read costs a chip on some rows, not the mailbox. Nothing louder.
+      .catch(() => {})
+    // The other half of the same question — which senders never need matching. Loaded together
+    // because the Blocked tab shows both and the same version counter refreshes them.
+    void fetchSenderRules(currentUser.id, 'always_junk')
+      .then((list) => { if (!cancelled) setAlwaysJunked(new Set(list.map((r) => r.pattern))) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [currentUser, blocksVersion])
+
+  /*
+   * Read the mailbox now rather than waiting for the sweep.
+   *
+   * The sweep reaches every mailbox in the firm every few minutes, which is the thing that makes
+   * pressing anything optional. Opening your own mailbox is still the clearest possible signal
+   * that you want it current, so it pulls -- and the header says when it was last read, so the
+   * button is for somebody who is impatient rather than somebody who has to remember.
+   */
+  const syncMine = useCallback(async () => {
+    const token = session?.access_token
+    if (!token) return
+    setSyncing(true)
+    try {
+      await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      setCheckedAt(new Date().toISOString())
+    } catch {
+      // Offline, or no mailbox connected. The list still shows what was already synced.
+    } finally {
+      setSyncing(false)
+      await load(0)
+    }
+  }, [session, load])
+
+  const firstLoad = useRef(true)
+  useEffect(() => {
+    if (!firstLoad.current) return
+    firstLoad.current = false
+    void syncMine()
+  }, [syncMine])
+
+  const allChosen = items.length > 0 && chosen.size === items.length
+
+  /*
+   * OPEN THE ONE THE CALENDAR ASKED FOR, wherever in the mailbox it is.
+   *
+   * IN AN EFFECT RATHER THAN ON MOUNT, because the list is fetched and the message is not there to
+   * open on the first render. It opens through the same path a click uses -- so it is marked read
+   * and its body is fetched exactly as it would have been -- and then clears the ask so a refresh
+   * does not re-open it and a click elsewhere is not fought.
+   *
+   * AND IT DOES NOT GIVE UP when the row is not on the page in hand, which it used to. The firm:
+   * "If I open an invitation from the calendar, it just takes me [to the mailbox]. It should just
+   * take me to ... Actual email." An invitation is usually days old by the time somebody opens the
+   * meeting, so it is past the first fifty; or the server called it junk. Either way the old effect
+   * never matched and left "Pick a message on the left" -- the fault this link exists to fix.
+   * So a miss fetches the ONE row by id, moves to the tab that holds it (tabOf, the rule the tabs
+   * themselves are built on), puts it at the top of that list and opens it. Put there only once
+   * that tab's own list has arrived: earlier, and the load that follows throws it away.
+   *
+   * A MESSAGE THAT IS GONE IS SAID, not swallowed: deleted from Raptor, or not this person's.
+   */
+  useEffect(() => {
+    if (!wanted) return
+    const found = items.find((m) => m.id === wanted)
+    if (found) {
+      setWanted(null)
+      setWantedRow(null)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('message')
+        return next
+      }, { replace: true })
+      void toggleTo(found)
+      return
+    }
+    if (loading || !currentUser) return
+
+    if (wantedRow) {
+      const tab = tabOf(wantedRow)
+      if (filter !== tab) { setFilter(tab); return }
+      if (loadedTab !== tab) return
+      setItems((list) => [wantedRow, ...list.filter((m) => m.id !== wantedRow.id)])
+      return
+    }
+
+    if (lookedUp.current) return
+    lookedUp.current = true
+    const id = wanted
+    fetchMailItem(currentUser.id, id).then((row) => {
+      if (row) { setWantedRow(row); return }
+      setWanted(null)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('message')
+        return next
+      }, { replace: true })
+      setStatus('That message is no longer in your mailbox \u2014 it may have been deleted from Raptor.')
+    }).catch((e) => {
+      setWanted(null)
+      setError(e instanceof Error ? e.message : String(e))
+    })
+    // toggleTo is redeclared each render; the guards above are what stop a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted, items, loading, wantedRow, filter, loadedTab, currentUser])
+
+  /**
+   * Open a message and read it.
+   *
+   * Raptor holds a snippet, so opening one fetches the rest from the mailbox. Opening is also
+   * what marks it read — the same rule as the account page, and for the same reason: a list where
+   * everything is bold tells you nothing about what still needs attention.
+   */
+  async function toggle(mail: MailItem) {
+    if (open === mail.id) { setOpen(null); return }
+    await toggleTo(mail)
+  }
+
+  /**
+   * Select and read a message, without the close-on-second-click of the list.
+   *
+   * In a reading pane, clicking the message you are already reading should keep reading it —
+   * emptying the pane would be a click that undoes itself.
+   */
+  async function toggleTo(mail: MailItem) {
+    setOpen(mail.id)
+
+    if (!mail.readAt) {
+      // Optimistic: the row un-bolds at once, and the write follows. A failed mark-read is not
+      // worth an error over — it will still be there to open again.
+      setItems((list) => list.map((m) => (
+        m.id === mail.id ? { ...m, readAt: new Date().toISOString() } : m
+      )))
+      /*
+       * AND THE TAB BADGES COME DOWN WITH IT, which is the other half of what unreadOne does and
+       * was missing here. Without it a badge counted what was unread when the page last loaded
+       * rather than what is unread now: read four of the five and All still said five, which is
+       * the same complaint as a badge that counts the wrong thing. The sidebar already follows —
+       * markMailRead fires refreshNavCounts — so leaving this out also had the two disagreeing.
+       *
+       * Reconciled by the next real load, exactly as the mark-unread side is.
+       */
+      setUnreadByTab((counts) => bumpUnread(counts, mail, -1))
+      void markMailRead([mail.id]).catch(() => {})
+    }
+
+    if (bodies[mail.id] !== undefined) return
+    /*
+     * ONE FETCH PER MESSAGE, INCLUDING WHILE ONE IS STILL IN FLIGHT.
+     *
+     * The line above only knows about fetches that have already come back, and reading a message
+     * means opening an IMAP connection to the mail server — several seconds on a bad line. So
+     * somebody who clicks again because nothing has happened yet closes the message and reopens
+     * it, `bodies` is still empty, and a second identical fetch goes out. The runtime logs showed
+     * one message fetched five times inside five seconds, each one taking a connection the
+     * mailbox could have given to the fetch that was already running. Clicking impatiently made
+     * it slower, which is the worst possible shape for a bug like this.
+     *
+     * A ref rather than state on purpose: this must be true the instant it is set, not after the
+     * next render, which is precisely the window the second click lands in.
+     */
+    if (fetchingBody.current.has(mail.id)) return
+    const token = session?.access_token
+    if (!token) return
+    fetchingBody.current.add(mail.id)
+
+    /*
+     * RAPTOR'S OWN COPY FIRST, AND USUALLY THAT IS THE WHOLE READ.
+     *
+     * THE FIRM: "reading something is super slow... isn't there some way we can mimic the way
+     * Outlook works?" Outlook's speed is a local copy, not a faster protocol, and Raptor has had
+     * the copy all along without the one part people actually read. One select on a row we already
+     * have the id of, against a TLS handshake and a LOGIN and a FETCH through a function that may
+     * be starting cold.
+     *
+     * NO SPINNER ON THIS PATH. `setReading` is deliberately not touched before the cached read:
+     * it comes back in a few tens of milliseconds, and a spinner that appears and vanishes inside
+     * one frame is a flicker that makes a fast screen feel broken.
+     */
+    let cached = null as Awaited<ReturnType<typeof fetchCachedBody>>
+    try {
+      cached = await fetchCachedBody(mail.id)
+    } catch { /* A cache that will not answer is the old behaviour, which is below. */ }
+
+    if (cached) {
+      setBodies((b) => ({ ...b, [mail.id]: cached.text }))
+      setHtmlBodies((h) => ({ ...h, [mail.id]: cached.html }))
+      setCalendars((c) => ({ ...c, [mail.id]: cached.calendar }))
+      setLinkedDetails((d) => ({ ...d, [mail.id]: cached.details }))
+      setBodyImages((i) => ({ ...i, [mail.id]: [] }))
+      setImagesSkipped((n) => ({ ...n, [mail.id]: 0 }))
+      /*
+       * AND THE PICTURES AFTERWARDS, where the message draws any.
+       *
+       * They are not kept -- they are most of a message's size and they are nearly always a
+       * signature logo -- so this goes to the mailbox for them WITH THE WORDS ALREADY ON SCREEN.
+       * The alternative is waiting on the whole message because somebody's signature has a logo
+       * in it, which is most business email and is the slowness this set out to fix.
+       */
+      if (!cached.pictures) {
+        fetchingBody.current.delete(mail.id)
+        return
+      }
+    }
+
+    setReading(cached ? null : mail.id)
+    setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
+    try {
+      const { text, html, details, images, imagesSkipped: skipped, calendar } = await fetchMailBody(mail.id, token)
+      setBodies((b) => ({ ...b, [mail.id]: text }))
+      setHtmlBodies((h) => ({ ...h, [mail.id]: html }))
+      setCalendars((c) => ({ ...c, [mail.id]: calendar }))
+      // Kept beside the text: these came out of the message's LINKS, which is the only thing an
+      // image signature leaves behind.
+      setLinkedDetails((d) => ({ ...d, [mail.id]: details }))
+      setBodyImages((i) => ({ ...i, [mail.id]: images }))
+      setImagesSkipped((n) => ({ ...n, [mail.id]: skipped }))
+    } catch (e) {
+      /*
+       * The snippet stays on screen, so this explains the gap rather than leaving it blank -- and
+       * where the cache already answered, the message is on screen and only its pictures are
+       * missing, so saying the mailbox could not be reached would be the warning that fires when
+       * nothing is wrong.
+       */
+      if (!cached) {
+        setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
+      }
+    } finally {
+      fetchingBody.current.delete(mail.id)
+      setReading(null)
+    }
+  }
+
+  /**
+   * Answer a message without leaving the mailbox.
+   *
+   * File first, then reply — and the reason is money, not tidiness. Item 1(a) is R25 on every
+   * message we send, and a fee can only be raised against an account. A reply typed here for a
+   * message that is on nobody's file goes out earning nothing and leaves no trace on any
+   * statement; and because replying from the mailbox is EASIER than opening the account, the
+   * easy path would quietly become the unbilled one. At 50 agents that is not a rounding error.
+   *
+   * So Reply on unlinked mail opens the account picker first. It is the same number of clicks as
+   * today's "find the account, then reply" and it ends with both the fee and the record in place.
+   * The picker still offers a way out for mail that genuinely belongs to no debtor — a supplier,
+   * a colleague — but as the deliberate second choice, which is what it should be.
+   */
+  function startReply(mail: MailItem, all = false) {
+    setReplyAll(all)
+    // Filed anywhere is enough — a lead's reply belongs on the lead, and the composer says
+    // plainly that nothing will be charged for it.
+    if (mail.isFiled) { setReplying(mail); return }
+    setLinkThenReply(true)
+    setLinking(mail)
+  }
+
+  /**
+   * The Cc a reply-all opens with, or undefined for an ordinary reply.
+   *
+   * Undefined rather than empty, because the composer shows the Cc box only when it is given one
+   * — an empty Cc field on every reply is a control nobody fills in and everybody reads past.
+   *
+   * `mine` is the connected mailbox: it is on the original, because that is how the message
+   * reached us, and left in every reply-all would drop a copy back in our own inbox.
+   */
+  function replyAllCc(mail: MailItem): string | undefined {
+    if (!replyAll) return undefined
+    const { cc } = replyAllTo({
+      from: { name: mail.fromName, address: mail.fromAddress },
+      to: mail.toRecipients,
+      cc: mail.ccRecipients,
+      mine: [mailbox, currentUser?.email].filter((a): a is string => !!a),
+    })
+    return recipientLine(cc)
+  }
+
+  /**
+   * A bulk action has finished, so selection mode ends with it.
+   *
+   * Picking messages, choosing what to do with them and then having to press Done was a second
+   * click that said nothing: the action IS the end of selecting. Worse, the page sat there
+   * afterwards with the tick boxes still showing and nothing ticked, which reads as though the
+   * action had not gone through.
+   *
+   * Only bulk actions call this. The single-message actions on an open message leave selection
+   * alone, because they were never part of it.
+   */
+  async function afterBulk() {
+    setSelecting(false)
+    // load() clears the ticks; this clears the gutter they were sitting in.
+    await load(page)
+  }
+
+  /** Turning selection off drops the selection with it — a forgotten tick must not act later. */
+  function toggleSelecting() {
+    setSelecting((on) => {
+      if (on) setChosen(new Set())
+      return !on
+    })
+  }
+
+  /** Filing on its own, with no reply waiting behind it. */
+  function startLink(mail: MailItem) {
+    setLinkThenReply(false)
+    setLinking(mail)
+  }
+
+  /**
+   * AN ATTACHMENT'S BYTES, for FileActions to open or save (the firm, 19 Oct: "an option to open it
+   * or download it"). The wait and any failure are shown on the file's own chip.
+   */
+  async function attachmentOf(mail: MailItem, filename: string): Promise<Blob> {
+    const token = session?.access_token
+    if (!token) throw new Error('Signed out. Sign in again to fetch the file.')
+    return fetchAttachment({ mailId: mail.id, filename, accessToken: token })
+  }
+
+  /** Moving a message that was filed on the wrong account. Administrators only. */
+  const [moving, setMoving] = useState<MailItem | null>(null)
+  const mayRefile = canRefileMail(currentUser)
+
+  /**
+   * Move mail onto the junk shelf, or take it back off.
+   *
+   * The firm's point: the mail server's verdict is a guess, and something in Needs filing is
+   * often simply spam it waved through. Junking it is the honest answer — it is neither filed
+   * nor deleted — and it takes it out of All, which is where the work is.
+   *
+   * Reversible, and offered from the Junk tab itself, because the guess is wrong both ways: a
+   * debtor writing from a free address lands in Junk often enough that a one-way move would be
+   * a trap.
+   */
+  async function junkChosen(junk: boolean) {
+    const ids = [...chosen]
+    if (ids.length === 0) return
+    if (junk) { setJunking(items.filter((m) => chosen.has(m.id))); return }
+    try {
+      /* Un-junking only: the junking direction went to the box above and never reaches here. */
+      const { moved } = await setJunk(ids, junk, currentUser?.id ?? null)
+      const refused = ids.length - moved
+      setStatus(
+        `${moved} ${moved === 1 ? 'email' : 'emails'} moved back to your mailbox.`
+        + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
+        /* AND THE STANDING RULE IS GONE WITH IT, said plainly. "Not junk" that left the rule
+           standing would send the sender's next message straight back, and the undo would look
+           broken with nothing on screen explaining it. */
+        + ' Anything new from them lands in your mailbox again.',
+      )
+      await afterBulk()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /** The same, for the one message somebody has open. */
+  async function junkOne(mail: MailItem, junk: boolean) {
+    if (junk) { setJunking([mail]); setOpen(null); return }
+    try {
+      const { moved } = await setJunk([mail.id], junk, currentUser?.id ?? null)
+      setStatus(moved === 0
+        ? 'That email is matched to a record, so it stays out of junk.'
+        : 'Moved back to your mailbox. Anything new from them lands there again.')
+      setOpen(null)
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function bin() {
+    const ids = [...chosen]
+    if (ids.length === 0) return
+    try {
+      const gone = await deleteMail(ids)
+      setStatus(`${gone} ${gone === 1 ? 'email' : 'emails'} removed from Raptor — still in your real mailbox.`)
+      await afterBulk()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function readChosen() {
+    const ids = [...chosen]
+    if (ids.length === 0) return
+    try {
+      await markMailRead(ids)
+      await afterBulk()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /** Put them back the way they were found. */
+  async function unreadChosen() {
+    const ids = [...chosen]
+    if (ids.length === 0) return
+    try {
+      await markMailUnread(ids)
+      await afterBulk()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * Put ONE message back to unread — the one that actually gets used.
+   *
+   * It closes the message as well, and that is the whole point rather than a nicety: leaving it
+   * open would mean the very next click re-opened it and marked it read again, so the button
+   * would undo itself. Closing it is also what somebody means by the action — put this back on
+   * the pile, I will deal with it later.
+   */
+  /**
+   * Start a forward, with the original underneath it.
+   *
+   * THE BODY IS FETCHED, not taken from the row. The mailbox stores a 240-character snippet and
+   * the message itself stays in the mailbox — forwarding the snippet would send somebody a
+   * truncated message with no sign it had been cut. Where the fetch fails the snippet goes
+   * instead, and says so in the quoted block rather than passing itself off as the whole thing.
+   */
+  async function startForward(mail: MailItem) {
+    const token = session?.access_token
+    if (!token) { setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null }); return }
+    try {
+      const full = await fetchMailBody(mail.id, token)
+      /*
+       * THE MARKUP WHERE THERE IS ANY, and the text only where there is not.
+       *
+       * THE FIRM: "I forwarded this email from Raptor and this is what it looks like" -- the
+       * corrections table arriving as a column of stacked lines. A forward quoted `full.text`,
+       * which for a table is every cell on its own line, and the sender could not see it: the
+       * reading pane draws the HTML.
+       *
+       * Cleaned through the same deny-list the reading pane uses, because this is somebody
+       * else's markup and a forward SENDS it. Pictures are allowed through here, unlike in the
+       * pane: the reader's decision not to fetch a stranger's images is about their own privacy
+       * and is not a reason to strip the pictures out of a message being passed on.
+       */
+      const safe = full.html?.trim()
+        ? sanitizeEmailFragment(full.html, { images: full.images, showPictures: true }).html
+        : null
+      setForwarding({
+        mail, body: full.text || mail.snippet || '', complete: !!full.text, html: safe,
+      })
+    } catch {
+      setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null })
+    }
+  }
+
+  async function unreadOne(mail: MailItem) {
+    /*
+     * NOTHING IS RELOADED. The firm: "when I mark an email as unread it kind of reloads
+     * everything and moves to the top."
+     *
+     * It did: this ended with load(), which sets `loading`, which swaps the whole list for a
+     * spinner. The list unmounts, and a list that unmounts comes back scrolled to the top -- so
+     * marking one message unread threw you out of wherever you were reading. Nothing on the server
+     * changed except one row's read_at, and this already knows which row that is.
+     *
+     * So the row is updated in place and the badge is adjusted by one. Both are reconciled by the
+     * next real load, and a failure reloads to put the truth back.
+     */
+    const wasRead = !!mail.readAt
+    setItems((list) => list.map((m) => (m.id === mail.id ? { ...m, readAt: null } : m)))
+    /* The tab badges follow the row, or the list says unread and the tab says nothing. */
+    if (wasRead) setUnreadByTab((counts) => bumpUnread(counts, mail, 1))
+    setOpen(null)
+    try {
+      await markMailUnread([mail.id])
+      setStatus('Put back as unread. It is waiting for you in the mailbox.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      await load(page)
+    }
+  }
+
+  /*
+   * Whether the reading pane is on screen, which decides where the search bar is drawn.
+   *
+   * The pane carries it in its own left column; every other state of this page -- loading, the
+   * blocklist, a failed load, an empty result -- has no pane, so the bar is drawn above the list
+   * instead. Worked out once, here, because two copies of this condition would eventually
+   * disagree and put two search boxes on the screen.
+   */
+  /*
+   * NOT `!loading`, AND NOT `items.length > 0`, AND THAT IS THE WHOLE OF THE BUG THE FIRM HIT.
+   *
+   * THE FIRM: "this search function here, I can't type something out -- I press one letter and
+   * then it goes away, and then if I do anything else I can't search properly."
+   *
+   * `load` has `search` in its dependencies, so every keystroke re-ran it and set `loading`. With
+   * `loading` in here the pane came down on the first letter -- and the search box lives INSIDE
+   * the pane, in its left column, so the box the person was typing into was unmounted underneath
+   * them. The caret went with it and the second letter reached nothing. The same happened the
+   * moment a search matched nothing, which is worse: the box you would have corrected the search
+   * in was the thing that disappeared.
+   *
+   * So the pane stays up through both. `items` holds the previous page while the next one loads,
+   * which is what every mail client does, and an empty result is said inside the list column --
+   * see listEmpty.
+   */
+  const paneShowing = !loadFailed && filter !== 'blocked' && view === 'reading'
+
+  return (
+    /*
+      THE MAILBOX IS A SCREEN, NOT A PANEL ON ONE.
+      
+      At lg and up the page takes the height it is given and nothing outside the two columns
+      scrolls. Before this the card ran past the bottom of the window and the page scrolled behind
+      it, so the foot of the message pane -- where the action bar lives -- was below the fold. The
+      firm: "you have to scroll down to the very bottom to see that ... it should pop up at the
+      bottom of the screen and stay stagnant."
+      
+      Only at lg, because below it there is no reading pane: the list is the page, and a page that
+      cannot scroll is a list you cannot read past the first screen.
+    */
+    <div className="space-y-4 lg:h-full lg:flex lg:flex-col lg:min-h-0">
+      <Card padded={false} className={paneShowing ? 'lg:flex-1 lg:min-h-0 lg:flex lg:flex-col' : undefined}>
+        {/*
+          THE MAILBOX, NAMED, AND THE ONE BUTTON THAT WRITES SOMETHING.
+
+          The firm, on a layout they preferred: "New email at the right top. So cool." It used to
+          sit at the left of a bar it shared with Check now, Select and the search box -- five
+          controls of equal weight, only one of which starts anything. Up here with the mailbox
+          address it has the row to itself, and everything that SORTS mail lives below with the
+          tabs, where sorting belongs.
+
+          (It was moved to the left once before, for the opposite reason: the heading's
+          description made the row wrap after the button, so on an iPad the bar began with "Check
+          now". Giving the title its own block fixes that properly -- the buttons cannot be
+          carried anywhere by text they no longer share a row with.)
+        */}
+        {/*
+          THE NAME AND THE BUTTONS ON ONE ROW; the explanation under it.
+
+          They shared a wrapping row with the description, and the description is long enough that
+          the buttons wrapped BELOW it -- the firm: "that sentence is very long and it goes over,
+          so the new mail is moved down." Text and buttons cannot be asked to share a wrapping row
+          and keep their order; this is the second time that has bitten this bar, so this time the
+          two are separated rather than re-ordered.
+        */}
+        <div className="px-5 pt-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+            <div className="flex items-baseline gap-2.5 min-w-0">
+              <h2 className="text-lg font-semibold text-navy-950 shrink-0">Raptor Mail</h2>
+              {/*
+                WHICH MAILBOX, said out loud. Raptor reads a connected mailbox that is not always
+                the address somebody signs in with -- a shared info@ is the ordinary case -- and an
+                agent who cannot see which one they are reading cannot tell whether a message is
+                missing or was simply never sent here.
+              */}
+              <span className="text-sm text-slate-400 truncate">{mailbox ?? currentUser?.email ?? ''}</span>
+            </div>
+
+            <div className="ml-auto shrink-0 flex items-center gap-2">
+            {/*
+              A message to anybody, from here. Every other compose in Raptor hangs off a record --
+              a debtor, a lead, a deal -- which covers replying and covers nothing else. Writing to
+              an attorney, a client's accountant or a bureau had to be done in Outlook, which is
+              how a mailbox managed in one place stops being managed in one place.
+
+              GOLD, which it was argued out of once: Select turns gold-400 while selecting is on,
+              and two gold buttons on one bar would have spent the only signal saying which mode
+              you are in. They are no longer on one bar. Select sits with the tabs, this sits with
+              the mailbox name, and gold can go back to meaning "the thing to press".
+            */}
+            <button onClick={() => setComposing(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 shadow-sm hover:bg-gold-500">
+              <PenLine size={14} />
+              New email
+            </button>
+            {/*
+              Check now, as an icon. The word was carrying no weight beside a circular arrow that
+              every mail client on earth uses for the same thing, and spelling it out made the pair
+              read as two equal choices rather than one action and one refresh.
+            */}
+            {/*
+              WHEN IT WAS LAST READ, beside the button that reads it.
+
+              Hidden below `sm`: on a phone the header is the mailbox name and two controls, and a
+              sentence squeezed between them is the thing that pushes the address off the edge.
+            */}
+            {checkedAt && (
+              <span className="hidden sm:inline shrink-0 text-xs text-slate-400">
+                Checked {agoLabel(checkedAt)}
+              </span>
+            )}
+            <button onClick={() => void syncMine()} disabled={syncing}
+              aria-label="Check for new mail now"
+              title={syncing ? 'Checking your mailbox\u2026' : 'Check for new mail now'}
+              className="shrink-0 inline-flex items-center justify-center px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
+              {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            </button>
+            </div>
+          </div>
+        </div>
+
+        {/*
+          The tabs scroll if they must; the unread pill does not scroll with them.
+          `ml-auto` inside an overflow-x-auto strip stops pushing right the moment the content
+          overflows, which on a narrow screen would carry the pill off the edge — the one place
+          somebody most needs to see it.
+        */}
+        <div className="border-b border-slate-200 flex items-center gap-2 pr-5">
+          <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px min-w-0 flex-1">
+            {TABS.map((t) => (
+              <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint} aria-pressed={filter === t.id}
+                className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
+                  filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                {t.label}
+                {/*
+                  TWO DIFFERENT NUMBERS, and they answer different questions.
+
+                  NEEDS MATCHING carries WORK OUTSTANDING -- what is still on nobody's file --
+                  because that is the one thing that tab is for.
+
+                  EVERY OTHER TAB, ALL INCLUDED, carries UNREAD. All used to carry work
+                  outstanding too, and the firm caught it: "I've got about four or five unread
+                  messages in my All mailbox, and it just shows that I have two." Both numbers
+                  were right and neither was the one being asked for. The tab that means "the
+                  whole mailbox" has to answer the question people ask of a mailbox, which is how
+                  much of it they have not read -- and it is the number the sidebar's own Mail
+                  badge shows, so the two were visibly contradicting each other on one screen.
+                  (nav_counts counted mail needing matching once as well; it was changed to unread
+                  and this was not changed with it, which is how the two drifted apart.)
+
+                  The rest carry unread at the firm's earlier instruction: "the junk email doesn't
+                  indicate to me if there's anything that's unread, the open mail also not." Junk
+                  is the one that matters most: a client's reply a spam filter misfiled sat there
+                  with nothing anywhere saying it had arrived.
+
+                  Nothing at zero, on either. A badge showing 0 is furniture, and furniture is what
+                  teaches people to stop reading the others.
+                */}
+                {(() => {
+                  const n = t.id === 'blocked' ? 0 : unreadByTab[t.id]
+                  if (n <= 0) return null
+                  return (
+                    /* Brand, matching the dot on a row and the Unread only filter. There used to be
+                       a gold one here too, for mail still on nobody's file; it went with the
+                       queue -- see the note on `outstanding`. */
+                    <span title="Unread"
+                      className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
+                        inline-flex items-center justify-center tabular-nums bg-brand-500 text-white">
+                      {n > 99 ? '99+' : n}
+                    </span>
+                  )
+                })()}
+              </button>
+            ))}
+          </div>
+
+          {/*
+            HOW THE MAIL IS LAID OUT, at the right end of the tab row.
+
+            Which tab you are on and how it is displayed are one question asked twice, so they
+            share a line -- and it keeps these away from New email, which is the only control on
+            this page that starts something rather than sorting what is already here.
+
+            Searching and narrowing to unread are NOT here. They belong over the list itself; see
+            MailSearchBar.
+          */}
+          <div className="shrink-0 flex items-center gap-2 py-1.5">
+            {/* Junk earns its own one-tap answer: it is where the volume is and where nobody
+                wants to read anything. */}
+            {filter === 'junk' && items.length > 0 && (
+              <button onClick={() => setEmptying(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-negative-700 hover:border-negative-100 hover:bg-negative-50">
+                <Trash2 size={14} /> Delete all junk
+              </button>
+            )}
+            {/*
+              Select, which is the only way the tick boxes appear.
+
+              Off by default so the gutter can carry the unread mark instead — see `selecting`.
+              It reads as pressed while it is on, because a mode you cannot see you are in is a
+              mode that surprises you.
+            */}
+            {filter !== 'blocked' && items.length > 0 && (
+              <button onClick={toggleSelecting} aria-pressed={selecting}
+                className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                  selecting
+                    ? 'border-gold-500 bg-gold-400 text-navy-950'
+                    : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                {selecting ? <X size={14} /> : <CheckSquare size={14} />}
+                {selecting ? 'Done' : 'Select'}
+              </button>
+            )}
+            {/* Not on the blocklist, which is a list of senders rather than of mail. */}
+            {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
+          </div>
+        </div>
+
+        {/* The bulk bar only exists once something is selected — an always-visible row of
+            disabled buttons is furniture. */}
+        {chosen.size > 0 && (
+          <div className="px-5 py-2.5 bg-gold-50 border-b border-gold-100 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-navy-950 font-medium mr-auto">{chosen.size} selected</span>
+            {/*
+              Read and unread, and only the one that would change something. Offering both on a
+              selection that is all read means one of the two buttons is furniture, and a button
+              that does nothing when you press it is worse than no button.
+            */}
+            {items.some((m) => chosen.has(m.id) && !m.readAt) && (
+              <button onClick={() => void readChosen()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <Check size={14} /> Mark read
+              </button>
+            )}
+            {items.some((m) => chosen.has(m.id) && !!m.readAt) && (
+              <button onClick={() => void unreadChosen()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <MailIcon size={14} /> Mark unread
+              </button>
+            )}
+            {/*
+              BLOCKING IS NOT A BULK ACTION, and it was one here.
+
+              "Don't bulk block people. That's a very bad and dangerous idea." The firm had just
+              lost thirty addresses to one press -- their own bank among them -- through the same
+              capability offered from the Empty junk box, and offering it again on a selection
+              leaves the same hazard one screen away.
+
+              It is not like the others on this bar. Everything else here is about MAIL THAT IS
+              ALREADY HERE and is visible afterwards: junk it, read it, delete it, and you can see
+              what happened. Blocking is about EVERY FUTURE MESSAGE from somebody, it shows nothing
+              once done, and what it costs is a client's mail that silently never arrives.
+
+              So it stays on the open message, where you have read something before deciding, and
+              it is one sender at a time.
+            */}
+            {/*
+              Junk, both ways round. Which one is offered follows the tab you are standing on:
+              on the Junk tab the useful action is rescuing something, everywhere else it is
+              shelving it.
+            */}
+            {filter === 'junk' ? (
+              <button onClick={() => void junkChosen(false)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <Undo2 size={14} /> Not junk
+              </button>
+            ) : (
+              <button onClick={() => void junkChosen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <ShieldAlert size={14} /> Move to junk
+              </button>
+            )}
+            <button onClick={() => void bin()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-negative-700 hover:bg-white">
+              <Trash2 size={14} /> Delete from Raptor
+            </button>
+          </div>
+        )}
+
+        {status && <p className="px-5 py-2 text-[13px] text-[var(--c-green)] border-b border-slate-100">{status}</p>}
+        {error && <p className="px-5 py-2 text-[13px] text-negative-700 border-b border-slate-100">{error}</p>}
+
+        {/*
+          SEARCHING AND NARROWING SIT OVER THE LIST, at the firm's instruction: "the search mail in
+          the left with the unread only ... you can filter that stuff there."
+
+          They used to be a box at the right end of the page's top bar and a pill at the end of the
+          tab row -- two controls that do one job, in two places, neither of them near the thing
+          they act on. In the reading pane they go inside the left column and stay put while it
+          scrolls (see ReadingPane's listHeader); everywhere else the same bar sits directly above
+          the list. Rendered here only when the pane is not, so there is never a second one.
+        */}
+        {filter !== 'blocked' && !paneShowing && (
+          <div className="border-b border-slate-100">
+            <MailSearchBar search={search} onSearch={setSearch}
+              unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
+              everywhere={searchEverywhere} onEverywhere={setSearchEverywhere}
+              tabLabel={TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
+          </div>
+        )}
+
+        {/*
+          SELECT ALL, IN BOTH VIEWS. It was inside the list branch, so with the reading pane up --
+          which is how the firm works -- pressing Select gave you tick boxes and no way to tick
+          them all. Rendered once here, above whichever view is showing, so the two cannot drift.
+
+          THE PAGE, AND IT SAYS SO. Not the whole mailbox: these buttons block senders and delete
+          rows, and a "select all" that silently reached messages nobody has seen -- or fetched --
+          is how somebody blocks a client they never laid eyes on. The page is what is on screen,
+          and the page size is now theirs to choose.
+        */}
+        {selecting && filter !== 'blocked' && items.length > 0 && (
+          <div className="px-5 py-2 border-b border-slate-100">
+            <label className="inline-flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+              <input type="checkbox" checked={allChosen}
+                onChange={(e) => setChosen(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())} />
+              Select all {items.length} on this page
+            </label>
+          </div>
+        )}
+
+        {/*
+          THE ORDER OF THESE BRANCHES IS LOAD-BEARING, and it used to open with `loading`.
+          Anything drawn behind a `loading` test is a thing that unmounts on every keystroke that
+          reaches the database -- which for the reading pane meant taking its own search box down.
+          The pane is now asked for FIRST and says inside itself that it is loading or empty.
+        */}
+        {filter === 'blocked' ? (
+          /*
+           * JUST THE BLOCKLIST NOW. It used to carry a second list beside it -- senders whose mail
+           * always landed in Open mail, so the queue would stop asking about them. With the queue
+           * gone there is nothing for such a rule to do, and a control that quietly does nothing
+           * is worse than one that is not there.
+           */
+          <BlockedList senders={blocked} onUnblock={async (id) => {
+            await unblockSender(id)
+            setBlocksVersion((v) => v + 1)
+            setStatus('Unblocked. Their mail appears again from the next sync — not retroactively.')
+            await load(0)
+          }} />
+        ) : loadFailed ? (
+          <LoadFailed onRetry={() => void load(page)} />
+        ) : paneShowing ? (
+          /*
+           * Outlook's shape. The left column is summaries only: ReadingPane makes each row a
+           * button, so a checkbox or a Link button nested inside it would be a control inside a
+           * control. The actions move to the pane's own header instead, which is where Outlook
+           * puts them too — and is why bulk select stays a list-view affair.
+           */
+          <ReadingPane
+            fill
+            items={items}
+            selectedId={open}
+            onSelect={(m) => void toggleTo(m)}
+            emptyDetail="Pick a message on the left to read it."
+            /*
+              SAID IN THE COLUMN, so the pane -- and the search box in its header -- stays up.
+              A spinner while the next page is on its way, and the tab's own empty words when it
+              really is empty. Drawn in place of the rows rather than instead of the pane.
+            */
+            listEmpty={loading ? (
+              <div className="py-14 grid place-items-center text-slate-400">
+                <Loader2 size={18} className="animate-spin" />
+              </div>
+            ) : (
+              <Empty filter={filter} searching={!!asked.trim()} />
+            )}
+            listHeader={
+              <MailSearchBar search={search} onSearch={setSearch}
+                unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
+                everywhere={searchEverywhere} onEverywhere={setSearchEverywhere}
+                tabLabel={TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
+            }
+            renderLead={(m) => (
+              /* Collapses with the gutter: padding on an empty span is the gap all over again. */
+              <span className={selecting ? 'pl-4 pt-2.5 shrink-0' : ''}>
+                <RowGutter mail={m} selecting={selecting} chosen={chosen.has(m.id)}
+                  onChoose={(on) => setChosen((prev) => {
+                    const next = new Set(prev)
+                    if (on) next.add(m.id)
+                    else next.delete(m.id)
+                    return next
+                  })} />
+              </span>
+            )}
+            renderRow={(m) => (
+              /* pl-3 to match the list view's gap-3 between the gutter and the text. It was
+                 dropped when the unread bar came off this row, which put the tick box hard up
+                 against the sender. */
+              <span className={`block pl-3 pr-3 py-2.5 ${!m.readAt ? 'bg-brand-50/60' : ''}`}>
+                <MailSummary mail={m} tight blocked={blocked} />
+              </span>
+            )}
+            renderDetail={(m) => (
+              /*
+                A COLUMN AT LEAST AS TALL AS THE PANE, so the floating bar has a bottom to sit on.
+                Sticky alone is not enough: a three-line message ends three lines down, and the bar
+                would hang there in the middle of an empty pane instead of at the foot of it. With
+                min-h-full and mt-auto it is at the bottom of a short message and stays on screen
+                through a long one, which is the whole behaviour the firm liked in Spark.
+              */
+              <div className="px-5 py-4 min-h-full flex flex-col">
+                {/*
+                  THE MESSAGE'S OWN HEADING: what it is about, when it came, who it is from and
+                  who else was on it -- in that order, and each on its own line.
+
+                  It used to be one truncated grey line carrying the name, the address and the day
+                  together, under a subject set at the same size as a row in the list. The firm, on
+                  a layout that gave the sender an avatar and a line of their own: "the name of the
+                  person that's displayed at the top ... it looks much better than yours."
+
+                  The time as well as the day, because "Today" stops being an answer the moment you
+                  have two messages from the same debtor open -- see timeOfDay.
+                */}
+                <div className="flex items-start gap-3">
+                  <h3 className="text-base font-semibold text-navy-950 min-w-0 flex-1 text-balance">
+                    {m.subject || '(no subject)'}
+                  </h3>
+                  <span className="shrink-0 pt-1 text-xs text-slate-400 whitespace-nowrap">
+                    {relativeDayLabel(m.occurredAt)}{' '}
+                    <span className="tabular-nums">{timeOfDay(m.occurredAt)}</span>
+                  </span>
+                </div>
+
+                <div className="flex items-start gap-3 mt-3 pb-3 mb-3 border-b border-slate-100">
+                  <Avatar name={m.fromName || m.fromAddress} color={senderColour(m.fromAddress)}
+                    size={40} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm min-w-0">
+                      <span className="font-semibold text-navy-950">{m.fromName || m.fromAddress}</span>
+                      {/*
+                        The address in angle brackets after the name, which is how every mail client
+                        writes it and how anybody checking that a message really is from their client
+                        expects to read it. Breaking rather than truncating: a half-shown address is
+                        worse than a wrapped one, because it looks like the whole of a shorter one.
+                      */}
+                      {m.fromName && (
+                        <span className="text-slate-400 break-words"> &lt;{m.fromAddress}&gt;</span>
+                      )}
+                    </p>
+                    {/*
+                      WHO ELSE WAS ON IT, at the firm's instruction: "I can't see all the other
+                      recipients of an email." A debtor who copies their attorney, or a client who
+                      copies two of their own people, read as a private message -- and somebody
+                      answering it had no way to know the answer needed to reach three people.
+                    */}
+                    <RecipientLines mail={m} mine={[mailbox, currentUser?.email]} />
+                  </div>
+                  {/*
+                    Where it is filed, said here rather than on every row in the list -- one place,
+                    where somebody is actually looking at the message. The kind matters: "On a lead"
+                    and "On a debtor account" are different enough that leaving it off would mislead.
+
+                    Nothing here when it is filed nowhere. That case is no longer a small button in
+                    the corner: it is a bar under the actions that says so and offers both ways out.
+                    See NotMatchedBar.
+                  */}
+                  {m.linkedTo && (
+                    <span className="shrink-0 text-xs text-[var(--c-green)] inline-flex items-center gap-1 pt-1">
+                      <Link2 size={12} />
+                      On {m.linkedTo.label}
+                      <span className="text-slate-400">&middot; {CRM_OR_ACCOUNT[m.linkedTo.kind]}</span>
+                    </span>
+                  )}
+                </div>
+                <MailBody mail={m} body={bodies[m.id]} html={htmlBodies[m.id]}
+                  images={bodyImages[m.id]}
+                  showPictures={!!showPictures[m.id]}
+                  onShowPictures={() => setShowPictures((p) => ({ ...p, [m.id]: true }))}
+                  calendar={calendars[m.id]} events={events}
+                  onAccept={(inv) => accept(inv, m.id)}
+                  onRespond={(inv, r) => respond(inv, r, m)} onRemoveEvent={dropEvent}
+                  skippedImages={imagesSkipped[m.id]}
+                  loadingBody={reading === m.id}
+                  bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
+                  onReply={() => startReply(m)} onReplyAll={() => startReply(m, true)}
+                  onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
+                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onUnread={() => void unreadOne(m)}
+                  onLink={() => startLink(m)}
+                  onCreateLead={() => setCreatingLead(m)}
+                  sticky
+                  fetchAttachment={(f) => attachmentOf(m, f)} />
+              </div>
+            )}
+          />
+        ) : loading ? (
+          <div className="py-14 grid place-items-center text-slate-400">
+            <Loader2 size={18} className="animate-spin" />
+          </div>
+        ) : items.length === 0 ? (
+          <Empty filter={filter} searching={!!asked.trim()} />
+        ) : (
+          <>
+            <ul className="divide-y divide-slate-100">
+              {items.map((m) => (
+                <MailRow key={m.id} mail={m}
+                  mine={[mailbox, currentUser?.email]}
+                  chosen={chosen.has(m.id)}
+                  expanded={open === m.id}
+                  blocked={blocked}
+                  body={bodies[m.id]}
+                  html={htmlBodies[m.id]}
+                  showPictures={!!showPictures[m.id]}
+                  onShowPictures={() => setShowPictures((p) => ({ ...p, [m.id]: true }))}
+                  images={bodyImages[m.id]}
+                  calendar={calendars[m.id]}
+                  events={events}
+                  onAccept={(inv) => accept(inv, m.id)}
+                  onRespond={(inv, r) => respond(inv, r, m)}
+                  onRemoveEvent={dropEvent}
+                  skippedImages={imagesSkipped[m.id]}
+                  loadingBody={reading === m.id}
+                  bodyError={readError[m.id]}
+                  onToggle={() => void toggle(m)}
+                  onBlock={() => setBlocking(m)}
+                  selecting={selecting}
+                  onChoose={(on) => setChosen((s) => {
+                    const next = new Set(s)
+                    if (on) next.add(m.id)
+                    else next.delete(m.id)
+                    return next
+                  })}
+                  onLink={() => startLink(m)}
+                  onReply={() => startReply(m)}
+                  onReplyAll={() => startReply(m, true)}
+                  onForward={() => startForward(m)}
+                  onJunk={(j) => void junkOne(m, j)}
+                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onUnread={() => void unreadOne(m)}
+                  onCreateLead={() => setCreatingLead(m)}
+                  fetchAttachment={(f) => attachmentOf(m, f)} />
+              ))}
+            </ul>
+          </>
+        )}
+
+        {filter !== 'blocked' && (
+          <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100">
+            <div className="flex items-center gap-3">
+              <button disabled={page === 0} onClick={() => void load(page - 1)}
+                className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Previous</button>
+
+              {/*
+                HOW MANY PER PAGE, at the firm's instruction: "if there's a page one or a page two,
+                it should give you an option about how many emails to show you."
+
+                Only once paging is actually in play, or once somebody has changed it — a control
+                offering to resize a list that fits on one page is furniture. The same pills the
+                account book uses: one question asked in two places should not look like two
+                mechanisms.
+              */}
+              {(page > 0 || more || pageSize !== PAGE) && (
+                <span className="flex items-center gap-1 text-xs">
+                  <span className="text-slate-400">Show</span>
+                  {PAGE_SIZES.map((n) => (
+                    <button key={n} type="button" aria-pressed={pageSize === n}
+                      onClick={() => { setPageSize(n); setPage(0) }}
+                      className={`rounded-full border px-2 py-0.5 tabular-nums ${
+                        pageSize === n
+                          ? 'border-navy-950 bg-navy-950 text-white'
+                          : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                      {n}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </div>
+            <span className="text-xs text-slate-400">
+              {page > 0 || more ? `Page ${page + 1}` : ''}
+            </span>
+            <div className="flex items-center gap-3">
+              <button disabled={!more} onClick={() => void load(page + 1)}
+                className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-30">Next</button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {emptying && (
+        <EmptyJunkModal
+          count={items.length}
+          userId={currentUser?.id ?? null}
+          onClose={() => setEmptying(false)}
+          onDone={(message) => {
+            setEmptying(false); setStatus(message); setBlocksVersion((v) => v + 1); void load(0)
+          }}
+        />
+      )}
+
+
+      {junking && junking.length > 0 && (
+        <JunkModal
+          mails={junking}
+          userId={currentUser?.id ?? null}
+          alwaysJunked={alwaysJunked}
+          onClose={() => setJunking(null)}
+          onDone={(message) => {
+            setJunking(null)
+            setStatus(message)
+            /* A rule may have been made, so the standing-decision lists are re-read off the same
+               counter the blocklist uses -- and the page reloads, because what was junked has
+               left whichever tab it was on. */
+            setBlocksVersion((v) => v + 1)
+            void afterBulk()
+          }}
+        />
+      )}
+
+      {blocking && (
+        <BlockModal
+          mail={blocking}
+          userId={currentUser?.id ?? null}
+          onClose={() => setBlocking(null)}
+          onDone={(message) => {
+            // The blocklist just changed, so every row's "sender blocked" chip is re-evaluated.
+            setBlocking(null); setStatus(message); setBlocksVersion((v) => v + 1); void load(0)
+          }}
+        />
+      )}
+
+      {linking && (
+        <LinkModal
+          mail={linking}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          body={bodies[linking.id]}
+          linked={linkedDetails[linking.id]}
+          replying={linkThenReply}
+          onClose={() => { setLinking(null); setLinkThenReply(false) }}
+          onDone={(message, accountId, record) => {
+            const mail = linking
+            const goOn = linkThenReply
+            setLinking(null)
+            setLinkThenReply(false)
+            setStatus(message)
+            void load(page)
+            /*
+             * Straight into the composer, carrying what it was just filed against — the list
+             * reload above has not finished and would hand back a stale copy of this row.
+             *
+             * accountId decides whether the reply is chargeable: a debtor account carries item
+             * 1(a), a lead or a client carries nothing, and the composer says which.
+             */
+            if (goOn && mail) setReplying({ ...mail, linkedAccountId: accountId, isFiled: true, linkedTo: record })
+          }}
+          onSkip={() => {
+            const mail = linking
+            setLinking(null)
+            setLinkThenReply(false)
+            if (mail) setReplying(mail)
+          }}
+        />
+      )}
+
+      {creatingLead && (
+        <CreateLeadFromMailModal
+          mail={creatingLead}
+          body={bodies[creatingLead.id]}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setCreatingLead(null)}
+          onCreated={(lead) => {
+            setCreatingLead(null)
+            setCreatedLead(lead)
+            /* Reloaded now rather than when the box closes, so the row behind it is already
+               showing "On <the lead>" whichever way the question is answered. */
+            void load(page)
+          }}
+        />
+      )}
+
+      {createdLead && (
+        <LeadCreatedModal
+          lead={createdLead}
+          onClose={() => {
+            setCreatedLead(null)
+            setStatus('Lead created, and this email is filed on it.')
+          }}
+          onOpen={() => navigate(`/leads/${createdLead.id}`)}
+        />
+      )}
+
+      {moving && (
+        <MoveModal
+          mail={moving}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setMoving(null)}
+          onDone={(message) => { setMoving(null); setStatus(message); void load(page) }}
+        />
+      )}
+
+      {composing && (
+        <ComposeEmailModal
+          contextNote={'This goes out from your mailbox and lands on no record. To put a message on '
+            + 'a debtor\u2019s file, send it from the account instead — that is what charges item 1(a) '
+            + 'and files the copy.'}
+          onClose={() => setComposing(false)}
+          onSent={() => { setComposing(false); setStatus('Sent.'); void load(page) }}
+        />
+      )}
+
+      {forwarding && (
+        <ComposeEmailModal
+          initialSubject={forwardSubject(forwarding.mail.subject)}
+          /*
+            THE MARKUP WHERE THERE IS ANY. With HTML the original rides underneath as itself --
+            tables and all -- and the box above starts empty for a covering note. Without it,
+            nothing changes: the plain text is quoted into the box the way it always was.
+          */
+          {...(forwarding.html
+            ? { quotedHtml: forwardQuoteHtml(forwarding.mail, forwarding.html) }
+            : { initialBody: forwardBody(forwarding.mail, forwarding.body, forwarding.complete) })}
+          /*
+            NOT inReplyTo. A forward starts a new conversation with somebody who was not in the
+            old one; threading it onto the original would file the recipient's reply against the
+            debtor the original came from.
+          */
+          contextNote={'Forwarded from your mailbox. It lands on no record and nothing is charged '
+            + '\u2014 a forward is not correspondence with the debtor.'}
+          onClose={() => setForwarding(null)}
+          onSent={() => { setForwarding(null); setStatus('Forwarded.'); void load(page) }}
+        />
+      )}
+
+      {replying && (
+        <ComposeEmailModal
+          to={replying.fromAddress}
+          initialCc={replyAllCc(replying)}
+          initialSubject={replySubject(replying.subject)}
+          /*
+           * The message being answered, under the box. Falls back to the snippet where the body
+           * has not been fetched -- 240 characters of it is still the difference between knowing
+           * what you are answering and guessing.
+           */
+          quoted={bodies[replying.id] ?? replying.snippet ?? undefined}
+          /*
+           * The box starts empty, on purpose, exactly as it does on the account page. A debtor's
+           * reply already carries their own client's quoted chain, so quoting it again opens the
+           * message with two layers of "> " before the agent has typed a word — and the message
+           * being answered is on the page behind this modal anyway.
+           */
+          inReplyTo={replying.messageId}
+          /*
+           * Three different truths, and the agent should know which one applies before typing.
+           * A debtor is charged R25; a lead is not charged anything, because Annexure B is the
+           * tariff for collecting a debt; and unfiled mail lands nowhere at all.
+           */
+          contextNote={replying.linkedAccountId
+            ? `Goes out from your mailbox, lands on ${replying.linkedTo?.label ?? 'the account'}, and is charged R25 under item 1(a).`
+            : replying.linkedTo
+              ? `Goes out from your mailbox and is logged on ${replying.linkedTo.label}. No charge — Annexure B is for debtor accounts.`
+              : 'This message is not matched to anything, so nothing will be charged and the reply will not appear on any record. It goes out from your mailbox and that is all.'}
+          onClose={() => setReplying(null)}
+          onSent={(rawSubject, bodyText, messageId, from) => {
+            const answering = replying
+            setReplying(null)
+            if (!answering?.linkedAccountId) {
+              /*
+               * THE ACTIVITY, WHICH WAS NOT BEING WRITTEN.
+               *
+               * This branch already told the agent "Reply sent and logged on Acme" and then
+               * logged nothing: ComposeEmailModal hands the sent subject and body back for the
+               * caller to record, the account branch below records it through recordSentEmail,
+               * and this one simply returned. So a reply to a lead went out, the agent was told
+               * it was on the lead's history, and it was on nothing — the worst shape a message
+               * can take, because nobody goes looking for what they were told is already there.
+               *
+               * Written the same way the lead and deal pages write their own sent mail: one
+               * Email activity carrying the subject and body. No charge, and there is nothing to
+               * charge — Annexure B prices collecting a debt, and none of these is a debt.
+               */
+              const on = answering?.linkedTo
+              if (on) {
+                addActivity({
+                  type: 'Email',
+                  // Kept with the modal's "Email sent: " framing, which is the CRM activity
+                  // convention on the lead and deal pages. Stripped only on the account side,
+                  // where account_emails stores the debtor's own subject line.
+                  subject: rawSubject,
+                  notes: bodyText,
+                  emailMessageId: messageId ?? undefined,
+                  leadId: on.kind === 'lead' ? on.id : undefined,
+                  dealId: on.kind === 'deal' ? on.id : undefined,
+                  companyId: on.kind === 'client' ? on.id : undefined,
+                  contactId: on.kind === 'contact' ? on.id : undefined,
+                })
+              }
+              // Said plainly rather than left to be discovered. The agent chose this path.
+              setStatus(on
+                ? `Reply sent and logged on ${on.label}. No charge — Annexure B is for debtor accounts.`
+                : 'Reply sent. Not charged and not recorded — it was not matched to anything.')
+              return
+            }
+            /*
+             * Identical to the account page's own send: charged under item 1(a), filed on
+             * account_emails, and noted on the timeline. Reusing recordSentEmail is the point —
+             * a second, subtly different way to bill an email is how two systems disagree.
+             *
+             * The subject arrives with the modal's "Email sent: " framing, which is the CRM
+             * activity convention and means nothing on an account. Stripped so the debtor's own
+             * subject line is what gets stored.
+             */
+            void recordSentEmail({
+              accountId: answering.linkedAccountId,
+              to: answering.fromAddress,
+              from: from ?? null,
+              subject: rawSubject.replace(/^Email sent: /, ''),
+              body: bodyText,
+              messageId: messageId ?? null,
+              inReplyTo: answering.messageId,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+            }).then((charge) => {
+              setStatus(`Replied to ${answering.fromAddress}. ${chargeMessage(charge, '1a')}`)
+              void load(page)
+            }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The mailbox did not load. Said out loud, because the alternative is an empty list that reads
+ * as "you have no mail" — and the one thing worse than a broken mailbox is a broken mailbox
+ * nobody reports.
+ */
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="py-14 text-center">
+      <AlertTriangle size={22} className="mx-auto text-gold-600" />
+      <p className="text-sm font-medium text-slate-700 mt-3">Your mailbox could not be loaded.</p>
+      <p className="text-[13px] text-slate-500 mt-1">
+        This is not an empty mailbox — nothing was read, so nothing is missing. The reason is in
+        the red line above.
+      </p>
+      <button onClick={onRetry}
+        className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+        <RefreshCw size={13} /> Try again
+      </button>
+    </div>
+  )
+}
+
+function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; searching: boolean }) {
+  if (searching) return <p className="py-14 text-center text-sm text-slate-400">Nothing matches that.</p>
+  const words: Record<MailFilter, string> = {
+    all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
+    // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
+    junk: 'Nothing in junk.',
+    sent: 'Nothing sent yet. This fills from your mailbox\u2019s Sent folder, so mail you send from Outlook or your phone shows here too.',
+  }
+  return (
+    <div className="py-14 text-center">
+      <Inbox size={22} className="mx-auto text-slate-300" />
+      <p className="text-sm text-slate-500 mt-3">{words[filter]}</p>
+    </div>
+  )
+}
+
+/**
+ * The summary of a message: what both views show in the list.
+ *
+ * Split out of the row so the reading pane can use the same block down its left-hand side. Two
+ * identical-looking lists maintained separately is how they end up disagreeing.
+ */
+/**
+ * The left gutter: a tick box while selecting, otherwise the unread mark.
+ *
+ * ONE fixed-width element carrying both, so pressing Select swaps what is in the gutter without
+ * moving a single row sideways. Two separate elements that appear and disappear would shift the
+ * whole list every time the mode changed, which reads as the page glitching.
+ *
+ * The dot is the unread signal the firm asked for — "a little colourful show about it" — in the
+ * space the tick boxes used to occupy every day for the sake of a rare bulk action.
+ */
+/**
+ * Searching this mailbox, and narrowing it to what has not been read.
+ *
+ * One component with two homes -- inside the reading pane's list column, or above the plain list
+ * -- because they are the same control over the same list and drifting into two would be two
+ * places to fix a search that stopped working.
+ *
+ * UNREAD IS A DROPDOWN, not a tab and not a toggle. It narrows whichever tab you are standing on,
+ * so "unread junk" and "unread that still needs matching" are both askable; a tab could only ever
+ * have answered one of them. The count rides in the option itself, which is the honest place for
+ * it -- it is the number of rows choosing that option leaves behind.
+ */
+function MailSearchBar({
+  search, onSearch, unreadOnly, onUnreadOnly, unread, everywhere, onEverywhere, tabLabel,
+}: {
+  search: string
+  onSearch: (value: string) => void
+  unreadOnly: boolean
+  onUnreadOnly: (on: boolean) => void
+  /** Unread within the tab and search already applied, so the number matches what you would get. */
+  unread: number
+  /** Whether a search reaches past this tab into the rest of the mailbox. See MailScope. */
+  everywhere: boolean
+  onEverywhere: (on: boolean) => void
+  /** What the current tab is called, so the narrower option can name it. */
+  tabLabel: string
+}) {
+  return (
+    <div className="px-4 py-3 space-y-1.5">
+      <div className="flex items-center gap-2">
+      <label className="relative min-w-0 flex-1">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search mail&hellip;"
+          aria-label="Search your mailbox"
+          className="w-full text-sm rounded-lg border border-slate-200 bg-white pl-9 pr-3 py-2 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        />
+      </label>
+
+      {/*
+        A real <select>: the keyboard, the screen reader and an iPad's own picker all come free,
+        and the firm works on iPads. Styled rather than rebuilt, so what is on screen is still the
+        control the browser knows about.
+      */}
+      <div className="relative shrink-0">
+        <Filter size={13} aria-hidden
+          className={`absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
+            unreadOnly ? 'text-brand-700' : 'text-slate-400'}`} />
+        <select
+          value={unreadOnly ? 'unread' : 'all'}
+          onChange={(e) => onUnreadOnly(e.target.value === 'unread')}
+          aria-label="Narrow this list"
+          className={`appearance-none text-sm font-medium rounded-lg border pl-7 pr-7 py-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-100 ${
+            /* Tinted while it is narrowing, because a filter you cannot see is on is a mailbox
+               with mail missing from it. */
+            unreadOnly
+              ? 'border-brand-500 bg-brand-50 text-brand-700'
+              : 'border-slate-200 bg-white text-slate-600'}`}
+        >
+          <option value="all">All mail</option>
+          <option value="unread">{unread > 0 ? `Unread only \u00b7 ${unread}` : 'Unread only'}</option>
+        </select>
+        <ChevronDown size={13} aria-hidden
+          className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${
+            unreadOnly ? 'text-brand-700' : 'text-slate-400'}`} />
+      </div>
+      </div>
+
+      {/*
+        WHERE THE SEARCH IS LOOKING, said only while it is looking anywhere.
+
+        A line rather than a control, because the default is right nearly always and a permanent
+        segmented switch beside the box would be a question asked of somebody who has not typed
+        anything yet. It states what is happening and offers the other reading in the same breath.
+      */}
+      {search.trim() !== '' && (
+        <p className="text-[11px] text-slate-400">
+          {everywhere ? 'Searching the whole mailbox, junk and sent included.' : `Searching ${tabLabel} only.`}
+          {' '}
+          <button type="button" onClick={() => onEverywhere(!everywhere)}
+            className="font-medium text-slate-500 underline underline-offset-2 hover:text-slate-800">
+            {everywhere ? `Search ${tabLabel} only` : 'Search everywhere'}
+          </button>
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RowGutter({ mail, selecting, chosen, onChoose, inline }: {
+  mail: MailItem
+  selecting: boolean
+  chosen: boolean
+  onChoose: (on: boolean) => void
+  /** The list's one-line row, where the box centres on the line rather than on a stacked
+      summary's first line. */
+  inline?: boolean
+}) {
+  /*
+   * NOTHING AT ALL WHEN NOTHING IS BEING SELECTED. The firm: "the little circles that indicate the
+   * name are in a weird place, off-centre and a little bit to the right -- make them a little more
+   * to the left. The moment you select something it'll move a little to the right to make space
+   * for that little circle."
+   *
+   * Exactly so. This column was permanently sixteen pixels wide because it carried the unread mark
+   * as well as the tick box, which pushed every avatar in off the edge and left a gap beside it on
+   * every row, for ever, to serve a mode that is off almost all the time. The unread mark moved
+   * onto the avatar itself -- see MailSummary -- so the column can collapse, and the list shifts
+   * right only while Select is actually on.
+   */
+  if (!selecting) return null
+  return (
+    <span className={`w-4 shrink-0 grid place-items-center ${inline ? '' : 'self-start mt-3'}`}>
+      <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
+        aria-label={`Select the email from ${mail.fromAddress}`} />
+    </span>
+  )
+}
+
+/**
+ * What has happened to this message, on the row.
+ *
+ * The firm asked for it once All became the first tab: a single list of everything is only
+ * useful if each row says where it stands, otherwise filed mail, junk and mail still waiting all
+ * look identical.
+ *
+ * ON THE SUBJECT LINE, not on a line of its own. Rows were deliberately shortened earlier at the
+ * firm's request ("Make it smaller"), and a status line per row would have put every one of those
+ * pixels straight back. Right-aligned opposite the subject costs nothing.
+ *
+ * IT SAYS WHAT HAS HAPPENED, NOT WHAT IS OWED. There were four states and two of them were a
+ * queue's: a gold "Needs matching" on everything nobody had filed, and a grey "Open mail" on what
+ * somebody had excused from filing. THE FIRM: "it's irritating having to match everybody. Just
+ * keep everyone in your main mailbox."
+ *
+ * A chip on four rows in five, in the colour this app uses for work outstanding, is that
+ * irritation printed on every line of the mailbox -- and removing the tab while leaving the chip
+ * would have moved the nagging rather than ended it. What is left is two facts worth knowing at a
+ * glance: this one is ON a record, or this one is junk. An ordinary message says nothing, because
+ * there is nothing to say about it.
+ *
+ * Blocked is NOT one of them — it describes the sender, not the message — so it rides alongside as
+ * its own chip where it applies.
+ */
+function MailStatus({ mail, blocked, tight }: {
+  mail: MailItem
+  blocked: BlockedSender[]
+  /** The reading pane's narrow column: labels shorten, the record name is dropped. */
+  tight?: boolean
+}) {
+  const block = blockedBy(mail.fromAddress, blocked)
+  const chip = 'shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap'
+
+  return (
+    <>
+      {mail.linkedTo ? (
+        <span className={`${chip} bg-positive-50 text-[var(--c-green)] max-w-[14rem]`}
+          title={`Matched to ${mail.linkedTo.label} — ${CRM_OR_ACCOUNT[mail.linkedTo.kind]}`}>
+          <Link2 size={10} className="shrink-0" />
+          <span className="truncate">{tight ? 'Matched' : `On ${mail.linkedTo.label}`}</span>
+        </span>
+      ) : mail.isJunk ? (
+        <span className={`${chip} bg-slate-100 text-slate-500`}>
+          <ShieldAlert size={10} /> Junk
+        </span>
+      ) : null}
+
+      {block && (
+        <span className={`${chip} bg-negative-50 text-negative-700`}
+          title={`Nothing further from ${block.kind === 'domain' ? block.pattern : block.pattern} reaches Raptor. Unblock under the Blocked tab.`}>
+          <Ban size={10} /> {tight ? 'Blocked' : 'Sender blocked'}
+        </span>
+      )}
+    </>
+  )
+}
+
+function MailSummary({ mail, tight, blocked }: {
+  mail: MailItem
+  /** The reading pane's narrow column: one line of preview, no sender address, short chips. */
+  tight?: boolean
+  /** The agent's blocklist, for marking a sender nothing further will arrive from. */
+  blocked?: BlockedSender[]
+}) {
+  const unread = !mail.readAt
+  return (
+    /*
+      Who, then what about, then what it says.
+      
+      The firm's ordering, and it is how a mailbox is actually read: you recognise the sender
+      first and decide from that whether the subject is worth reading. Leading with the subject
+      made every row start with a phrase like "Re: Account Abc1111" — indistinguishable from the
+      next one — and buried the one thing that tells a debtor's reply from a newsletter.
+
+      Three tiers of weight follow the same order: the sender carries the most, the subject
+      less, the preview least. Unread deepens the sender rather than adding a fourth signal.
+    */
+    <span className={`flex min-w-0 ${tight ? 'items-start gap-3' : 'items-center gap-2.5'}`}>
+      {/*
+        The sender, as a face before it is a name. See senderColour -- the colour is the whole
+        point, and it is why this is worth the width: a mailbox is scanned by correspondent, and
+        recognising one takes a glance where reading a name takes a beat.
+
+        A span, because this whole summary renders inside a button and a div there is invalid.
+
+        AND IT CARRIES THE UNREAD MARK, which used to have a column of its own to the left of it.
+        That column was sixteen pixels on every row for ever to serve a dot that is on some of
+        them -- and it was what pushed the avatars in off the edge. As a badge it costs nothing,
+        and it is nearer the name it belongs to. The ring is the row's own background, so the dot
+        reads as sitting ON the face rather than behind it.
+      */}
+      <span className="relative shrink-0 inline-flex">
+        <Avatar name={mail.fromName || mail.fromAddress} color={senderColour(mail.fromAddress)}
+          size={tight ? 32 : 22} />
+        {!mail.readAt && (
+          <span aria-hidden title="Unread"
+            className={`absolute -top-0.5 -right-0.5 rounded-full bg-brand-500 ring-2 ring-white ${tight ? 'w-2.5 h-2.5' : 'w-2 h-2'}`} />
+        )}
+      </span>
+
+      {tight ? (
+        <span className="block min-w-0 flex-1">
+        {/* 1. Who it is from, and when. */}
+        <span className="flex items-baseline gap-2">
+          <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}>
+            {/* The name alone: the address would push the name itself out of sight here. */}
+            {mail.fromName || mail.fromAddress}
+          </span>
+          <span className="ml-auto shrink-0 text-xs text-slate-400">
+            {relativeDayLabel(mail.occurredAt)}
+          </span>
+        </span>
+
+        {/* 2. What it is about, and where the message stands. */}
+        <span className="flex items-center gap-2 mt-0.5">
+          <span className={`text-[13px] truncate ${unread ? 'text-slate-700' : 'text-slate-500'}`}>
+            {mail.subject || '(no subject)'}
+          </span>
+          {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+          {/*
+            Pushed to the right end of the subject line rather than given a line of its own — the
+            state of a row belongs where the eye already is, and costs no height there.
+          */}
+          <span className="ml-auto flex items-center gap-1.5">
+            <MailStatus mail={mail} blocked={blocked ?? []} tight />
+          </span>
+        </span>
+        {/*
+          One line of preview. A four-line row is one you scroll past rather than scan.
+
+          `truncate` for the single line rather than `line-clamp-1`, deliberately. line-clamp needs
+          display:-webkit-box, and two things go wrong with that here: Tailwind emits `.block` later
+          in the stylesheet, so pairing them silently kills the clamp; and Safari can reserve the
+          UNCLAMPED height while painting only the visible line, which is what left ~120px of blank
+          space under every row with a preview on the firm's iPad. Chromium renders the same markup
+          at 81px, which is why it took a screenshot to find.
+
+          truncate is overflow+ellipsis+nowrap — no display trickery, identical everywhere.
+        */}
+        {mail.snippet && (
+          <span className="block text-[13px] text-slate-400 mt-0.5 truncate">
+            {mail.snippet}
+          </span>
+        )}
+        </span>
+      ) : (
+        /*
+          ONE LINE IN THE LIST, the firm's checking-list look: "thin, sleek, easy to read. The rest
+          is bulky, information is all over the place." The list used to give every message three
+          lines -- sender, subject, two lines of preview -- so a page of mail was a dozen rows and
+          had to be scrolled to be scanned. Now each tier is a column on one line, in the same
+          order and weight: the sender (address after the name, cut off rather than wrapped, the
+          whole of it in the tooltip), then the subject with the preview trailing it in grey, then
+          the chips, then the day at the right edge where every row's day lines up.
+
+          Only the narrow reading-pane column keeps the stacked form above: at a third of the
+          screen there is no line long enough to hold a sender and a subject side by side.
+        */
+        <span className="flex items-center gap-2 min-w-0 flex-1 text-[12.5px] whitespace-nowrap">
+          <span className={`w-36 sm:w-56 shrink-0 truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}
+            title={mail.fromName ? `${mail.fromName} <${mail.fromAddress}>` : mail.fromAddress}>
+            {mail.fromName || mail.fromAddress}
+            {mail.fromName && (
+              <span className="font-normal text-slate-400"> &middot; {mail.fromAddress}</span>
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className={unread ? 'font-medium text-slate-800' : 'text-slate-600'}>
+              {mail.subject || '(no subject)'}
+            </span>
+            {mail.snippet && <span className="text-slate-400"> &middot; {mail.snippet}</span>}
+          </span>
+          {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+          <MailStatus mail={mail} blocked={blocked ?? []} />
+          <span className="shrink-0 min-w-[4.5rem] text-right text-[12px] text-slate-400 tabular-nums">
+            {relativeDayLabel(mail.occurredAt)}
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Everything you can do with an open message, in one bar, in one of two places.
+ *
+ * See the placement note in MailBody: floating at the foot of the reading pane, an ordinary row at
+ * the top of an expanded list row. Written once so the two cannot end up offering different things.
+ */
+function MessageActions({
+  mail, sticky, moreActions, onReply, onReplyAll, onForward, onUnread,
+}: {
+  mail: MailItem
+  sticky: boolean
+  moreActions: RowMenuItem[]
+  onReply: () => void
+  onReplyAll: () => void
+  onForward: () => void
+  onUnread: () => void
+}) {
+  /*
+   * SPARK'S BAR, WHICH THE FIRM SENT OVER: "I kind of like the one that Spark did better -- it's
+   * smaller and it's kind of nicer ... it stays there, so if you scroll up or down through the
+   * email it kind of stays there as a little bar."
+   *
+   * A floating pill at the foot of the message, icon-only, with the overflow at one end and the
+   * one action you actually came for set apart at the other. Three things follow from that shape
+   * and each of them is the point:
+   *
+   *  - IT FLOATS, so the old complaint ("it's sitting there at the bottom and I have to scroll
+   *    down all the way to do anything") does not come back. It is at the bottom AND always on
+   *    screen, which the version at the top of the message only managed by being in the way.
+   *  - IT IS ICONS, which is where the bulk went. Six labelled buttons and a record name wrapped
+   *    onto a second row on an iPad; six icons do not.
+   *  - REPLY KEEPS ITS WORD. Spark's accent button is separated and unlabelled, and a row of
+   *    near-identical arrows is fine for somebody who uses Spark all day. A collector should not
+   *    have to work out which arrow is reply-all, so the ones that are only arrows carry tooltips
+   *    and the one that matters carries its name.
+   */
+  return (
+    <div className={sticky
+      /* pointer-events-none on the rail so the bar does not swallow clicks on the message under
+       it; restored on the pill itself, which is the only part anybody aims at. */
+      ? 'sticky bottom-3 z-20 mt-auto pt-4 flex justify-center pointer-events-none'
+      : 'flex flex-wrap items-center gap-1.5 pb-2'}>
+      <div className={sticky
+      ? 'pointer-events-auto inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white/95 backdrop-blur px-1.5 py-1 shadow-lg'
+      : 'contents'}>
+
+      {/*
+        Not yet, which is a legitimate answer. Without it, opening a message to see whether it
+        was urgent was the same act as deciding it was not. First, as it is in Spark.
+      */}
+      <BarButton sticky={sticky} onClick={onUnread} label="Mark unread" icon={<MailIcon size={15} />} />
+
+      {/*
+        REPLY ALL, at the firm's instruction: "I also can't respond to all recipients." A debtor
+        who copies their attorney was answered privately, so the attorney never saw the answer
+        to the question they had been copied on.
+
+        Absent where nobody else was on it, rather than present and doing the same as Reply.
+      */}
+      {(mail.toRecipients.length + mail.ccRecipients.length) > 1 && (
+        <BarButton sticky={sticky} onClick={onReplyAll} label="Reply all" icon={<ReplyAll size={15} />} />
+      )}
+
+      {/*
+        FORWARD, which Reply alone could not cover. Passing a debtor's dispute to the client who
+        has to answer it, or a mandate to the attorney, is everyday work that otherwise meant
+        opening Outlook — and mail managed in two places is mail managed in neither.
+      */}
+      <BarButton sticky={sticky} onClick={onForward} label="Forward" icon={<ForwardIcon size={15} />} />
+
+      {/*
+        Through to the debtor's file, which is the other half of managing mail from one place:
+        the message is here, but the balance, the arrangement and the history are there.
+
+        Still a Link, because middle-click and "open in new tab" both work on one and neither
+        survives being anything else — which matters when you are working a message and want
+        the account beside it. Its label lives in the tooltip on the bar, where the record name
+        was the widest thing on the row and the reason it wrapped.
+      */}
+      {mail.linkedTo && (
+        <Link to={mail.linkedTo.path} title={`Open ${mail.linkedTo.label}`}
+          aria-label={`Open ${mail.linkedTo.label}`}
+          className={sticky
+            ? 'inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            : 'inline-flex items-center gap-1 min-w-0 max-w-[15rem] text-[13px] font-medium px-2 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-50'}>
+          <ExternalLink size={15} className="shrink-0" />
+          {!sticky && <span className="truncate">Open {mail.linkedTo.label}</span>}
+        </Link>
+      )}
+
+      {/*
+        The rest, behind the dots. They are filing decisions -- taken once per message and never
+        in a hurry -- so they cost a click and buy back a bar that reads at a glance.
+      */}
+      {/*
+        AND NOTHING WHERE THERE IS NOTHING. On an unmatched message the bar has taken every filing
+        decision, which leaves this menu empty -- and a dots button that opens a blank panel is
+        worse than no dots at all: it reads as a feature that has broken rather than as one that
+        does not apply.
+      */}
+      {moreActions.length > 0 && (
+        <div className={sticky ? '' : 'ml-auto'}>
+          <RowMenu width="w-56" bordered={!sticky} up={sticky}
+            label="More things to do with this message" items={moreActions} />
+        </div>
+      )}
+
+      {/* A hairline, so the thing you came for is not just another icon in the row. */}
+      {sticky && <span aria-hidden className="mx-1 w-px h-5 bg-slate-200" />}
+
+      {/*
+        REPLY, set apart, where Spark puts its own accent button. It is the whole reason the
+        mailbox stopped being read-only: answering a debtor used to mean finding their account
+        and starting again there, so the mailbox was a filing tray rather than a place you
+        worked. What it does depends on whether this message is on an account yet -- see
+        startReply.
+      */}
+      <button onClick={onReply}
+        className={`inline-flex items-center gap-1.5 font-medium border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 ${
+          sticky ? 'text-[13px] px-3.5 py-1.5 rounded-full' : 'text-[13px] px-3 py-1.5 rounded-lg'}`}>
+        <Reply size={15} /> Reply
+      </button>
+      </div>
+    </div>
+
+  )
+}
+
+/**
+ * One icon on that bar.
+ *
+ * Icon-only where it floats and labelled where it does not, because the two placements have
+ * different room and the same buttons. A tooltip AND an aria-label on both: an icon with neither
+ * is a button nobody can name, and "which arrow was reply-all?" is exactly the question a
+ * collector should not have to answer from memory.
+ */
+function BarButton({ sticky, onClick, label, icon }: {
+  sticky: boolean
+  onClick: () => void
+  label: string
+  icon: ReactNode
+}) {
+  return (
+    <button onClick={onClick} title={label} aria-label={label}
+      className={sticky
+        ? 'inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+        : 'inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'}>
+      {icon}
+      {!sticky && label}
+    </button>
+  )
+}
+
+/** The message itself, shared by the expanded row and the reading pane. */
+/**
+ * A message's own markup, on screen, with nothing of the message reaching the page.
+ *
+ * WHY AN IFRAME AND NOT dangerouslySetInnerHTML. A scan can always be got wrong; a frame does not
+ * have to be right. The sandbox here carries NO `allow-scripts`, which is a browser-level block on
+ * every way HTML has of running code — inline handlers, `javascript:` hrefs, scripts that were
+ * mis-nested past the scan in src/lib/emailHtml.ts — and it does not depend on that file. The
+ * document also carries `default-src 'none'`, so it cannot fetch anything from anybody. Layout is
+ * contained for free: a newsletter's `position:fixed` banner cannot sit over Raptor's own toolbar.
+ *
+ * WHY `allow-same-origin` IS IN THE LIST. Without it the frame is an opaque origin and this
+ * component cannot read the height of what it just rendered — which means either a fixed box with
+ * a scrollbar inside a scrolling list, or a two-line reply in a 600px hole. With it the height is
+ * measured and the frame is exactly as tall as the message. It is safe HERE and would not be
+ * anywhere else: same-origin is only worth having to a script, and no script can run in this
+ * document — the sandbox forbids it and the content policy forbids it again.
+ *
+ * `allow-popups-to-escape-sandbox` is what makes a link actually work. A link opened from a
+ * sandboxed frame inherits the sandbox unless this is set, so the debtor's bank statement portal
+ * would open in a tab with its own scripting turned off — which looks exactly like the broken
+ * links this was written to fix.
+ */
+function EmailFrame({ html }: { html: string }) {
+  const frame = useRef<HTMLIFrameElement | null>(null)
+  /* 0 means "not measured yet". The placeholder below is deliberately short: growing into place
+     reads better than a tall box collapsing. */
+  const [height, setHeight] = useState(0)
+
+  const measure = useCallback(() => {
+    const doc = frame.current?.contentDocument
+    if (!doc?.body) return
+    const wanted = Math.max(doc.body.scrollHeight, doc.documentElement?.scrollHeight ?? 0)
+    /*
+     * Capped, and the cap is not cosmetic. A marketing mail can run to tens of thousands of
+     * pixels, and a frame that tall inside a scrolling list means the list's own scrollbar stops
+     * describing the list. Past the cap the message scrolls inside its own frame, which is what
+     * every other mail client does with the reading pane anyway.
+     */
+    setHeight(Math.min(Math.max(wanted + 2, 48), 3200))
+  }, [])
+
+  /*
+   * Measured again a moment later, once rather than on a timer.
+   *
+   * `load` fires when the document and its subresources are done, but a webfont-less newsletter
+   * frequently reflows after that — and pressing "Show pictures" swaps in images whose own sizes
+   * are not known until they arrive. One late measurement covers both and costs nothing.
+   */
+  useEffect(() => {
+    setHeight(0)
+    const later = setTimeout(measure, 400)
+    return () => clearTimeout(later)
+  }, [html, measure])
+
+  return (
+    <iframe
+      ref={frame}
+      /* Named, because a frame with no title is an unlabelled region to a screen reader. */
+      title="Message"
+      srcDoc={html}
+      onLoad={measure}
+      referrerPolicy="no-referrer"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      className="block w-full border-0 bg-white"
+      style={{ height: `${height || 48}px` }}
+    />
+  )
+}
+
+function MailBody({
+  mail, body, html, showPictures, onShowPictures,
+  images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
+  bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread,
+  onLink, onCreateLead, fetchAttachment, sticky,
+}: {
+  mail: MailItem
+  body?: string
+  /**
+   * The message as it was written, where it was written in HTML.
+   *
+   * Rendered in a sandboxed frame, never into this page — see EmailFrame and sanitizeEmailHtml.
+   */
+  html?: string
+  /** Whether the reader has asked to fetch this message's remote pictures. */
+  showPictures?: boolean
+  onShowPictures?: () => void
+  /** The raw ICS where this was a meeting request. Parsed here — see parseInvite. */
+  calendar?: string
+  /** This person's calendar, so an invite already on it says so. */
+  events: CalendarEvent[]
+  onAccept: (invite: CalendarInvite) => Promise<void>
+  /** Tell the organiser. See replyToInvite — this is the half that leaves the building. */
+  onRespond: (invite: CalendarInvite, response: InviteResponse) => Promise<void>
+  onRemoveEvent: (id: string) => Promise<void>
+  /** Pictures drawn into the message — a signature, nearly always. */
+  images?: InlineImage[]
+  /** How many were left behind for being too big. Said out loud rather than left as a gap. */
+  skippedImages?: number
+  loadingBody: boolean
+  bodyError?: string
+  onBlock: () => void
+  onReply: () => void
+  /**
+   * Answer everybody who was on it.
+   *
+   * Offered only where there IS somebody else — a message addressed to one person has nothing
+   * for this button to do, and one that does nothing is one people stop believing.
+   */
+  onReplyAll: () => void
+  /** Pass it on to somebody who was not in the conversation — an attorney, the client. */
+  onForward: () => void
+  /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
+  onJunk: (junk: boolean) => void
+  /** Unmatch it, or rematch it from the same box. Null for anyone who is not an administrator. */
+  onMove: (() => void) | null
+  /** Put it back on the pile, and close it. */
+  onUnread: () => void
+  /** Put it on a record -- the picker, which searches leads, deals, clients and the book. */
+  onLink: () => void
+  /**
+   * Make a NEW lead out of the sender and file the message on it.
+   *
+   * The half the picker could never cover: an enquiry from somebody the firm has never dealt with
+   * matches nothing, and the honest answer was to leave the mailbox, add a lead, come back and
+   * find the message again. Three screens for the most valuable email of the day.
+   */
+  onCreateLead: () => void
+  /**
+   * Pin the toolbar to the top of the pane it is scrolling in.
+   *
+   * Only in the reading pane, where the message has a scroll container of its own. In the list an
+   * open message scrolls with the page, and a bar stuck to the top of the window there would sit
+   * over whichever OTHER message happened to be under it.
+   */
+  sticky?: boolean
+  /** Pull one attachment out of the mailbox, to be opened or saved. */
+  fetchAttachment: (filename: string) => Promise<Blob>
+}) {
+  /*
+   * THE OVERFLOW MENU, AND IT NOW CARRIES EVERY ANSWER, ALWAYS.
+   *
+   * THE FIRM: "you don't have a match section any more or a needs match section or an open mail
+   * section, but there is just an option to say match to a record. So you can create a lead. Match
+   * to a record. Move to junk. Block sender."
+   *
+   * WHICH IS A LIST OF OPTIONS, NOT A SEQUENCE OF QUESTIONS, and that is the change. These used to
+   * be rationed by what the message was: the gold bar owned them while a message was unmatched and
+   * the menu owned them once it was not, so that the two were never offering the same thing at
+   * once. That rationing existed to serve a queue -- it made sure the loose end was answered -- and
+   * with the queue gone it only means a collector has to work out WHERE a button is before they
+   * can press it. Every one of them is here, on every message, in one place.
+   *
+   * Each entry still carries its own reason for the shape it takes:
+   *
+   * - MATCH is first and is offered on everything, matched or not. On a message already on a
+   *   record it says "Match to another record", because that is what pressing it does -- the
+   *   picker refiles rather than adding a second home.
+   * - UNMATCH is only on mail filed on a DEBTOR account, and only where the caller may refile it --
+   *   the database refuses it for anybody else, so offering the button would be a lie. It is ONE
+   *   item and it says Unmatch, because two items made the agent choose between "rematch" and
+   *   "unmatch" before knowing which they could do, and the answer to "which account should this
+   *   be on?" is frequently "I do not know yet". The box behind it offers rematching underneath.
+   * - CREATE LEAD is the other kind of yes, and the half the picker can never cover: an enquiry
+   *   from somebody the firm has never dealt with matches nothing by definition.
+   * - JUNK sits between "file it" and "block them": this message is not work, without claiming
+   *   anything about the sender. Hidden on filed mail -- a message on a record is neither junk nor
+   *   anybody's to reclassify, and junking clears the record link in the database anyway.
+   * - BLOCK is last and is the only one marked as damage. It is the one action you should have
+   *   read something before taking, which is why it is on the open message and not on every row --
+   *   and it is offered even on mail already filed, because blocking is about future noise and not
+   *   about the message in front of you.
+   *
+   * MARK UNREAD IS NOT HERE. It is on the bar itself, where Spark puts it and where it belongs:
+   * it is the one of these that gets pressed in a hurry -- "not yet", said while scanning -- and
+   * it was in both places for one commit, which is one place too many.
+   *
+   * MARK AS OPEN IS GONE ENTIRELY. It was the third answer to "what is this?", and it existed to
+   * let a supplier's invoice out of the queue without matching it. Nothing is in a queue now, so
+   * it had nothing left to do.
+   */
+  /*
+   * The message, made safe to show.
+   *
+   * Recomputed only when the markup or the picture decision changes — a scan of a newsletter is
+   * not free and this component re-renders on every hover in the list behind it.
+   */
+  const safe = useMemo(
+    () => (html && html.trim() ? sanitizeEmailHtml(html, { images, showPictures }) : null),
+    [html, images, showPictures],
+  )
+  /*
+   * The pictures the message did NOT place for itself.
+   *
+   * A signature is a cid reference inside the markup, so once the markup is rendered the logo is
+   * already on screen; listing it again underneath showed every signature twice. What is left
+   * here is the picture that came with the message and is referred to by nothing — which still
+   * has to be shown, because that is the shape an image-only message arrives in.
+   */
+  const loosePictures = useMemo(() => {
+    if (!safe) return images ?? []
+    const placed = new Set(safe.usedCids)
+    return (images ?? []).filter((img) => !placed.has(img.cid.replace(/^<|>$/g, '').toLowerCase()))
+  }, [images, safe])
+
+  const moreActions: RowMenuItem[] = [
+    {
+      label: mail.isFiled ? 'Match to another record' : 'Match to a record',
+      icon: <Link2 size={15} />,
+      onClick: onLink,
+    },
+    ...(mail.linkedTo?.kind === 'account' && onMove
+      ? [{ label: 'Unmatch', icon: <Undo2 size={15} />, onClick: onMove }]
+      : []),
+    { label: 'Create a lead', icon: <UserPlus size={15} />, onClick: onCreateLead },
+    ...(!mail.isFiled
+      ? [mail.isJunk
+        ? { label: 'Not junk', icon: <Undo2 size={15} />, onClick: () => onJunk(false) }
+        : { label: 'Move to junk', icon: <ShieldAlert size={15} />, onClick: () => onJunk(true) }]
+      : []),
+    /* "Block sender", to match the Blocked tab. The long phrasing described the mechanism; this
+       names the thing, and the two now obviously belong together. */
+    { label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true },
+  ]
+
+  /* Gathered once, because the bar renders in one of two places and a second argument list would
+     be a second set of buttons waiting to happen. */
+  const bar = {
+    mail, sticky: !!sticky, moreActions, onReply, onReplyAll, onForward, onUnread,
+  }
+
+  return (
+    <>
+      {/*
+        IN THE LIST, THE ACTIONS STAY AT THE TOP, at the firm's earlier instruction: "it's sitting
+        there at the bottom and I have to scroll down all the way to do anything."
+
+        That complaint is about a bar you have to REACH. Spark's floating one never has to be
+        reached -- it is at the foot of the pane and always on screen -- so in the reading pane it
+        goes to the bottom and floats. An expanded row in the list has no scroll container of its
+        own, so there is nothing for a bar to float in and nothing to stop it sitting over the next
+        message; there it stays an ordinary row, above the message, where it always was.
+
+        One component, two placements, so the two cannot drift into different sets of buttons.
+      */}
+      {!sticky && <MessageActions {...bar} />}
+
+      {/*
+        AN ENQUIRY OFF THE WEBSITE, AND ONLY THAT.
+
+        This bar used to appear on EVERY unmatched message, headed "Not matched yet" with five
+        buttons under it -- which was the whole of what the firm asked to be rid of: "it's
+        irritating having to match everybody." A gold panel on four messages in five, saying the
+        same thing each time, is a queue drawn on the message rather than in a tab.
+
+        It survives for the one case where there is genuinely something to prompt: mail from the
+        website's contact form. That address has exactly one answer -- somebody new wants something
+        -- and the honest action, Create lead, is one nobody would think to look for behind the
+        dots on what looks like an ordinary email. One address, one prompt, a real new thing to do.
+      */}
+      <EnquiryBar mail={mail} onLink={onLink} onCreateLead={onCreateLead} />
+      {mail.attachmentNames.length > 0 && (
+        /*
+          BETWEEN THE TWO RULES, not sitting on the lower one. The firm: "the NDA attachment is
+          lying on top of the line that's on top of Hi Camille and Stephan -- make it in the middle
+          of those two little lines."
+
+          It was: `mt-3` put twelve pixels above the chips and nothing at all below them, so the
+          rule that separates the header from the message ran along their bottom edge. The space
+          above comes from the header's own margin, so this only has to supply the space below --
+          matching it here as well would double the top and put the chips off-centre the other way.
+        */
+        <div className="pb-3 flex flex-wrap items-center gap-1.5">
+          {/*
+            The files themselves are still not stored — each of these fetches out of the mailbox
+            on demand and streams straight to the browser. Names alone were not enough: a debtor
+            attaching proof of income to a payment arrangement is exactly the attachment a
+            collector needs, and reading the filename then opening Outlook is not using Raptor.
+          */}
+          <Paperclip size={11} className="text-slate-400" />
+          {mail.attachmentNames.map((name) => (
+            /* OPEN OR DOWNLOAD, each its own press (the firm, 19 Oct). It used to be one press
+               that "downloaded" -- and on the iPad put the PDF over Raptor instead. */
+            <FileActions key={name} name={name} label={<AttachmentLabel name={name} />}
+              fetchFile={() => fetchAttachment(name)} testId="mail-attachment" />
+          ))}
+        </div>
+      )}
+
+      {/* A rule under the controls, so the message reads as the message and not as more toolbar. */}
+      <div className="border-b border-slate-100 mb-3" />
+
+      {/*
+        A MEETING REQUEST, READ. Until now an invite rendered as "This message has no text in it":
+        its body is a text/calendar part, and the reader took text/plain and text/html only. A
+        collector could see somebody had written and nothing about what was being asked.
+
+        Above the message text on purpose. Where there IS text as well it is the organiser's
+        covering note, and what the meeting actually is beats a note about it.
+      */}
+      {!loadingBody && (
+        <InviteCard ics={calendar} events={events} onAccept={onAccept}
+          onRespond={onRespond} answered={mail.inviteResponse} onRemove={onRemoveEvent} />
+      )}
+
+      {loadingBody && (
+        <p className="text-[13px] text-slate-400 inline-flex items-center gap-1.5">
+          <Loader2 size={13} className="animate-spin" /> Fetching the message from your mailbox&hellip;
+        </p>
+      )}
+
+      {!loadingBody && body !== undefined && safe && (
+        /*
+         * THE MESSAGE AS IT WAS WRITTEN.
+         *
+         * This used to be the flattened text for every message, on the rule that a stranger's
+         * markup has no business in the page. The rule still holds for THE PAGE — nothing here
+         * goes into Raptor's own DOM. It goes into a frame that cannot run script and cannot
+         * fetch anything, which is a different proposition, and it is what a newsletter needs to
+         * be readable at all: flattening takes the pictures out and takes the links off the
+         * words, which is exactly how this was reported ("there's links there that I should
+         * press on, but it doesn't work").
+         */
+        <>
+          {safe.blockedRemote > 0 && !showPictures && (
+            /*
+             * Not a warning — nothing is wrong. It is an offer, and it has to say what pressing
+             * it costs, because the cost is the whole reason the pictures are not already there.
+             */
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border
+              border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">
+                Pictures in this message were not downloaded, so the sender cannot tell you opened it.
+              </p>
+              <button type="button" onClick={onShowPictures}
+                className="text-xs font-medium text-[var(--c-green)] hover:underline">
+                Show pictures
+              </button>
+            </div>
+          )}
+          <EmailFrame html={safe.html} />
+        </>
+      )}
+
+      {!loadingBody && body !== undefined && !safe && (
+        /*
+         * A message written in plain text, and the fallback for one whose markup came back empty.
+         * `whitespace-pre-wrap` because an email's own line breaks carry meaning — collapsing them
+         * turns a numbered arrangement into a paragraph. `break-words` because a pasted URL would
+         * otherwise push the page wide.
+         */
+        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+          {body.trim() || <span className="text-slate-400">This message has no text in it.</span>}
+        </p>
+      )}
+
+      {/*
+        The pictures the message was written WITH, as opposed to files attached to it.
+
+        This is the answer to a signature that is an image. Raptor read those messages as three
+        lines and a blank space where the sender's name, firm and number should have been —
+        because the text scan finds nothing in a picture, and the picture was never sent to the
+        browser at all. Now it is, and a collector can simply read it.
+
+        Every src here is a data: URI carrying its own bytes. Nothing is fetched from anybody
+        else's server, so a remote tracking pixel cannot report that this debtor's mail was
+        opened, by whom, or when — see fetchMessageBody, which is where the bytes are read.
+      */}
+      {!loadingBody && body !== undefined && !images?.length && !!skippedImages && (
+        /* A gap with no explanation reads as a broken feature — which is exactly how the first
+           version of this was reported. If the picture is not here, the message says why. */
+        <p className="text-xs text-slate-400 mt-3">
+          {skippedImages === 1
+            ? 'One picture in this message was too large to show here.'
+            : `${skippedImages} pictures in this message were too large to show here.`}
+        </p>
+      )}
+
+      {!loadingBody && loosePictures.length > 0 && (
+        <div className="mt-3">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
+            In this message
+          </p>
+          <div className="flex flex-wrap items-start gap-2">
+            {loosePictures.map((img, i) => (
+              <ZoomableImage
+                key={img.cid || img.filename || i}
+                src={img.dataUri}
+                /* A signature picture has no useful alt text of its own; naming it as one is
+                   more honest to a screen reader than an empty string or a filename. */
+                alt={img.filename || 'Image from this message'}
+                /*
+                  Twice the height it used to be. A signature sets its own telephone number in
+                  about eight points, and at 160px the number was there but not readable — which
+                  is no better than not showing it. The width cap still stops a full-width
+                  letterhead pushing the reading pane wide, and it is the width that binds on a
+                  phone; click it for anything bigger.
+                */
+                className="max-w-full max-h-80 w-auto block"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!loadingBody && bodyError && (
+        <>
+          {/* Fall back to what Raptor holds rather than showing nothing. */}
+          {mail.snippet && (
+            <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}</p>
+          )}
+          <p className="text-xs text-gold-600 mt-2">
+            {bodyError} Showing the first {mail.snippet?.length ?? 0} characters Raptor saved.
+          </p>
+        </>
+      )}
+
+      {sticky && <MessageActions {...bar} />}
+
+    </>
+  )
+}
+
+/**
+ * A meeting request, as the four things somebody needs to decide whether to go.
+ *
+ * WHAT IT DOES NOT DO IS PRETEND. Raptor has no calendar to put a meeting in -- CalendarPage
+ * renders tasks and deal dates, there is no events table and no connection to Outlook or Google
+ * -- so there is no Accept button here. A button that notified the organiser and put the meeting
+ * nowhere would be worse than none: the collector would believe it was in their day.
+ *
+ * The .ics is attached to the message and downloads from the row above, which opens in whatever
+ * calendar they actually use. That is the honest answer until Raptor has one of its own.
+ */
+/**
+ * A NEW ENQUIRY OFF THE WEBSITE.
+ *
+ * WHAT THIS WAS. It was NotMatchedBar, and it appeared on every message that was not on a record:
+ * a gold panel headed "Not matched yet" offering Match, Mark as open, Move to junk, Block sender
+ * and Create lead. It was built when matching was a queue somebody had to clear.
+ *
+ * THE FIRM ENDED THE QUEUE: "it's irritating having to match everybody. Just keep everyone in your
+ * main mailbox. If you want to match someone, match them." A panel saying "not matched yet" on
+ * four messages in five IS that irritation -- the tab was only where it was counted. So the panel
+ * went with the tabs, and all five actions moved into the overflow menu, where they are offered on
+ * every message whatever state it is in. See moreActions.
+ *
+ * WHAT IS LEFT IS THE ONE CASE THAT WAS NEVER A NAG. Mail from the website's contact form is not a
+ * message somebody has failed to file -- it is a stranger asking the firm for something, and the
+ * useful action is to make a lead out of them, which no amount of matching could do. One address,
+ * one prompt, and a new thing to do rather than a loose end to tidy.
+ *
+ * BLOCKING IS STILL NOT OFFERED HERE, which was always deliberate: every enquiry arrives from the
+ * one address, so blocking it from this bar would not silence a time-waster -- it would silence
+ * the contact form, permanently, for everybody, and the next fortnight's enquiries would simply
+ * never arrive. It stays behind the dots, where it costs a deliberate click and a box that says
+ * what it does.
+ *
+ * Nothing is charged either way. Annexure B is for debtor accounts; the sales side raises nothing.
+ */
+function EnquiryBar({ mail, onLink, onCreateLead }: {
+  mail: MailItem
+  onLink: () => void
+  onCreateLead: () => void
+}) {
+  /* The one address this is for. Everything else gets no bar at all -- which is the change. */
+  if (!isLeadIntake(mail.fromAddress)) return null
+  /* And not once it has been dealt with: a lead made or a record matched is an answered enquiry,
+     and a prompt that stays up after it has been obeyed is the nag in miniature. */
+  if (mail.isFiled) return null
+
+  const primary = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+  const secondary = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+
+  return (
+    <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2
+      flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="inline-flex items-center gap-2 shrink-0">
+        <Info size={14} className="text-slate-400" />
+        <span className="text-[13px] font-medium text-slate-700">A new enquiry off the website</span>
+      </span>
+
+      <span className="flex flex-wrap items-center gap-1.5">
+        <button onClick={onCreateLead} className={primary}>
+          <UserPlus size={13} /> Create lead
+        </button>
+        {/* Because sometimes they are already on the books -- an existing client using the form
+            rather than the address they were given. */}
+        <button onClick={onLink} className={secondary}>
+          <Link2 size={13} /> Match instead
+        </button>
+      </span>
+    </div>
+  )
+}
+
+/**
+ * To and Cc, under the sender, on ONE LINE EACH.
+ *
+ * The firm, on three recipients spread down four lines: "all of this is underneath each other,
+ * make it in a line next to each other to save space, because it's becoming bulky down there."
+ *
+ * The saving is in what is printed, not in the font. `recipientLine` writes real header values --
+ * "Stephan Ferreira <stephan@bredellferreira.co.za>" -- because that is what goes into a Cc box
+ * and out on the wire; on screen the addresses are the part nobody reads and four fifths of the
+ * width. So: names, the mailbox owner as "you", and the full list in the title for the one time
+ * somebody does need to check an address.
+ *
+ * Absent entirely where there is nobody to name: a message addressed to one person, which is most
+ * of them, gains nothing from a line saying so. Mail synced before these columns existed has
+ * empty lists and is silent for the same reason -- it says nothing rather than claiming nobody
+ * else was on it.
+ */
+function RecipientLines({ mail, mine }: {
+  mail: MailItem
+  /** The addresses that are this agent's, so they read as "you" rather than as a third name. */
+  mine?: (string | null | undefined)[]
+}) {
+  if (mail.toRecipients.length === 0 && mail.ccRecipients.length === 0) return null
+  const own = (mine ?? []).filter((a): a is string => !!a)
+  const line = 'text-xs text-slate-400 truncate'
+  /*
+   * "+4" RATHER THAN A CUT-OFF LINE, which is Spark's and is what the firm sent over. A clipped
+   * line ends mid-address and says nothing about how much was clipped; a count is exact, and nine
+   * people on a message is itself worth knowing before you answer it.
+   */
+  return (
+    <div className="mt-0.5">
+      {mail.toRecipients.length > 0 && (
+        <p className={line} title={recipientLine(mail.toRecipients)}>
+          <span className="text-slate-500">To:</span> {recipientSummary(mail.toRecipients, own)}
+        </p>
+      )}
+      {mail.ccRecipients.length > 0 && (
+        <p className={line} title={recipientLine(mail.ccRecipients)}>
+          <span className="text-slate-500">Cc:</span> {recipientSummary(mail.ccRecipients, own)}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
+  ics?: string
+  events: CalendarEvent[]
+  /** Put it in the day and tell nobody. What is left when there is no organiser to answer. */
+  onAccept: (invite: CalendarInvite) => Promise<void>
+  onRespond: (invite: CalendarInvite, response: InviteResponse) => Promise<void>
+  /** What this person already told the organiser, if anything. */
+  answered: InviteResponse | null
+  onRemove: (id: string) => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  /*
+   * THE FIRM'S OWN CLOCK, AND THE SAME ONE acceptInvite USES. A floating time -- no `Z`, no
+   * `TZID` -- is read on the observer's clock by RFC 5545, and the observer here is the firm.
+   * Reading it any other way than the write does is how the two came to disagree before.
+   *
+   * ABOVE THE EARLY RETURN WITH THE OTHER HOOKS, not down beside the line that uses it: a message
+   * with no calendar part returns null before that point, so a hook there runs on some renders of
+   * this component and not others and React loses its place in the hook list.
+   */
+  const homeZone = useFirmTimeZone()
+  const invite = parseInvite(ics)
+  if (!invite) return null
+
+  const when = inviteWhen(invite.when)
+  const people = invite.attendees.filter((a) => a.name || a.email)
+  const already = eventForInvite(events, invite)
+  /*
+   * A meeting whose hour Raptor could not work out. Computed the same way the WRITE does, rather
+   * than from the presence of a TZID: the two disagreed, and the screen was the one that was
+   * wrong — it stayed quiet while the event was stored with no date.
+   */
+  const undated = !invite.when.allDay
+    && invite.when.startsAt !== null
+    && inviteInstant(invite.when, homeZone).startsAt === null
+  /* Offered only where a reply would actually reach somebody — see canReplyTo. */
+  const canAnswer = canReplyTo(invite)
+  const organiserName = invite.organiser?.name ?? invite.organiser?.email ?? 'The organiser'
+
+  async function run(work: () => Promise<void>) {
+    setBusy(true); setError(null)
+    try { await work() } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className={`mb-3 rounded-lg border px-3 py-2.5 ${
+      /* A cancellation is not an invitation and must not look like one. */
+      invite.cancelled ? 'border-negative-100 bg-negative-50' : 'border-gold-300 bg-gold-50'
+    }`}>
+      <p className={`text-[11px] uppercase tracking-wide font-medium inline-flex items-center gap-1.5 ${
+        invite.cancelled ? 'text-negative-700' : 'text-[var(--c-gold-deep)]'
+      }`}>
+        <CalendarDays size={12} /> {inviteHeadline(invite)}
+      </p>
+
+      <p className={`text-sm font-medium mt-1 break-words ${
+        invite.cancelled ? 'text-negative-700 line-through' : 'text-navy-950'
+      }`}>
+        {invite.summary ?? 'Untitled meeting'}
+      </p>
+
+      <dl className="mt-1.5 space-y-0.5">
+        {when && <InviteLine label="When" value={when} note={invite.repeats} />}
+        {invite.location && <InviteLine label="Where" value={invite.location} />}
+        {invite.organiser && (
+          <InviteLine label="Called by"
+            value={invite.organiser.name ?? invite.organiser.email ?? 'Unknown'}
+            note={invite.organiser.name ? invite.organiser.email : null} />
+        )}
+        {people.length > 0 && (
+          <InviteLine label={people.length === 1 ? 'Also asked' : `Also asked (${people.length})`}
+            value={people.slice(0, 4).map((a) => a.name ?? a.email).join(', ')
+              + (people.length > 4 ? `, and ${people.length - 4} more` : '')} />
+        )}
+      </dl>
+
+      {invite.cancelled ? (
+        <p className="text-[11px] text-negative-700 mt-1.5">
+          The organiser has called this off. Nothing to add.
+        </p>
+      ) : canAnswer ? (
+        /*
+          THE THREE ANSWERS A MEETING HAS, and pressing one tells the organiser.
+          Accept and Tentative also put it in the day; Decline takes it back out if it was
+          already there, because declining a meeting you are still carrying is not a state
+          anybody meant to be in.
+        */
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {busy && <Loader2 size={13} className="animate-spin text-slate-400" />}
+          {(['accepted', 'tentative', 'declined'] as const).map((r) => (
+            <button key={r} type="button" disabled={busy}
+              onClick={() => void run(() => onRespond(invite, r))}
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border disabled:opacity-50 ${
+                answered === r
+                  ? 'border-navy-950 bg-navy-950 text-white'
+                  : r === 'accepted'
+                    ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}>
+              {r === 'accepted' && <Check size={13} />}
+              {RESPONSE_WORD[r]}
+            </button>
+          ))}
+          <span className="text-[11px] text-slate-500">
+            {answered
+              ? `You answered ${RESPONSE_WORD[answered].toLowerCase()}. ${organiserName} has been told, and their calendar has been updated. Press another to change your answer.`
+              : `${organiserName} is told straight away, and their calendar updates itself.`}
+          </span>
+          {already && (
+            <button type="button" disabled={busy} onClick={() => void run(() => onRemove(already.id))}
+              className="text-[11px] font-medium text-slate-500 hover:underline">
+              Take it off my calendar
+            </button>
+          )}
+        </div>
+      ) : (
+        /*
+          NOBODY TO ANSWER. A calendar attachment published rather than sent, or an invitation
+          with no organiser address on it, can still be put in the day -- but the card must not
+          offer to tell somebody who is not there, and must say which of the two this is.
+        */
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {busy && <Loader2 size={13} className="animate-spin text-slate-400" />}
+          {already ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-positive-700">
+                <Check size={12} /> In your Raptor calendar
+              </span>
+              <button type="button" disabled={busy} onClick={() => void run(() => onRemove(already.id))}
+                className="text-[11px] font-medium text-slate-500 hover:underline">
+                Take it off
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={busy} onClick={() => void run(() => onAccept(invite))}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              <CalendarPlus size={13} /> Add to my calendar
+            </button>
+          )}
+          <span className="text-[11px] text-slate-500">
+            {invite.organiser?.email
+              ? 'This is a copy of a meeting rather than a request, so there is nothing to answer.'
+              : 'The invitation does not say who to answer, so this goes on your calendar only.'}
+          </span>
+        </div>
+      )}
+
+      {/*
+        A TIME THAT CANNOT BE PLACED IN A DAY, and the card has to say so BEFORE somebody accepts.
+        It used to fire only when the invite named no zone at all -- and the case that actually
+        bit was the opposite: an invitation naming `South Africa Standard Time`, which is a
+        Windows name Intl rejects. The time failed to resolve, the meeting was stored with no date
+        on it, and it appeared nowhere on the calendar while this card said nothing. Whether the
+        zone is missing or merely unreadable, the answer for the reader is the same.
+      */}
+      {!invite.cancelled && undated && (
+        <p className="text-[11px] text-gold-700 mt-1.5">
+          {/*
+            ONLY A NAMED ZONE CAN REACH THIS NOW. An invitation that gives NO zone is a floating
+            time, which RFC 5545 defines as read on the observer's own clock -- so it resolves on
+            the firm's and is never undated. What is left is an organiser who named a zone nothing
+            here could resolve, and that is a fact we failed to read rather than one nobody stated:
+            reading it as Johannesburg could be ten hours out.
+          */}
+          Raptor does not recognise this invite&rsquo;s timezone
+          (&ldquo;{invite.when.timeZone}&rdquo;), so it cannot be placed at an hour. It will
+          go on your calendar without a time.
+        </p>
+      )}
+
+      {error && <p className="text-[11px] text-negative-700 mt-1.5">{error}</p>}
+    </div>
+  )
+}
+
+/** One line of the invite. Values wrap; a Teams link is long and must not push the pane wide. */
+function InviteLine({ label, value, note }: { label: string; value: string; note?: string | null }) {
+  return (
+    <div className="flex flex-wrap gap-x-2 text-[11px]">
+      <dt className="text-slate-500 shrink-0">{label}</dt>
+      <dd className="text-slate-800 min-w-0 break-words">
+        {value}
+        {note && <span className="text-slate-400"> · {note}</span>}
+      </dd>
+    </div>
+  )
+}
+
+function MailRow({
+  mail, chosen, expanded, selecting, blocked, body, html, showPictures, onShowPictures,
+  images, calendar, events, onAccept, onRespond,
+  onRemoveEvent, skippedImages, loadingBody,
+  bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
+  onForward, onJunk, onMove,
+  onUnread, fetchAttachment,
+}: {
+  mail: MailItem
+  /** The raw ICS where this was a meeting request. Passed through to MailBody. */
+  calendar?: string
+  events: CalendarEvent[]
+  onAccept: (invite: CalendarInvite) => Promise<void>
+  onRespond: (invite: CalendarInvite, response: InviteResponse) => Promise<void>
+  onRemoveEvent: (id: string) => Promise<void>
+  chosen: boolean
+  expanded: boolean
+  /** Tick boxes are showing, so the gutter carries one instead of the unread mark. */
+  selecting: boolean
+  /** The agent's blocklist, so the row can say a sender is silenced. */
+  blocked: BlockedSender[]
+  /** The full text, once fetched. Undefined until then. */
+  body?: string
+  /** The same message as markup, passed straight through to MailBody. */
+  html?: string
+  /** Whether this reader has asked for this message's remote pictures. */
+  showPictures?: boolean
+  onShowPictures?: () => void
+  /** The pictures inside it, fetched alongside the text. */
+  images?: InlineImage[]
+  /** And how many were left behind for being too big. */
+  skippedImages?: number
+  loadingBody: boolean
+  bodyError?: string
+  onToggle: () => void
+  onChoose: (on: boolean) => void
+  onLink: () => void
+  onBlock: () => void
+  onReply: () => void
+  onReplyAll: () => void
+  onForward: () => void
+  onJunk: (junk: boolean) => void
+  onMove: (() => void) | null
+  onUnread: () => void
+  onCreateLead: () => void
+  /** This agent's own addresses, so a recipient line can say "you" instead of naming them. */
+  mine: (string | null | undefined)[]
+  fetchAttachment: (filename: string) => Promise<Blob>
+}) {
+  const unread = !mail.readAt
+  return (
+    /*
+      Unread wears a bar down its left edge, in the brand blue rather than the gold used for
+      selection — the two must not be mistakable for each other, since a row can be both.
+      Read rows keep a transparent bar of the same width so nothing shifts sideways as mail is
+      read, which would make the whole list twitch.
+    */
+    <li className={unread ? 'bg-brand-50/60' : 'hover:bg-slate-50'}>
+      <div className="px-5 py-1.5 flex items-center gap-3">
+        {/*
+          The gutter sits OUTSIDE the button that opens the message. Nesting a checkbox inside
+          the other means ticking a row to delete it also opens and reads it, which is the
+          opposite of what somebody clearing spam wants.
+        */}
+        <RowGutter mail={mail} selecting={selecting} chosen={chosen} onChoose={onChoose} inline />
+
+        <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
+          {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
+          <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} blocked={blocked} />
+        </button>
+
+        <div className="shrink-0 flex items-center gap-2">
+          {/* Linked mail offers nothing: it is on an account, it raised a fee, and it is not
+              anybody's to re-file or delete. The database refuses both as well. */}
+          {!mail.isFiled && (
+            <button onClick={onLink}
+              className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 rounded-md border border-gold-500 bg-gold-400 text-navy-950">
+              <Link2 size={12} /> Match
+            </button>
+          )}
+          <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
+            className="text-slate-400 hover:text-slate-600">
+            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-5 pt-1.5 pb-4 pl-[2.9rem]">
+          {/*
+            WHO ELSE WAS ON IT, here as well as in the reading pane. The firm: "I can't see all the
+            other recipients of an email." Offering Reply all on a row that never says who would be
+            copied is worse than not offering it -- the one thing somebody must be able to check
+            before pressing it is the list.
+          */}
+          <div className="-mt-1 mb-2.5">
+            <RecipientLines mail={mail} mine={mine} />
+          </div>
+          <MailBody mail={mail} body={body} html={html} images={images}
+            showPictures={showPictures} onShowPictures={onShowPictures} calendar={calendar}
+            events={events} onAccept={onAccept} onRespond={onRespond} onRemoveEvent={onRemoveEvent}
+            skippedImages={skippedImages}
+            loadingBody={loadingBody}
+            bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
+            onForward={onForward} onJunk={onJunk}
+            onMove={onMove} onUnread={onUnread}
+            onLink={onLink} onCreateLead={onCreateLead} fetchAttachment={fetchAttachment} />
+        </div>
+      )}
+    </li>
+  )
+}
+
+/**
+ * Clearing out junk, with the one choice that matters.
+ *
+ * Deleting junk is cheap and reversible in the sense that matters — the mail is still in Outlook.
+ * Blocking the senders as well is what stops the same rubbish arriving again tomorrow, and it is
+ * the difference between emptying a bin and stopping the delivery. Offered, not assumed: a
+ * legitimate sender does end up in junk sometimes.
+ */
+function EmptyJunkModal({ count, userId, onClose, onDone }: {
+  count: number
+  userId: string | null
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run() {
+    if (!userId) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await emptyJunk({ userId })
+      onDone(`${r.deleted} ${r.deleted === 1 ? 'message' : 'messages'} deleted from Raptor. `
+        + 'They are still in your real mailbox.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    /*
+      DELETING JUNK DELETES JUNK, AND NOTHING ELSE.
+      
+      This box used to offer "Block these senders too", TICKED BY DEFAULT, and the firm pressed it:
+      "I accidentally just said empty junk and then it said block all of these people ... that's a
+      very bad and dangerous idea." Thirty addresses went onto the blocklist in one action, among
+      them their own bank, Telkom, a supplier and four real people who had written to them.
+      
+      The two are not one decision. Deleting junk is about mail that is ALREADY HERE, it is
+      reversible in the way that matters -- every message is still on the mail server -- and it is
+      done in a hurry, because junk is where the volume is. Blocking is about EVERY FUTURE MESSAGE
+      from somebody, it is invisible once done, and what it costs is a client's mail that silently
+      never arrives. A destructive sweep must not carry a permanent silent decision with it.
+      
+      Blocking one sender still lives on the open message, where you have read something first.
+    */
+    <Modal title="Delete all junk" onClose={onClose} width={480}>
+      <p className="text-sm text-slate-500">
+        This deletes {count === 1 ? 'the message' : `all ${count} messages`} in junk from Raptor.
+        They stay in your real mailbox &mdash; nothing here touches Outlook, and nobody is blocked.
+      </p>
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
+        <button onClick={onClose} disabled={busy}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+          Cancel
+        </button>
+        <button onClick={() => void run()} disabled={busy}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-negative-100 bg-negative-50 text-negative-700 disabled:opacity-50">
+          Delete all junk
+        </button>
+      </div>
+
+      {/* Anything rescued onto an account is a record and is never swept — said here because it
+          is the one thing somebody might fear losing. */}
+      <p className="text-xs text-slate-400 mt-4">
+        Junk mail you have already linked to an account is left where it is.
+      </p>
+    </Modal>
+  )
+}
+
+
+/**
+ * The blocklist, newest block first.
+ *
+ * Ordered by when it was blocked rather than alphabetically, and the date is ON the row, because
+ * this list is read for one reason: something stopped arriving and somebody wants to know what
+ * they did recently. An alphabetical list makes that a search; a chronological one puts the
+ * answer at the top. (fetchBlockedSenders does the ordering, in SQL.)
+ */
+function BlockedList({ senders, onUnblock }: {
+  senders: BlockedSender[]
+  onUnblock: (id: string) => Promise<void>
+}) {
+  if (senders.length === 0) {
+    return (
+      <div className="py-14 text-center">
+        <Ban size={22} className="mx-auto text-slate-300" />
+        <p className="text-sm text-slate-500 mt-3">Nothing blocked.</p>
+        <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          Open a message and choose &ldquo;Block sender&rdquo; to keep it out of Raptor for
+          good. It stays in your real mailbox.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <ul className="divide-y divide-slate-100">
+      {senders.map((b) => (
+        <li key={b.id} className="px-5 py-1.5 flex items-center gap-2.5 text-[12.5px] whitespace-nowrap hover:bg-slate-50">
+          <Ban size={13} className="shrink-0 text-slate-400" />
+          {/* One line, the checking-list look: the pattern, then when and why in grey after it. */}
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium text-slate-800">
+              {b.kind === 'domain' ? `Everything from ${b.pattern}` : b.pattern}
+            </span>
+            <span className="text-slate-400">
+              {' '}&middot; Blocked {relativeDayLabel(b.createdAt).toLowerCase()}
+              {b.label && <> &middot; {b.label}</>}
+            </span>
+          </span>
+          <button onClick={() => void onUnblock(b.id)}
+            className="shrink-0 inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+            <Undo2 size={12} /> Unblock
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Blocking a sender, with the two ways to do it and the reasons one of them may be refused.
+ *
+ * The refusals are the point of this box existing rather than it being a one-click action. A
+ * blocked sender never becomes a row, so a mistake here is invisible: the mail simply stops, and
+ * an account quietly looks unworked.
+ */
+
+/**
+ * MOVING TO JUNK ASKS WHETHER IT IS ABOUT THE MESSAGE OR ABOUT THE SENDER.
+ *
+ * THE FIRM: "if I say move to junk, can it also ask me if I can move and always send those things
+ * to junk?" It always made the standing rule and told you afterwards. That is right for the
+ * sender you are junking BECAUSE they are a nuisance, and wrong for the other kind of junk move
+ * the firm described in the same breath: "sometimes I get like stuff that I want to see but it's
+ * junk, so I don't want to see it in my main inbox — I'll get to it later — it's cluttering my
+ * main mailbox because it's actually junk but it's kind of semi-important, otherwise I would have
+ * blocked it."
+ *
+ * WHICH IS THE WHOLE SHAPE OF JUNK IN RAPTOR, AND WORTH SAYING ON THE BOX. Junk is a SHELF, not a
+ * bin and not a block: the message still arrives, keeps its row, stays searchable and can be
+ * rescued. That is exactly the thing the firm wants for semi-important mail — out of the way,
+ * still there. A block is the other decision and lives on its own button, because a blocked
+ * sender never becomes a row at all and nobody sees it go missing.
+ *
+ * TWO CHOICES AND NOT A TICK BOX, in the shape of the block box beside it: a tick box defaulted
+ * one way is how the silent rule happened in the first place, and the two answers here are
+ * genuinely different decisions rather than one with an option on it.
+ *
+ * AND WHERE A RULE WOULD NOT BE MADE, IT IS SAID BEFORE THE PRESS. An address on a debtor's file
+ * is never given a standing junk rule — a rule that quietly sent a debtor's every future reply to
+ * Junk could lose an arrangement, and junk is exactly where a message goes missing. That refusal
+ * used to arrive in the status line after the fact.
+ */
+function JunkModal({ mails, userId, alwaysJunked, onClose, onDone }: {
+  /** The messages being shelved: one from the reading pane, or a selection from the list. */
+  mails: MailItem[]
+  userId: string | null
+  /** The senders that already have a standing rule, so the box does not offer to make it twice. */
+  alwaysJunked: Set<string>
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /* The distinct senders, worked out the same way the writer does it: lowercased, blanks out. */
+  const senders = [...new Set(mails
+    .map((m) => (m.fromAddress ?? '').trim().toLowerCase())
+    .filter((a) => a.includes('@')))]
+  const one = senders.length === 1 ? senders[0] : null
+  const already = senders.filter((a) => alwaysJunked.has(a))
+  const newRule = senders.filter((a) => !alwaysJunked.has(a))
+
+  /*
+   * Whether a rule COULD be made, asked when the box opens rather than after the click — the same
+   * correction the block box already carries. Undefined while it is being looked up, so the
+   * second choice is not offered as available and then refused.
+   */
+  const [onFile, setOnFile] = useState<string[] | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    void Promise.all(senders.map(async (a) => (await debtorFileFor(a) ? a : null)))
+      .then((found) => { if (alive) setOnFile(found.filter((a): a is string => a !== null)) })
+      /* A lookup that fails must not turn the guard off: rememberJunkSenders checks again and
+         keeps the address, so the worst case is the old wording, not a wrong rule. */
+      .catch(() => { if (alive) setOnFile([]) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [senders.join(',')])
+
+  const blockedByFile = (onFile ?? []).length > 0
+  const ruleWouldDoNothing = newRule.length === 0 || (onFile !== undefined && newRule.every((a) => onFile.includes(a)))
+
+  async function go(remember: boolean) {
+    if (!userId && remember) return
+    setBusy(true); setError(null)
+    try {
+      const ids = mails.map((m) => m.id)
+      const { moved, remembered, kept } = await setJunk(ids, true, userId, remember)
+      const refused = ids.length - moved
+      onDone(
+        `${moved} ${moved === 1 ? 'email' : 'emails'} moved to junk.`
+        + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : '')
+        + ' Nothing deleted; delete all junk when you want it gone.'
+        + (remembered.length > 0
+          ? (remembered.length === 1
+            ? ` Anything new from ${remembered[0]} will go straight to junk.`
+            : ` Anything new from those ${remembered.length} senders will go straight to junk.`)
+          : '')
+        + (kept.length > 0
+          ? (kept.length === 1
+            ? ` ${kept[0]} is on a debtor's file, so their future mail is left in your inbox.`
+            : ` ${kept.length} of them are on debtors' files, so their future mail is left in your inbox.`)
+          : ''),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={mails.length === 1 ? 'Move to junk' : `Move ${mails.length} emails to junk`}
+      onClose={onClose} width={480}>
+      {blockedByFile && (
+        <div className="rounded-lg border border-gold-200 bg-gold-50 p-3.5 mb-4">
+          <p className="text-sm text-navy-950 flex items-start gap-1.5">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5 text-gold-600" />
+            <span>
+              {(onFile ?? []).length === 1
+                ? <><span className="font-medium">{(onFile ?? [])[0]}</span> is on a debtor&rsquo;s file.</>
+                : <><span className="font-medium">{(onFile ?? []).length} of these senders</span> are on debtors&rsquo; files.</>}
+            </span>
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            The message still moves, but no standing rule is made for them &mdash; a debtor&rsquo;s
+            reply arriving straight into Junk is how an arrangement goes missing.
+          </p>
+        </div>
+      )}
+
+      <p className="text-sm text-slate-500">
+        Junk is a shelf, not a bin. The message stays in Raptor, stays searchable and can be
+        pulled back out &mdash; it just leaves your main mailbox.
+      </p>
+
+      <div className="mt-4 space-y-2">
+        <button disabled={busy} onClick={() => void go(false)}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
+          <span className="block text-sm font-medium text-slate-800">
+            {mails.length === 1 ? 'Just this message' : 'Just these messages'}
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5">
+            Their next one still lands in your mailbox.
+          </span>
+        </button>
+
+        <button disabled={busy || !userId || ruleWouldDoNothing || onFile === undefined}
+          onClick={() => void go(true)}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
+          <span className="block text-sm font-medium text-slate-800">
+            {one ? <>Always junk {one}</> : <>Always junk these {senders.length} senders</>}
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5 truncate">
+            {already.length > 0 && newRule.length === 0
+              ? 'Already set for them — nothing to add.'
+              : 'Everything they send goes straight to Junk from now on. Still arrives, still searchable.'}
+          </span>
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-negative-700 mt-3 flex items-start gap-1.5">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          {error}
+        </p>
+      )}
+
+      {/*
+        THE THIRD DECISION, NAMED SO NOBODY REACHES FOR JUNK TO GET IT. The firm drew the line
+        themselves: semi-important mail goes to Junk, "otherwise I would have blocked it".
+      */}
+      <p className="text-xs text-slate-400 mt-4">
+        Neither of these blocks anyone. To stop their mail reaching Raptor at all, open the
+        message and use Block sender.
+      </p>
+    </Modal>
+  )
+}
+
+function BlockModal({ mail, userId, onClose, onDone }: {
+  mail: MailItem
+  userId: string | null
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const domain = domainOf(mail.fromAddress)
+  const domainProblem = domainBlockProblem(mail.fromAddress)
+  /*
+   * Whether this can be blocked at all, asked when the box opens rather than after the click.
+   *
+   * It used to offer both choices, let you press one, and only then say no — with a footnote
+   * underneath stating the rule in general terms, which read as a caution rather than a refusal.
+   * The address is on the file because a tick box put it there at matching time, so the agent has
+   * no memory of it and nothing on screen said which account to go and look at. A dead end.
+   */
+  const [onFile, setOnFile] = useState<DebtorFile | null | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    void debtorFileFor(mail.fromAddress)
+      .then((f) => { if (alive) setOnFile(f) })
+      // A lookup that fails must not silently turn the guard off: blockSender checks again on the
+      // server side and refuses there, so the worst case is the old behaviour, not a wrong block.
+      .catch(() => { if (alive) setOnFile(null) })
+    return () => { alive = false }
+  }, [mail.fromAddress])
+  const checking = onFile === undefined
+  const refused = !!onFile
+
+  async function block(scope: 'address' | 'domain') {
+    if (!userId) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { pattern, removed } = await blockSender({
+        userId,
+        address: mail.fromAddress,
+        scope,
+        label: mail.fromName ?? mail.subject ?? null,
+      })
+      onDone(
+        `Blocked ${pattern}.`
+        + (removed > 0 ? ` ${removed} ${removed === 1 ? 'message' : 'messages'} cleared out of Raptor.` : '')
+        + ' Nothing from them will be imported again.',
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Block this sender" onClose={onClose} width={480}>
+      {/*
+        The refusal comes first and says what to do about it, because it is the whole answer: no
+        amount of reading the rest helps if this address cannot be blocked.
+      */}
+      {refused && onFile && (
+        <div className="rounded-lg border border-gold-200 bg-gold-50 p-3.5 mb-4">
+          <p className="text-sm text-navy-950 flex items-start gap-1.5">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5 text-gold-600" />
+            <span>
+              <span className="font-medium">{mail.fromAddress}</span> is saved as a contact on{' '}
+              <span className="font-medium">{onFile.label}</span>
+              {onFile.accountNumber ? ` (${onFile.accountNumber})` : ''}.
+            </span>
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            Blocking it would stop that debtor&rsquo;s mail reaching Raptor at all, and because a
+            blocked sender never becomes a row, nobody would see it go missing. Take the address
+            off the account first, then block it.
+          </p>
+          {/*
+            The way out. It usually got onto the file by the tick box when this message was
+            matched — so Unmatch offers to take it off again, which is the one-click route.
+          */}
+          <Link to={`/accounts/${onFile.accountId}`}
+            className="inline-flex items-center gap-1.5 mt-3 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300">
+            <ExternalLink size={13} /> Open {onFile.label}
+          </Link>
+        </div>
+      )}
+
+      <p className="text-sm text-slate-500">
+        Their mail will stop appearing in Raptor from the next sync, and anything of theirs still
+        sitting here will be cleared out. It stays in your real mailbox &mdash; this only stops
+        Raptor taking a copy.
+      </p>
+
+      <div className="mt-4 space-y-2">
+        <button disabled={busy || checking || refused} onClick={() => void block('address')}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
+          <span className="block text-sm font-medium text-slate-800">Just this address</span>
+          <span className="block text-xs text-slate-400 mt-0.5 truncate">{mail.fromAddress}</span>
+        </button>
+
+        <button disabled={busy || checking || refused || !!domainProblem} onClick={() => void block('domain')}
+          title={domainProblem ?? undefined}
+          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
+          <span className="block text-sm font-medium text-slate-800">
+            Everything from {domain ?? 'this domain'}
+          </span>
+          <span className="block text-xs text-slate-400 mt-0.5">
+            {domainProblem ?? 'Catches the same nuisance when it changes address, which spam does.'}
+          </span>
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-negative-700 mt-3 flex items-start gap-1.5">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          {error}
+        </p>
+      )}
+
+      {/* The general rule is said above, and only when it applies. What is left is the part that
+          is true either way. */}
+      <p className="text-xs text-slate-400 mt-4">
+        Reversible from the Blocked tab, though unblocking is not retroactive &mdash; it lets
+        their next message in, not the ones already skipped.
+      </p>
+      {(busy || checking) && (
+        <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
+          <Loader2 size={12} className="animate-spin" />
+          {busy ? 'Blocking\u2026' : 'Checking whether this address is on a debtor\u2019s file\u2026'}
+        </p>
+      )}
+    </Modal>
+  )
+}
+
+/**
+ * Choosing which account a message belongs to.
+ *
+ * A search rather than a list: there are 100 000 accounts, and the agent already has the name or
+ * the number in front of them on the email.
+ */
+/**
+ * A NEW LEAD, OUT OF AN EMAIL FROM SOMEBODY NOBODY KNOWS YET.
+ *
+ * The picker answers "which of our records is this?" and has nothing to say when the answer is
+ * "none of them, yet" — which is the case for the single most valuable email the firm gets. Before
+ * this, the honest route was: read the enquiry, leave the mailbox, add a lead, come back, find the
+ * message again, match it. Three screens, and the step people skipped was the last one, so the
+ * enquiry that started the relationship was not on the lead that came out of it.
+ *
+ * THE REAL LEAD FORM, at the firm's instruction: "it should use the same lead form as adding an
+ * actual lead -- this one is a small version, it should actually make a lead." So this is a
+ * wrapper: it works out what to prefill, hands LeadForm the values, and takes over what happens
+ * after the lead is saved. A second, shorter form would have drifted within a month.
+ *
+ * WHERE THE PREFILLS COME FROM depends on who sent it, and the difference matters:
+ *
+ *  - FROM THE WEBSITE'S FORM, the From header is the firm's OWN address. Reading the lead's
+ *    details off it would put form@bredellferreira.co.za on the lead — and saved there it would
+ *    match every later enquiry to that same lead, so one afternoon's five enquiries would file
+ *    themselves on one stranger. Everything comes out of the body instead. See parseLeadIntake.
+ *  - FROM ANYBODY ELSE, the header is the person. The name is split out of one field, the company
+ *    read off the domain but never off gmail, and their address is theirs.
+ *
+ * Every one of them is a guess in an editable box, in front of somebody reading the message.
+ */
+function CreateLeadFromMailModal({ mail, body, actor, onClose, onCreated }: {
+  mail: MailItem
+  /** The message text, where it has been fetched — the only source for a form enquiry. */
+  body?: string
+  actor: { id: string | null; name: string | null }
+  onClose: () => void
+  /** The lead exists and the email is on it. The caller asks where to go next. */
+  onCreated: (lead: Lead) => void
+}) {
+  const store = useAppStore()
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
+
+  const text = body ?? mail.snippet ?? ''
+  const fromForm = isLeadIntake(mail.fromAddress)
+  const intake = fromForm ? parseLeadIntake(text) : {}
+  const split = splitPersonName(mail.fromName)
+  const domain = domainOf(mail.fromAddress)
+
+  const initial = fromForm
+    ? {
+      /*
+       * THE NAME IS THE ONE THING THE HEADER IS RIGHT ABOUT. The firm's form posts a Contact
+       * Number, a Company or Business Name and a Subject -- and no name field at all, because it
+       * puts the person's name in the From display name instead. So the body is asked first and
+       * the header is the fallback, which is the opposite way round from every other field here.
+       */
+      firstName: intake.firstName ?? split.firstName,
+      lastName: intake.lastName ?? split.lastName,
+      companyName: intake.companyName ?? '',
+      phone: intake.phone ?? '',
+      /*
+       * NEVER THE FROM HEADER. It is form@bredellferreira.co.za -- the firm's own address -- and
+       * saved on a lead it would match every later enquiry to that same lead. Blank is the honest
+       * answer where the form did not ask for one, and the Contact Number is what makes the lead
+       * reachable.
+       */
+      email: intake.email ?? '',
+      source: 'Website' as LeadSource,
+    }
+    : {
+      firstName: split.firstName,
+      lastName: split.lastName,
+      /* Only where the domain says something: "Gmail" in the Company box is worse than a blank. */
+      companyName: isSharedDomain(mail.fromAddress) ? '' : companyFromDomain(domain),
+      phone: '',
+      email: mail.fromAddress,
+      /* Email, because that is literally where this one came from. */
+      source: 'Email' as LeadSource,
+    }
+
+  return (
+    <LeadForm
+      store={store}
+      navigate={navigate}
+      onClose={onClose}
+      title="Create lead"
+      initial={initial}
+      intro={(
+        <>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 mb-4">
+            <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
+            <p className="text-xs text-slate-400 mt-0.5 truncate">
+              {fromForm
+                ? 'An enquiry off the website\u2019s contact form. Their details are read out of the message, not off the sender.'
+                : `From ${mail.fromAddress}`}
+            </p>
+          </div>
+          {/*
+            NOTHING IS CHARGED, and it says so. Annexure B prices work on DEBTOR ACCOUNTS; the sales
+            side raises no fees at all. The rest of this page talks about money constantly, so
+            silence here would read as "some fee, unstated".
+          */}
+          <p className="text-xs text-slate-400 -mt-1 mb-3">
+            This email is filed on the lead once it is saved. Nothing is charged &mdash; Annexure B
+            prices work on debtor accounts, and the sales side raises no fees.
+          </p>
+          {error && <p className="text-sm text-negative-700 mb-3">{error}</p>}
+        </>
+      )}
+      onCreated={(lead) => {
+        /*
+         * FILED ON THE NEW LEAD IN THE SAME BREATH, which is the whole point of doing this from the
+         * mailbox. A lead created from an email that is not then carrying that email is the same
+         * three-screen problem with one screen removed.
+         *
+         * The lead is already saved by the time this runs, so a failure here is not a reason to
+         * pretend nothing happened: it is reported and the lead is handed on regardless.
+         */
+        void linkMailToRecord({
+          mail,
+          to: {
+            kind: 'lead',
+            id: lead.id,
+            label: [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.companyName,
+          },
+          actor,
+        })
+          .then(() => onCreated(lead))
+          .catch((e: unknown) => setError(
+            `The lead was created, but this email could not be filed on it: ${
+              e instanceof Error ? e.message : String(e)}`,
+          ))
+      }}
+    />
+  )
+}
+
+/**
+ * The lead exists. Where would you rather be?
+ *
+ * At the firm's instruction: "once it says lead created, it should ask you -- go back to mail, or
+ * go to the lead." Both are real answers and neither is right for everybody: somebody working a
+ * morning's enquiries wants the next message, and somebody who has just met their best lead of the
+ * week wants to phone them.
+ *
+ * Asked rather than assumed, because the wrong guess is expensive in one direction — thrown out of
+ * a queue you were half way through — and free in the other.
+ */
+function LeadCreatedModal({ lead, onClose, onOpen }: {
+  lead: Lead
+  onClose: () => void
+  onOpen: () => void
+}) {
+  const name = [lead.firstName, lead.lastName].filter(Boolean).join(' ') || lead.companyName
+  return (
+    <Modal title="Lead created" onClose={onClose} width={440}>
+      <p className="text-sm text-slate-600">
+        <strong className="font-semibold text-slate-800">{name}</strong> is on the leads list
+        {lead.companyName && name !== lead.companyName ? ` at ${lead.companyName}` : ''}, and this
+        email is filed on it.
+      </p>
+      <p className="text-xs text-slate-400 mt-2">
+        Nothing was charged &mdash; Annexure B is for debtor accounts.
+      </p>
+      <div className="flex items-center justify-end gap-2 mt-5">
+        <button onClick={onClose}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+          Back to the mail
+        </button>
+        <button onClick={onOpen}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          Open the lead
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+/** A CRM record the search box turned up. Not a debtor account — those page separately. */
+interface CrmHit {
+  kind: 'lead' | 'deal' | 'client' | 'contact'
+  id: string
+  label: string
+  /** A second line telling two similar names apart — a company, an address, or the kind. */
+  hint: string | null
+}
+
+const CRM_PATH: Record<CrmHit['kind'], (id: string) => string> = {
+  lead: (id) => `/leads/${id}`,
+  deal: (id) => `/deals/${id}`,
+  client: (id) => `/companies/${id}`,
+  contact: (id) => `/contacts/${id}`,
+}
+
+/** What to call each destination on screen. "Account" means a debtor, which is the one that bills. */
+const CRM_OR_ACCOUNT: Record<LinkedRecord['kind'], string> = {
+  account: 'Debtor account', lead: 'Lead', deal: 'Deal', client: 'Client', contact: 'Contact',
+}
+
+function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSkip }: {
+  mail: MailItem
+  actor: { id: string | null; name: string | null }
+  /** The message text, where it has been fetched — one source of the contact suggestions. */
+  body?: string
+  /** Details read off the message's links, which is what an image signature gives up. */
+  linked?: ContactCandidate[]
+  /** Opened by Reply rather than by the Link button: say so, and offer the way out. */
+  replying?: boolean
+  onClose: () => void
+  /**
+   * Filed. `accountId` is null when it went to a CRM record rather than a debtor account —
+   * which is also what tells the caller whether a reply from here can be charged.
+   */
+  onDone: (message: string, accountId: string | null, record: LinkedRecord) => void
+  /** Reply anyway, with nothing charged and nothing filed. Only offered when replying. */
+  onSkip?: () => void
+}) {
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<DebtorAccount[]>([])
+  const [looking, setLooking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /*
+   * CRM records come from the store, which already holds every lead, deal, client and contact
+   * this user can see — so they filter in memory, instantly, with no round trip. Debtor accounts
+   * cannot: there are 100 000 of them and they are fetched and paged. Hence one debounced search
+   * below and one synchronous filter here, for what is a single search box on screen.
+   */
+  /*
+   * Two steps for a debtor account, one for a CRM record.
+   *
+   * Picking a debtor no longer files it: there are decisions to make first — whether to keep the
+   * address, and which of the details the message gave up are real. A lead has none of those and
+   * no fee, so it files on the tap, as it always did.
+   */
+  const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
+  const [keepAddress, setKeepAddress] = useState(true)
+  const [keepDetails, setKeepDetails] = useState<Set<string>>(new Set())
+
+  /*
+   * What the message gave up, from its words and its links together.
+   *
+   * Both, because they fail in opposite cases. A debtor typing "my new number is …" leaves it in
+   * the text and nothing in the links; a corporate signature that renders as one picture leaves
+   * nothing in the text and its number in a tel: href. Merging deduplicates the common case
+   * where a signature carries the same number both ways.
+   *
+   * Nothing is fetched for this — no body, no suggestions, which is the honest outcome of
+   * filing a message without reading it.
+   */
+  const suggestions = useMemo(
+    () => mergeCandidates(body ? findContactDetails(body) : [], linked ?? []),
+    [body, linked],
+  )
+
+  const { leads, deals, companies, contacts } = useAppStore()
+  const crmHits = useMemo<CrmHit[]>(() => {
+    const q = term.trim().toLowerCase()
+    if (q.length < 2) return []
+    const has = (...parts: (string | null | undefined)[]) =>
+      parts.some((x) => x?.toLowerCase().includes(q))
+    const out: CrmHit[] = []
+    for (const l of leads) {
+      if (out.length >= 12) break
+      const name = [l.firstName, l.lastName].filter(Boolean).join(' ')
+      // The lead number as text too — it is how the firm refers to a lead out loud.
+      if (has(name, l.companyName, l.email, String(l.leadNumber))) {
+        out.push({
+          kind: 'lead',
+          id: l.id,
+          label: name || l.companyName || 'Unnamed lead',
+          hint: l.companyName || l.email || null,
+        })
+      }
+    }
+    for (const d of deals) {
+      if (out.length >= 12) break
+      if (has(d.name)) out.push({ kind: 'deal', id: d.id, label: d.name, hint: 'Deal' })
+    }
+    for (const c of companies) {
+      if (out.length >= 12) break
+      if (has(c.name)) out.push({ kind: 'client', id: c.id, label: c.name, hint: 'Client' })
+    }
+    for (const c of contacts) {
+      if (out.length >= 12) break
+      const name = [c.firstName, c.lastName].filter(Boolean).join(' ')
+      if (has(name, c.email)) out.push({ kind: 'contact', id: c.id, label: name || c.email || 'Unnamed contact', hint: c.email ?? null })
+    }
+    return out
+  }, [term, leads, deals, companies, contacts])
+
+  // Debounced, because otherwise this searches 100 000 rows on every keystroke.
+  useEffect(() => {
+    const q = term.trim()
+    if (q.length < 2) { setHits([]); return }
+    let cancelled = false
+    setLooking(true)
+    const t = setTimeout(() => {
+      // Reuses the accounts list's own search — account number, client reference or surname —
+      // rather than introducing a second, subtly different way to find a debtor.
+      /* NO COUNT. The box shows eight and never says how many there were, and the exact count
+         is a second pass over every matching row in the book -- paid on every keystroke. */
+      void fetchAccounts({ search: q, pageSize: 8, countRows: false })
+        .then((r) => { if (!cancelled) setHits(r.accounts) })
+        .catch(() => { if (!cancelled) setHits([]) })
+        .finally(() => { if (!cancelled) setLooking(false) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [term])
+
+  /**
+   * File against a CRM record. Nothing is charged — see linkMailToRecord.
+   *
+   * The message lands on that record's timeline and leaves the working list, which is the same
+   * outcome as filing to a debtor minus the fee. Said in the status line either way, so nobody
+   * has to remember which destinations cost the debtor money.
+   */
+  async function fileOn(hit: CrmHit) {
+    setBusy(true)
+    setError(null)
+    try {
+      await linkMailToRecord({ mail, to: hit, actor })
+      onDone(`Matched to ${hit.label}. No charge — Annexure B is for debtor accounts.`, null, {
+        kind: hit.kind, id: hit.id, label: hit.label, path: CRM_PATH[hit.kind](hit.id),
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  async function link() {
+    if (!picked) return
+    const { id: accountId, label } = picked
+    setBusy(true)
+    setError(null)
+    try {
+      const charge = await linkMailToAccount({ mail, accountId, actor })
+
+      /*
+       * Saved AFTER the filing, and never allowed to undo it. The message is on the account and
+       * the fee is raised; a contact that failed to save is a detail to re-enter, not a reason
+       * to leave the agent looking at a red box over work that actually succeeded.
+       */
+      let saved = 0
+      try {
+        saved = await saveAccountContacts({
+          accountId,
+          details: [
+            ...(keepAddress
+              ? [{ kind: 'email' as const, value: mail.fromAddress, label: mail.fromName ?? undefined }]
+              : []),
+            ...suggestions
+              .filter((c) => keepDetails.has(c.value))
+              .map((c) => ({
+                kind: c.kind,
+                value: c.value,
+                // Says where it came from, so a later audit can tell a detail lifted out of a
+                // message from one somebody confirmed on a call.
+                label: c.context === 'Linked in their signature' ? 'From their signature' : 'From their email',
+              })),
+          ],
+          actor,
+        })
+      } catch (e) {
+        console.error('[MailPage] filed, but the contact details did not save:', e)
+      }
+
+      onDone(
+        `Matched to ${label}. ${chargeMessage(charge, '6')}`
+        + (saved > 0 ? ` ${saved} contact ${saved === 1 ? 'detail' : 'details'} saved on the account.` : ''),
+        accountId,
+        { kind: 'account', id: accountId, label, path: `/accounts/${accountId}` },
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={replying ? 'Reply — what is this about?' : 'What is this about?'}
+      onClose={onClose} width={520}>
+      {replying && (
+        // Why there is a step before the composer, said once, in plain terms.
+        <p className="text-[13px] text-slate-500 mb-3">
+          Matching it first is what puts your reply on the record it belongs to &mdash; and, on
+          a debtor account, what raises the R25 for sending it. Pick where it goes and the reply
+          opens next.
+        </p>
+      )}
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+        <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
+        <p className="text-xs text-slate-400 mt-0.5 truncate">From {mail.fromAddress}</p>
+        {mail.snippet && <p className="text-[13px] text-slate-500 mt-1.5">{mail.snippet.slice(0, 160)}</p>}
+      </div>
+
+      {picked ? (
+        /*
+          STEP 2 — what else to keep. Only for a debtor account: a lead files on the tap, since
+          there is no fee and no account_contacts to add to.
+        */
+        <>
+          <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
+            <Link2 size={15} className="shrink-0 text-slate-400" />
+            <span className="text-sm text-slate-800 min-w-0 flex-1">
+              Matching to <strong className="font-semibold">{picked.label}</strong>
+            </span>
+            <button onClick={() => { setPicked(null); setError(null) }} disabled={busy}
+              className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+              Change
+            </button>
+          </div>
+
+          {/*
+            On by default, because it is the whole point: findAccount matches future mail against
+            this, so saving it once means the next email from this debtor files itself. The
+            consequence is stated rather than buried — automatic filing is also automatic
+            charging, so the wrong address here bills quietly and repeatedly.
+          */}
+          <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={keepAddress}
+              onChange={(e) => setKeepAddress(e.target.checked)} />
+            <span className="min-w-0">
+              <span className="block text-sm text-slate-800">
+                Save <strong className="font-medium">{mail.fromAddress}</strong> on this account
+              </span>
+              <span className="block text-xs text-slate-400 mt-0.5">
+                Their next email then files itself &mdash; and charges R13 on its own. Leave this
+                off if the address is not the debtor&rsquo;s.
+              </span>
+            </span>
+          </label>
+
+          {suggestions.length > 0 && (
+            <div className="mt-3">
+              <p className="text-sm font-medium text-slate-700">
+                Also in this message <span className="font-normal text-slate-400">&mdash; tick what is right</span>
+              </p>
+              {/* Said once, because a number lifted off a signature looks authoritative and is
+                  still a guess. */}
+              <p className="text-xs text-slate-400 mt-0.5">
+                Read out of what they wrote and out of their signature&rsquo;s links. Check each one.
+              </p>
+              {/*
+                Off by default, every one of them. These are guesses from the debtor's own words,
+                and a wrong number saved here is one a collector later phones.
+              */}
+              <div className="mt-1.5 space-y-1.5">
+                {suggestions.map((c) => (
+                  <label key={c.value} className="flex items-start gap-2.5 cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={keepDetails.has(c.value)}
+                      onChange={(e) => setKeepDetails((prev) => {
+                        const next = new Set(prev)
+                        if (e.target.checked) next.add(c.value)
+                        else next.delete(c.value)
+                        return next
+                      })} />
+                    <span className="min-w-0">
+                      <span className="block text-sm text-slate-800 break-all">
+                        {c.value}{' '}
+                        <span className="text-slate-400">
+                          &middot; {c.kind === 'mobile' ? 'Mobile' : c.kind === 'email' ? 'Another address' : 'Phone'}
+                        </span>
+                      </span>
+                      <span className="block text-xs text-slate-400 mt-0.5 truncate">&ldquo;{c.context}&rdquo;</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-slate-400 mt-4 flex items-start gap-1.5">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5 text-gold-600" />
+            Matching charges the debtor R13 under item 6, correspondence received and attended
+            to. It cannot be undone from here.
+          </p>
+
+          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} disabled={busy}
+              className="text-sm font-medium px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={() => void link()} disabled={busy}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+              {/*
+                 The LABEL DOES NOT CHANGE while this works — only the icon does. A label that
+                 swaps to a shorter word mid-click changes the button's width, and on the firm's
+                 iPad that left the old glyphs painted under the new ones. Nothing is lost: the
+                 spinner says it is working, and the button is disabled besides.
+               */}
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+              {`Match to ${picked.label} · R13`}
+            </button>
+          </div>
+        </>
+      ) : (
+      <>
+      <label className="block mt-4">
+        <span className="text-sm font-medium text-slate-700">Find the debtor, lead or client</span>
+        <input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          autoFocus
+          placeholder="Surname, company, account number or lead number"
+          className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        />
+      </label>
+
+      {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
+
+      {/*
+        Two groups, and the heading on each is doing real work rather than decorating: the only
+        difference an agent cannot see from a name is that the first group charges the debtor R13
+        and the second charges nothing. Debtor accounts come first because this is a collections
+        firm and that is what most of this mail is.
+      */}
+      <div className="mt-3 max-h-72 overflow-y-auto">
+        {hits.length > 0 && (
+          <>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 pt-1 pb-1.5">
+              Debtor accounts &mdash; charges R13
+            </p>
+            <div className="divide-y divide-slate-100">
+              {hits.map((h) => (
+                <button key={h.id}
+                  onClick={() => setPicked({ id: h.id, label: debtorLabel(h) })}
+                  className="w-full text-left px-1 py-2.5 hover:bg-slate-50">
+                  <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
+                  <span className="block text-xs text-slate-400">
+                    {h.accountNumber ?? 'no account number'}
+                    {h.clientReference && <> &middot; {h.clientReference}</>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {crmHits.length > 0 && (
+          <>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 pt-3 pb-1.5">
+              Leads, deals, clients &amp; contacts &mdash; no charge
+            </p>
+            <div className="divide-y divide-slate-100">
+              {crmHits.map((h) => (
+                <button key={`${h.kind}:${h.id}`} disabled={busy}
+                  onClick={() => void fileOn(h)}
+                  className="w-full text-left px-1 py-2.5 hover:bg-slate-50 disabled:opacity-50">
+                  <span className="block text-sm font-medium text-slate-800">{h.label}</span>
+                  <span className="block text-xs text-slate-400">
+                    {CRM_OR_ACCOUNT[h.kind]}
+                    {h.hint && h.hint !== CRM_OR_ACCOUNT[h.kind] && <> &middot; {h.hint}</>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {term.trim().length >= 2 && !looking && hits.length === 0 && crmHits.length === 0 && (
+          <p className="py-3 text-sm text-slate-400">Nothing in Raptor matches that.</p>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      <p className="text-xs text-slate-400 mt-4 flex items-start gap-1.5">
+        <AlertTriangle size={13} className="shrink-0 mt-0.5 text-gold-600" />
+        Matching to a <strong className="font-medium">debtor account</strong> charges R13 under
+        item 6, correspondence received and attended to, and cannot be undone from here. Matching
+        to a lead, deal, client or contact charges nothing.
+      </p>
+      {busy && (
+        <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
+          <Loader2 size={12} className="animate-spin" /> Matching&hellip;
+        </p>
+      )}
+
+      {/*
+        The way out, for mail that genuinely belongs to no debtor — a supplier, a colleague, the
+        bank. Deliberately plain text rather than a second gold button: it is the right answer
+        sometimes, and the wrong one by default, and the two should not look equally inviting.
+      */}
+      </>
+      )}
+
+      {replying && onSkip && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <button onClick={onSkip} disabled={busy}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+            This is not about anything in Raptor — reply without matching it
+          </button>
+          <p className="text-xs text-slate-400 mt-1">Nothing charged, and it appears on no account.</p>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+
+/**
+ * Taking a message off the account it was wrongly matched to.
+ *
+ * UNMATCHING IS THE MAIN THING, and the box is built that way: the firm's point is that the
+ * common case is "this is not theirs" and the right account is a separate question, often one
+ * nobody can answer yet. Matching it to another account is offered underneath, for when somebody
+ * does know.
+ *
+ * The fee note sits at the BOTTOM, small. It was a warning box above the fold, which put the
+ * thing that does NOT happen ahead of the thing somebody came here to do. It still has to be
+ * said — the R13 stays, this is not an undo — but it is a footnote, not the headline.
+ */
+function MoveModal({ mail, actor, onClose, onDone }: {
+  mail: MailItem
+  actor: { id: string | null; name: string | null }
+  onClose: () => void
+  onDone: (message: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const was = mail.linkedTo?.label ?? 'the current account'
+
+  /** The search is folded away until somebody says they know where it belongs. */
+  const [rematching, setRematching] = useState(false)
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<DebtorAccount[]>([])
+  const [looking, setLooking] = useState(false)
+  const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
+
+  /*
+   * Is the sender's address saved as a contact on the very account we are taking this off?
+   *
+   * Because that is the same mistake seen twice. Matching a message ticks "save this address" by
+   * default, so a newsletter matched to a debtor by accident ends up ON their file — and from
+   * then on it cannot be blocked, with nothing anywhere saying why. That happened: a Yahoo
+   * Finance brief was matched to a debtor, unmatched again, and blocking it was still refused.
+   *
+   * Offered, never assumed. The address may have been the debtor's all along with only this one
+   * message matched wrongly, and quietly deleting a real contact is not ours to decide.
+   */
+  const [savedOnFile, setSavedOnFile] = useState<DebtorFile | null>(null)
+  const [alsoRemove, setAlsoRemove] = useState(false)
+  useEffect(() => {
+    let alive = true
+    void debtorFileFor(mail.fromAddress)
+      .then((f) => {
+        // Only when it is on THIS account. On another debtor's file it is somebody else's fact.
+        if (alive && f && f.accountId === mail.linkedAccountId) setSavedOnFile(f)
+      })
+      .catch(() => { /* Not knowing just means the tick box is not offered. */ })
+    return () => { alive = false }
+  }, [mail.fromAddress, mail.linkedAccountId])
+
+  // Debounced, for the same reason the matching search is: 100 000 rows per keystroke otherwise.
+  useEffect(() => {
+    const q = term.trim()
+    if (q.length < 2) { setHits([]); return }
+    let cancelled = false
+    setLooking(true)
+    const t = setTimeout(() => {
+      /* NO COUNT. The box shows eight and never says how many there were, and the exact count
+         is a second pass over every matching row in the book -- paid on every keystroke. */
+      void fetchAccounts({ search: q, pageSize: 8, countRows: false })
+        .then((r) => { if (!cancelled) setHits(r.accounts) })
+        .catch(() => { if (!cancelled) setHits([]) })
+        .finally(() => { if (!cancelled) setLooking(false) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [term])
+
+  async function unmatch() {
+    setBusy(true)
+    setError(null)
+    try {
+      const removeContact = alsoRemove && !!savedOnFile
+      await unmatchMail({ mail, reason, actor, removeContact })
+      /*
+       * WHERE IT ACTUALLY WENT, and there are only two answers now.
+       *
+       * This once had to choose between three queues and got it wrong for junk -- it said "back
+       * under Needs matching" unconditionally, so an agent who unmatched a newsletter was told
+       * where to look and found an empty list. With the queues gone the question is nearly
+       * trivial: junk is the one place that is not the mailbox.
+       */
+      const landsIn = mail.isJunk ? 'Junk' : 'All'
+      onDone(
+        `Unmatched from ${was}. You will find it under ${landsIn}.`
+        + (removeContact ? ` ${mail.fromAddress} is off their contacts, so it can be blocked now.` : ''),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  async function rematch() {
+    if (!picked) return
+    setBusy(true)
+    setError(null)
+    try {
+      const charge = await moveFiledMail({
+        mail, toAccountId: picked.id, toLabel: picked.label, reason, actor,
+      })
+      onDone(`Rematched to ${picked.label}. ${chargeMessage(charge, '6')}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Unmatch this email" onClose={onClose} width={520}>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+        <p className="text-sm font-medium text-slate-800 truncate">{mail.subject || '(no subject)'}</p>
+        <p className="text-xs text-slate-400 mt-0.5 truncate">
+          From {mail.fromAddress} &middot; currently on {was}
+        </p>
+      </div>
+
+      {/*
+        THE MAIN ACTION, first and on its own. Everything else in this box is an alternative to
+        it, which is the opposite of how this read before.
+      */}
+      <div className="mt-4 rounded-xl border border-gold-200 bg-gold-50/60 p-4">
+        <p className="text-sm font-semibold text-navy-950">Take it off {was}</p>
+        <p className="text-[13px] text-slate-500 mt-1">
+          It stays in your mailbox under <strong className="font-medium text-slate-600">All</strong>,
+          on nobody&rsquo;s file. Match it to the right account whenever you work out which one that
+          is &mdash; or leave it, which is now a perfectly good answer.
+        </p>
+
+        <label className="block mt-3">
+          <span className="text-xs font-medium text-slate-600">
+            Why? <span className="font-normal text-slate-400">Optional</span>
+          </span>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            autoFocus
+            placeholder="Wrong Mthembu"
+            className="w-full text-sm rounded-lg border border-slate-200 bg-white px-3 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
+          {/* Kept on the message, never on the debtor's account — see unmatchMail. */}
+          <span className="block text-xs text-slate-400 mt-1">
+            Kept on the email, for the firm. Nothing is written onto anyone&rsquo;s account.
+          </span>
+        </label>
+
+        {/*
+          The address that came with it. Only shown when there is one, so the ordinary unmatch —
+          a debtor's genuine reply on the wrong file — is not cluttered by it.
+        */}
+        {savedOnFile && (
+          <label className="flex items-start gap-2 mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 cursor-pointer">
+            <input type="checkbox" checked={alsoRemove} disabled={busy}
+              onChange={(e) => setAlsoRemove(e.target.checked)} className="mt-0.5 shrink-0" />
+            <span className="min-w-0">
+              <span className="block text-[13px] font-medium text-slate-700">
+                Also take {mail.fromAddress} off their contacts
+              </span>
+              <span className="block text-xs text-slate-400 mt-0.5">
+                It was saved onto this account when the email was matched. While it is there the
+                sender cannot be blocked. Leave it if the address really is theirs.
+              </span>
+            </span>
+          </label>
+        )}
+
+        <button onClick={() => void unmatch()} disabled={busy}
+          className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold px-3.5 py-2.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+          {/* Fixed label, spinner for the wait — a label that shrinks mid-click leaves its old
+              glyphs behind on the firm's iPad. */}
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Undo2 size={15} />}
+          Unmatch from {was}
+        </button>
+      </div>
+
+      {/* The second answer, for when somebody does know where it belongs. */}
+      {!rematching ? (
+        <button onClick={() => setRematching(true)} disabled={busy}
+          className="mt-3 w-full text-left text-[13px] font-medium text-slate-600 hover:text-navy-950 px-1 py-1.5 disabled:opacity-50">
+          <span className="inline-flex items-center gap-1.5">
+            <MoveRight size={14} className="text-slate-400" />
+            I know which account it should be on &mdash; match it there instead
+          </span>
+        </button>
+      ) : (
+        <div className="mt-3 rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-slate-700 flex-1">Which account should it be on?</span>
+            <button onClick={() => { setRematching(false); setPicked(null); setTerm('') }} disabled={busy}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+              Cancel
+            </button>
+          </div>
+
+          {picked ? (
+            <>
+              <div className="mt-3 rounded-lg border border-slate-200 px-3 py-2.5 flex items-center gap-2">
+                <MoveRight size={15} className="shrink-0 text-slate-400" />
+                <span className="text-sm text-slate-800 min-w-0 flex-1">
+                  Rematching to <strong className="font-semibold">{picked.label}</strong>
+                </span>
+                <button onClick={() => setPicked(null)} disabled={busy}
+                  className="shrink-0 text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2 disabled:opacity-50">
+                  Change
+                </button>
+              </div>
+              <button onClick={() => void rematch()} disabled={busy}
+                className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-300 text-navy-950 hover:bg-slate-50 disabled:opacity-50">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <MoveRight size={14} />}
+                Rematch to {picked.label} &middot; R13
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                value={term}
+                onChange={(e) => setTerm(e.target.value)}
+                autoFocus
+                placeholder="Surname, account number or client reference"
+                className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-2 focus:outline-none focus:ring-2 focus:ring-brand-100"
+              />
+              {looking && <p className="text-xs text-slate-400 mt-2">Looking&hellip;</p>}
+              <div className="mt-2 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                {/* The account it is already on is filtered out — matching it to itself is not a move. */}
+                {hits.filter((h) => h.id !== mail.linkedAccountId).map((h) => (
+                  <button key={h.id}
+                    onClick={() => setPicked({ id: h.id, label: debtorLabel(h) })}
+                    className="w-full text-left px-1 py-2.5 hover:bg-slate-50">
+                    <span className="block text-sm font-medium text-slate-800">{debtorLabel(h)}</span>
+                    <span className="block text-xs text-slate-400">
+                      {h.accountNumber ?? 'no account number'}
+                      {h.clientReference && <> &middot; {h.clientReference}</>}
+                    </span>
+                  </button>
+                ))}
+                {term.trim().length >= 2 && !looking && hits.length === 0 && (
+                  <p className="py-3 text-sm text-slate-400">No account matches that.</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      {/*
+        The footnote. It has to be said and it is not the headline: whichever way this goes, the
+        R13 already raised is not reversed, because fees feed remittances and a processed
+        remittance cannot be unwound. Finance corrects it forward.
+      */}
+      <p className="text-xs text-slate-400 mt-4 pt-3 border-t border-slate-100">
+        The R13 already on {was} is not reversed either way, and the email stays on that account
+        so the fee still has the correspondence behind it. Finance corrects it in the remittance.
+      </p>
+    </Modal>
+  )
+}

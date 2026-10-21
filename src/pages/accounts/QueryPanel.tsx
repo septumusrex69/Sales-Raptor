@@ -1,19 +1,21 @@
 import { useState } from 'react'
-import { Check, MessageCircleQuestion, Plus, X } from 'lucide-react'
+import { Check, Mail, MessageCircleQuestion, Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
-import { chargeMessage } from '../../lib/accountCharges'
 import {
-  closeQuery, isStale, markOutcomeDone, raiseQuery, updateQuery,
-  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
-  type AccountQuery, type QueryOutcome, type QueryStage,
+  closeQuery, isStale, markDisputeReceived, markOutcomeDone, openDisputeOn, updateQuery,
+  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, stageLine,
+  type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
-import { QUERY_CATEGORIES } from '../../lib/disputeCategories'
+import { escalationCard } from '../../lib/disputeCategories'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * Where a dispute sits, as a dot, in the app's own palette.
@@ -49,46 +51,83 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
  * the business's decision, and a system that quietly halted work on an account would be taking
  * that decision away.
  */
-export function QueryPanel({ accountId, accountLabel, queries, users, actor, onChange, busy, run, clientId, clientLiaisonId }: {
+export function QueryPanel({ accountId, queries, users, actor, onChange, onRaise, busy, run, clientId, clientLiaisonId }: {
   accountId: string
-  /** The account number, used to find this debtor again on the dispute board. */
-  accountLabel: string | null
   queries: AccountQuery[]
   /** Who a query can be given to. */
   users: User[]
-  actor: { id: string | null; name: string | null; role: string | undefined }
+  /*
+   * WITH THE GRANTS, not the role alone. What somebody may do is the role's template plus what
+   * they were given minus what was taken away -- see capabilities.ts -- so a shape carrying only
+   * `role` can answer the question wrongly for exactly the person the firm went out of their way
+   * to give something to.
+   */
+  actor: Pick<User, 'grants' | 'revokes'> & { id: string | null; name: string | null; role: string | undefined }
   onChange: () => Promise<void>
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   clientId: string | undefined
+  /**
+   * OPEN THE ESCALATE BOX -- the same one the Escalate button opens, and now the only way in.
+   *
+   * THE FIRM: "I really like the way that the dispute is captured in the escalate. But if you raise
+   * a dispute in that little box down there, it doesn't do the same."
+   *
+   * IT DID NOT, AND THE DIFFERENCES WERE NOT COSMETIC. This panel had a form of its own that never
+   * asked how the dispute reached us, so every dispute raised from here was verbal and the written
+   * sequence was unreachable from this screen; it could not be dictated, with the debtor on the
+   * telephone; it offered every user in the firm as the assignee rather than this person's own team
+   * leader, the liaison on the client and the liaison manager; it still said "Chase the client on",
+   * which the firm asked about by name; and its fee sentence was a year out of date.
+   *
+   * SO IT IS GONE RATHER THAN BROUGHT UP TO DATE. Two boxes raising the same thing is CLAUDE.md's
+   * one-clause-builder rule wearing different clothes: written twice they drift, and what drifts
+   * here is which sequence a statutory dispute starts.
+   */
+  onRaise: () => void
   /** Who looks after this debtor's client — giving a dispute to them is what "with the liaison" means. */
   clientLiaisonId: string | undefined
 }) {
-  const [adding, setAdding] = useState(false)
   const open = queries.filter((q) => q.status !== 'closed')
   const closed = queries.filter((q) => q.status === 'closed')
+  /*
+   * ONE AT A TIME, SO THERE IS NOTHING TO PRESS.
+   *
+   * THE FIRM: "there should only be one dispute allowed to be open at a specific time." The
+   * database refuses a second, and finding that out by pressing Raise one, typing what the debtor
+   * said and being told no -- with the debtor still on the telephone -- is the worst way to learn
+   * a rule. So the control is not there, and the line under the heading says why and what instead.
+   */
+  const alreadyDisputed = openDisputeOn(queries)
 
   return (
     <Card>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes</h3>
-        <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
-          {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Raise one</>}
-        </button>
+        {/*
+          NOT "DISPUTES" ANY MORE, because it never only held them -- help and litigation have
+          always been on this list, and a request joins them. The firm: "the whole dispute
+          situation for me currently just feels very disorganised." A panel of four kinds of thing
+          under one of their names is part of that: it made a request for a statement look like a
+          debtor objecting, which is exactly the confusion the kinds are there to end.
+        */}
+        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes &amp; requests</h3>
+        {!alreadyDisputed && (
+          <button onClick={onRaise} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+            <Plus size={12} /> Raise one
+          </button>
+        )}
       </div>
 
-      {adding && (
-        <RaiseForm
-          accountId={accountId}
-          users={users}
-          actor={actor}
-          busy={busy}
-          run={run}
-          onDone={() => setAdding(false)}
-        />
+      {/* THE FIRM'S OWN DISTINCTION: several things, one dispute. Said where the button was, so it
+          reads as an instruction rather than as something missing. */}
+      {alreadyDisputed && (
+        <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+          This account has an open dispute. A debtor may dispute several things, but in one
+          dispute — add what they are now saying to the one below.
+        </p>
       )}
 
-      {open.length === 0 && closed.length === 0 && !adding && (
+      {open.length === 0 && closed.length === 0 && (
         <p className="text-[11px] text-slate-400 leading-relaxed">
           Nothing disputed. Raise one when the debtor says something only the client can answer.
         </p>
@@ -96,7 +135,7 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
 
       <div className="space-y-2.5">
         {open.map((q) => (
-          <QueryCard key={q.id} query={q} accountId={accountId} accountLabel={accountLabel} users={users} actor={actor}
+          <QueryCard key={q.id} query={q} accountId={accountId} users={users} actor={actor}
             clientLiaisonId={clientLiaisonId} busy={busy} run={run} onChange={onChange} clientId={clientId} />
         ))}
       </div>
@@ -106,19 +145,23 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
           <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-slate-600">
             {closed.length} closed
           </summary>
-          <div className="space-y-2 mt-2">
+          {/* ONE LINE A CLOSED QUERY (the firm: "thin, sleek, easy to read"). What was asked and
+              what was done about it follow the date and the outcome, truncated, with the whole of
+              both on the title. */}
+          <div className="mt-2 divide-y divide-slate-50">
             {closed.map((q) => (
-              <div key={q.id} className="text-xs">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-slate-400 tabular-nums shrink-0">{formatDate(q.closedAt ?? q.raisedAt)}</span>
-                  {q.outcome && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${OUTCOME_CHIP[q.outcome]}`}>
-                      {QUERY_OUTCOME_LABEL[q.outcome]}
-                    </span>
-                  )}
-                </div>
-                <p className="text-slate-600 mt-0.5 wrap-anywhere">{q.description}</p>
-                {q.outcomeAction && <p className="text-slate-400 mt-0.5">{q.outcomeAction}</p>}
+              <div key={q.id} className="flex items-center gap-2 py-1 text-[12px] whitespace-nowrap min-w-0 hover:bg-slate-50"
+                title={[q.description, q.outcomeAction].filter(Boolean).join(' · ')}>
+                <span className="text-slate-400 tabular-nums shrink-0">{formatDate(q.closedAt ?? q.raisedAt)}</span>
+                {q.outcome && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${OUTCOME_CHIP[q.outcome]}`}>
+                    {QUERY_OUTCOME_LABEL[q.outcome]}
+                  </span>
+                )}
+                <span className="min-w-0 truncate text-slate-600">
+                  {q.description}
+                  {q.outcomeAction && <span className="text-slate-400"> · {q.outcomeAction}</span>}
+                </span>
               </div>
             ))}
           </div>
@@ -128,12 +171,17 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
   )
 }
 
-function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run, onChange, clientId, clientLiaisonId }: {
+function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, clientId, clientLiaisonId }: {
   query: AccountQuery
   accountId: string
-  accountLabel: string | null
   users: User[]
-  actor: { id: string | null; name: string | null; role: string | undefined }
+  /*
+   * WITH THE GRANTS, not the role alone. What somebody may do is the role's template plus what
+   * they were given minus what was taken away -- see capabilities.ts -- so a shape carrying only
+   * `role` can answer the question wrongly for exactly the person the firm went out of their way
+   * to give something to.
+   */
+  actor: Pick<User, 'grants' | 'revokes'> & { id: string | null; name: string | null; role: string | undefined }
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   onChange: () => Promise<void>
@@ -141,7 +189,7 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
   clientLiaisonId: string | undefined
 }) {
   const [closing, setClosing] = useState(false)
-  const stale = isStale(q, TODAY)
+  const stale = isStale(q, TODAY())
   const owner = users.find((u) => u.id === q.ownerId)
   const ctx = { accountId, actorId: actor.id, actorName: actor.name }
 
@@ -186,13 +234,55 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
         least useful of them at a glance, and the timeline records it on the "Dispute raised" note.
       */}
       <p className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-1.5">
-        <span className="inline-flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
-          {QUERY_STAGE_LABEL[q.stage]}
-        </span>
+        {/*
+          WHERE IT STANDS AND WHEN IT COMES BACK, in one breath.
+
+          THE FIRM: "it says awaiting liaison, but it's actually already been escalated to the
+          client. So it should say awaiting client feedback and when to follow up next."
+
+          A ticket sitting with a client is not a problem; a ticket sitting with a client that
+          nobody has booked a day to chase is how one goes quiet for a month -- so the absence of a
+          date is said out loud rather than left blank.
+        */}
+        {(() => {
+          const line = stageLine({ stage: q.stage, chaseOn: q.chaseOn, today: TODAY() })
+          return (
+            <span className="inline-flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
+              {line.label}
+              {line.waiting && (
+                <span className={line.overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-400'}>
+                  &middot; {line.followOn ? `follow up ${formatDate(line.followOn)}` : 'no follow-up booked'}
+                </span>
+              )}
+            </span>
+          )
+        })()}
         {q.category && (
           <span className="inline-flex items-center gap-1.5">
             <span className="text-slate-300">&middot;</span>{q.category}
+          </span>
+        )}
+        {/*
+          WHAT KIND OF THING THIS IS, ON EVERYTHING BUT A DISPUTE.
+          
+          NOT ON A DISPUTE, deliberately: it is the heaviest of them and the one the panel is
+          named for, so labelling it adds a word to every card to say the default. The others
+          look identical to it without this -- which is how "please send the March statement"
+          read as a debtor objecting to the debt -- and a request also says who is being asked,
+          because "awaiting liaison · from the client" is the whole status in five words.
+        */}
+        {q.kind !== 'dispute' && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-slate-300">&middot;</span>
+            {/* One vocabulary, off the kind itself. This was a fourth chain with a fallback,
+                and a fallback is how a new kind ends up wearing "Handover data". */}
+            <span className="text-slate-600">{escalationCard(q.kind).label}</span>
+            {/* WHAT IS WANTED, straight through: it is already the firm's own words from a
+                closed list, so there is nothing here to translate. It replaced "from the client",
+                which said who was being asked -- a thing the ticket already answers with whose
+                desk it is on. */}
+            {q.requestFor && <span className="text-slate-400">{q.requestFor}</span>}
           </span>
         )}
       </p>
@@ -268,13 +358,22 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
       */}
       {!closing && (
         <div className="flex gap-1.5 mt-2">
-          {clientId && canViewClients(actor.role as User['role'] | undefined) && (
+          {clientId && canViewClients({ ...actor, role: actor.role as User['role'] }) && (
             <Link to={`/companies/${clientId}`}
               className="flex-1 text-[11px] font-medium py-1 rounded border border-brand-100 text-brand-500 hover:bg-white inline-flex items-center justify-center gap-1">
               View client
             </Link>
           )}
-          <Link to={accountLabel ? `/queries?q=${encodeURIComponent(accountLabel)}` : '/queries'}
+          {/*
+            STRAIGHT TO THE TICKET. THE FIRM: "if you say view dispute, it doesn't take you to the
+            ticket -- it takes you to the dispute pane and then you have to double click. It should
+            say view dispute and you should go there immediately."
+
+            It went to /queries?q=<account number>, which is the BOARD filtered to this account:
+            one row, which you then had to find and open. The board is where you go to see what is
+            outstanding; this button names one ticket and now opens it.
+          */}
+          <Link to={`/queries/${q.id}`}
             className="flex-1 text-[11px] font-medium py-1 rounded border border-brand-100 text-brand-500 hover:bg-white inline-flex items-center justify-center gap-1">
             View dispute
           </Link>
@@ -285,12 +384,34 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
         </div>
       )}
 
+      {/*
+        THE MOMENT THE WRITTEN DISPUTE ARRIVES, AND IT IS A BUTTON BECAUSE IT IS AN EVENT.
+        
+        THE FIRM: "we need a way to figure out, to start the dispute workflow from the moment that
+        we've received the email with the dispute." Pressing this ends the sequence that was asking
+        for it in writing -- its deemed-undisputed notice must never reach a debtor whose dispute
+        is on the firm's desk -- starts the real one, and stops the collection sequences until
+        there is a finding. All of it off one write; see markDisputeReceived.
+        
+        ONLY WHERE IT IS STILL BEING WAITED FOR. A dispute already in writing has nothing to
+        record, and one that is closed is over.
+      */}
+      {q.kind === 'dispute' && q.status !== 'closed' && !q.inWriting && (
+        <button disabled={busy}
+          onClick={() => run(() => markDisputeReceived(q.id, {
+            accountId, actorId: actor.id, actorName: actor.name,
+          }))}
+          className="w-full mt-1.5 text-[11px] font-medium py-1.5 rounded border border-[#c9a052] text-[var(--c-gold-deep)] bg-gold-50 hover:bg-gold-100 disabled:opacity-50 inline-flex items-center justify-center gap-1.5">
+          <Mail size={11} /> The dispute has arrived in writing
+        </button>
+      )}
+
       {closing && (
         <CloseForm
           onCancel={() => setClosing(false)}
           busy={busy}
-          onClose={async (outcome, action, amount) => {
-            const ok = await run(() => closeQuery(q.id, { outcome, action, amount }, ctx))
+          onClose={async (outcome, action, amount, effect) => {
+            const ok = await run(() => closeQuery(q.id, { outcome, action, amount, effect }, ctx))
             if (ok) setClosing(false)
             await onChange()
           }}
@@ -393,81 +514,25 @@ function ChaseDate({ value, stale, busy, onChange }: {
   )
 }
 
-function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
-  accountId: string
-  users: User[]
-  actor: { id: string | null; name: string | null }
-  busy: boolean
-  run: (fn: () => Promise<unknown>) => Promise<boolean>
-  onDone: () => void
-}) {
-  const [description, setDescription] = useState('')
-  const [category, setCategory] = useState('')
-  const [ownerId, setOwnerId] = useState('')
-  const [chaseOn, setChaseOn] = useState('')
-  const [charged, setCharged] = useState<string | null>(null)
-
-  return (
-    <form
-      className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3"
-      onSubmit={async (e) => {
-        e.preventDefault()
-        if (!description.trim()) return
-        let message: string | null = null
-        const ok = await run(async () => {
-          const { charge } = await raiseQuery({
-            accountId, description, category, ownerId: ownerId || null, chaseOn: chaseOn || null,
-            raisedBy: actor.id, raisedByName: actor.name,
-          })
-          message = charge ? chargeMessage(charge, '3') : 'Not charged to the debtor.'
-        })
-        // Said after the fact rather than promised beforehand: whether item 3 has anything left
-        // on this account depends on the ledger, and the ledger is read when the charge is made.
-        if (ok) { setCharged(message); onDone() }
-      }}
-    >
-      <textarea value={description} onChange={(e) => setDescription(e.target.value)} autoFocus rows={3}
-        placeholder="What did the debtor say? In their words if you can."
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 resize-none" />
-      {/* Optional. The kinds are too various to make anyone pick one before they can save. */}
-      <select value={category} onChange={(e) => setCategory(e.target.value)}
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
-        <option value="">No category</option>
-        {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
-      </select>
-      <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
-        <option value="">Nobody yet</option>
-        {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-      </select>
-      <label className="block text-[11px] text-slate-500">
-        Chase the client on
-        <input type="date" value={chaseOn} onChange={(e) => setChaseOn(e.target.value)} min={TODAY}
-          className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
-      </label>
-      <p className="text-[10px] text-slate-500 leading-snug">
-        Raising a query charges item 3, &ldquo;other necessary expenses not specifically provided
-        for&rdquo; &mdash; R25 excluding VAT, and a total for the account, so a second query
-        charges nothing under it. Sending it to the client then charges item 1a (R25) and the
-        client&rsquo;s reply charges item 6 (R13), both per occurrence.
-      </p>
-      {charged && <p className="text-[11px] text-gold-600">{charged}</p>}
-      <button type="submit" disabled={busy || !description.trim()}
-        className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
-        {busy ? 'Saving...' : 'Raise query'}
-      </button>
-    </form>
-  )
-}
-
 function CloseForm({ onClose, onCancel, busy }: {
-  onClose: (outcome: QueryOutcome, action: string, amount: number | null) => void
+  onClose: (outcome: QueryOutcome, action: string, amount: number | null, effect: QueryEffect | null) => void
   onCancel: () => void
   busy: boolean
 }) {
   const [outcome, setOutcome] = useState<QueryOutcome>('valid')
   const [action, setAction] = useState('')
   const [amount, setAmount] = useState('')
+  /*
+   * WHAT IT DID TO THE ACCOUNT, and it decides what happens to the sequence -- so it is asked as
+   * three answers rather than typed into the box below. The firm named all three: "either the
+   * account can be withdrawn or the account can stay with new terms and conditions... or the
+   * dispute can be valid but nothing changes."
+   *
+   * DEFAULTED TO "nothing changes", which is the safe direction. Resuming a sequence that should
+   * have ended is visible on the account; ending one that should have resumed loses a demand the
+   * firm properly issued and nobody notices.
+   */
+  const [effect, setEffect] = useState<QueryEffect>('no_change')
   const needsAction = outcome === 'valid' || outcome === 'partly_valid'
 
   return (
@@ -480,6 +545,26 @@ function CloseForm({ onClose, onCancel, busy }: {
       </select>
       {needsAction && (
         <>
+          {/*
+            THE THREE ENDINGS, AS BUTTONS, WITH WHAT EACH ONE DOES UNDER IT. A collector closing a
+            dispute is deciding whether a statutory sequence resumes, ends, or has to be issued
+            again -- which is not a thing to infer from a sentence somebody typed.
+          */}
+          <fieldset className="space-y-1.5">
+            <legend className="text-[11px] font-medium text-slate-600">What happens to the account?</legend>
+            {(Object.keys(QUERY_EFFECT_LABEL) as QueryEffect[]).map((e) => (
+              <label key={e} className={`flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 ${
+                effect === e ? 'border-[#c9a052] bg-gold-50' : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}>
+                <input type="radio" name="query-effect" value={e} checked={effect === e}
+                  onChange={() => setEffect(e)} className="mt-0.5 shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-medium text-slate-800">{QUERY_EFFECT_LABEL[e]}</span>
+                  <span className="block text-[10px] leading-snug text-slate-500">{QUERY_EFFECT_HINT[e]}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <input value={action} onChange={(e) => setAction(e.target.value)}
             placeholder="What must happen now? e.g. reduce to R4,200, withdraw the account"
             className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
@@ -495,7 +580,8 @@ function CloseForm({ onClose, onCancel, busy }: {
       <div className="flex items-center gap-2">
         <button
           disabled={busy}
-          onClick={() => onClose(outcome, action, amount.trim() ? Number(amount) : null)}
+          onClick={() => onClose(
+            outcome, action, amount.trim() ? Number(amount) : null, needsAction ? effect : null)}
           className="text-[11px] font-medium px-2.5 py-1 rounded bg-brand-600 text-white disabled:opacity-50 inline-flex items-center gap-1"
         >
           <MessageCircleQuestion size={12} /> Close query

@@ -9,6 +9,7 @@
  * one. What it guards is narrow but it is the part that matters: an account opens a ledger, and a
  * ledger opened on a wrong capital or a wrong date is wrong in every figure it ever produces.
  */
+import { ruleRateFor, type ClientCommission } from './commissionRule.ts'
 
 export interface NewDebtorInput {
   /** Our reference. Optional — suggestReference proposes the next in the client's series. */
@@ -17,11 +18,53 @@ export interface NewDebtorInput {
   clientReference: string
   firstName: string
   surname: string
+  /*
+   * THE OTHER THREE PARTS OF A NAME, and they are optional because only the importer has them.
+   *
+   * The sheet asks a client for a title, initials and a second name; the draft table shows all
+   * three; and until now toAccountRow wrote neither -- so three of the five name columns a client
+   * fills in were collected, validated, displayed, and then dropped on the way to the account.
+   * Nothing failed. The account simply opened without them, which is what the firm was looking at
+   * on a debtor showing "Zanele Sithole" and nothing else.
+   *
+   * THE TITLE IS NOT COSMETIC. addressAs falls back to the surname alone when there is none, and
+   * the firm found a section 129 of their own opening "Dear buitendag".
+   *
+   * Optional rather than required so the by-hand form, which does not ask for them, is unchanged.
+   */
+  title?: string
+  initials?: string
+  secondName?: string
+  /**
+   * Person or company, and it was never written by an import at all.
+   *
+   * Every account the new importer opened came out 'individual', which is precisely the state the
+   * Swordfish import left the book in -- sixteen accounts named "(Pty) Ltd" holding a
+   * registration number and filed as people. The whole debtor panel turns on this: what it is
+   * called, whether the identity field is an ID or a registration number, whether the numbers on
+   * it are the debtor's own or the people who answer for a company, and what a trace searches on.
+   *
+   * Optional, and absent means a person -- which is what the column already defaults to.
+   */
+  /* Written out rather than imported: this file deliberately has no imports, so it can be
+     tested without a database anywhere near it. */
+  debtorKind?: 'individual' | 'company'
   /** South African ID. Optional, but checked when given. */
   idNumber: string
   /** Capital as at handover. The account opens here and everything else is movement. */
   capital: string
+  /**
+   * THE DAY THE ACCOUNT WAS HANDED OVER -- the day the batch is approved, or the day an account is
+   * added by hand. Interest runs from here (accountBalance.openAccrual, open_interest), and so does
+   * the ledger. NOT the date of default: the firm (7 Oct 2026), "interest runs from the date of
+   * handover, never from the date of default."
+   */
   handoverDate: string
+  /**
+   * THE DATE OF DEFAULT, as the client's sheet gave it -- a RECORD, kept on default_date. Nothing
+   * accrues from it. Optional: an account phoned in often arrives without one.
+   */
+  defaultDate?: string
   /** Percent a year. 24 is standard but negotiable per client and per account. */
   interestRateAnnual: string
 
@@ -91,13 +134,61 @@ export function isValidSaId(id: string): boolean {
  *
  * Returns null where there is nothing to learn from, and the field stays free text.
  */
-export function suggestReference(existing: string[]): string | null {
+/**
+ * The next `count` references in the client's series, for a whole handover at once.
+ *
+ * THE FIRM, on a batch that had just been imported: "the reference numbers for the previous
+ * import — it didn't generate reference numbers for Raptor. I see the client ref, but I don't see
+ * the Raptor reference."
+ *
+ * It generated none because nothing asked it to: `toDebtorInput` reads an `account_number` column
+ * off the sheet, and a client's sheet has no reason to carry OUR reference. So 45 accounts opened
+ * with none, which is not cosmetic — the reference is what a debtor is told to quote when they
+ * pay, what a receipt is matched on, and what the duplicate check compares. With every account
+ * carrying none, the next import of the same file reported forty-five "possible duplicates of an
+ * account with no reference", which is exactly what the firm was looking at.
+ *
+ * BUILT ON suggestReference, one at a time, each answer fed back in as though it were already on
+ * the book. Anything cleverer would be a second implementation of the prefix-and-padding rule,
+ * and the two would disagree the first time a client's series did something unexpected.
+ */
+export function nextReferences(
+  existing: string[], clientCode: string | null | undefined, count: number,
+): (string | null)[] {
+  const book = [...existing]
+  const out: (string | null)[] = []
+  for (let i = 0; i < count; i += 1) {
+    const next = suggestReference(book, clientCode)
+    out.push(next)
+    /* Pushed even when null, so a client with no series AND no code returns nulls rather than
+       looping on the same answer -- the field is free text and stays empty, as it did before. */
+    if (next) book.push(next)
+  }
+  return out
+}
+
+export function suggestReference(existing: string[], clientCode?: string | null): string | null {
   const parsed: { prefix: string; digits: string }[] = []
   for (const ref of existing) {
     const m = /^(.*?)(\d+)$/.exec(ref.trim())
     if (m && m[2]) parsed.push({ prefix: m[1], digits: m[2] })
   }
-  if (parsed.length === 0) return null
+  if (parsed.length === 0) {
+    /*
+     * A CLIENT'S FIRST ACCOUNT HAS NO SERIES TO CONTINUE, so it starts one from their code.
+     *
+     * THE FIRM: "our reference, shouldn't our reference automatically be loaded?" It was not, and
+     * this is why — with nothing on the book there was nothing to read a prefix off, so the box
+     * came up blank on exactly the clients where somebody is least likely to know the convention.
+     * Clients have a code now, which is what every later reference will be built on anyway.
+     *
+     * FIVE DIGITS FROM 00001, matching the shape already in the book — ACF10085, APM20097 — and
+     * starting at one rather than at ten thousand, because a first account numbered 10001 reads
+     * as ten thousand accounts that were never there.
+     */
+    const code = (clientCode ?? '').trim().toUpperCase()
+    return code ? `${code}00001` : null
+  }
 
   // The commonest prefix, not the first: a client with a stray legacy reference should not have
   // the whole series renamed after it.
@@ -140,10 +231,34 @@ export function validateNewDebtor(input: NewDebtorInput, today: string): Problem
   if (capital === null) problems.push({ field: 'capital', message: 'Capital handed over is required.' })
   else if (capital <= 0) problems.push({ field: 'capital', message: 'Capital must be more than nothing.' })
 
+  /*
+   * A DATE, WRITTEN AS A DATE. Not a formality: this is the last thing between a string somebody
+   * typed and a `date` column, and Postgres does not fail safely on a bad one. Supabase runs
+   * DateStyle MDY, so "15/03/2026" is rejected outright -- loudly, which is the lucky half --
+   * while "03/04/2026" is accepted and stored as 4 March. In duplum, interest and prescription
+   * all run from this date, so a silently transposed one is wrong for the life of the account.
+   *
+   * The import hit the loud half on a date typed into the handover table. The check is here
+   * rather than only there because every path to an account comes through this function, and the
+   * comparison below is a STRING comparison that is only meaningful on yyyy-mm-dd anyway.
+   */
   if (!input.handoverDate) {
     problems.push({ field: 'handoverDate', message: 'The handover date is required — interest runs from it.' })
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(input.handoverDate)) {
+    problems.push({
+      field: 'handoverDate',
+      message: `"${input.handoverDate}" is not a date this can open an account on.`,
+    })
   } else if (input.handoverDate > today) {
     problems.push({ field: 'handoverDate', message: 'A handover cannot be dated in the future.' })
+  }
+  /* THE DATE OF DEFAULT, WHERE GIVEN, on the same rule: a typed column, so a bad one stops a write
+     and a transposed one is wrong for good. Not required -- it is a record, not a clock. */
+  const defaulted = (input.defaultDate ?? '').trim()
+  if (defaulted && !/^\d{4}-\d{2}-\d{2}$/.test(defaulted)) {
+    problems.push({ field: 'defaultDate', message: `"${defaulted}" is not a date.` })
+  } else if (defaulted && defaulted > today) {
+    problems.push({ field: 'defaultDate', message: 'A date of default cannot be in the future.' })
   }
 
   if (input.email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(input.email.trim())) {
@@ -168,13 +283,49 @@ export function validateNewDebtor(input: NewDebtorInput, today: string): Problem
  * client anyway, so it is inherited rather than typed: null where the client has none resolved,
  * which is a different fact from zero and the schema keeps them apart.
  */
+/**
+ * WHAT A DEBT COSTS A DEBTOR WHERE NOBODY HAS SAID OTHERWISE.
+ *
+ * THE FIRM, having been asked and having looked at eight accounts running at nought: "all debt
+ * clients are by default loaded on 24% interest. If we change it, we want to change it. We will
+ * reduce it if we want."
+ *
+ * THIS OVERRULES A DECISION MADE TWO COMMITS AGO, and the reversal is worth writing down rather
+ * than quietly swapping a constant. The import wrote 0% where a client had no rate recorded, on the
+ * argument that an account at nought is one somebody notices and an account at a guessed 24% is one
+ * nobody does. That argument was about GUESSING. 24% is not a guess — it is the firm's standing
+ * rate, it is what every account on the migrated book charges, it is the 2% a month the firm's own
+ * letters quote, and the firm has now said so in as many words. A default somebody has decided is a
+ * different thing from a default somebody inferred.
+ *
+ * STILL PER CLIENT, AND STILL OVERRIDABLE DOWNWARDS. `companies.default_interest_rate_annual` is
+ * read first and is what a mandate at a lower rate goes in; this is only what happens when that
+ * column is empty. "We will reduce it if we want" is exactly that column.
+ *
+ * ONE PLACE, because three entry points were giving three answers — the by-hand form defaulted to
+ * 24, the Swordfish import to 24 where its column was missing, and the handover sheet to 0.
+ */
+export const DEFAULT_INTEREST_RATE_ANNUAL = 24
+
 export function toAccountRow(
   input: NewDebtorInput,
   companyId: string,
   handoverId: string | null,
-  clientCommissionRate: number | null = null,
+  /*
+   * THE CLIENT'S RULE, NOT A RATE (prompt 9). A number still means a flat rate, which is what this
+   * took before; the rule is what it should be given, because on a sliding scale the rate depends on
+   * THIS account's capital and the caller did not know it. Passing one number for a whole handover is
+   * how a client on a scale had every new account priced at a single rate whatever its size.
+   */
+  client: ClientCommission | number | null = null,
 ) {
   const capital = num(input.capital) ?? 0
+  const rule: ClientCommission | null = typeof client === 'number' ? { commissionRate: client } : client
+  /* DECIDED ONCE, HERE, on the capital handed over -- the band this debt falls in at handover, as
+     the mandates state it. Stamped on the account so the engine never re-decides it, and stamped as
+     the expectation too, so a fresh account is never "off its mandate rate" on the day it opens. */
+  const rate = rule ? (ruleRateFor(rule, capital) ?? null) : null
+  const banded = !!rule?.commissionBands && rule.commissionBands.length > 0
   return {
     company_id: companyId,
     handover_id: handoverId,
@@ -182,6 +333,10 @@ export function toAccountRow(
     client_reference: input.clientReference.trim() || null,
     debtor_first_name: input.firstName.trim() || null,
     debtor_surname: input.surname.trim(),
+    debtor_kind: input.debtorKind ?? 'individual',
+    debtor_title: input.title?.trim() || null,
+    debtor_initials: input.initials?.trim() || null,
+    debtor_second_name: input.secondName?.trim() || null,
     debtor_id_number: input.idNumber.trim() || null,
     capital_handed_over: capital,
     capital_outstanding: capital,
@@ -194,10 +349,14 @@ export function toAccountRow(
     opening_interest: 0,
     opening_fees: 0,
     opening_as_at: input.handoverDate,
-    // Interest runs from the handover, which is what the date is for.
+    // Interest runs from the handover, which is what the date is for -- never from the default.
     interest_rate_annual: num(input.interestRateAnnual) ?? 0,
     interest_from: input.handoverDate,
-    commission_rate: clientCommissionRate,
+    // The client's date of default, kept as a record and read by nothing that accrues.
+    default_date: (input.defaultDate ?? '').trim() || null,
+    commission_rate: rate,
+    commission_rate_expected: rate,
+    commission_rate_source: rate === null ? null : banded ? 'Band on capital at handover' : 'Client flat rate',
     status: 'Active: Activated',
     source: 'manual',
   }

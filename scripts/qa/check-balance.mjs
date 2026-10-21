@@ -10,13 +10,16 @@
  */
 import { computeBalance, buildStatement } from '../../src/lib/accountBalance.ts'
 import { accrueToDate, coveredTo } from '../../src/lib/interestAccrual.ts'
+import { accrueToFor } from '../../src/lib/balanceInput.ts'
+import { readFileSync } from 'node:fs'
 
 let failed = 0
+let passed = 0
 const near = (a, b) => Math.abs(a - b) < 0.005
 
 function check(name, actual, expected) {
   const ok = near(actual, expected)
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok) console.log(`        expected ${expected.toFixed(2)}, got ${actual.toFixed(2)}`)
 }
@@ -32,17 +35,21 @@ const empty = { payments: [], fees: [], interest: [] }
 }
 
 /*
- * The receipt fee is priced on the schedule in force the DAY THE PAYMENT ARRIVED, not today.
- * A R6,100 instalment is exactly at the 2026 maximum of R610 and well past the 2020 one of R509,
- * so the same payment costs different amounts either side of 6 March 2026. Getting this wrong
- * would be invisible on small payments and wrong on every large one.
+ * The receipt fee is priced on the cap in force the DAY THE PAYMENT ARRIVED, not today.
+ * A R6,100 instalment is exactly at the 2026 maximum of R610 and well past the earlier R502, so
+ * the same payment costs different amounts either side of the day the firm raised it. Getting this
+ * wrong would be invisible on small payments and wrong on every large one.
+ *
+ * AND THE DAY IS THE 7th OF APRIL 2026, NOT THE 6th OF MARCH. The gazette is dated 6 March; the
+ * firm applied the new cap from 7 April, and `annexure_b_tariffs` -- what allocate_payment actually
+ * charges on -- says so. For that month the app said R610 while the engine said R502.
  */
 {
   const before = computeBalance({
     capitalHandedOver: 0, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-11-29', amount: 6100 }] },
   })
-  check('payment in 2025 caps at the R509 maximum', before.receiptFees, 585.35)
+  check('payment in 2025 caps at the R502 the firm charged', before.receiptFees, 577.30)
 
   const after = computeBalance({
     capitalHandedOver: 0, handoverDate: '2026-01-01',
@@ -132,6 +139,70 @@ const empty = { payments: [], fees: [], interest: [] }
 
   const dates = s.lines.map((l) => l.date)
   check('lines are in date order', [...dates].sort().join() === dates.join() ? 1 : 0, 1)
+
+  /*
+   * AN ACTION THAT EARNED NOTHING IS ON THE STATEMENT, AT NOUGHT.
+   *
+   * THE FIRM: "it stops charging things... the last one was charged the 13th of September but a
+   * lot of things happened after that, now I can't see them... maybe we put it there and we have a
+   * zero charge that reflects on the statement."
+   *
+   * PAST THE ANNEXURE B CEILING EVERY FURTHER ACTION IS FREE, and the row is written at nought
+   * with `billed` false. The statement used to skip it, on the reasoning that it "belongs in the
+   * account's activity, not on a statement of what is owed" -- true about the BALANCE and wrong
+   * about the page: this is what a client reads to see what has been DONE, and a firm that emails
+   * a debtor eleven times past the ceiling and shows nothing after 13 September looks like a firm
+   * that stopped working.
+   */
+  const free = s.lines.filter((l) => l.kind === 'fee-no-charge')
+  check('an action past the ceiling is on the statement', free.length, 1)
+  check('...named for what it was', free[0]?.description === 'Phone Call' ? 1 : 0, 1)
+  /* AND IT MOVES NOTHING. The whole point is that the work shows and the balance does not budge --
+     which is also why the debits-less-credits assertion above still holds with it there. */
+  check('...charging nothing', free[0]?.debit ?? -1, 0)
+  check('...and crediting nothing', free[0]?.credit ?? -1, 0)
+  {
+    const at = s.lines.indexOf(free[0])
+    check('...leaving the balance exactly where it was',
+      free[0].balance, at > 0 ? s.lines[at - 1].balance : s.breakdown.capital)
+  }
+  /* A BILLED FEE IS STILL A FEE, or every charge on the book would quietly stop counting. */
+  const billed = s.lines.filter((l) => l.kind === 'fee')
+  check('the fees that did earn something are still fees', billed.length, 2)
+  check('...and still carry their charge', billed.reduce((t, l) => t + l.debit, 0), 32.78)
+}
+
+/*
+ * AND THE AMOUNT DECIDES WHICH IT IS, NOT THE `billed` FLAG BESIDE IT.
+ *
+ * Raptor's own rows keep the two in step -- chargeItem writes the recoverable amount and sets
+ * `billed` from whether it was above nought -- so a fixture built from those alone cannot tell a
+ * reading of one from a reading of the other. The MIGRATED book can disagree: a row may carry a
+ * figure and still be flagged unbilled.
+ *
+ * THE AMOUNT WINS THERE, and this check exists because the first cut of the no-charge line got it
+ * backwards. computeBalance sums every fee's amount without consulting the flag, which is correct
+ * under the imported-history rule -- Swordfish's figures are what the client was invoiced on -- so
+ * a line drawn at nought off the flag would be a row whose money the balance had already counted,
+ * and the statement would not add up to the figure at its own foot.
+ */
+{
+  const s = buildStatement({
+    capitalHandedOver: 1000, handoverDate: '2026-01-01',
+    ledgers: {
+      payments: [], interest: [],
+      fees: [{ date: '2026-02-01', description: 'Trace', exclVat: 25, vat: 3.75, billed: false }],
+    },
+  })
+  const line = s.lines.find((l) => l.description === 'Trace')
+  check('a migrated row carrying money is shown', line ? 1 : 0, 1)
+  check('...as a fee, because the balance counts it', line?.kind === 'fee' ? 1 : 0, 1)
+  check('...with its charge on it', line?.debit ?? -1, 28.75)
+  /* THE INVARIANT THAT CAUGHT IT: a statement whose lines do not add up to its own foot is the one
+     thing a statement may never be. */
+  const debits = s.lines.reduce((t, l) => t + l.debit - l.credit, 0)
+  check('...and the lines still add up to the balance', debits, s.breakdown.balance)
+  check('...which includes it', s.breakdown.balance, 1028.75)
 }
 
 /*
@@ -296,14 +367,29 @@ const empty = { payments: [], fees: [], interest: [] }
   check('near the ceiling: the fee is trimmed to the headroom', nearly.settlementFee, 50)
   check('near the ceiling: settlement lands exactly on the ceiling', nearly.settlement, 2000)
 
-  /* An account not subject to in duplum is untouched by any of this. */
+  /*
+   * AND THERE IS NO SUCH THING AS AN ACCOUNT NOT SUBJECT TO IT.
+   *
+   * THIS ASSERTED THE OPPOSITE. It passed `inDuplum` off and checked that R5 000 of interest on
+   * R1 000 of capital stood at R6 000 uncapped -- which was the behaviour, and the behaviour was
+   * wrong. THE FIRM, looking at RRC00005: "in duplum is still not working here." It was not,
+   * because the switch was `debtor_accounts.in_duplum`, Swordfish's "has this account REACHED the
+   * ceiling" column, false on everything Raptor ever created.
+   *
+   * In duplum at common law binds every debt; NCA s103(5) is the wider version and binds credit
+   * agreements. There is no input to pass any more, so the same figures cap, and the assertion
+   * that used to prove the escape hatch now proves it is shut.
+   */
   const free = computeBalance({
     capitalHandedOver: 1000, handoverDate: '2024-01-01',
     ledgers: { payments: [], fees: [], interest: [{ from: '2024-02-01', days: 30, amount: 5000 }] },
   })
-  // 10% of R6,000 is R600, still under the R610 maximum, so it is not the cap that applies here.
-  check('without in duplum the fee is charged in full', free.settlementFee, 690)
-  check('and the balance is not capped', free.balance, 6000)
+  check('there is no way to ask for it NOT to cap: the balance stops at twice capital',
+    free.balance, 2000)
+  check('...and the ceiling leaves no room for a settlement fee', free.settlementFee, 0)
+  /* `check` here compares numbers, so the reason is asserted as the one thing it must be. */
+  check('...and it says what stopped it', free.cappedBy === 'in duplum' ? 1 : 0, 1)
+  check('...and how much it withheld', free.withheld, 4000)
 }
 
 /*
@@ -318,14 +404,16 @@ const empty = { payments: [], fees: [], interest: [] }
   /* R803 paid, R80.30 charged: exactly 10%, under any cap. Computed and charged agree. */
   const under = computeBalance({
     capitalHandedOver: 0, handoverDate: '2024-01-01',
-    ledgers: { ...empty, payments: [{ date: '2024-05-30', amount: 803, commissionExclVat: 80.30 }] },
+    ledgers: { ...empty, payments: [{ date: '2024-05-30', amount: 803, receiptFeeExclVat: 80.30 }] },
   })
   check('a commission under the cap matches the computed figure', under.receiptFees, 92.35)
 
-  /* R15,000 paid. Swordfish charged R502; the 2020 gazette says R509. The charged figure wins. */
+  /* R15,000 paid, with the charged figure recorded. It wins over the computed one wherever it is
+     present -- which is the belt to the braces now that the computed cap is the as-charged R502
+     too: a payment billed at some other figure still reads back as that figure. */
   const charged = computeBalance({
     capitalHandedOver: 0, handoverDate: '2025-01-01',
-    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, commissionExclVat: 502 }] },
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, receiptFeeExclVat: 502 }] },
   })
   check('a capped commission uses what was actually charged', charged.receiptFees, 577.30)
 
@@ -334,20 +422,26 @@ const empty = { payments: [], fees: [], interest: [] }
     capitalHandedOver: 0, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000 }] },
   })
-  check('with no recorded commission the gazette applies', computed.receiptFees, 585.35)
-  check('and the two differ by the seven rand plus VAT', computed.receiptFees - charged.receiptFees, 8.05)
+  /*
+   * AND WITH NOTHING RECORDED, THE COMPUTED FIGURE IS NOW THE SAME ONE. It used to be the gazette's
+   * R509 -- R8.05 more than every statement the firm had actually sent -- and the two only agreed
+   * because the recorded figure covered it up on the 79 payments that carried one. A payment with
+   * no recorded commission got a fee no debtor was ever billed.
+   */
+  check('with nothing recorded, the computed figure is the same cap', computed.receiptFees, 577.30)
+  check('and the two no longer differ', computed.receiptFees - charged.receiptFees, 0)
 
   /* An explicit zero is a real instruction — a waived fee — not a missing value. */
   const waived = computeBalance({
     capitalHandedOver: 1000, handoverDate: '2025-01-01',
-    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 500, commissionExclVat: 0 }] },
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 500, receiptFeeExclVat: 0 }] },
   })
   check('a recorded zero commission charges nothing', waived.receiptFees, 0)
 
   /* And it has to reach the statement, not just the totals. */
   const s = buildStatement({
     capitalHandedOver: 20000, handoverDate: '2025-01-01',
-    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, commissionExclVat: 502 }] },
+    ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, receiptFeeExclVat: 502 }] },
   })
   const line = s.lines.find((l) => l.kind === 'receipt-fee')
   check('the statement shows the charged fee', line.debit, 577.30)
@@ -405,5 +499,69 @@ const empty = { payments: [], fees: [], interest: [] }
   checkText('untimed fees keep the order they arrived in', order.join(' then '), 'Letter then Phone Call')
 }
 
+/*
+ * A SETTLED ACCOUNT ENDS AT NIL, AND THE REST IS A LINE (the firm, HTH/4004, 12 Oct: settled for
+ * R5 000 and the page still said R7 980 to settle today). Worked by hand: R12 000 capital, R2 000
+ * and R5 000 paid, receipt fees R230 and R575 (10% + VAT, under the cap) -> R5 805 owed on the day
+ * it closed, all of it waived. A fee raised after the close is not owed; interest stops.
+ */
+{
+  const settled = {
+    capitalHandedOver: 12000, handoverDate: '2026-03-18', interestRateAnnual: 0, accrueTo: '2026-10-12',
+    settledOn: '2026-08-10',
+    ledgers: {
+      payments: [
+        { id: 'p1', date: '2026-07-08', amount: 2000, paidToClient: false },
+        { id: 'p2', date: '2026-08-05', amount: 5000, paidToClient: false },
+      ],
+      fees: [{ date: '2026-09-01', description: 'Email', exclVat: 25, vat: 3.75, billed: true }],
+      interest: [],
+    },
+  }
+  const b = computeBalance(settled)
+  check('settled: what it owed on the day is waived', b.waived, 5805)
+  check('settled: the balance is nil', b.balance, 0)
+  check('settled: nothing to settle, no receipt fee quoted', b.settlement, 0)
+  const st = buildStatement(settled)
+  const last = st.lines[st.lines.length - 1]
+  check('settled: the statement ends at nil', last.balance, 0)
+  check('settled: ...on the discount line, a credit for the waived amount', last.kind === 'settlement-discount' ? last.credit : -1, 5805)
+  check('settled: the fee after the close is not on it', st.lines.filter((l) => l.date > '2026-08-10').length, 0)
+  const over = computeBalance({ ...settled, ledgers: { ...settled.ledgers,
+    payments: [...settled.ledgers.payments, { id: 'p3', date: '2026-08-09', amount: 7000, paidToClient: false }] } })
+  check('settled but overpaid: nothing is waived, the credit stays the debtor\'s', over.waived, 0)
+  check('...and the balance stays below nil', over.balance < 0 ? 1 : 0, 1)
+  const open = computeBalance({ ...settled, settledOn: null })
+  check('an open account waives nothing', open.waived, 0)
+}
+
+/*
+ * A WRITE-OFF RUNS ON TO PRESCRIPTION; AN ENDED FILE STOPS (the firm, 12 Oct: "written off accounts
+ * ... should continue to run until prescription ... it can stop running on withdrawn accounts, ...
+ * paid up accounts"). Strings compared as dates, so the checks use the "stops on" day as a number.
+ */
+{
+  const day = (s) => (s === null ? -1 : Number(s.replaceAll('-', '')))
+  check('an open account runs to today', day(accrueToFor({}, '2026-10-12')), 20261012)
+  check('a written-off account runs to today too', day(accrueToFor({ endedAs: 'written_off', endedOn: '2026-05-01' }, '2026-10-12')), 20261012)
+  check('...until it prescribes', day(accrueToFor({ endedAs: 'written_off', prescriptionDate: '2026-08-31' }, '2026-10-12')), 20260831)
+  check('a prescription still to come does not stop it', day(accrueToFor({ prescriptionDate: '2027-01-31' }, '2026-10-12')), 20261012)
+  check('flagged prescribed with no date: no open interest at all', day(accrueToFor({ prescribed: true }, '2026-10-12')), -1)
+  check('withdrawn stops on the day it ended', day(accrueToFor({ endedAs: 'withdrawn', endedOn: '2026-08-10' }, '2026-10-12')), 20260810)
+  check('paid up stops on the day it ended', day(accrueToFor({ endedAs: 'paid_up', endedOn: '2026-08-10' }, '2026-10-12')), 20260810)
+  const sql = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+  const oi = sql.slice(sql.lastIndexOf('create or replace function public.open_interest('))
+  const body = oi.slice(0, oi.indexOf('end $$;'))
+  check('the database no longer stops interest on a written-off status', /~\* 'written\.off' then return/.test(body) ? 1 : 0, 0)
+  check('...stops it at prescription', /p_as_at := least\(p_as_at, v_acct\.prescription_date\)/.test(body) ? 1 : 0, 1)
+  check('...and on the day a withdrawn, paid-up or settled file ended', /ended_as in \('withdrawn', 'paid_up', 'settled'\)/.test(body) ? 1 : 0, 1)
+}
+
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

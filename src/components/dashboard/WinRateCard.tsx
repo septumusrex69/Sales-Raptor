@@ -13,6 +13,8 @@ interface WinRateCardProps {
   converted: number
   periodLabel: string
   periodParam: string
+  /** The lead column. Off on the sales dashboard since S8: the firm wanted deal outcomes "separate from the leads", which the Mandates card above now carries. */
+  showLeadPipeline?: boolean
 }
 
 /**
@@ -35,7 +37,7 @@ interface WinRateCardProps {
  * win. The second ignores open work entirely, which is also correct for judging closing. The
  * gap between them is how much is still in play.
  */
-export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabel, periodParam }: WinRateCardProps) {
+export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabel, periodParam, showLeadPipeline = true }: WinRateCardProps) {
   const won = cohort.filter((d) => d.stage === 'Won').length
   const lost = cohort.filter((d) => d.stage === 'Rejected').length
   const open = cohort.length - won - lost
@@ -63,13 +65,14 @@ export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabe
   ]
 
   return (
-    <Card>
+    <Card className={showLeadPipeline ? undefined : 'h-full'}>
       <div className="flex items-start justify-between mb-4 gap-3">
-        <CardHeader title="Deal Outcomes" subtitle={`The ${total} ${total === 1 ? 'deal' : 'deals'} opened in this sales month, and where they stand today`} />
+        <CardHeader title="Deal Outcomes" subtitle={`The ${total} ${showLeadPipeline ? (total === 1 ? 'deal' : 'deals') : (total === 1 ? 'service deal' : 'service deals')} opened in this period, and where they stand today${showLeadPipeline ? '' : '. Mandates are counted on their own'}`} />
         <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{periodLabel}</span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[176px_1fr_1fr] gap-6 items-start">
+      <div className="@container">
+      <div className={`grid grid-cols-1 gap-6 items-start ${showLeadPipeline ? 'md:grid-cols-[176px_1fr_1fr]' : 'gap-5 @[24rem]:grid-cols-[164px_1fr]'}`}>
         <RingDonut data={donutData} centerValue={`${outcomeRate}%`} centerColor={OUTCOME_VALUE} centerLabel="WON SO FAR" caption={`Of ${total} opened`} />
 
         <div className="flex flex-col gap-4">
@@ -109,7 +112,7 @@ export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabe
           )}
         </div>
 
-        <div className="flex flex-col gap-2.5">
+        {showLeadPipeline && <div className="flex flex-col gap-2.5">
           <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Lead pipeline, same period</span>
           {pipeline.map((p) => (
             <Link key={p.label} to={p.to} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-slate-100 hover:bg-slate-50/60">
@@ -122,11 +125,12 @@ export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabe
               </span>
             </Link>
           ))}
-        </div>
+        </div>}
+      </div>
       </div>
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400 gap-3">
-        <span>Both rates count only deals opened between {periodLabel} &mdash; one population, followed to today.</span>
+        <span>Both rates count only deals opened in {periodLabel} &mdash; one population, followed to today.</span>
         <Link to={buildDrilldownUrl('/deals', { view: 'table', [SALES_MONTH_PARAM]: periodParam })} className="font-semibold text-brand-600 hover:underline shrink-0">
           View all deals &rarr;
         </Link>

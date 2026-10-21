@@ -23,9 +23,13 @@ export function DashboardHero({
   // Each skin brings its own mark. The watermark steps aside where a skin supplies its own
   // atmosphere behind the band, rather than two brand devices competing in one panel.
   const { theme, themeId } = useTheme()
-  const raptor = themeId === 'raptor'
+  const raptor = themeId === 'raptor' || themeId === 'glass-mountain'
+  const glassMountain = themeId === 'glass-mountain'
   return (
-    <div className="app-hero px-7 py-8">
+    <div
+      className="app-hero px-7 py-8"
+      style={glassMountain ? { background: 'transparent', backgroundImage: 'none', overflow: 'visible' } : undefined}
+    >
       {!raptor && (
       <svg
         viewBox="0 0 200 200"

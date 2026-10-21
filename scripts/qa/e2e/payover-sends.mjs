@@ -1,0 +1,318 @@
+/**
+ * A SENT PAYOVER ADVICE, KEPT AS IT WENT, IN A REAL BROWSER.
+ *
+ * The firm, 8 Oct: "if something was sent, there should be ... a record of ... the data that was
+ * sent", and "you can revise one and then send it again". check-payover-sends holds the table, the
+ * bucket and the order of the steps; this holds that a run shows every copy that went, that a sent
+ * or paid run offers Send again, and that a run sent before copies were kept says so plainly rather
+ * than showing an empty list.
+ *
+ * Run: node scripts/qa/e2e/payover-sends.mjs
+ */
+import { OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
+import { PROFILE } from './fixtures.mjs'
+
+const t = makeRunner('payover-sends')
+const ADMIN = { ...PROFILE, name: 'Stephan', role: 'Administrator', team_id: null }
+const RUN = {
+  id: 'run-1', invoice_number: 'PO-BPM-2610', status: 'paid', period_start: '2026-08-11', period_end: '2026-09-10',
+  trust_capital: 10000, trust_commission: 1500, due_to_client: 8500, ptc_received: 0, ptc_fees_taken: 0,
+  ptc_capital: 0, ptc_commission: 0, due_to_bf: 0, commission_vat: 225, carried_in: 0, charges_set_off: 0,
+  excess_released: 0, net_payover: 8275, approved_at: '2026-10-08T08:00:00Z', sent_at: '2026-10-08T09:00:00Z',
+  paid_at: '2026-10-08T10:00:00Z', eft_reference: 'BF PO-BPM-2610', company_id: 'c2',
+  companies: { name: 'Baobab Property Managers (Pty) Ltd', code: 'BPM', commission_rate: 0.15, vat_number: null, email: 'accounts@example.co.za' },
+}
+const SENDS = [
+  { id: 's2', run_id: 'run-1', version: 2, sent_at: '2026-10-09T09:00:00Z', sent_to: 'finance@example.co.za',
+    subject: 'Remittance advice', net_payover: 8275, pdf_path: 'c2/PO-BPM-2610/b.pdf', xlsx_path: 'c2/PO-BPM-2610/b.xlsx' },
+  { id: 's1', run_id: 'run-1', version: 1, sent_at: '2026-10-08T09:00:00Z', sent_to: 'accounts@example.co.za',
+    subject: 'Remittance advice', net_payover: 8275, pdf_path: 'c2/PO-BPM-2610/a.pdf', xlsx_path: 'c2/PO-BPM-2610/a.xlsx' },
+]
+let sends = SENDS
+let runShown = RUN
+/* Ready, in a cycle that has not closed (far off, so the test does not age). */
+const OPEN_RUN = { ...RUN, id: 'run-open', status: 'ready', period_start: '2099-12-11', period_end: '2099-12-31',
+  approved_at: null, sent_at: null, paid_at: null, eft_reference: null }
+const q = (id, client, start, end, net, status) => ({ run_id: id, company_id: id, client, client_code: null,
+  invoice_number: `PO-${id}`, period_start: start, period_end: end, payments: 1, trust_capital: net,
+  ptc_set_off: 0, net_payover: net, exceptions: 0, status, next_step: 'mark_paid', approved_at: null,
+  sent_at: null, paid_at: null, eft_reference: null })
+const QUEUE = [
+  { ...q('A', 'Summit Fitness', '2026-08-11', '2026-09-10', 8426.07, 'sent'), next_step: 'paid' },
+  q('B', 'Baobab Property', '2026-08-11', '2026-09-10', 9699.53, 'approved'),
+  { ...q('C', 'Lowveld Motors', '2026-07-11', '2026-08-10', 120, 'sent'), next_step: 'paid' },
+  /* Ready in the cycle being paid now, and ready in the cycle still open (not approvable yet). */
+  { ...q('E', 'Silverleaf Body Corporate', '2026-08-11', '2026-09-10', 500, 'ready'), next_step: 'approve' },
+  /* Ready in a cycle whose payout day (11 Sep) has passed: the one a bulk approval may take. */
+  { ...q('F', 'Mopane Lodges', '2026-07-11', '2026-08-10', 250, 'ready'), next_step: 'approve' },
+  { ...q('D', 'Karoo Fleet Hire', '2026-09-11', '2026-10-10', 3031.31, 'ready'), next_step: 'approve' },
+  /* HISTORY (S7): two finished runs paid in two different months. H was paid at 00:30 on 12 Sep in
+     Johannesburg, which is still 11 Sep in UTC -- the date paid must read the firm's day. */
+  { ...q('G', 'Thandeka Catering', '2026-06-11', '2026-07-10', 700, 'paid'), next_step: null,
+    paid_at: '2026-08-11T10:00:00Z', eft_reference: 'BF PO-G' },
+  { ...q('H', 'Umhlanga Storage', '2026-07-11', '2026-08-10', 900, 'paid'), next_step: null,
+    paid_at: '2026-09-11T22:30:00Z', eft_reference: 'BF PO-H' },
+]
+let queue = QUEUE
+const calls = []
+/* Three stages: on the statement, paid by hand and not yet on it, and still owed. */
+const CLIENT_RUNS = [
+  { id: 'run-2', invoice_number: 'PO-BPM-2611', status: 'sent', period_start: '2026-09-11', period_end: '2026-10-10',
+    net_payover: 1200, paid_at: null, eft_reference: null },
+  { id: 'run-1', invoice_number: 'PO-BPM-2610', status: 'paid', period_start: '2026-08-11', period_end: '2026-09-10',
+    net_payover: 8275, paid_at: '2026-10-08T10:00:00Z', eft_reference: 'BF PO-BPM-2610' },
+  { id: 'run-0', invoice_number: 'PO-BPM-2609', status: 'paid', period_start: '2026-07-11', period_end: '2026-08-10',
+    net_payover: 500, paid_at: '2026-09-15T10:00:00Z', eft_reference: 'BF PO-BPM-2609' },
+]
+const handlers = [
+  [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
+  /* The client's list asks by company; the run page asks for one. */
+  [(u) => /\/rest\/v1\/payover_runs\?.*company_id=eq/.test(u), () => ({ body: CLIENT_RUNS })],
+  /* Nothing released early for payout (release_payover_run_early): every approved run waits for its day. */
+  [(u) => /\/rest\/v1\/payover_runs\?.*released_at/.test(u), () => ({ body: [] })],
+  [(u) => /\/rest\/v1\/payover_runs\?/.test(u), () => ({ body: runShown })],
+  [(u) => /\/rest\/v1\/bank_statement_lines\?/.test(u), () => ({ body: [{ payover_run_id: 'run-0', txn_date: '2026-09-16' }] })],
+  [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [{ id: 'c2', name: 'Baobab Property Managers (Pty) Ltd', owner_id: ADMIN.id }] })],
+  [(u) => /\/rest\/v1\/payover_run_sends\?/.test(u), () => ({ body: sends })],
+  [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
+  [(u) => /\/rpc\/payover_cycle_now/.test(u), () => ({ body: [{ period_start: '2026-09-11', period_end: '2026-10-10', days_left: 2, today: '2026-10-08' }] })],
+  [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: queue })],
+  [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run_early|approve_payover_run|mark_payover_run_paid)/.test(u),
+    (u, req) => { calls.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...(req.postDataJSON() ?? {}) }); return { body: 0 } }],
+  [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
+  [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
+]
+
+const server = await startServer()
+const browser = await chromium.launch()
+try {
+  const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-1`, { waitUntil: 'domcontentloaded' })
+  const list = page.getByTestId('sent-copies')
+  await list.waitFor({ timeout: 20000 })
+  t.check('every copy that went is listed', await list.locator('li').count(), 2)
+  const text = await list.innerText()
+  t.ok('...the revision named as such, newest first', /^Sent again \(2\)/.test(text.trim()))
+  t.ok('...each with where it went', text.includes('finance@example.co.za') && text.includes('accounts@example.co.za'))
+  /* EACH COPY, OPEN OR DOWNLOAD (19 Oct): its statement and its schedule, two buttons apiece. */
+  t.check('...and each opens its own PDF and schedule', await list.getByText('Statement (PDF)').count(), 2)
+  t.check('...each with Open and Download', JSON.stringify([await list.locator('[data-action="open"]').count(), await list.locator('[data-action="download"]').count()]), '[4,4]')
+  t.ok('a paid run offers Send again', await page.getByRole('button', { name: 'Send again' }).isVisible())
+  t.check('...and not a first Email advice', await page.getByRole('button', { name: 'Email advice' }).count(), 0)
+  await t.shot(page, 'payover-sends')
+
+  await page.getByRole('button', { name: 'Send again' }).click()
+  const title = page.getByText('Send the remittance advice again')
+  await title.waitFor({ timeout: 10000 }).catch(() => {})
+  t.ok('Send again says it goes beside what was sent', await title.isVisible()
+    && (await page.getByText(/What was sent before is kept as it was/).count()) > 0)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+
+  /* ---- FOUR TABS, ONE CYCLE EACH (S7, the firm, 12 Oct: "in the closed to pay, two months were mixed") ---- */
+  /* Today is 8 Oct. Collecting: 11 Sep - 10 Oct. Waiting: 11 Aug - 10 Sep (pays 11 Oct). To pay: the
+     11 Jul - 10 Aug cycle, whose day (11 Sep) has passed -- overdue. */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payover`, { waitUntil: 'domcontentloaded' })
+  const groups = page.getByTestId('cycle-group')
+  const queueTab = (name) => page.getByTestId(`tab-${name}`)
+  const heads = async () => (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
+  const openTab = async (name, tone) => {
+    await queueTab(name).click()
+    await page.locator(`[data-testid="cycle-group"][data-tone="${tone}"]`).first().waitFor({ timeout: 10000 })
+  }
+  await groups.first().waitFor({ timeout: 15000 })
+  t.ok('the tabs are Collecting, Waiting, Approve, History, each counting its runs',
+    /Collecting\s*\(?\s*1\s*\)?/.test(await queueTab('collecting').innerText()) && /Waiting\s*\(?\s*3\s*\)?/.test(await queueTab('waiting').innerText())
+      && /Approve\s*\(?\s*2\s*\)?/.test(await queueTab('topay').innerText()) && /History\s*\(?\s*2\s*\)?/.test(await queueTab('history').innerText()))
+  let h = await heads()
+  t.check('it opens on To pay, which holds ONE cycle', h.length, 1)
+  t.ok('...the overdue one, saying it was due', /^Overdue[\s\S]*2 clients[\s\S]*was due 11 Sep and is not yet paid/i.test(h[0] ?? ''))
+  t.check('...in red', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late"]')
+
+  await openTab('waiting', 'now')
+  h = await heads()
+  t.check('Waiting holds ONE cycle, not mixed with the one due', h.length, 1)
+  t.ok('...the one that closed, with its payover day and total',
+    /^Waiting[\s\S]*3 clients[\s\S]*Nothing more goes in · approved, paid and advised on 11 Oct[\s\S]*R 18 625\.60/i.test(h[0] ?? ''))
+
+  /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
+  t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
+  t.check('...so there is no Build a run button', await page.getByRole('button', { name: /Build a run/ }).count(), 0)
+  /* APPROVED ON THE DAY (11 Oct): Silverleaf's cycle pays on the 11th, so it stays Ready until then. */
+  t.ok('a ready run before its payout day says when it is approved instead of offering Approve',
+    /Approve on 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Silverleaf' }).innerText()))
+  t.ok('the approved run says when it pays rather than offering a button',
+    /Pays 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Baobab' }).innerText()))
+  for (const name of ['Silverleaf Body Corporate', 'Baobab Property']) {
+    await page.getByRole('checkbox', { name: `Select ${name}` }).check()
+  }
+  /* A pick survives a change of tab, so a bulk press can take runs from both. */
+  await openTab('topay', 'late')
+  await page.getByRole('checkbox', { name: 'Select Mopane Lodges' }).check()
+  const bar = page.getByTestId('bulk-bar')
+  const barText = await bar.innerText()
+  t.ok('the bulk bar offers only what the picked runs are ready for',
+    /3 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 0/.test(barText))
+  t.ok('...and says when the ready one is approved', /1 approved on 11 Oct 2026, the payout day/.test(barText))
+  t.ok('...and says when the approved one is due', /1 not yet due: advice and payment on 11 Oct/.test(barText))
+  await t.shot(page, 'payover-queue-cycles')
+  await bar.getByRole('button', { name: 'Approve 1' }).click()
+  await page.getByTestId('bulk-note').waitFor({ timeout: 10000 }).catch(() => {})
+  t.check('...and approves the ready one whose payout day has come, and nothing else',
+    JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['F']))
+  t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
+  t.ok('...and stays on the tab it was on', /tab=topay/.test(page.url()))
+
+  /* ---- MARK PAID FROM THE LIST (the firm, 10 Oct: "just immediately show you that pop-up") ---- */
+  await openTab('waiting', 'now')
+  await page.getByTestId('queue-run').filter({ hasText: 'Summit Fitness' }).getByRole('button', { name: 'Mark paid' }).click()
+  const ref = page.getByLabel('EFT reference')
+  await ref.waitFor({ timeout: 5000 }).catch(() => {})
+  t.ok('Mark paid opens the box on the list, not the run', /\/trust\/payover/.test(page.url()) && await ref.isVisible().catch(() => false))
+  t.ok('...with the reference the run should go out on', /PO-A/.test(await ref.inputValue().catch(() => '')))
+  await page.getByRole('button', { name: 'Mark paid', exact: true }).last().click()
+  await page.getByTestId('bulk-note').filter({ hasText: 'marked paid' }).waitFor({ timeout: 10000 }).catch(() => {})
+  const paidOne = calls.filter((c) => c.fn === 'mark_payover_run_paid')
+  t.check('...and marks it paid through the function, on that reference',
+    JSON.stringify(paidOne.map((c) => [c.p_run, /PO-A/.test(c.p_reference ?? '')])), JSON.stringify([['A', true]]))
+
+  /* AND SEVERAL AT ONCE, each on its own reference, one date -- from two tabs. */
+  await page.getByTestId('queue-run').filter({ hasText: 'Summit Fitness' }).getByRole('checkbox').check()
+  /* A row with a button, measured here to hold the Collecting tab's text-only row against it. */
+  const buttonRowHeight = await page.getByTestId('queue-run').filter({ has: page.locator('button') }).first()
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height)).catch(() => -1)
+  await openTab('topay', 'late')
+  await page.getByTestId('queue-run').filter({ hasText: 'Lowveld Motors' }).getByRole('checkbox').check()
+  await page.getByTestId('bulk-pay').click()
+  await page.getByRole('button', { name: 'Mark 2 paid' }).waitFor({ timeout: 5000 }).catch(() => {})
+  t.ok('the bulk bar marks the picked runs paid, each with its own reference',
+    (await page.getByLabel('EFT reference for Summit Fitness').count()) > 0 && (await page.getByLabel('EFT reference for Lowveld Motors').count()) > 0)
+  await page.getByRole('button', { name: 'Mark 2 paid' }).click()
+  await page.waitForTimeout(600)
+  t.check('...and calls the function once a run',
+    JSON.stringify(calls.filter((c) => c.fn === 'mark_payover_run_paid').map((c) => c.p_run).slice(1).sort()), JSON.stringify(['A', 'C']))
+
+  /* ---- HISTORY (S7): one payout at a time, searchable across all of them ---- */
+  await openTab('history', 'done')
+  t.check('History opens on the latest payout', await page.getByTestId('history-payout').inputValue(), '2026-09-11')
+  t.check('...showing only that payout\'s runs', JSON.stringify((await page.getByTestId('queue-run').allInnerTexts()).map((x) => /Umhlanga/.test(x))), '[true]')
+  /* en-ZA writes September as "Sept". */
+  t.ok('...with the date paid on the firm\'s calendar (00:30 on 12 Sep, not UTC\'s 11th)',
+    /^12 Sept? 2026$/.test((await page.getByTestId('history-paid-on').first().innerText()).split(String.fromCharCode(0xa0)).join(' ')))
+  t.check('...and the reference it went out on', await page.getByTestId('history-reference').first().innerText(), 'BF PO-H')
+  await page.getByTestId('history-payout').selectOption('2026-08-11')
+  await page.getByTestId('queue-run').filter({ hasText: 'Thandeka' }).waitFor({ timeout: 5000 })
+  t.check('another month is one pick away', await page.getByTestId('queue-run').count(), 1)
+  await page.getByTestId('history-payout').selectOption('2026-09-11')
+  await page.getByTestId('queue-run').filter({ hasText: 'Umhlanga' }).waitFor({ timeout: 5000 })
+  await page.getByLabel('Search clients').fill('po-g')
+  await page.getByTestId('queue-run').filter({ hasText: 'Thandeka' }).waitFor({ timeout: 5000 })
+  t.ok('a search finds a run in another month by its number', (await page.getByTestId('queue-run').count()) === 1
+    && await page.getByTestId('history-payout').isDisabled())
+  await page.getByLabel('Search clients').fill('')
+
+  /* ---- THE COLLECTING TAB: still collecting ---- */
+  await openTab('collecting', 'early')
+  const runningHead = (await groups.first().innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.ok('Collecting holds the open cycle, still collecting', /^Collecting[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(runningHead))
+  t.ok('...and its run says so instead of offering Approve',
+    /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
+  /* THE FIRM'S DRAWING (10 Oct): four cards, no status legend, a search over the clients. */
+  /* The status filter's options name every status too, so they are read out of the page first. */
+  const pageText = await page.locator('main').evaluate((m) => {
+    const c = m.cloneNode(true); c.querySelectorAll('select').forEach((x) => x.remove()); return c.innerText ?? c.textContent
+  })
+  t.ok('the status legend is gone', !/Needs review[\s\S]{0,6}Ready[\s\S]{0,6}Approved[\s\S]{0,6}Sent[\s\S]{0,6}Paid/.test(pageText))
+  t.ok('the four cards are drawn, ending on Ready to approve',
+    /Money received[\s\S]*Net due to clients[\s\S]*Unmatched payments[\s\S]*Ready to approve[\s\S]*Review runs/
+      .test(await page.getByTestId('run-tiles').innerText()))
+  await page.getByLabel('Search clients').fill('no such client')
+  await page.getByText('No run on this tab matches').waitFor({ timeout: 5000 })
+  t.check('a search with no match empties the list, and says why', await page.getByTestId('queue-run').count(), 0)
+  await page.getByLabel('Search clients').fill('karoo')
+  await page.getByTestId('queue-run').first().waitFor({ timeout: 5000 })
+  t.check('...and a client\'s name finds it, ignoring case', await page.getByTestId('queue-run').count(), 1)
+  await page.getByLabel('Search clients').fill('')
+
+  const openRowHeight = await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' })
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height))
+  t.ok('a run row with a button was measured', buttonRowHeight > 0)
+  t.check('...and an "Open until" row stands exactly as tall', openRowHeight, buttonRowHeight)
+
+  /* THE OPEN CYCLE IS SHOWN EVEN EMPTY (the firm, 12 Oct: "There's nothing in running. I don't know
+     why"): on its first day nothing has been processed yet. */
+  queue = QUEUE.filter((r) => r.run_id !== 'D')
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payover?tab=collecting`, { waitUntil: 'domcontentloaded' })
+  await page.locator('[data-testid="cycle-group"][data-tone="early"]').waitFor({ timeout: 15000 })
+  const emptyHead = (await groups.first().innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.ok('an empty open cycle still shows its band and when it pays',
+    /^Collecting[\s\S]*11 Sep 2026 – 10 Oct 2026[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(emptyHead))
+  t.ok('...and says why it is empty', (await page.getByText('Nothing processed in this cycle yet').count()) === 1)
+  queue = QUEUE
+
+  /* ---- APPROVING BEFORE THE CYCLE CLOSES, WITH A REASON (the firm, 8 Oct) ---- */
+  runShown = OPEN_RUN
+  sends = []
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-open`, { waitUntil: 'domcontentloaded' })
+  const early = page.getByRole('button', { name: 'Approve early…' })
+  await early.waitFor({ timeout: 15000 })
+  t.check('a run whose cycle is open offers Approve early, not Approve', await page.getByRole('button', { name: 'Approve', exact: true }).count(), 0)
+  await early.click()
+  const now = page.getByRole('button', { name: 'Approve now' })
+  await page.getByLabel('Why now?').fill('too short')
+  t.ok('...which wants a real reason', await now.isDisabled())
+  await page.getByLabel('Why now?').fill('Large PTC: the client owes us our share and needs the advice')
+  await now.click()
+  await page.waitForTimeout(500)
+  const sentEarly = calls.find((c) => c.fn === 'approve_payover_run_early')
+  t.check('...and approves through the early function, with the reason',
+    JSON.stringify(sentEarly ? { p_run: sentEarly.p_run, p_reason: sentEarly.p_reason } : null),
+    JSON.stringify({ p_run: 'run-open', p_reason: 'Large PTC: the client owes us our share and needs the advice' }))
+  /* ---- AN EARLY APPROVAL SAYS WHO (the firm, 10 Oct: "it should say who made the note") ---- */
+  runShown = { ...RUN, early_reason: 'Large PTC: the client needs the advice', early_at: '2026-10-09T08:00:00Z',
+    early: { name: 'Stephan' } }
+  sends = []
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-1`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('early-reason').waitFor({ timeout: 15000 })
+  t.ok('an early approval names who approved it, when and why',
+    /Approved before the cycle closed by Stephan on .*: Large PTC: the client needs the advice/.test(await page.getByTestId('early-reason').innerText()))
+  runShown = RUN
+  sends = SENDS
+
+  /* ---- THE CLIENT'S FOLDER: every run, where it has got to, and what was sent ---- */
+  await page.goto(`http://127.0.0.1:${PORT}/companies/c2`, { waitUntil: 'domcontentloaded' })
+  const tab = page.getByRole('button', { name: 'Payovers', exact: true })
+  await tab.waitFor({ timeout: 15000 })
+  await tab.click()
+  const runsOn = page.getByTestId('client-payover')
+  await runsOn.first().waitFor({ timeout: 15000 })
+  t.check('the client lists every run', await runsOn.count(), 3)
+  const folder = (await page.locator('main').innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.ok('a run paid by hand is waiting for the statement', /PO-BPM-2610[\s\S]*Paid, waiting for the statement/.test(folder))
+  t.ok('...one on the statement says when', /Paid, on the statement 16 Sep 2026/.test(folder))
+  t.ok('...a sent one is still owed', /Advice sent, not paid yet/.test(folder))
+  t.ok('...with what it was paid with', folder.includes('reference BF PO-BPM-2610'))
+  t.ok('the copies sent sit under their run', (await runsOn.filter({ hasText: 'PO-BPM-2610' }).getByText('Statement (PDF)').count()) === 2)
+  t.ok('paid out and still to pay are added up', /Paid out R 8 775\.00/.test(folder) && /Still to pay R 1 200\.00/.test(folder))
+  await t.shot(page, 'client-payovers')
+
+  sends = []
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-1`, { waitUntil: 'domcontentloaded' })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  const none = page.getByTestId('no-sent-copy')
+  await none.waitFor({ timeout: 15000 }).catch(() => {})
+  t.ok('a run sent before copies were kept says there is no copy', await none.isVisible())
+  await context.close()
+} catch (e) {
+  t.ok(`the run finished without throwing (${String(e).split('\n')[0].slice(0, 160)})`, false)
+  try {
+    const pages = browser.contexts().flatMap((c) => c.pages())
+    if (pages[0]) await t.shot(pages[0], 'payover-sends-where-it-stopped')
+  } catch { /* nothing more to learn */ }
+} finally {
+  await browser.close()
+  stopServer(server)
+}
+
+const good = t.finish(`A sent run lists every copy that went, offers Send again, and says so when no copy was kept.
+Screenshots in ${OUT}.`)
+process.exit(good ? 0 : 1)

@@ -1,0 +1,307 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { adminClient, requireCaller } from '../auth.js'
+import { firmClock } from './clock.js'
+import { planUnplannedRuns } from './plan.js'
+import { runOneStep, type DueStep } from './step.js'
+import { mayActOnAccount } from './who.js'
+
+/**
+ * A COLLECTOR ISSUES THE SECTION 129, AND THAT IS WHAT STARTS THE CLOCK.
+ *
+ * THE FIRM, ASKED HOW IT SHOULD WORK: "the moment the section 129 is sent out via email, that is
+ * when the workflow is triggered." Which is the truth about the work: the statutory demand is the
+ * event the whole sequence is measured from -- ten business days to answer it, the final notice
+ * after that, the bureau twenty business days later -- and a file is ready for it when a person
+ * says so, not when a timer says so.
+ *
+ * SO THIS IS THE ONLY WAY A `by_hand` WORKFLOW EVER STARTS. The other kind starts itself:
+ * workflow_start_on_allocation fires in the database the first time an account lands on somebody's
+ * desk, which is what the handover runs on. Before this route there was no second way in at all,
+ * so the section 129 sequence was eleven steps nothing could reach -- written, dated in business
+ * days, and unreachable.
+ *
+ * IT SENDS THE FIRST STEP IN THE SAME PRESS, and that is the point rather than a convenience.
+ * Day 1 of the sequence IS the section 129, and it carries `needs_release` because a statutory
+ * demand must not go out without a person having looked. The person looked: they pressed a button
+ * that says what it sends. Passing the caller to runOneStep is what lifts that one refusal, and it
+ * lifts it only for what is due on the day the run starts -- the listing notice on day 39 and the
+ * summons on day 49 still wait for their own press, because each asserts a fact that has to be
+ * true before it is said.
+ *
+ * EXCEPT ON A DAY THE OFFICE IS SHUT, WHEN NOTHING GOES AND THE PRESS SAYS SO. A business-day
+ * sequence does not begin on a Saturday: landsOn normalises the start forward, day 1 is the next
+ * working day, and the release guard refuses a step before its due_on because "sent early" on a
+ * statutory interval is a misrepresentation. The firm hit this on a Sunday -- "it said it started,
+ * but when is it going to send out the SMS and the letter? I thought it does that immediately" --
+ * and the bug was the sentence on the button, not the dates. `firstStepOn` in the response is the
+ * fix's other half: the run reports the day its first notice is dated, so a screen can name it.
+ *
+ * WHAT IT REFUSES, AND WHY EACH ONE. A live promise or an open dispute are precisely the two
+ * events that take an account OUT of a workflow (workflow_exit_on_promise, workflow_exit_on_dispute
+ * in the schema) -- so starting one on top of either would issue a demand to somebody the firm has
+ * an arrangement with, or who is waiting for an answer to a query. The exit triggers cannot help
+ * here: they fire when the promise or the dispute is created, and this is the other order.
+ *
+ * AND ONCE PER ACCOUNT AND VERSION, EVER. The same rule the allocation trigger states in SQL: not
+ * "no second LIVE run", which the partial unique index already enforces, but no second run at all.
+ * A section 129 sequence begun twice on one account is two statutory clocks on one debt.
+ */
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' })
+    return
+  }
+  const admin = adminClient()
+  if (!admin) {
+    res.status(500).json({ error: 'Server is missing Supabase configuration.' })
+    return
+  }
+  /* A SESSION, NEVER THE CRON SECRET. Nothing about this is scheduled: the whole point is that a
+     named person decided the file was ready, and the run records who. */
+  const caller = await requireCaller(req, admin)
+  if (!caller) {
+    res.status(401).json({ error: 'Invalid or expired session.' })
+    return
+  }
+
+  const { accountId, versionId } = (req.body ?? {}) as { accountId?: string; versionId?: string }
+  if (!accountId || !versionId) {
+    res.status(400).json({ error: 'Say which account, and which workflow.' })
+    return
+  }
+
+  const [versionRes, accountRes] = await Promise.all([
+    admin.from('workflow_versions')
+      .select('id, state, trigger_kind, workflows!inner(name)')
+      .eq('id', versionId).maybeSingle(),
+    admin.from('debtor_accounts').select('id, status').eq('id', accountId).maybeSingle(),
+  ])
+  const version = versionRes.data as
+    { id: string; state: string; trigger_kind: string; workflows?: { name?: string } } | null
+  if (!version) {
+    res.status(404).json({ error: 'That workflow is not there any more.' })
+    return
+  }
+  if (!accountRes.data) {
+    res.status(404).json({ error: 'That account is not there any more.' })
+    return
+  }
+
+  /*
+   * PUBLISHED, NOT A DRAFT. A draft is being argued about -- the wording, the days, which steps
+   * exist -- and what a file went through is a question an attorney asks eighteen months later.
+   * Said as the sentence somebody can act on, since publishing it is one button in the Library.
+   */
+  if (version.state !== 'active') {
+    res.status(409).json({
+      error: version.state === 'draft'
+        ? 'That workflow is still a draft. Publish it in the Library before it can be started on a file.'
+        : 'That version of the workflow has been archived, so nothing new starts on it.',
+    })
+    return
+  }
+  /*
+   * ONLY A WORKFLOW THAT WAITS FOR A PERSON. One that starts on an event starts itself, in the
+   * database; offering to start it by hand as well would give an account two runs of the same
+   * sequence the day somebody pressed the button before the event arrived.
+   */
+  if (version.trigger_kind !== 'by_hand') {
+    res.status(409).json({
+      error: 'That workflow starts on its own when its event happens. It is not one a person starts.',
+    })
+    return
+  }
+
+  if (!await mayActOnAccount(admin, caller.id, accountId)) {
+    res.status(403).json({
+      error: 'This account is not yours, and you do not lead the floor it is on.',
+    })
+    return
+  }
+
+  /*
+   * ONCE PER ACCOUNT AND VERSION, EVER -- WITH ONE NARROWING.
+   *
+   * A run whose DEMAND WAS DEFECTIVE may be issued again. The firm upheld a dispute, the amount
+   * was corrected, and a section 129 that stated a figure the firm has since conceded was wrong
+   * never started a good clock -- so the fresh sequence is one clock, not two. reissue_allowed is
+   * written by the dispute trigger and by nothing else.
+   *
+   * EVERY RUN, NOT ANY. One good run among them means this account has had a valid demand, and
+   * that is the clock the rule exists to protect.
+   */
+  const { data: already } = await admin.from('workflow_runs')
+    .select('id, state, reissue_allowed').eq('account_id', accountId).eq('version_id', versionId)
+  const runs = (already ?? []) as { id: string; state: string; reissue_allowed?: boolean }[]
+  const blocking = runs.filter((r) => !r.reissue_allowed)
+  if (blocking.length > 0) {
+    res.status(409).json({
+      error: 'This account has already been through this workflow. A second run would be a second clock on one debt.',
+    })
+    return
+  }
+
+  /*
+   * AND THE RUN BEING REPLACED IS CLOSED BEFORE THE NEW ONE IS MADE.
+   *
+   * THE BUG THIS FIXES, AND IT WAS MINE. `reissue_allowed` lifts the once-per-account-and-version
+   * rule THIS route enforces -- and the database has a second rule of its own,
+   * `workflow_runs_one_live`, a partial unique index that refuses a second RUNNING run. So the
+   * re-issue marked the notice unserved, unlocked the flag, and then fell over on the insert:
+   * "duplicate key value violates unique constraint". The firm pressed the button and got a
+   * Postgres error.
+   *
+   * THE FAILED PRESS WAS THE SMALLER HALF. On RRC00004 the superseded run was left RUNNING with
+   * eight steps still pending -- a final notice a week out, a credit bureau listing in November, an
+   * intended summons on the 30th -- every one of them dated from a demand the debtor never
+   * received, and every one of them would have gone out. The whole point of re-issuing is that
+   * those intervals never started.
+   *
+   * SUPERSEDED, NOT DELETED. The run keeps its sent steps and gains a reason; the file reads "went
+   * to the wrong address on the 1st, re-issued on the 8th", which is what the firm asked for in as
+   * many words.
+   *
+   * ONE RUN AT A TIME, by id. workflow_exit_account closes every live run on the account, which is
+   * right when a promise takes the debtor out of everything and wrong here -- re-issuing the
+   * section 129 is no reason to stop the handover sequence running beside it.
+   *
+   * AND IT IS NOT FIRE AND FORGET. A new run created while the old one still holds its pending
+   * steps is two sequences on one debt, which is the exact harm the once-ever rule exists to
+   * prevent. If this cannot be done, nothing is started.
+   */
+  const live = runs.filter((r) => r.state === 'running' || r.state === 'held')
+  for (const r of live) {
+    const { error: closeError } = await admin.rpc('workflow_supersede_run', {
+      p_run: r.id,
+      p_reason: 'The notice never reached the debtor, so the sequence was issued again.',
+    })
+    if (closeError) {
+      res.status(500).json({
+        error: `The earlier run could not be closed, so nothing was started: ${closeError.message}`,
+      })
+      return
+    }
+  }
+
+  /* The two the workflow itself exits on, checked here because this is the other order: the exit
+     triggers fire when a promise or a dispute is created, and cannot see one that already exists. */
+  const [promiseRes, disputeRes] = await Promise.all([
+    admin.from('promises_to_pay').select('id').eq('account_id', accountId).eq('status', 'open').limit(1),
+    admin.from('account_queries').select('id').eq('account_id', accountId).eq('kind', 'dispute')
+      .neq('status', 'closed').limit(1),
+  ])
+  if ((promiseRes.data ?? []).length > 0) {
+    res.status(409).json({
+      error: 'There is a live promise to pay on this account. A demand would go to somebody the firm has an arrangement with.',
+    })
+    return
+  }
+  if ((disputeRes.data ?? []).length > 0) {
+    res.status(409).json({
+      error: 'There is an open dispute on this account. It has to be answered before a demand goes out.',
+    })
+    return
+  }
+
+  /*
+   * THE FIRM'S DAY, not the server's. The function runs in Paris and the firm is two hours ahead
+   * in winter; around midnight the two disagree about the date, and started_on is what every step
+   * of the sequence is counted from -- ten business days from the wrong day is the wrong day.
+   */
+  /* The firm's day as the database keeps it -- the staging clock's, on staging (prompt 10). */
+  const { today, now } = await firmClock(admin)
+  const { data: created, error: insertError } = await admin.from('workflow_runs')
+    .insert({ account_id: accountId, version_id: versionId, started_on: today, started_by: caller.id })
+    .select('id').single()
+  if (insertError || !created) {
+    res.status(500).json({ error: insertError?.message ?? 'The workflow could not be started.' })
+    return
+  }
+
+  /* Dated here, like every other run: the working-day calendar lives in the app, so the run is
+     created with no steps and planUnplannedRuns gives them their dates. */
+  const planned = await planUnplannedRuns(admin, [accountId])
+  const problem = planned.find((p) => p.runId === created.id && p.problem !== null)?.problem ?? null
+
+  /*
+   * AND WHAT IS DUE TODAY GOES NOW. Only this run's steps -- an account may have a handover run
+   * of its own sitting held on something, and starting the section 129 is not a decision about
+   * that one.
+   *
+   * WHICH ON A WEEKEND IS NOTHING, AND THAT IS CORRECT. The firm pressed start on a Sunday and
+   * asked "when is it going to send out the SMS and the letter? I thought it does that
+   * immediately." A business-day sequence normalises its start forward to the Monday, so day 1 --
+   * the demand itself -- is dated tomorrow and `lte('due_on', today)` matches nothing. Sending
+   * anyway would put a statutory notice out before the day the interval is counted from, which is
+   * precisely what the release guard refuses. So nothing is sent, and `firstStepOn` below is how
+   * the screen says that instead of leaving the person to wonder.
+   */
+  const { data: dueRows } = await admin
+    .from('workflow_run_steps')
+    .select('id, node_id, due_on, state, note, run_id, instalment_no, workflow_nodes!inner(ordinal), workflow_runs!inner(id, account_id, version_id, started_on, state)')
+    .eq('run_id', created.id)
+    .in('state', ['pending', 'held'])
+    .lte('due_on', today)
+    .order('due_on', { ascending: true })
+
+  /*
+   * THE NOTICE BEFORE THE SMS BEHIND IT, AND THIS IS THE THIRD PLACE THAT NEEDED SAYING.
+   *
+   * THE FIRM, HAVING PRESSED THE BUTTON: "I also sent the section 129 number. It doesn't record
+   * the fees associated." The section 129 email went and its SMS did not -- so no item 1(c) was
+   * raised, because the message it would have been raised on never left.
+   *
+   * WHY: ordered by due_on alone, and the two steps of a pair share it, so the SMS was free to be
+   * attempted FIRST. planSend then refused it -- "the message before this one did not go" -- and
+   * marked it held. The email sent a moment later in the same loop and nothing came back for the
+   * SMS. The account still reads `sms-day-1` held with that note under an email stamped sent.
+   *
+   * The same key was missing in accountRun (the screen) and in run.ts (the morning sweep). Three
+   * places, one fact: `ordinal` is the node's own column and has said email-then-SMS since the
+   * workflow was built.
+   */
+  const due = ((dueRows ?? []) as unknown as (DueStep & { workflow_nodes?: { ordinal?: number } })[])
+    .sort((a, b) => (
+      a.due_on.localeCompare(b.due_on)
+      || (a.workflow_nodes?.ordinal ?? 0) - (b.workflow_nodes?.ordinal ?? 0)
+      /* And the instalment last, so two of one node's instalment steps coming due together --
+         which needs a rewritten arrangement to happen at all -- still go in the debtor's order. */
+      || (a.instalment_no ?? 0) - (b.instalment_no ?? 0)
+    ))
+
+  /* The earliest date anything on this run is dated, read back from what the planner wrote rather
+     than recomputed -- a second opinion about the date is how a button promises Monday for a
+     notice dated Tuesday. */
+  const { data: firstRow } = await admin
+    .from('workflow_run_steps')
+    .select('due_on')
+    .eq('run_id', created.id)
+    .order('due_on', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  /* `skipped` cannot happen here (only a staging clock jump skips), and is counted so the tally is total. */
+  const outcome = { sent: 0, held: 0, stillHeld: 0, failed: 0, skipped: 0, notes: [] as string[] }
+  for (const step of due as DueStep[]) {
+    try {
+      const what = await runOneStep(admin, step, today, caller.id, { now })
+      outcome[what.result] += 1
+      if (what.note) outcome.notes.push(what.note)
+    } catch (e) {
+      /* One step's failure is not the run's: the run HAS started, and the morning sweep picks up
+         whatever did not go. Reported rather than swallowed, because the person is watching. */
+      outcome.failed += 1
+      outcome.notes.push(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  res.status(200).json({
+    ok: true,
+    runId: created.id,
+    workflow: version.workflows?.name ?? 'Workflow',
+    startedOn: today,
+    firstStepOn: (firstRow as { due_on?: string } | null)?.due_on ?? null,
+    planProblem: problem,
+    ...outcome,
+  })
+}

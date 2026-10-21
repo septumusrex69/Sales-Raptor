@@ -10,7 +10,13 @@
  * about a phone number without being wrong about a balance.
  */
 import { supabase } from './supabase'
+import { fileSignedCopy, tokenOfPlaceholder } from './signedCopy.ts'
+import { chargePerusal, type ChargeResult } from './accountCharges.ts'
+import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
+import { parseWindows, type ContactWindow } from './contactWindows.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
+import type { CancelCause } from './promiseRules.ts'
+import { clockNow, clockToday } from './clock.ts'
 
 export {
   nextDueDate, describeArrangement, ARRANGEMENT_LABEL, WEEKDAYS, type Arrangement,
@@ -36,6 +42,15 @@ export interface AccountContact {
   kind: ContactKind
   value: string
   label: string | null
+  /**
+   * Whose number this is, on a company account.
+   *
+   * Null is the debtor themselves — every individual account, and a company's own switchboard.
+   * Set, it is the person a collector has to ask for, which on a company is the whole question.
+   */
+  personName: string | null
+  /** What they do there. Free text: it is what they called themselves on the phone. */
+  personRole: string | null
   isPrimary: boolean
   verifiedAt: string | null
   retiredAt: string | null
@@ -101,6 +116,8 @@ const toContact = (r: any): AccountContact => ({
   kind: r.kind,
   value: r.value,
   label: r.label,
+  personName: r.person_name ?? null,
+  personRole: r.person_role ?? null,
   isPrimary: !!r.is_primary,
   verifiedAt: r.verified_at,
   retiredAt: r.retired_at,
@@ -143,7 +160,24 @@ const toNote = (r: any): AccountNote => ({
   source: r.source ?? 'manual',
 })
 
-export type PromiseStatus = 'open' | 'kept' | 'broken' | 'cancelled'
+/**
+ * WHAT HAS BECOME OF A PROMISE.
+ *
+ * `defaulted` IS THE 48 HOURS THE FIRM'S OWN DEFAULT LETTER PROMISES, and it is a state rather than
+ * a timer for a reason worth writing down. The letter says: "payment of the missed amount must
+ * reach our trust account within 48 hours of the date of this letter. If it does, the arrangement
+ * continues on its existing terms and no further step is taken."
+ *
+ * SO THE ARRANGEMENT HAS NOT BROKEN WHEN THAT LETTER GOES. `broken` is what releases the hold on
+ * the collections sequence -- the listing, the attorneys -- and marking it broken on the day the
+ * letter is sent would let the very next morning's sweep do the thing the letter said would not
+ * happen for two days. If the letter promises 48 hours and the listing goes out in 12, the firm has
+ * broken a promise in writing, and that is what the Council for Debt Collectors acts on.
+ *
+ * It becomes `kept` on a payment inside the window, on the arrangement's existing terms, and
+ * `broken` only once the 48 hours lapse unpaid.
+ */
+export type PromiseStatus = 'open' | 'defaulted' | 'kept' | 'broken' | 'cancelled'
 
 export interface PromiseToPay {
   id: string
@@ -164,6 +198,17 @@ export interface PromiseToPay {
   dayOfWeek: number | null
   instalmentsKept: number
   totalPromised: number | null
+  /**
+   * WHY A CANCELLED ARRANGEMENT WAS CANCELLED. Null on every promise that was not.
+   *
+   * A CLOSED LIST BECAUSE IT DECIDES SOMETHING -- see the column's own comment and
+   * workflow_on_promise_cancelled. The firm: "if it's because of a dispute, a dispute should be
+   * raised. And if it's because the debtor just decided not to pay, then it should go back to the
+   * section 129."
+   */
+  cancelCause: CancelCause | null
+  /** What the collector wrote: what the debtor actually said. */
+  cancelReason: string | null
 }
 
 const toPromise = (r: any): PromiseToPay => ({
@@ -183,6 +228,10 @@ const toPromise = (r: any): PromiseToPay => ({
   dayOfWeek: r.day_of_week === null || r.day_of_week === undefined ? null : Number(r.day_of_week),
   instalmentsKept: Number(r.instalments_kept ?? 0),
   totalPromised: r.total_promised === null || r.total_promised === undefined ? null : Number(r.total_promised),
+  /* Hand-written mappers drop columns silently -- CLAUDE.md's own warning, and `diary_capacity`
+     sat undefined for months on exactly this. check-promise-cancel holds these two. */
+  cancelCause: (r.cancel_cause ?? null) as CancelCause | null,
+  cancelReason: r.cancel_reason ?? null,
 })
 
 /**
@@ -192,7 +241,7 @@ const toPromise = (r: any): PromiseToPay => ({
  * a row whose truth depends on when it was last written. `status` records what a person decided;
  * this computes what the calendar says.
  */
-export function isOverdue(p: PromiseToPay, today = new Date().toISOString().slice(0, 10)): boolean {
+export function isOverdue(p: PromiseToPay, today = clockToday()): boolean {
   return p.status === 'open' && p.dueOn < today
 }
 
@@ -209,7 +258,20 @@ export interface Workspace {
 
 export async function fetchWorkspace(accountId: string): Promise<Workspace> {
   const [contacts, notes, promises] = await Promise.all([
-    supabase.from('account_contacts').select('*').eq('account_id', accountId).order('is_primary', { ascending: false }),
+    /*
+     * PRIMARY FIRST, THEN OLDEST, AND THE SECOND HALF IS NOT TIDINESS.
+     *
+     * Sorted on is_primary alone, two contacts of the same kind TIE — and Postgres returns tied
+     * rows in whatever physical order they happen to sit in. An UPDATE writes a new tuple at the
+     * end of the table, so editing one contact silently reorders them. The firm found it exactly
+     * that way: an account with two email addresses, one slot showing the first of them, and
+     * saving a change to one address made the OTHER one appear. Nothing was lost and nothing
+     * looked wrong — the panel was simply showing a different row.
+     *
+     * created_at is the tiebreak because it is the only thing about a contact that never moves.
+     */
+    supabase.from('account_contacts').select('*').eq('account_id', accountId)
+      .order('is_primary', { ascending: false }).order('created_at', { ascending: true }),
     supabase.from('account_notes').select('*').eq('account_id', accountId).order('created_at', { ascending: false }),
     supabase.from('promises_to_pay').select('*').eq('account_id', accountId).order('due_on', { ascending: false }),
   ])
@@ -221,21 +283,100 @@ export async function fetchWorkspace(accountId: string): Promise<Workspace> {
   }
 }
 
+/**
+ * THE NOTES THAT BELONG TO ONE TICKET, FETCHED ON THEIR OWN.
+ *
+ * THE FIRM, of the ticket screen: "make notes on the ticket, and the notes should also live in the
+ * client section and on the ticket."
+ *
+ * THEY ALREADY DID. `addNote` has taken a `queryId` since queries existed, every stage change
+ * writes one, and `notesForQuery` reads them back out of a list — but the only caller that ever
+ * HAD such a list was the account page, so a liaison working the ticket saw none of it. The ticket
+ * screen is not holding the account's workspace and should not have to load it: a dispute is one
+ * conversation, and pulling a debtor's contacts and promises to draw it would be a fetch for three
+ * panels nobody asked for.
+ *
+ * OLDEST FIRST, unlike the account's timeline, for the same reason TicketEmails is: a ticket is a
+ * short exchange read in order — what was asked, what was answered, what was done about it.
+ */
+/**
+ * The thread on a ticket, NEWEST FIRST.
+ *
+ * THE FIRM: "when I enter a note, the newest note goes under the first note. It should be on top."
+ *
+ * It was ascending, which is how a conversation reads when you are catching up on it from the
+ * start. That is not what this list is for: a ticket is opened to find out where it got to, and
+ * on one with nine notes the thing somebody needs was nine rows down and below the fold.
+ *
+ * ONLY THIS LIST. The account's own timeline is a different question asked of the same table and
+ * keeps its own order -- the ordering belongs to the reading, not to the rows.
+ */
+export async function fetchQueryNotes(queryId: string): Promise<AccountNote[]> {
+  const { data, error } = await supabase
+    .from('account_notes').select('*').eq('query_id', queryId)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map(toNote)
+}
+
 export async function addContact(input: {
   accountId: string
   kind: ContactKind
   value: string
   label?: string | null
+  /** Whose it is. Null is the debtor; on a company it is who to ask for. */
+  personName?: string | null
+  personRole?: string | null
   isPrimary?: boolean
+  /**
+   * WHETHER THIS LANDS ALREADY CONFIRMED.
+   *
+   * THE FIRM, of a number saved out of a trace: "if you save this person and their number, it's
+   * automatically verified... it goes into a verified state unless you remove it from a verified
+   * state." They had to go back to the account and tick it by hand every time, which is the step
+   * that gets skipped.
+   *
+   * THE CALLER DECIDES, not this function. Saving a finding off a trace is a decision somebody
+   * made about a specific row; typing a number into the contact form is not the same act, and a
+   * default of true here would quietly mark every hand-typed guess as confirmed.
+   */
+  verified?: boolean
 }): Promise<AccountContact> {
+  const value = input.value.trim()
+  /*
+   * THE SAME NUMBER IS NOT TWO NUMBERS.
+   *
+   * THE FIRM, LOOKING AT AN ACCOUNT: "this, the same number, was put in as the alternative number
+   * in this one." 0832573344 was on the account twice -- once as the primary mobile and once
+   * beside it -- so the panel drew "Mobile (Primary)" and "Alternative number" over one line, and
+   * a collector who rang the alternative when the mobile did not answer rang the same phone.
+   *
+   * MATCHED ON THE DIGITS, NOT ON THE TEXT. "083 257 3344" and "0832573344" are one line; only a
+   * comparison that ignores spaces, brackets and dashes can say so. An email is matched
+   * case-insensitively for the same reason, and an address is left alone -- two ways of writing
+   * one street are a judgement nobody should make automatically.
+   *
+   * THE ONE ALREADY THERE IS RETURNED rather than an error raised. Every caller is somebody
+   * saving a number they have just found, and "that is already on the account" is not a failure
+   * -- it is the answer. A RETIRED one is not in the way: somebody putting back a number the firm
+   * stopped using has decided it is good again, and the new row carries that decision.
+   */
+  const same = await existingContact(input.accountId, input.kind, value)
+  if (same) return same
+
   const { data, error } = await supabase
     .from('account_contacts')
     .insert({
       account_id: input.accountId,
       kind: input.kind,
-      value: input.value.trim(),
+      value,
       label: input.label?.trim() || null,
+      person_name: input.personName?.trim() || null,
+      person_role: input.personRole?.trim() || null,
       is_primary: input.isPrimary ?? false,
+      /* NULL RATHER THAN false, because the column is a DATE: "nobody has confirmed it" and
+         "confirmed on this day" are the two states, and there is no third. */
+      verified_at: input.verified ? clockNow().toISOString() : null,
     })
     .select('*')
     .single()
@@ -243,11 +384,46 @@ export async function addContact(input: {
   return toContact(data)
 }
 
+/**
+ * The live contact of this kind already holding this value, or null.
+ *
+ * COMPARED HERE RATHER THAN IN SQL, and the reason is the comparison itself: the digits of a
+ * phone number are what make two of them the same, and no index on `value` can see that. The
+ * account's own contacts are a handful of rows, so reading them and comparing is exact and cheap.
+ */
+async function existingContact(
+  accountId: string, kind: ContactKind, value: string,
+): Promise<AccountContact | null> {
+  const { data, error } = await supabase
+    .from('account_contacts')
+    .select('*').eq('account_id', accountId).eq('kind', kind).is('retired_at', null)
+  if (error) throw new Error(error.message)
+  const mine = sameValue(kind, value)
+  return (data ?? []).map(toContact).find((c) => sameValue(kind, c.value) === mine) ?? null
+}
+
+/**
+ * The form of a value that decides whether two of them are the same thing.
+ *
+ * A NUMBER IS ITS DIGITS, with a leading 27 read as the 0 it stands for -- "+27 83 257 3344" and
+ * "0832573344" are one telephone. An address is ITSELF: two ways of writing one street is a
+ * judgement for the person looking at them, not for a comparison that would quietly swallow a
+ * flat number.
+ */
+function sameValue(kind: ContactKind, value: string): string {
+  if (kind === 'email') return value.trim().toLowerCase()
+  if (kind === 'mobile' || kind === 'phone' || kind === 'work') {
+    const digits = value.replace(/[^\d]/g, '')
+    return digits.startsWith('27') && digits.length === 11 ? `0${digits.slice(2)}` : digits
+  }
+  return value.trim()
+}
+
 /** Confirming a number reaches the debtor. Recorded with who and when, since it decays. */
 export async function verifyContact(id: string, verifiedBy: string | null): Promise<AccountContact> {
   const { data, error } = await supabase
     .from('account_contacts')
-    .update({ verified_at: new Date().toISOString(), verified_by: verifiedBy })
+    .update({ verified_at: clockNow().toISOString(), verified_by: verifiedBy })
     .eq('id', id)
     .select('*')
     .single()
@@ -262,7 +438,7 @@ export async function verifyContact(id: string, verifiedBy: string | null): Prom
 export async function retireContact(id: string, reason: string): Promise<AccountContact> {
   const { data, error } = await supabase
     .from('account_contacts')
-    .update({ retired_at: new Date().toISOString(), retired_reason: reason || null, is_primary: false })
+    .update({ retired_at: clockNow().toISOString(), retired_reason: reason || null, is_primary: false })
     .eq('id', id)
     .select('*')
     .single()
@@ -368,10 +544,36 @@ export async function resolvePromise(
   id: string,
   status: Exclude<PromiseStatus, 'open'>,
   resolvedBy: string | null,
+  /**
+   * WHY, AND ONLY A CANCELLATION HAS ONE.
+   *
+   * THE FIRM: "If the payment arrangement is cancelled, there should be a reason. So the person
+   * should write a reason, say why has it been cancelled."
+   *
+   * THE CAUSE IS NOT A NOTE. The database acts on it -- workflow_on_promise_cancelled ends the
+   * arrangement's own sequence either way and gives back the collection sequence the promise was
+   * holding for two of the three causes -- so it is a closed list and the column refuses a
+   * cancellation without one. See CANCEL_CHOICES.
+   *
+   * KEPT AND BROKEN DO NOT TAKE IT. A promise that was kept needs no explaining, and a broken one
+   * already has a notice of default that says what happened; a reason box on either would be a
+   * field people learn to leave blank, which is how the one that matters gets left blank too.
+   */
+  cancel?: { cause: CancelCause; reason: string } | null,
 ): Promise<PromiseToPay> {
   const { data, error } = await supabase
     .from('promises_to_pay')
-    .update({ status, resolved_at: new Date().toISOString(), resolved_by: resolvedBy })
+    .update({
+      status,
+      resolved_at: clockNow().toISOString(),
+      resolved_by: resolvedBy,
+      /* Written in the SAME update as the status, which is what lets the trigger read the cause
+         off NEW: a second update would fire it with the column still null and the account would
+         stay paused on an arrangement that no longer exists. */
+      ...(status === 'cancelled' && cancel
+        ? { cancel_cause: cancel.cause, cancel_reason: cancel.reason.trim() || null }
+        : {}),
+    })
     .eq('id', id)
     .select('*')
     .single()
@@ -391,6 +593,15 @@ export interface AccountDocument {
   kind: string | null
   uploadedByName: string | null
   createdAt: string
+  /**
+   * SET WHERE THIS ROW IS A SIGNED DOCUMENT RATHER THAN A FILE.
+   *
+   * THE FIRM: "when it's signed and saved, I can't see the document that's signed or saved
+   * anywhere." It is filed by the database the moment it is signed -- the signer is anonymous and
+   * could never have written this row themselves -- and there is no file in the bucket to open,
+   * because everything the document is already lives on the signing request. The token opens it.
+   */
+  signingToken: string | null
 }
 
 const toDocument = (r: any): AccountDocument => ({
@@ -401,17 +612,34 @@ const toDocument = (r: any): AccountDocument => ({
   mimeType: r.mime_type,
   sizeBytes: r.size_bytes === null ? null : Number(r.size_bytes),
   kind: r.kind,
+  /* NAMED HERE BY HAND like every other column -- one missing from this mapper reads as undefined
+     for ever, and here it would make a signed document look like a file that will not open. */
+  signingToken: typeof r.storage_path === 'string' && r.storage_path.startsWith('signing/')
+    ? r.storage_path.slice('signing/'.length)
+    : null,
   uploadedByName: r.uploaded_by_name,
   createdAt: r.created_at,
 })
 
 /** What kind of paper it is. A short list, because a long one gets ignored. */
+/*
+ * 'Trace' is here and is not an ordinary kind. Choosing it opens the trace reader rather than
+ * filing the PDF unread — see DocumentsPanel. The firm pays for every search under Annexure B
+ * item 4(c), and a trace that goes into the bucket without being read is the waste that whole
+ * feature exists to end. It still lands here as a document afterwards, under this kind.
+ */
+export const TRACE_KIND = 'Trace'
+
 export const DOCUMENT_KINDS = [
   'Mandate', 'Acknowledgement of Debt', 'Letter of Demand', 'Statement',
-  'Proof of payment', 'Identity document', 'Court document', 'Correspondence', 'Other',
+  'Proof of payment', 'Identity document', 'Court document', TRACE_KIND, 'Correspondence', 'Other',
 ] as const
 
 const BUCKET = 'account-documents'
+
+/* Drawing the signed copy lives in its own file: it reaches pdf-lib, the letterhead and the
+   signing request, none of which the rest of this module has any business knowing about. */
+
 
 export async function fetchDocuments(accountId: string): Promise<AccountDocument[]> {
   const { data, error } = await supabase
@@ -439,7 +667,18 @@ export async function uploadDocument(input: {
   kind?: string | null
   uploadedBy?: string | null
   uploadedByName?: string | null
-}): Promise<AccountDocument> {
+  /**
+   * WHETHER THE DEBTOR PAYS FOR THIS ONE. Defaults true, which is the firm's rule: saving a
+   * document is a perusal, once a day.
+   *
+   * FALSE FOR A PTC CONFIRMATION, and the reason is the same one that keeps a client's own
+   * paperwork off a debtor's bill. Item 3 recovers time the DEBTOR caused somebody to spend. A
+   * PTC confirmation is the CLIENT's letter, uploaded so the firm can invoice the CLIENT for
+   * commission on money it never handled -- billing the debtor for the firm's own evidence
+   * would not survive being asked about.
+   */
+  chargePerusalFee?: boolean
+}): Promise<{ document: AccountDocument; charge: ChargeResult | null }> {
   const safe = input.file.name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
   const path = `${input.accountId}/${crypto.randomUUID()}-${safe}`
 
@@ -469,7 +708,79 @@ export async function uploadDocument(input: {
     await supabase.storage.from(BUCKET).remove([path])
     throw new Error(error.message)
   }
-  return toDocument(data)
+  /*
+   * AND SAVING IT IS A PERUSAL OF DOCUMENTS, once a day. The firm's rule, and the fee is raised
+   * AFTER the row lands: a document that would not save has not been perused, and charging for it
+   * first is how a debtor pays for a file nobody has.
+   */
+  const charge = input.chargePerusalFee === false
+    ? null
+    : await chargePerusal({ accountId: input.accountId, createdBy: input.uploadedBy })
+  return { document: toDocument(data), charge }
+}
+
+/**
+ * OPENING ONE, WHICH IS THE SAME FEE AS SAVING ONE.
+ *
+ * THE FIRM: "any time anybody saves a document or opens a document, but limited to one a day."
+ *
+ * ITS OWN FUNCTION RATHER THAN A FLAG ON documentUrl, because documentUrl is also how a signed
+ * address is got for something that is not a perusal at all -- and a charge that depends on a
+ * caller remembering to pass `true` is a charge that is raised inconsistently.
+ *
+ * THE URL FIRST. A document that cannot be opened has not been perused.
+ */
+export async function openDocument(
+  doc: { id: string; accountId: string; storagePath: string; name?: string | null },
+  by: string | null,
+  /**
+   * `inline` for OPEN, which shows the document in a tab; without it the address carries
+   * `attachment` and is what DOWNLOAD fetches (the firm, 19 Oct: "an option to open it or download
+   * it"). The fee is the same either way: both are reading the document.
+   */
+  opts: { inline?: boolean } = {},
+): Promise<{ url: string; charge: ChargeResult | null }> {
+  /*
+   * A SIGNED DOCUMENT IS DRAWN THE FIRST TIME SOMEBODY OPENS IT, and is a file from then on.
+   *
+   * THE FIRM: "it saves now, but it saves like the online version. It doesn't save a PDF." The
+   * database files the ROW the moment a request is signed, with storage_path = 'signing/<token>'
+   * and nothing behind it -- the signer is anonymous and could never have uploaded a file. This
+   * used to hand the collector the signing PAGE for that token, which is the online version they
+   * are objecting to: a web page is not an instrument, and it cannot be posted to an attorney or
+   * attached to a summons.
+   *
+   * SO THE FIRST AUTHENTICATED OPEN DRAWS IT, on the letterhead, with the mark on the rules it was
+   * made on, and repoints the row. See signedCopy.ts, and the policy comment in schema.sql for why
+   * that update is the only one this table allows.
+   *
+   * AND IT FALLS BACK TO THE PAGE RATHER THAN FAILING. A request that will not draw is still a
+   * request somebody can read; "could not open that document" on an agreement that plainly exists
+   * is the worse answer.
+   */
+  const token = tokenOfPlaceholder(doc.storagePath)
+  let path = doc.storagePath
+  if (token) {
+    const filed = await fileSignedCopy({
+      documentId: doc.id, accountId: doc.accountId, storagePath: doc.storagePath,
+    }).catch(() => null)
+    if (!filed || filed.startsWith('signing/')) {
+      return {
+        url: signingPath(token),
+        /* THE PERUSAL FEE IS RAISED EITHER WAY. Item 6 is for reading a document on the account,
+           and where it is kept is not the debtor's business. */
+        charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }),
+      }
+    }
+    path = filed
+  }
+  const url = await documentUrl(path, doc.name, { inline: opts.inline })
+  return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
+}
+
+/** Where the signing page for a token lives. One place, so the link and the opener agree. */
+export function signingPath(token: string): string {
+  return `/sign/${token}`
 }
 
 /**
@@ -477,9 +788,27 @@ export async function uploadDocument(input: {
  *
  * The bucket is private, so there is no permanent address to link to. Sixty seconds is enough to
  * open a PDF and not enough for the URL to be worth passing on.
+ *
+ * AND IT ARRIVES AS A FILE, NOT AS A VIEW. THE FIRM, of a signed acknowledgement of debt: "it
+ * opens like as something, I don't know if it's a PDF or whatever, but I can't download it, I
+ * can't save it."
+ *
+ * THAT IS CONTENT-DISPOSITION AND NOTHING ELSE. Without it the object is served inline, and Safari
+ * on an iPad renders a PDF in its own reader with no filename and no obvious way out -- which is
+ * exactly what the firm met, on a document they need to keep, post to an attorney or attach to a
+ * summons. `download` makes storage send `attachment` with the file's own name, which is what puts
+ * it into Files on an iPad and into Downloads everywhere else.
+ *
+ * THE NAME IS THE ROW'S, because that is the one somebody searches for later: a signed agreement
+ * saved as a UUID is a signed agreement nobody finds again.
  */
-export async function documentUrl(storagePath: string): Promise<string> {
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(storagePath, 60)
+export async function documentUrl(
+  storagePath: string, filename?: string | null, opts: { inline?: boolean } = {},
+): Promise<string> {
+  /* INLINE ONLY WHEN SOMEBODY PRESSED OPEN, which now opens a NEW TAB (FileActions) -- Raptor stays
+     behind it, which is what the firm's complaint above was really about. */
+  const { data, error } = await supabase.storage.from(BUCKET)
+    .createSignedUrl(storagePath, 60, opts.inline ? undefined : { download: filename || true })
   if (error || !data?.signedUrl) throw new Error(error?.message ?? 'Could not open that document.')
   return data.signedUrl
 }
@@ -501,27 +830,84 @@ export async function deleteDocument(doc: AccountDocument): Promise<void> {
  * evidence of what was said on a day; this is what someone picking the account up needs to know
  * before they read any of it.
  */
-export async function saveMainComment(accountId: string, text: string, byId: string | null): Promise<void> {
+export async function saveMainComment(
+  accountId: string,
+  text: string,
+  byId: string | null,
+  byName?: string | null,
+): Promise<void> {
+  const body = text.trim()
   const { error } = await supabase
     .from('debtor_accounts')
     .update({
-      main_comment: text.trim() || null,
-      main_comment_at: new Date().toISOString(),
+      main_comment: body || null,
+      main_comment_at: clockNow().toISOString(),
       main_comment_by: byId,
     })
     .eq('id', accountId)
   if (error) throw new Error(error.message)
+
+  /*
+   * AND ON THE TIMELINE, because the main comment is overwritten and the old one is gone.
+   *
+   * That is the right behaviour for the field — it is the current state of play, not a history —
+   * but it means every previous state of play was being destroyed with nothing left to say it
+   * existed. Somebody picking an account up cold could read what is true today and never learn
+   * that it said something different, and quite possibly contradictory, last week.
+   *
+   * A note per change turns the sequence of overwrites into exactly the history the field cannot
+   * keep. Marked `main_comment` rather than `note` so the timeline can show it as the change it
+   * is, and `system` because Raptor composed the framing even though a person wrote the words.
+   *
+   * It is allowed to fail on its own. The comment is what the next caller reads before they ring;
+   * losing the timeline copy is a gap in the record, losing the comment is a gap in the work.
+   */
+  try {
+    await addNote({
+      accountId,
+      body: body
+        ? `Main comment changed to: "${body}"`
+        : 'Main comment cleared.',
+      authorName: byName ?? null,
+      createdBy: byId,
+      kind: 'main_comment',
+      /*
+       * A PERSON'S WRITING, not the machine's — and getting this wrong made the whole thing
+       * pointless for a while.
+       *
+       * It was 'system' on the reasoning that Raptor composed the framing. But the timeline's
+       * "just what people wrote" filter is on by default and hides exactly that, so every one of
+       * these was written to the database and shown to nobody. The rule the schema states is
+       * about the WORDS: system means Raptor composed them, manual means a person typed them.
+       * The words of a main comment are always a person's.
+       */
+      source: 'manual',
+    })
+  } catch {
+    // Deliberately swallowed — see above.
+  }
 }
 
 export async function saveDebtorPreferences(accountId: string, patch: {
   preferredLanguage?: string | null
   contactPreference?: string | null
   consentStatus?: string | null
+  /**
+   * WHEN they may be telephoned, which is not the same question as HOW.
+   *
+   * Written whole rather than one window at a time: the list is three or four rows the collector
+   * is looking at, and a per-row write would need rows with identities, which is a table. See
+   * contactWindows.ts.
+   */
+  contactWindows?: ContactWindow[]
 }): Promise<void> {
-  const row: Record<string, string | null> = {}
+  const row: Record<string, unknown> = {}
   if ('preferredLanguage' in patch) row.preferred_language = patch.preferredLanguage?.trim() || null
   if ('contactPreference' in patch) row.contact_preference = patch.contactPreference?.trim() || null
   if ('consentStatus' in patch) row.consent_status = patch.consentStatus?.trim() || null
+  /* Re-read on the way out, so a window that would not survive being read back is never written:
+     the one shape stored is the one shape parseWindows recognises. */
+  if ('contactWindows' in patch) row.contact_windows = parseWindows(patch.contactWindows ?? [])
   const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
   if (error) throw new Error(error.message)
 }
@@ -540,13 +926,46 @@ export async function saveDebtorIdentity(accountId: string, patch: {
   idNumber?: string | null
   title?: string | null
   initials?: string | null
+  /**
+   * The second given name.
+   *
+   * IMPORTED SINCE THE SHEET HAD THE COLUMN, stored on the row, read by toAccount -- and until
+   * now with nothing anywhere that could write it or show it. A field that arrives, is kept and
+   * cannot be seen is the same failure as a mapper that drops one: nothing breaks, and the value
+   * is simply never true again after the day it landed.
+   */
+  secondName?: string | null
+  /**
+   * Whether this debtor is a person or a company.
+   *
+   * The column has existed since the book was imported and nothing could ever write to it, which
+   * is why three accounts said "company" and the rest did not. It decides what the whole account
+   * screen calls things — "Company details" over "Registration Number", contacts grouped under
+   * the people who answer for the company rather than listed as the debtor's own — and what a
+   * trace is searched on. Getting it wrong is visible immediately, which is the argument for
+   * letting a collector set it rather than inferring it.
+   */
+  debtorKind?: DebtorKind
 }): Promise<void> {
   const row: Record<string, string | null> = {}
   if ('firstName' in patch) row.debtor_first_name = patch.firstName?.trim() || null
   if ('surname' in patch) row.debtor_surname = patch.surname?.trim() || null
-  if ('idNumber' in patch) row.debtor_id_number = patch.idNumber?.replace(/\s/g, '') || null
+  if ('debtorKind' in patch && patch.debtorKind) row.debtor_kind = patch.debtorKind
+  /*
+   * A REGISTRATION NUMBER IS NORMALISED, AN ID NUMBER ONLY DESPACED. The bureau prefixes a letter
+   * of its own — K2016/210735/07 — and the firm's records do not, so two spellings of one company
+   * would never match a lookup keyed on the number, which is exactly what a CIPC or bureau
+   * enquiry is. Anything that is not a registration number is stored as typed: some records are
+   * foreign passports, and refusing to keep what a collector was given loses the only thing they
+   * have to work from.
+   */
+  if ('idNumber' in patch) {
+    const raw = patch.idNumber ?? ''
+    row.debtor_id_number = normaliseRegistrationNumber(raw) ?? (raw.replace(/\s/g, '') || null)
+  }
   if ('title' in patch) row.debtor_title = patch.title?.trim() || null
   if ('initials' in patch) row.debtor_initials = patch.initials?.trim() || null
+  if ('secondName' in patch) row.debtor_second_name = patch.secondName?.trim() || null
   const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
   if (error) throw new Error(error.message)
 }

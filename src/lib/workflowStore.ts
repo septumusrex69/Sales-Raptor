@@ -1,0 +1,356 @@
+/**
+ * Reading and writing a workflow.
+ *
+ * THE MAPPERS LIST EVERY COLUMN BY HAND, which is this codebase's standing hazard rather than a
+ * style choice: a column present in the database, in the type and in the select, but missing from
+ * the mapper, reads as undefined for ever and nothing fails. diary_capacity sat in that state for
+ * months. The check beside this file compares the two lists.
+ */
+import { supabase } from './supabase'
+import type {
+  Channel, DayUnit, DeadlineUnit, NodeAnchor, NodeKind, TriggerKind, Workflow, WorkflowConnection,
+  WorkflowNode, WorkflowPhase, VersionState,
+} from './workflowBuilder.ts'
+import { sequenceLine } from './workflowBuilder.ts'
+
+/* eslint-disable @typescript-eslint/no-explicit-any -- rows arrive as untyped JSON from PostgREST. */
+
+const toPhase = (r: any): WorkflowPhase => ({
+  id: r.id,
+  ordinal: r.ordinal,
+  name: r.name,
+  subtitle: r.subtitle,
+  fromDay: r.from_day,
+  toDay: r.to_day,
+})
+
+const toNode = (r: any): WorkflowNode => ({
+  id: r.id,
+  phaseId: r.phase_id,
+  key: r.key,
+  kind: r.kind as NodeKind,
+  label: r.label,
+  description: r.description,
+  day: r.day,
+  deadlineDays: r.deadline_days,
+  deadlineUnit: r.deadline_unit as DeadlineUnit | null,
+  channel: r.channel as Channel | null,
+  templateId: r.template_id,
+  templateCompanyId: r.template_company_id,
+  afterMinutes: r.after_minutes,
+  needsRelease: r.needs_release,
+  statutory: r.statutory,
+  assignTo: r.assign_to,
+  x: r.x,
+  y: r.y,
+  ordinal: r.ordinal,
+  /* Which clock the step is on. A row whose anchor is absent reads as 'run', which is what every
+     node drawn before instalment anchoring existed is — and what the column defaults to. */
+  anchor: (r.anchor ?? 'run') as NodeAnchor,
+  anchorOffset: r.anchor_offset ?? null,
+  anchorUnit: (r.anchor_unit ?? null) as DayUnit | null,
+})
+
+const toConnection = (r: any): WorkflowConnection => ({
+  id: r.id,
+  fromNodeId: r.from_node_id,
+  toNodeId: r.to_node_id,
+  toWorkflowId: r.to_workflow_id,
+  label: r.label,
+})
+
+export interface WorkflowSummary {
+  id: string
+  key: string
+  name: string
+  description: string | null
+  versions: { id: string; version: number; state: VersionState }[]
+  /**
+   * WHAT STARTS IT, AND WHAT IT THEN DOES — read off the version the list is showing.
+   *
+   * On the summary rather than fetched when somebody opens one, because these two facts ARE the
+   * list: a row carrying only a name and a state badge means opening each workflow to find out
+   * which one you meant, and opening the wrong one is the cost. Null where the version could not
+   * be read, which the row shows as a gap rather than as a guess.
+   */
+  trigger: TriggerKind | null
+  sequence: string | null
+  dayUnit: DayUnit | null
+}
+
+/**
+ * Every workflow, for the list.
+ *
+ * ONE QUERY, INCLUDING THE STEPS. A workflow's row says what starts it and what it then does, and
+ * both come off the version being shown -- so the phases and nodes come with it. There are a
+ * handful of workflows and a dozen steps each; this is not the book, and a second round trip per
+ * row to draw a list would be the wrong trade in the other direction.
+ */
+export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
+  const { data, error } = await supabase
+    .from('workflows')
+    .select(`id, key, name, description,
+      workflow_versions(id, version, state, trigger_kind, day_unit,
+        workflow_phases(id, ordinal, name, subtitle, from_day, to_day),
+        workflow_nodes(id, phase_id, key, kind, label, day, channel, after_minutes, ordinal, anchor, anchor_offset, anchor_unit))`)
+    .order('name')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r: any) => {
+    const versions = (r.workflow_versions ?? [])
+      .slice()
+      .sort((a: any, b: any) => b.version - a.version)
+    /* THE VERSION THE ROW IS ABOUT: the live one where there is one, otherwise the newest. The
+       same order the builder opens on, so the list and the screen it leads to agree. */
+    const shown = versions.find((v: any) => v.state === 'active') ?? versions[0]
+    return {
+      id: r.id,
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      versions: versions.map((v: any) => ({
+        id: v.id, version: v.version, state: v.state as VersionState,
+      })),
+      trigger: (shown?.trigger_kind as TriggerKind) ?? null,
+      dayUnit: shown ? ((shown.day_unit ?? 'calendar') as DayUnit) : null,
+      sequence: shown ? sequenceLine({
+        id: r.id, key: r.key, name: r.name, description: r.description, teamName: null,
+        version: {
+          id: shown.id, version: shown.version, state: shown.state as VersionState,
+          publishedAt: null, dayUnit: (shown.day_unit ?? 'calendar') as DayUnit,
+          trigger: shown.trigger_kind as TriggerKind, triggerNote: null,
+        },
+        phases: (shown.workflow_phases ?? []).map(toPhase),
+        nodes: (shown.workflow_nodes ?? []).map(toNode),
+        connections: [],
+      }) : null,
+    }
+  })
+}
+
+/**
+ * One workflow at one version.
+ *
+ * WHICH VERSION, IF NOBODY SAYS: the draft if there is one, otherwise the active one, otherwise
+ * the newest. That order is the useful one — somebody opening the builder is going to edit, and
+ * landing them on a frozen version so that their first keystroke is refused is a worse first
+ * second than landing them on the draft they already have open.
+ */
+export async function fetchWorkflow(key: string, versionId?: string): Promise<Workflow | null> {
+  const { data: wf, error } = await supabase
+    .from('workflows')
+    .select('id, key, name, description, teams(name), workflow_versions(id, version, state, published_at, trigger_kind, trigger_note, day_unit)')
+    .eq('key', key)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!wf) return null
+
+  const versions = ((wf as any).workflow_versions ?? []) as any[]
+  const chosen = versionId
+    ? versions.find((v) => v.id === versionId)
+    : versions.find((v) => v.state === 'draft')
+      ?? versions.find((v) => v.state === 'active')
+      ?? [...versions].sort((a, b) => b.version - a.version)[0]
+  if (!chosen) return null
+
+  const [phases, nodes, connections] = await Promise.all([
+    supabase.from('workflow_phases')
+      .select('id, ordinal, name, subtitle, from_day, to_day')
+      .eq('version_id', chosen.id).order('ordinal'),
+    supabase.from('workflow_nodes')
+      .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal, anchor, anchor_offset, anchor_unit')
+      .eq('version_id', chosen.id).order('day').order('ordinal'),
+    supabase.from('workflow_connections')
+      .select('id, from_node_id, to_node_id, to_workflow_id, label')
+      .eq('version_id', chosen.id),
+  ])
+  for (const r of [phases, nodes, connections]) if (r.error) throw new Error(r.error.message)
+
+  return {
+    id: (wf as any).id,
+    key: (wf as any).key,
+    name: (wf as any).name,
+    description: (wf as any).description,
+    teamName: (wf as any).teams?.name ?? null,
+    version: {
+      id: chosen.id,
+      version: chosen.version,
+      state: chosen.state as VersionState,
+      publishedAt: chosen.published_at ?? null,
+      dayUnit: (chosen.day_unit ?? 'calendar') as DayUnit,
+      /* Named here like every other column, and the reason to look twice: a trigger missing from
+         this mapper reads as undefined for ever and the builder shows a workflow waiting for
+         nothing. check-workflow-triggers holds the two lists together. */
+      trigger: chosen.trigger_kind as TriggerKind,
+      triggerNote: chosen.trigger_note ?? null,
+    },
+    phases: (phases.data ?? []).map(toPhase),
+    nodes: (nodes.data ?? []).map(toNode),
+    connections: (connections.data ?? []).map(toConnection),
+  }
+}
+
+/**
+ * Save one step.
+ *
+ * ONLY THE FIELDS THE FORM OWNS. Sending the whole row back would overwrite x and y with whatever
+ * the form happened to be holding, and the position of a card on the canvas is not the step
+ * editor's business — it belongs to the drag, which saves separately.
+ */
+export async function saveNode(node: WorkflowNode): Promise<void> {
+  const { error } = await supabase
+    .from('workflow_nodes')
+    .update({
+      label: node.label,
+      description: node.description,
+      day: node.day,
+      deadline_days: node.deadlineDays,
+      deadline_unit: node.deadlineUnit,
+      kind: node.kind,
+      channel: node.channel,
+      template_id: node.templateId,
+      statutory: node.statutory,
+      assign_to: node.assignTo,
+    })
+    .eq('id', node.id)
+  if (error) throw new Error(friendly(error.message))
+}
+
+/** Where a card sits. Saved on its own, because moving one changes nothing about what runs. */
+export async function saveNodePosition(nodeId: string, x: number, y: number): Promise<void> {
+  const { error } = await supabase.from('workflow_nodes').update({ x, y }).eq('id', nodeId)
+  if (error) throw new Error(friendly(error.message))
+}
+
+/** Re-point what follows a step. Null unhooks it, which is how the last step in a line looks. */
+export async function setNextNode(versionId: string, fromNodeId: string, toNodeId: string | null): Promise<void> {
+  const del = await supabase.from('workflow_connections').delete().eq('from_node_id', fromNodeId)
+  if (del.error) throw new Error(friendly(del.error.message))
+  if (toNodeId === null) return
+  const { error } = await supabase
+    .from('workflow_connections')
+    .insert({ version_id: versionId, from_node_id: fromNodeId, to_node_id: toNodeId })
+  if (error) throw new Error(friendly(error.message))
+}
+
+export async function deleteNode(nodeId: string): Promise<void> {
+  const { error } = await supabase.from('workflow_nodes').delete().eq('id', nodeId)
+  if (error) throw new Error(friendly(error.message))
+}
+
+export interface NewNode {
+  versionId: string
+  phaseId: string | null
+  kind: NodeKind
+  label: string
+  day: number
+  ordinal: number
+}
+
+export async function addNode(input: NewNode): Promise<string> {
+  /* A key a person can read, made unique by the clock rather than by a counter nobody maintains. */
+  const key = `${input.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'step'}-${Date.now().toString(36)}`
+  const { data, error } = await supabase
+    .from('workflow_nodes')
+    .insert({
+      version_id: input.versionId,
+      phase_id: input.phaseId,
+      key,
+      kind: input.kind,
+      label: input.label,
+      day: input.day,
+      ordinal: input.ordinal,
+      /* A communication needs a channel to be valid, and email is the one that costs least to be
+         wrong about — Annexure B item 1(a) is R25 against a registered post item. */
+      channel: input.kind === 'communication' ? 'email' : null,
+    })
+    .select('id')
+    .single()
+  if (error) throw new Error(friendly(error.message))
+  return (data as any).id
+}
+
+/**
+ * A workflow from nothing: the row, its first draft version and a phase to put steps in.
+ *
+ * ONE ROUND TRIP, in the database, because three from the browser can stop after the first and
+ * leave a workflow with no version — a row the library lists, nothing can open and nothing can
+ * delete from that screen.
+ */
+export async function createWorkflow(input: {
+  name: string
+  description: string | null
+  domain: 'collections' | 'communications' | 'sales'
+  trigger: TriggerKind
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('workflow_create', {
+    p_name: input.name,
+    p_description: input.description,
+    p_domain: input.domain,
+    p_trigger: input.trigger,
+  })
+  if (error) throw new Error(friendly(error.message))
+  return data as string
+}
+
+/**
+ * What this version waits for.
+ *
+ * A DRAFT ONLY, and the database is what says so rather than this function — the frozen-version
+ * trigger refuses it on a published row and `friendly` turns that into the sentence about taking
+ * a draft. Changing what starts a live workflow would change which files are in it, retroactively.
+ */
+export async function setTrigger(
+  versionId: string, trigger: TriggerKind, note: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('workflow_versions')
+    .update({ trigger_kind: trigger, trigger_note: note?.trim() || null })
+    .eq('id', versionId)
+  if (error) throw new Error(friendly(error.message))
+}
+
+/**
+ * WHAT KIND OF DAY THIS VERSION'S NUMBERS ARE.
+ *
+ * Stored since the firm corrected us -- "this is all working days, not normal days" -- applied by
+ * `landsOn` and carried by `workflow_take_draft`, and settable from nowhere. A column only a
+ * migration can change is one that is wrong on every workflow the firm draws next.
+ *
+ * Refused on a published version by refuse_trigger_change_when_frozen, which is why the message
+ * comes back through `friendly` rather than being guessed at here.
+ */
+export async function setDayUnit(versionId: string, unit: DayUnit): Promise<void> {
+  const { error } = await supabase
+    .from('workflow_versions')
+    .update({ day_unit: unit })
+    .eq('id', versionId)
+  if (error) throw new Error(friendly(error.message))
+}
+
+/** "Click Edit: create a Draft version." The copy is done in the database, edges and all. */
+export async function takeDraft(versionId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('workflow_take_draft', { p_version: versionId })
+  if (error) throw new Error(friendly(error.message))
+  return data as string
+}
+
+export async function publish(versionId: string): Promise<void> {
+  const { error } = await supabase.rpc('workflow_publish', { p_version: versionId })
+  if (error) throw new Error(friendly(error.message))
+}
+
+/**
+ * The database's own words, where they are already the right ones.
+ *
+ * The frozen-version trigger raises a sentence written for a person to read, and passing it
+ * through unchanged is better than a generic "could not save" — it says what to do next.
+ */
+function friendly(message: string): string {
+  if (/published/i.test(message)) {
+    return 'This version is published and cannot be changed. Take a draft of it first.'
+  }
+  if (/row-level security/i.test(message)) {
+    return 'You do not have permission to change workflows.'
+  }
+  return message
+}

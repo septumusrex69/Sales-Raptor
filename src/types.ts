@@ -1,3 +1,5 @@
+import type { CollectorGrade } from './lib/collectorGrade'
+
 export type ID = string
 
 export type LeadStatus =
@@ -66,6 +68,16 @@ export interface LeadServiceValue {
 }
 
 export interface Lead {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * Not a note. A note is a thing that happened, dated, and it belongs on the timeline with the
+   * others; this is the current state of affairs, overwritten as it changes. The debtor's account
+   * has had one since the firm asked for it — this is the same idea on the sales side.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   /** Permanent, sequential, never-reused display number (formatted via formatLeadNumber → "SR-00001"). */
   leadNumber: number
@@ -74,6 +86,8 @@ export interface Lead {
   jobTitle?: string
   companyId?: ID
   companyName: string
+  /** A company or an individual, said when the lead is added (S8): the mandate opens on it. */
+  party?: 'company' | 'individual'
   phone?: string
   mobile?: string
   email?: string
@@ -163,6 +177,25 @@ export interface Handover {
   notes?: string
   loggedBy?: ID
   createdAt: string
+  /**
+   * WHEN THIS BATCH WAS TAKEN BACK OUT, where it was.
+   *
+   * THE FIRM, looking at a client whose Handover Book read three batches and a hundred quadrillion
+   * rand: "the notes that I made of like retracting the handover file, that's also not there. You
+   * remember I took it out, those handover files."
+   *
+   * THEY HAD. Two of the three batches carried `discarded_at`, their accounts were gone, and the
+   * card counted all three anyway — because this field was on the table and not on the type, so
+   * nothing on a screen could see it. The silent-column fault CLAUDE.md names, this time on the
+   * app's side of the line rather than in a row mapper.
+   *
+   * A DISCARDED BATCH IS STILL A FACT ABOUT THE CLIENT. It arrived, and it was taken back out; it
+   * is kept and marked rather than deleted — see handoverDiscard.ts — so it is drawn and struck
+   * through rather than hidden. What it must not do is count.
+   */
+  discardedAt?: string
+  discardedBy?: ID
+  discardedReason?: string
 }
 
 export type DealKind = 'Service' | 'Handover'
@@ -186,6 +219,16 @@ export const DEAL_STAGE_PROBABILITY: Record<DealStage, number> = {
 }
 
 export interface Deal {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * Not a note. A note is a thing that happened, dated, and it belongs on the timeline with the
+   * others; this is the current state of affairs, overwritten as it changes. The debtor's account
+   * has had one since the firm asked for it — this is the same idea on the sales side.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   name: string
   companyId: ID
@@ -223,6 +266,15 @@ export interface Deal {
 }
 
 export interface Contact {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * On a person rather than a relationship: "prefers to be called after four", "goes through his
+   * PA". What is going on with the CLIENT belongs on the client.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   firstName: string
   lastName: string
@@ -240,6 +292,16 @@ export interface Contact {
 }
 
 export interface Company {
+  /**
+   * The two lines the next person needs before they read anything else.
+   *
+   * Not a note. A note is a thing that happened, dated, and it belongs on the timeline with the
+   * others; this is the current state of affairs, overwritten as it changes. The debtor's account
+   * has had one since the firm asked for it — this is the same idea on the sales side.
+   */
+  mainComment?: string
+  mainCommentAt?: string
+  mainCommentBy?: ID
   id: ID
   name: string
   industry?: string
@@ -255,10 +317,27 @@ export interface Company {
   parentCompanyId?: ID
   /** Short reference code — either the real Swordfish client prefix (e.g. "MPY"), or an internal-only code we invent for a parent that has no Swordfish code of its own (e.g. "MARARA"). */
   code?: string
+  /**
+   * The client's liaison, AS A NAME, because that is how Swordfish holds it and how it came across.
+   *
+   * NOT THE SAME FIELD AS `accountOwnerId`, and the Clients list read the wrong one: every client
+   * shows the same owner id, so the column read "Nicole" for all of them -- including Rinda Roo
+   * Company, whose liaison is null. The firm's own data has Ryno on Baobab, Karoo and Meridian and
+   * Rinda on Kestrel.
+   */
+  liaison?: string
   /** Debt-collection servicing totals, synced from Swordfish per sub-account. A parent with children has no totals of its own — sum its children instead. */
   accountCount?: number
   handoverAmount?: number
   paymentsToDate?: number
+  /**
+   * DETAILS KEPT BESIDE THE CLIENT INFORMATION, NOT OVER IT (S9). The firm, of a signed mandate whose
+   * number, email or bank account differs from the one on file: "always add the information from the
+   * mandate. Don't replace stuff. If the closer [has] put up some information and it's important,
+   * they might need it." Written by mandate_on_signed; the closer's name for the client lands here
+   * too when the signed name takes over. Never empty in the database (default `[]`).
+   */
+  otherDetails?: { label: string; value: string; source: string; at: string }[]
   /** Name of the closer who originally signed this client (Swordfish's "Marketing Agent"), where known. */
   marketingAgent?: string
   /** Swordfish's client classification (A/B/C/D), where known. Set at the level a Swordfish code actually exists — a parent container invented by us has none of its own. */
@@ -274,8 +353,60 @@ export interface Company {
   estimatedHandoverAmount?: number
   estimatedAccountsCount?: number
   estimatedAtConversion?: string
+
+  /*
+   * WHAT A CLIENT LOADED DIRECTLY CARRIES. All of these columns already existed on `companies`
+   * -- the Swordfish import writes several -- but were not on this type, so nothing could set
+   * them from a screen. AppStore maps rows generically, so they arrived and were invisible.
+   */
+  registrationNumber?: string
+  vatNumber?: string
+  /** Where remittance goes OUT to this client. Not the firm's trust account -- see CLAUDE.md. */
+  bankingDetails?: string
+  contactPerson?: string
+  /** What they have signed for, where the client was loaded directly rather than converted. */
+  services?: ProductService[]
+  /** A single rate, as a FRACTION — 0.3 is thirty percent. Null where a scale applies instead. */
+  commissionRate?: number
+  /** The sliding scale, where the mandate has one. Ordered ascending, ending in an "and above". */
+  commissionBands?: { upTo: number | null; rate: number }[]
+  commissionBandsSource?: string
+  /** The date of the mandate the bands come from. */
+  commissionBandsDated?: string
+  /**
+   * THE REGISTER'S SCALE AS SWORDFISH FILED IT: one rate per client record (KIS 21%, KIS2 15% ...),
+   * without the rand boundaries between them. Present only where the rates differ. The scale is
+   * visible from this before anybody has captured the bands; it does not price anything itself.
+   */
+  commissionTiers?: { prefix: string; rate: number }[]
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
+  /** THE WELCOME FLOW (S8). Signed online and waiting for Sales to assign a liaison. */
+  liaisonNeeded?: boolean
+  /** When Sales handed the client to its liaison. */
+  liaisonAssignedAt?: string
+  /** When the liaison's welcome email went to the client. */
+  welcomeSentAt?: string
+  /**
+   * Set on a client the Swordfish import created -- the run that brought it across. Such a client
+   * takes handovers without a mandate date (prompt 10); see mandateRule.ts.
+   */
+  importBatchId?: string | null
+  /**
+   * The interest rate in THIS CLIENT'S mandate, as a PERCENT a year — 24 means 24%.
+   *
+   * NOT A FRACTION, unlike commissionRate above, and the difference is deliberate rather than
+   * sloppy: this is the same unit `debtor_accounts.interest_rate_annual` holds, so the value copies
+   * from here onto an account without a conversion sitting between them. The old handover sheet
+   * asked for the rate twice in two units — "Interest Rate" 24 and "Percentage" 0.25 — and nothing
+   * said which was which; one unit, named in the field, is the lesson from that.
+   *
+   * UNDEFINED IS NOT NOUGHT. Undefined means nobody has recorded what the mandate says, and an
+   * account opened under such a client still opens at 0% with no interest running. The client card
+   * says so rather than leaving both silent, which is the state the firm found: eight live accounts
+   * at 0% and a simulation correctly reporting that no interest was running on any of them.
+   */
+  defaultInterestRateAnnual?: number
 }
 
 export type TaskType =
@@ -309,11 +440,32 @@ export interface Task {
   completedAt?: string
   /** Set when this task's due date was auto-rolled forward because it was missed; cleared once completed. */
   autoRescheduledFrom?: string
+  /**
+   * WHY IT WAS CANCELLED, in the words of whoever cancelled it.
+   *
+   * THE FIRM: "you should also be able to cancel a task -- the cancel reason... the client has
+   * cancelled the meeting, and then it will also be on the notes of the client."
+   *
+   * 'Cancelled' has been a status all along and the only thing it could say was that somebody had.
+   * A meeting the CLIENT called off and one the firm dropped because it was no longer needed are
+   * the same row, and six months later that is the whole question: a client who keeps moving is a
+   * different problem from a firm that keeps forgetting.
+   */
+  cancelReason?: string
+  cancelledAt?: string
 }
 
 export type ActivityType =
   | 'Call'
   | 'Email'
+  /*
+   * A text message, on a record that is not a debtor's account.
+   *
+   * A debtor's SMS lives on the account's own timeline and raises Annexure B item 1(c); a lead's
+   * or a client's is sales activity and charges nobody, so it belongs here with the calls and the
+   * emails. See crmSms.
+   */
+  | 'SMS'
   | 'WhatsApp'
   | 'Meeting'
   | 'Note'
@@ -345,6 +497,16 @@ export interface Activity {
   attachmentNames?: string[]
   /** The message's own Message-ID, used to thread replies back to the record that sent it. */
   emailMessageId?: string
+  /**
+   * Everyone else on a synced email: the To line and the Cc line, as the message carried them.
+   *
+   * What makes a reply-all from a lead, deal or client possible. Without them a client who copies
+   * two of their own people arrived looking like a private message, and answering it dropped both.
+   * Empty on anything synced before the columns existed, and on everything that is not an email —
+   * which reads as "nobody else known" and simply hides the button.
+   */
+  emailToRecipients?: { name: string | null; address: string }[]
+  emailCcRecipients?: { name: string | null; address: string }[]
 }
 
 export type ProposalStatus = 'Draft' | 'Sent' | 'Viewed' | 'Accepted' | 'Declined' | 'Expired'
@@ -378,6 +540,10 @@ export type UserRole =
   | 'Sales Representative'
   | 'Liaison Manager'
   | 'Liaison'
+  // The top of the collections ladder: the firm's own words, "the manager of the team leaders".
+  // They carry a book like everybody else on the floor -- a reduced one, which is a per-person
+  // ceiling and not a property of the role (see book_ceiling).
+  | 'Call Centre Manager'
   // The rung between the collector and the client liaison: a dispute an agent cannot answer
   // goes to one of those two and to nobody else.
   | 'Pre-legal Team Leader'
@@ -389,9 +555,24 @@ export interface User {
   name: string
   email: string
   role: UserRole
+  /**
+   * WHAT THIS PERSON WAS GIVEN ON TOP OF THEIR ROLE, and what was taken away from it.
+   *
+   * THE FIRM, SHOWING ME SWORDFISH: "you can choose, for example, for a user to have a management
+   * template, but you can add them more functionality."
+   *
+   * EMPTY MEANS "WHATEVER YOUR ROLE GIVES", which is the same shape `bookCeiling`, `diaryCapacity`
+   * and `diaryReserve` already use -- the firm reads a blank as the standard everywhere else, so
+   * it reads as the standard here. See capabilities.ts; the names are `Capability` values and an
+   * unrecognised one is ignored rather than fatal.
+   */
+  grants?: string[]
+  revokes?: string[]
   teamId?: ID
   status: 'Active' | 'Inactive'
   phone?: string
+  /** A number a debtor may be messaged on, which is routinely not the desk line above. */
+  whatsapp?: string
   avatarColor: string
   /** Appended under the body of any email sent from Romulus via this person's connected inbox. */
   emailSignature?: string
@@ -401,9 +582,43 @@ export interface User {
   emailSignatureImageAlign?: 'left' | 'center' | 'right'
   /** This person's BuzzBox PABX extension; set, click-to-dial rings it before bridging the call. */
   buzzboxExtension?: string
+  /**
+   * How many accounts a working day holds for this person before the diary warns about
+   * overbooking. Per agent rather than firm-wide: a phone-heavy collector and one working
+   * through letters do not have the same day. Undefined means the firm default.
+   */
+  diaryCapacity?: number
+  /**
+   * What this person is trusted with: Junior, Skilled, Senior, Elite.
+   *
+   * Undefined means "not a collector" — a liaison or a sales rep has no grade, and defaulting
+   * one would put accounts on a desk that does not work them. Set by a team leader, never
+   * computed: one large settlement is not a promotion, and it is an employment matter besides.
+   */
+  collectorGrade?: CollectorGrade
+  /** The most accounts they should carry at once, in play. Undefined means the firm standard. */
+  bookCeiling?: number
+  /** Slots held back each day for work handed to them. Undefined means the firm standard. */
+  diaryReserve?: number
+  /**
+   * How this person likes their diary ordered, when they have said.
+   *
+   * Undefined means they never chose, which is the firm's own order. Typed loosely rather than
+   * as DiaryOrder so that types.ts does not have to import the diary module; the diary validates
+   * it on the way in and falls back when it no longer offers the value.
+   */
+  diaryOrder?: string
 }
 
-export type TeamKind = 'Sales' | 'Communications'
+/*
+ * A team belongs to a department, and so does the person in it.
+ *
+ * 'Call centre' was missing, so the firm's five pre-legal teams were filed as SALES -- there was
+ * nothing else to file them as. That is what let a pre-legal agent sit in a Communications team
+ * and open Raptor on the Communications dashboard: the firm's own words, "a pre-legal agent can't
+ * be in a team that is for communications, they should be in the pre-legal division."
+ */
+export type TeamKind = 'Sales' | 'Communications' | 'Call centre'
 
 export interface Team {
   id: ID
@@ -418,7 +633,15 @@ export interface Team {
  * Every one of these is already computed somewhere on the dashboard — a target is a line drawn
  * on a number that exists, never a new number invented to be targeted.
  */
-export type TargetMetric = 'leads' | 'mandates' | 'deals' | 'revenue' | 'book' | 'accounts' | 'activities'
+/**
+ * Two sides of the firm on one list. 'collected' is the collections side's only target and it is
+ * the one the floor is actually run on day to day; everything before it is the sales side.
+ * `TARGET_METRICS` in src/lib/targets.ts records which side each belongs to — a sales dashboard
+ * showing a collections target, or the reverse, is a screen nobody can act on.
+ */
+export type TargetMetric =
+  | 'leads' | 'mandates' | 'deals' | 'revenue' | 'book' | 'accounts' | 'activities'
+  | 'collected'
 
 export interface Target {
   id: ID
@@ -477,6 +700,17 @@ export type NotificationType =
   | 'Deal won'
   | 'Lead reassigned'
   | 'Email received'
+  /*
+   * Raised by a hand-out, and named with a dot rather than a sentence on purpose: these two are
+   * read by code (newWorkPopup picks them out of the bell to decide whether to interrupt
+   * somebody), where the other eleven are only ever shown. A sentence that has to be matched
+   * exactly is a sentence nobody may reword.
+   */
+  | 'handover.allocated'
+  | 'handover.referred'
+  /* The welcome flow (S8): the closer, told a mandate was signed; the liaison, given a new client. */
+  | 'mandate_signed'
+  | 'client.assigned'
 
 export interface AppNotification {
   id: ID

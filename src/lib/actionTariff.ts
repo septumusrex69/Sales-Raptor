@@ -30,9 +30,30 @@ export type ActionCode =
   | 'consultation'
   | 'perusal'
   | 'acknowledgement_of_debt'
+  /* S9: a document the debtor signed or accepted online -- the payment arrangement. Item 4(b). */
+  | 'document_signed'
   | 'promise_to_pay'
   | 'trace'
   | 'whatsapp'
+  /*
+   * VERIFYING THAT A DEBTOR PAID THE CLIENT DIRECT.
+   *
+   * THE FIRM, correcting an earlier judgement of mine that this should be free: "You can charge a
+   * perusal fee for a PTC because the debtor has paid into the client's account and it cost us
+   * administration to verify this... handle it as other necessary expenses and call it a PTC
+   * confirmation."
+   *
+   * They are right and the reasoning I had was wrong. I read the confirmation as the FIRM's own
+   * evidence for invoicing the client, and therefore not the debtor's to pay. But the work is
+   * there because the DEBTOR chose to pay somebody else: the firm has to obtain the client's
+   * confirmation, read it, and satisfy itself the money is real before it touches a balance.
+   * Item 3 is "other necessary expenses not specifically provided for", and that is what this is.
+   *
+   * ITS OWN CODE RATHER THAN `perusal`, because the two are limited differently. A perusal is
+   * capped per period however many documents are read; a PTC confirmation is one verification of
+   * one payment, and two PTCs in a month are two pieces of work.
+   */
+  | 'ptc_confirmation'
 
 export interface ActionDefinition {
   code: ActionCode
@@ -49,6 +70,7 @@ export interface ActionDefinition {
 }
 
 export const ACTION_DEFINITIONS: ActionDefinition[] = [
+  { code: 'ptc_confirmation', label: 'PTC Confirmation' },
   { code: 'phone_call', label: 'Phone Call' },
   { code: 'sms', label: 'SMS', perSegment: true, electronicCommunication: true },
   { code: 'email_out', label: 'Email (Outgoing)', electronicCommunication: true },
@@ -57,6 +79,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   { code: 'consultation', label: 'Consultation' },
   { code: 'perusal', label: 'Perusal of Documents' },
   { code: 'acknowledgement_of_debt', label: 'Acknowledgement of Debt' },
+  { code: 'document_signed', label: 'Document Signed' },
   { code: 'promise_to_pay', label: 'Promise to Pay' },
   { code: 'trace', label: 'Trace' },
   { code: 'whatsapp', label: 'WhatsApp Correspondence' },
@@ -117,6 +140,83 @@ export interface TariffSchedule {
  * and not the Magistrates' Courts tariff for those years; no action in the book is old enough
  * for the difference to bite.
  */
+/**
+ * HOW OFTEN AN ACTION MAY BE CHARGED IN ONE DAY, or absent where nothing limits it.
+ *
+ * ONE ENTRY, AND IT IS THE FIRM'S OWN RULE: "we should add a fee perusal of documents. This is any
+ * time anybody saves a document or opens a document, but limited to one a day. So one charge a
+ * day. Can't be more than one perusal of documents in a day. This includes a trace and everything
+ * else."
+ *
+ * A NARROWING, NOT A NEW FEE. `perusal` has been item 3 with four schedules of rates since the
+ * import, and raising a dispute has charged it all along. What it never had was a limit -- item 3
+ * is gazetted as "a total amount of R25,00" for the whole account and the firm instructed on 9
+ * September that it is charged per occurrence instead (ENFORCE_ITEM_TOTALS), which left nothing at
+ * all between a collector and a fee every time they opened a PDF. One a day is the firm putting
+ * that boundary back where they want it.
+ *
+ * COUNTED ON THE ACTION, NOT ON THE ITEM, and that is the whole of "this includes a trace and
+ * everything else": a document opened, a document saved, a trace report read and a dispute handed
+ * to a liaison are one kind of work to the gazette and one kind of work to the firm, so they share
+ * the day's allowance rather than each having their own.
+ *
+ * PER ACCOUNT, NOT PER PERSON -- the firm, asked directly which it was: "one charge per account per
+ * day". It is the DEBTOR who pays it, so the day belongs to the file rather than to whoever opened
+ * it. A collector, their team leader and the client liaison all reading the same trace report on
+ * the same afternoon read ONE set of documents; three charges for it would be the firm billing a
+ * debtor for its own internal handover. `created_by` sits on every fee row, so counting the day
+ * there was one filter away, and it would have read "one each".
+ *
+ * PER CALENDAR DAY IN THE FIRM'S OWN TIMEZONE. An action at one in the morning in Johannesburg is
+ * eleven the previous night in UTC, and a day boundary read in the wrong zone is a second charge
+ * on a debtor who was only ever perused once.
+ */
+export const DAILY_LIMIT: Partial<Record<ActionCode, number>> = {
+  perusal: 1,
+}
+
+/**
+ * THE ACTION CODE TRACING ACTUALLY WRITES.
+ *
+ * NOT `trace`, WHICH IS IN THE UNION ABOVE AND NOTHING WRITES. accountTrace has stored 'TRC' since
+ * the Trace button was built, and every tracing fee on the book carries it. Named here rather than
+ * quietly repeated, because the cap below has to match what is in the COLUMN and not what the type
+ * says ought to be there -- a cap keyed on the tidier spelling would count nothing for ever and
+ * refuse nobody, which is the kind of guard that looks right in a diff and does not exist.
+ *
+ * The discrepancy is left alone deliberately: renaming it means rewriting history on 59 215 fee
+ * rows, and CLAUDE.md says imported figures are not swept.
+ */
+export const TRACING_ACTION_CODE = 'TRC'
+
+/**
+ * HOW MANY TIMES AN ACTION MAY BE CHARGED IN A CALENDAR MONTH.
+ *
+ * THE FIRM, settling how the wider trace sources are to be billed: "I don't think you have to
+ * charge the other necessary expenses for every single one. It's just if you're starting to
+ * conduct those traces... Cap all the tracing activities at four a month. Whether or not it's a
+ * trace or the other necessary expense. Just detail them."
+ *
+ * ONE ALLOWANCE ACROSS BOTH ITEMS, WHICH IS WHY IT IS KEYED ON THE ACTION. A bureau search is item
+ * 4(c) and a SASSA or deeds search is item 3, and the firm's instruction is that four is the total
+ * of BOTH -- "whether or not it's a trace or the other necessary expense". Keyed on the item it
+ * would be two separate fours, which is twice what they asked for; and item 3 also carries the
+ * perusal of documents and the PTC confirmation, so an item-3 cap would stop a collector opening a
+ * PDF because somebody had searched the deeds office.
+ *
+ * SEPARATE FROM ENFORCE_MONTHLY_LIMITS, which stays off. That flag is the GAZETTE's per-item
+ * allowances, which the firm switched off on 10 September for a reason that is still true -- the
+ * gazette counts per account while the work happens per person. This is the firm's own cap on
+ * their own activity, so it is their number rather than the gazette's and it binds whatever that
+ * flag is doing. The two agree at four by coincidence, not by construction.
+ *
+ * PER ACCOUNT AND PER CALENDAR MONTH, like the gazette's own wording and like DAILY_LIMIT above:
+ * it is the DEBTOR who pays, so the allowance belongs to the file rather than to whoever spent it.
+ */
+export const MONTHLY_LIMIT: Record<string, number> = {
+  [TRACING_ACTION_CODE]: 4,
+}
+
 export const TARIFF_HISTORY: TariffSchedule[] = [
   {
     effectiveFrom: '2026-03-06',

@@ -88,16 +88,16 @@ export interface AnnexureBSchedule {
   itemsOneToSevenCeiling: number
   /** Item 9: a fee of 10% of the instalment received. */
   receiptFeeRate: number
-  /**
-   * Item 9: "subject to a maximum amount of R610,00", and R509 / R480 / R435 in the earlier
-   * schedules.
+  /*
+   * THE ITEM 9 CAP IS NOT HERE. It moves on its own dates -- the 2026 gazette is dated 6 March and
+   * the firm applied the new cap from 7 April -- so one `effectiveFrom` on this object cannot say
+   * both, and the one it was saying put R610 on a month of receipts Swordfish capped at R502. See
+   * RECEIPT_FEE_CAPS, which mirrors `annexure_b_tariffs` row for row.
    *
-   * **Per instalment, not in aggregate.** The wording carries both readings — "on receipt of an
-   * instalment (one or more) in redemption of the debt" — and this was an open question for some
-   * time. The business has confirmed the per-instalment reading, which is also the one that
-   * reproduces their own statements. Settled.
+   * Per instalment, not in aggregate, wherever it is read: the wording carries both readings --
+   * "on receipt of an instalment (one or more) in redemption of the debt" -- and the business has
+   * confirmed the per-instalment one, which is also what reproduces their own statements.
    */
-  receiptFeeMaximum: number
   items: AnnexureBItem[]
 }
 
@@ -107,7 +107,6 @@ export const ANNEXURE_B_2026: AnnexureBSchedule = {
   vatBasis: 'exclusive',
   itemsOneToSevenCeiling: 1225,
   receiptFeeRate: 0.1,
-  receiptFeeMaximum: 610,
   items: [
     {
       id: '1a',
@@ -186,7 +185,6 @@ export const ANNEXURE_B_2020: AnnexureBSchedule = {
   vatBasis: 'exclusive',
   itemsOneToSevenCeiling: 1023,
   receiptFeeRate: 0.1,
-  receiptFeeMaximum: 509,
   items: [
     {
       id: '1a',
@@ -262,7 +260,6 @@ export const ANNEXURE_B_2017: AnnexureBSchedule = {
   vatBasis: 'exclusive',
   itemsOneToSevenCeiling: 965,
   receiptFeeRate: 0.1,
-  receiptFeeMaximum: 480,
   items: earlierItems({
     letter: 20, electronic: 2.8, phoneCall: 20, otherExpenses: 20,
     signedAtResidence: 198, creditBureau: 13, settlementAccount: 39,
@@ -277,7 +274,6 @@ export const ANNEXURE_B_2015: AnnexureBSchedule = {
   vatBasis: 'exclusive',
   itemsOneToSevenCeiling: 870,
   receiptFeeRate: 0.1,
-  receiptFeeMaximum: 435,
   items: earlierItems({
     letter: 18, electronic: 2.5, phoneCall: 18, otherExpenses: 18,
     signedAtResidence: 178, creditBureau: 12, settlementAccount: 35,
@@ -338,6 +334,50 @@ export const ANNEXURE_B_SCHEDULES: AnnexureBSchedule[] = [
   ANNEXURE_B_2026, ANNEXURE_B_2020, ANNEXURE_B_2017, ANNEXURE_B_2015,
 ]
 
+/* ---------------------------------------------------------------------------------------------
+ * THE ITEM 9 CAP IS ITS OWN DATED SERIES, AND IT IS THE AS-CHARGED ONE
+ * ------------------------------------------------------------------------------------------- */
+
+/**
+ * WHAT THE FIRM ACTUALLY CHARGED, mirroring `annexure_b_tariffs` row for row.
+ *
+ * THE FIRM, AFTER THE FIRST TEST IMPORT: "The annexure_b_tariffs table (used by allocate_payment)
+ * has R502 until 2026-04-06 and R610 from 2026-04-07, which matches what Swordfish charged (R502
+ * from Dec 2023 to 31 Mar 2026, R610 from 7 Apr 2026). src/lib/annexureB.ts has R509 from
+ * 2020-05-22 and R610 from 2026-03-06."
+ *
+ * TWO DISAGREEMENTS AND THEY ARE DIFFERENT KINDS. The AMOUNT -- R502 against R509 -- is the firm's
+ * own figure against the gazette's; what a client was invoiced on is the record, and CLAUDE.md's
+ * rule about imported history says so in as many words. The DATE is worse: between 6 March and
+ * 7 April 2026 the app would have capped at R610 while Swordfish capped at R502, so every receipt
+ * over R5 020 in that month came out R108 too high -- charged to the debtor, remitted to nobody.
+ *
+ * SEPARATE FROM THE SCHEDULE BECAUSE IT MOVES SEPARATELY. The 2026 gazette is dated 6 March and
+ * the firm applied the new cap from 7 April; one `effectiveFrom` on the schedule object cannot say
+ * both, and the one it was saying was the wrong one for this item. The schedule still prices items
+ * 1 to 7 on the gazette's date, which is right for them.
+ *
+ * NEWEST FIRST, so the cap in force on a date is the first entry that started on or before it.
+ */
+export const RECEIPT_FEE_CAPS: { from: string; cap: number }[] = [
+  { from: '2026-04-07', cap: 610 },
+  /* Swordfish charged R502 for the whole of the period Raptor has history for. The earlier
+     gazetted figures (R509, R480, R435) are not what the firm's own statements were raised on. */
+  { from: '2000-01-01', cap: 502 },
+]
+
+/**
+ * The item 9 cap in force on a date.
+ *
+ * NO DEFAULT, AND THAT IS THE POINT. The firm: "never default to a schedule without a date."
+ * A cap reached with no date is today's cap applied to a 2019 receipt, which is CLAUDE.md's own
+ * rule about `scheduleFor` broken from the other end.
+ */
+export function receiptFeeCapOn(date: string | Date): number {
+  const iso = (typeof date === 'string' ? date : date.toISOString()).slice(0, 10)
+  return (RECEIPT_FEE_CAPS.find((c) => c.from <= iso) ?? RECEIPT_FEE_CAPS[RECEIPT_FEE_CAPS.length - 1]).cap
+}
+
 export function scheduleFor(date: string | Date): AnnexureBSchedule {
   const iso = typeof date === 'string' ? date : date.toISOString()
   return ANNEXURE_B_SCHEDULES.find((s) => s.effectiveFrom <= iso.slice(0, 10)) ?? ANNEXURE_B_2026
@@ -378,8 +418,9 @@ export function feeCeiling(capitalAmount: number, schedule: AnnexureBSchedule = 
  * debt" — leans per-receipt, and the per-instalment reading reproduces the business's own
  * statements, so that is what this does. Not settled.
  */
-export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANNEXURE_B_2026): number {
-  return roundToCents(Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum))
+export function receiptFee(instalment: number, onDate: string | Date): number {
+  return roundToCents(Math.min(
+    instalment * scheduleFor(onDate).receiptFeeRate, receiptFeeCapOn(onDate)))
 }
 
 /**
@@ -400,11 +441,15 @@ export function receiptFee(instalment: number, schedule: AnnexureBSchedule = ANN
  */
 export function receiptFeeInclVat(
   instalment: number,
-  vatRate = 0.15,
-  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+  vatRate: number,
+  /* THE DAY THE MONEY CAME IN. Required, never defaulted: a fee reached with no date is today's
+     cap applied to a receipt from another year. */
+  onDate: string | Date,
 ): number {
   if (instalment <= 0) return 0
-  return roundToCents(Math.min(instalment * schedule.receiptFeeRate, schedule.receiptFeeMaximum) * (1 + vatRate))
+  return roundToCents(
+    Math.min(instalment * scheduleFor(onDate).receiptFeeRate, receiptFeeCapOn(onDate))
+    * (1 + vatRate))
 }
 
 /**
@@ -477,10 +522,10 @@ export function roundToCents(value: number): number {
  */
 export function settlementReceiptFee(
   balanceBeforeFee: number,
-  vatRate = 0.15,
-  schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+  vatRate: number,
+  onDate: string | Date,
 ): number {
-  return receiptFeeInclVat(balanceBeforeFee, vatRate, schedule)
+  return receiptFeeInclVat(balanceBeforeFee, vatRate, onDate)
 }
 
 /**
@@ -489,8 +534,41 @@ export function settlementReceiptFee(
  * The boundary is confirmed: exactly R50,000 falls in the higher band.
  */
 export function acknowledgementOfDebtFee(debtAmount: number): number {
-  const band = ACKNOWLEDGEMENT_OF_DEBT_BANDS.find((b) => b.below !== undefined && debtAmount < b.below)
-  return band?.amount ?? ACKNOWLEDGEMENT_OF_DEBT_BANDS[ACKNOWLEDGEMENT_OF_DEBT_BANDS.length - 1].amount
+  return bandAmount(ACKNOWLEDGEMENT_OF_DEBT_BANDS, debtAmount)
+}
+
+/**
+ * WHICH BAND A DEBT FALLS IN, FOR ANY BANDED ITEM.
+ *
+ * Pulled out of acknowledgementOfDebtFee so that the arithmetic reading `below` lives in ONE
+ * place: the charge engine now has to resolve a banded item too, and a second copy of this
+ * comparison is a second chance to get the boundary wrong. Exactly R50,000 falls in the higher
+ * band, which is `<` and not `<=`, and is the whole of what there is to get wrong.
+ *
+ * THE LAST BAND HAS NO CEILING by construction -- see FeeBand -- so it is the answer whenever
+ * nothing matched rather than a default written out here.
+ */
+export function bandAmount(bands: FeeBand[], debtAmount: number): number {
+  const band = bands.find((b) => b.below !== undefined && debtAmount < b.below)
+  return band?.amount ?? bands[bands.length - 1].amount
+}
+
+/**
+ * WHAT ONE UNIT OF AN ITEM COSTS, WHICH FOR TWO ITEMS IS NOT A SINGLE FIGURE.
+ *
+ * Items 1(b) and 4(a) carry `amount: null` because the Magistrates' Courts Rules price them, not
+ * this Annexure. 4(a) is BANDED by the size of the debt, so it has an answer the moment somebody
+ * says what the debt is -- and before this existed it had none, which meant an acknowledgement of
+ * debt went out and the ledger recorded R0,00 for it.
+ *
+ * NULL RATHER THAN ZERO where there is still no answer. A zero reads as "this action is free",
+ * which for item 1(b) -- a registered letter under section 57 -- is exactly the wrong thing for a
+ * statement to say. The caller has to decide, which is what itemAmountFor then does.
+ */
+export function unitAmountFor(item: AnnexureBItem, debtAmount?: number): number | null {
+  if (item.amount !== null) return item.amount
+  if (item.bandedAmounts && debtAmount !== undefined) return bandAmount(item.bandedAmounts, debtAmount)
+  return null
 }
 
 export function annexureBItem(id: AnnexureBItemId, schedule: AnnexureBSchedule = ANNEXURE_B_2026): AnnexureBItem | undefined {
@@ -584,22 +662,33 @@ export function itemAmountFor(
   quantity: number,
   alreadyChargedUnderItem: number,
   schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+  /**
+   * The size of the debt, for the one item whose price depends on it.
+   *
+   * OPTIONAL, AND IGNORED BY EVERY OTHER ITEM, so the forty existing callers are unchanged. Only
+   * item 4(a) reads it, and without it 4(a) still comes out at nought -- which is the honest
+   * answer to "what does an acknowledgement of debt cost" asked without saying of what.
+   */
+  debtAmount?: number,
 ): number {
   const item = schedule.items.find((i) => i.id === itemId)
-  if (!item || item.amount === null) return 0
+  const unit = item ? unitAmountFor(item, debtAmount) : null
+  if (!item || unit === null) return 0
   const units = Math.max(1, Math.floor(quantity))
-  const asked = roundToCents(item.amount * units)
+  const asked = roundToCents(unit * units)
   if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return asked
-  return roundToCents(Math.max(0, Math.min(asked, item.amount - alreadyChargedUnderItem)))
+  return roundToCents(Math.max(0, Math.min(asked, unit - alreadyChargedUnderItem)))
 }
 
 export function itemTotalRemaining(
   itemId: string,
   alreadyChargedUnderItem: number,
   schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+  debtAmount?: number,
 ): number {
   const item = schedule.items.find((i) => i.id === itemId)
-  if (!item || item.amount === null) return 0
-  if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return item.amount
-  return roundToCents(Math.max(0, item.amount - alreadyChargedUnderItem))
+  const unit = item ? unitAmountFor(item, debtAmount) : null
+  if (!item || unit === null) return 0
+  if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return unit
+  return roundToCents(Math.max(0, unit - alreadyChargedUnderItem))
 }

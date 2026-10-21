@@ -1,6 +1,7 @@
 import { getCurrentSalesMonth, isWithinPeriod } from './salesMonth'
 import { dealKind } from './dealKind'
 import type { Deal } from '../types'
+import { clockNow } from './clock.ts'
 
 export type CelebrationIntensity = 'win' | 'milestone'
 
@@ -23,7 +24,7 @@ export const DEAL_MILESTONE_EVERY = 5
  *
  * Counted per person, too. Somebody else's good month shouldn't fire on your screen.
  */
-export function celebrationForWin(deal: Deal, allDeals: Deal[], now: Date = new Date()): Celebration {
+export function celebrationForWin(deal: Deal, allDeals: Deal[], now: Date = clockNow()): Celebration {
   const isHandover = dealKind(deal) === 'Handover'
   const period = getCurrentSalesMonth(now)
   const step = isHandover ? MANDATE_MILESTONE_EVERY : DEAL_MILESTONE_EVERY

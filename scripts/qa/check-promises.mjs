@@ -33,9 +33,17 @@ check('item 5 is the settlement account drawn at the debtor’s request',
 check('item 5 is R50 excluding VAT', item5.amount, 50)
 check('item 5 counts towards the items 1-7 ceiling', item5.countsTowardCap, true)
 check('item 5 is per occurrence, not a total for the account', item5.isTotal, undefined)
+/*
+ * LITERALS ON THE RIGHT, and that is the fix rather than a tidy-up.
+ *
+ * This read `TARIFF_HISTORY.map(t => t.rates.promise_to_pay)` against a map of the SAME array
+ * that passed every value but one straight through -- so three of the four numbers were being
+ * compared to themselves and could be set to anything. A review of this suite found it. Every
+ * rate of every schedule is now pinned in check-tariff-history.mjs; this keeps the promise-to-pay
+ * column beside the item 5 rules it belongs to.
+ */
 check('the promise_to_pay action has always been charged at the item 5 rate',
-  TARIFF_HISTORY.map((t) => t.rates.promise_to_pay),
-  TARIFF_HISTORY.map((t) => t.effectiveFrom === '2026-03-06' ? 50 : t.rates.promise_to_pay))
+  TARIFF_HISTORY.map((t) => t.rates.promise_to_pay), [50, 41, 39, 35])
 check('and under the current schedule that is R50', TARIFF_HISTORY[0].rates.promise_to_pay, 50)
 
 /* ---- the ceiling ---- */
@@ -84,17 +92,26 @@ const promise = {
   onLastDay: false,
   dayOfWeek: null,
 }
-const charged = promiseNote(promise, { exclVat: 50, vat: 7.5, reason: 'charged' })
-check('the note says what was agreed', /R\s?1\s?500,00 monthly on the 25th/.test(charged), true)
-check('...and when it starts', /first due 2026-09-25/.test(charged), true)
-check('...and what it cost', /Charged R50\.00 plus VAT under item 5\./.test(charged), true)
+const note = promiseNote(promise)
+check('the note says what was agreed', /R\s?1\s?500,00 monthly on the 25th/.test(note), true)
+check('...and when it starts', /first due 2026-09-25/.test(note), true)
+check('the whole note, exactly', note,
+  'Payment arrangement taken — R\u00a01\u00a0500,00 monthly on the 25th, first due 2026-09-25.')
 
-check('a written-off account says so instead of a fee',
-  promiseNote(promise, { exclVat: 0, vat: 0, reason: 'written-off' }),
-  'Payment arrangement taken — R\u00a01\u00a0500,00 monthly on the 25th, first due 2026-09-25. '
-  + 'Not charged — the account is written off.')
-check('so does an account at the ceiling',
-  /at the Annexure B fee ceiling/.test(promiseNote(promise, { exclVat: 0, vat: 0, reason: 'at-ceiling' })), true)
+/*
+ * A note says what happened. It does NOT say what it cost.
+ *
+ * This note used to end with "Charged R50.00 plus VAT under item 5." and the firm had it taken
+ * out: "don't have to say about the charges in the notes, it's on the transaction list." The
+ * fee is already its own entry on the same timeline as well as a line on Transactions.
+ *
+ * The AMOUNT PROMISED is not a charge and stays -- that is the substance of the arrangement,
+ * which is why this is a narrower test than the one in check-calls.
+ */
+check('the note says nothing about a fee',
+  /VAT|charged|item \d|ceiling|written off|allowance/i.test(note), false)
+check('...but the amount promised survives, because that is the point of it',
+  /1\s?500,00/.test(note), true)
 
 /* ---- what the debtor reads ---- */
 check('the statement line is plain', PROMISE_DESCRIPTION, 'Payment arrangement')

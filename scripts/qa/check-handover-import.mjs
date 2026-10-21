@@ -1,0 +1,1224 @@
+import { readFileSync } from 'node:fs'
+/**
+ * Reading a handover sheet back, from either sheet, without anybody declaring which.
+ *
+ * THE FIRM: "any import should work on the old import file from Swordfish and from this one that
+ * I currently gave you ... I don't know if we have to indicate that it comes from Swordfish or
+ * that it's a Raptor template."
+ *
+ * The answer this file holds: nobody declares it, because the header row already says. The cost
+ * of getting that wrong is not an error message — on the OLD sheet "Debtor Initials" holds the
+ * SURNAME, so a file read as the new one puts a surname in the initials column and addresses
+ * every notice to nobody. Both sheets are therefore read here, the same rows, and the same
+ * debtor has to come out of both.
+ */
+import {
+  checkPhone, dateFault, debtorKindFrom, detectDateOrder, displayDate, looksLikeEmail, parseMoney,
+  parseSheetDate, planHandover, repairPhone, spellDate, toDebtorInput,
+} from '../../src/lib/handoverImport.ts'
+import { NOT_COLLECTED, aliasIndex, headingKey } from '../../src/lib/handoverSheet.ts'
+import { DEFAULT_INTEREST_RATE_ANNUAL, validateNewDebtor } from '../../src/lib/newDebtor.ts'
+import { suggestedDesk } from '../../src/lib/linkedAccount.ts'
+
+let pass = 0
+const failures = []
+/*
+ * READ DEFENSIVELY, and this file is why CLAUDE.md says so.
+ *
+ * Break-testing the ambiguous-date guard, this check did not report a failure -- it threw a
+ * TypeError on `.problems[0].message` two lines BELOW the assertion that should have caught it,
+ * and the run died before printing anything. A check that crashes instead of failing is a check
+ * whose result nobody reads. Every reach into a row goes through these.
+ */
+const problemsOf = (row) => row?.problems ?? []
+const firstMessage = (row) => problemsOf(row)[0]?.message ?? '(no problem was reported)'
+const check = (label, actual, expected) => {
+  const a = JSON.stringify(actual)
+  const e = JSON.stringify(expected)
+  if (a === e) { pass += 1; return }
+  failures.push(`${label}\n    expected ${e}\n    got      ${a}`)
+}
+const ok = (label, actual) => check(label, actual, true)
+const TODAY = '2026-09-21'
+
+/* ---------- 1. money, including the space that is not a space ---------- */
+
+check('a plain number reads', parseMoney('48250'), 48250)
+check('...with a decimal', parseMoney('48250.55'), 48250.55)
+check('...with a rand sign and spaces', parseMoney('R 48 250.00'), 48250)
+/*
+ * THE NON-BREAKING SPACE. en-ZA groups thousands with U+00A0, so a figure copied out of Raptor
+ * and pasted back into a spreadsheet carries it. JavaScript's `\s` matches it, which is why the
+ * lib strips with `\s` alone -- this check stayed green when U+00A0 was removed from the class,
+ * because it was guarding a redundancy. Narrow `\s` to a literal space and it fails, which is
+ * the change that would actually break a figure.
+ */
+check('...and with the non-breaking space en-ZA actually uses',
+  parseMoney('R 48 250.00'), 48250)
+/* A comma is a separator, not a decimal point, unless it is the last one with two digits after. */
+check('a comma between thousands is grouping', parseMoney('48,250.00'), 48250)
+check('...and a comma as the decimal is still the same money', parseMoney('48 250,00'), 48250)
+check('words are not money', parseMoney('to be advised'), null)
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * THE WORST BUG THIS FILE HAS HAD, AND THE FIRM FOUND IT ON THEIR OWN SHEET.
+ * ---------------------------------------------------------------------------------------------
+ *
+ * THE FIRM: "look at this handover sheet, and the amounts." The draft read
+ * R 35 582 000 000 003 956 of capital over eight accounts worth R 7 510,85 between them, and
+ * said "8 ready, 0 not accepted" -- so every one of them would have opened a ledger at that
+ * figure.
+ *
+ * EXCEL STORES WHAT A FORMULA PRODUCED, NOT WHAT THE CELL DISPLAYS. The sheet shows 1 134,40 and
+ * the file holds `1134.4000000000001`: IEEE 754, not corruption, and the reader is right to pass
+ * it through as what the file says.
+ *
+ * THE DECIMAL WAS MATCHED AS ONE OR TWO DIGITS, so a thirteen-digit tail did not look like a
+ * decimal at all, the separator was stripped as thousands grouping, and R1 134,40 became eleven
+ * quadrillion rand. Four of these assertions are the firm's own eight cells.
+ */
+check('float noise is read as the money it is', parseMoney('1134.4000000000001'), 1134.4)
+check('...and the other one on their sheet', parseMoney('2423.8000000000002'), 2423.8)
+/* ROUNDED TO CENTS, not carried: money has two decimals and the extra digits are an artefact. */
+check('...rounded to cents', parseMoney('1.005999999999'), 1.01)
+check('...including where the noise rounds down', parseMoney('99.99499999999'), 99.99)
+/* THE WHOLE SHEET, BECAUSE THE TOTAL IS WHAT THE FIRM SAW. */
+const THEIR_SHEET = ['770.45', '1134.4000000000001', '811.7', '380', '380',
+  '2423.8000000000002', '1230.5', '380']
+check('their eight accounts add up to what the client handed over',
+  Number(THEIR_SHEET.reduce((n, c) => n + (parseMoney(c) ?? 0), 0).toFixed(2)), 7510.85)
+
+/*
+ * AND THREE DIGITS IS STILL GROUPING, which is the line this fix must not cross. "1.234" is one
+ * thousand two hundred and thirty-four in the South African and European convention, it is what
+ * this has always read, and it is what the sheets in the building are written in. Nothing groups
+ * thousands in FOURS, which is why four is the safe place to draw it.
+ */
+check('three digits after a separator is still thousands', parseMoney('1.234'), 1234)
+check('...and so is a grouped figure with a decimal', parseMoney('1,234,567.89'), 1234567.89)
+check('...and a negative keeps its sign', parseMoney('-1134.4000000000001'), -1134.4)
+/* NOTHING ELSE MOVED. The four cases above this block are re-asserted as a group, because a
+   "fix" to the long-fraction branch that also caught these would be the same bug mirrored. */
+check('a plain grouped figure is unchanged', parseMoney('R 48 250,00'), 48250)
+check('...and a two-decimal one', parseMoney('48250.55'), 48250.55)
+
+/*
+ * AND THE SCREEN DRAWS IT AS MONEY. The total was parseMoney's fault; the CELL showing
+ * `1134.4000000000001` is the other half, and a handover amount column full of that reads as a
+ * broken screen whatever the arithmetic underneath it says.
+ *
+ * THE SAME RULE THE DATES FOLLOW, including the half that matters: what cannot be read comes
+ * back UNTOUCHED, because that is the one somebody has to look at and correct. A figure quietly
+ * tidied into something plausible is a figure nobody checks.
+ */
+const card = readFileSync(new URL('../../src/components/settings/HandoverImportCard.tsx', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+ok('money columns are drawn through the parser', /const displayMoney = /.test(card))
+ok('...keyed off the column kind rather than a hand-kept list',
+  /HANDOVER_COLUMNS\.filter\(\(c\) => c\.kind === 'money'\)/.test(card))
+ok('...and used in the cell', /isMoney[\s\S]{0,80}displayMoney\(row\.values\[k\]\)/.test(card))
+/* UNREADABLE COMES BACK AS IT WAS. Asserted on the source rather than by calling it, because the
+   function lives in a .tsx the rule checks cannot import. */
+ok('...leaving what it cannot read alone', /n === null \? text : n\.toFixed\(2\)/.test(card))
+/*
+ * AND THE INPUT RE-MOUNTS WHEN THE STORED VALUE CHANGES. These boxes are uncontrolled, so an
+ * edit elsewhere that re-judges the draft would otherwise leave the old text in the box -- the
+ * same trap the date cells already carry a `key` for.
+ */
+ok('...without leaving stale text in the box', /key=\{isDate \|\| isMoney \?/.test(card))
+check('an empty cell is not nought', parseMoney(''), null)
+
+/* ---------- 2. dates, and the one that means two days ---------- */
+
+check('an ISO date reads', parseSheetDate('2026-03-18'), '2026-03-18')
+/*
+ * THE SHAPE THE APP'S OWN READER PRODUCES, which is the one this file forgot.
+ *
+ * `readXlsxRows` renders every date cell as yyyy/mm/dd -- "the shape Swordfish's own exports
+ * use", says its comment -- and only the hyphen was matched here. So every date in every .xlsx
+ * that reached the importer through its own screen was refused: 45 of 45 accounts on the client
+ * sheet refused on a date of default that had been read correctly out of the file two functions
+ * earlier. Nothing about four leading digits is ambiguous, so the separator cannot matter.
+ */
+check('a year-first date with slashes reads', parseSheetDate('2026/09/17'), '2026-09-17')
+check('...and with dots', parseSheetDate('2026.09.17'), '2026-09-17')
+check('...and is not touched by the file order', parseSheetDate('2026/09/17', 'month-first'), '2026-09-17')
+/* The year-first branch owes the same refusal as the slash branch below it. */
+check('the 31st of February is not a date year-first either', parseSheetDate('2026/02/31'), null)
+/* Excel hands a date over as a serial. 46282 is 17 September 2026. */
+check('an Excel serial reads', parseSheetDate('46282'), '2026-09-17')
+/*
+ * A SLASH DATE IS READ DAY-FIRST, at the firm's correction: "South Africa reads the dates first
+ * the day, then the month, then the year."
+ *
+ * This file used to refuse 02/09/2024 as ambiguous, which was right before the convention was
+ * stated and merely timid afterwards -- a question asked of the firm once is an answer, and
+ * refusing a date every South African sheet contains would have refused most files.
+ */
+check('a slash date reads day first', parseSheetDate('02/09/2024'), '2024-09-02')
+check('...and so does one that could only ever have been a day', parseSheetDate('18/03/2026'), '2026-03-18')
+check('...while month-first reads the other way when the file says so',
+  parseSheetDate('02/09/2024', 'month-first'), '2024-02-09')
+/* A day that does not exist in its month is a typo, not a date: Date.parse rolls 31 February
+   into March, which is a wrong date that looks exactly like a date. */
+check('the 31st of February is not a date', parseSheetDate('31/02/2026'), null)
+check('a thirteenth month is not a date', parseSheetDate('03/13/2026'), null)
+check('a reference number is not a date', parseSheetDate('929228801'), null)
+check('nothing is not a date', parseSheetDate(''), null)
+
+/*
+ * ---------- 2b. a date shown back the way South Africa writes it ----------
+ *
+ * THE FIRM, looking at the draft table: "this date of default that it says is wrong, it's
+ * actually in the right way -- first day, then month, then year. This is how we do it in South
+ * Africa. So everything else is wrong, to be honest."
+ *
+ * And they were right about everything else. The table printed the raw cell, and readXlsxRows
+ * renders an .xlsx date as yyyy/mm/dd -- so a sheet the firm fills in day-first, read correctly
+ * and judged correctly, was shown back to them year-first. The app was displaying its own
+ * reader's internal format to the people whose convention the file is built around.
+ */
+check('a date read out of a workbook is shown day first', displayDate('2026/03/18'), '18/03/2026')
+check('...and one already day-first is left as it is', displayDate('18/03/2026'), '18/03/2026')
+check('...and an ISO one is turned round too', displayDate('2026-03-18'), '18/03/2026')
+/* A month-first FILE is shown day-first as well: the display is the firm's convention, not the
+   file's, and the parse has already settled which is which. */
+check('a month-first file is still shown day first',
+  displayDate('03/18/2026', 'month-first'), '18/03/2026')
+/*
+ * UNPARSEABLE COMES BACK UNTOUCHED, which is the other half of it. 31/02/2026 is the row somebody
+ * has to correct, and reformatting it would hide the very thing that is wrong with it.
+ */
+check('a date nobody can read is shown exactly as the sheet has it',
+  displayDate('31/02/2026'), '31/02/2026')
+check('...as is anything that is not a date at all',
+  displayDate('when they could'), 'when they could')
+check('an empty cell shows nothing', displayDate(''), '')
+
+/*
+ * ---------- 2c. WHY it could not be read, which is a different question ----------
+ *
+ * The message said the file's ORDER could not account for 31/02/2026, which reads as Raptor not
+ * understanding the way South Africa writes a date -- and sent the firm to check the importer
+ * instead of the cell. February has no 31st; that is the whole of it.
+ */
+check('the 31st of February is a day that does not exist',
+  dateFault('31/02/2026', 'day-first'), 'no-such-day')
+/* A thirteenth month under this order IS the other complaint, and still is. */
+check('a thirteenth month is a file written the other way round',
+  dateFault('03/13/2026', 'day-first'), 'wrong-order')
+check('a real date is fine', dateFault('18/03/2026', 'day-first'), 'ok')
+check('words are unreadable', dateFault('when they could', 'day-first'), 'unreadable')
+check('nothing is empty, not wrong', dateFault('', 'day-first'), 'empty')
+
+check('a bad day is spelt out in words', spellDate('31/02/2026', 'day-first'), '31 February')
+check('...read the file’s own way round', spellDate('02/31/2026', 'month-first'), '31 February')
+check('...and nothing is spelt where there is no date', spellDate('rubbish', 'day-first'), null)
+
+/*
+ * THE ORDER IS THE FILE'S, NOT THE ROW'S, and this is the part that matters.
+ *
+ * Read row by row, a sheet written by an American-locale machine comes out with most rows read
+ * day-first and the handful containing a day above twelve read month-first -- every one of them
+ * plausible on its own, the file internally inconsistent, and nothing reporting it.
+ */
+check('a file with nothing to go on is read the South African way',
+  detectDateOrder(['02/09/2024', '01/01/2026']).order, 'day-first')
+check('...and says it fell back rather than proved it',
+  detectDateOrder(['02/09/2024']).proven, false)
+check('a file that can only be day-first is read that way, and proved',
+  [detectDateOrder(['18/03/2026', '02/09/2024']).order, detectDateOrder(['18/03/2026']).proven],
+  ['day-first', true])
+/* A day above twelve in the SECOND position can only be a month first. One such row settles the
+   whole file, including its ambiguous rows -- which is the entire point of deciding once. */
+check('one American date settles the whole file',
+  detectDateOrder(['03/18/2026', '02/09/2024']).order, 'month-first')
+/*
+ * A FILE THAT PROVES BOTH IS REPORTED, NOT RESOLVED. Something has been pasted into it from
+ * somewhere else, and no order is safe for the rows that could go either way.
+ */
+check('a file that proves both orders is reported rather than resolved',
+  detectDateOrder(['18/03/2026', '03/18/2026']).contradictory, true)
+
+/* ---------- 3. the same debtor, out of either sheet ---------- */
+
+/** One row, written as the firm's current sheet has it. */
+const NEW_SHEET = [
+  ['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name', 'First name', 'ID number', 'Cell number 1', 'Street address 1'],
+  ['GPS3/10103', '48250.00', '2026-03-18', 'Person', 'Van Der Westhuizen', 'Johannes',
+    '8503125009089', '082 123 4567', '14 Protea Street'],
+]
+
+/**
+ * The same row as the client's OLD sheet has it — and note where the surname is.
+ *
+ * "Debtor Initials" is not initials on that sheet: all 45 rows of the file the firm sent had the
+ * surname in it and "Debtor Surname" empty. The mapping is a correction, not a rename, and it is
+ * the single reason the format must never be declared by hand.
+ */
+const OLD_SHEET = [
+  ['Client Reference', 'Capital on Default', 'Date of Default', 'Debtor Initials',
+    'Debtor Firstname', 'Debtor ID', 'Cell Phone 1', 'Street Address line 1'],
+  ['GPS3/10103', '48250.00', '2026-03-18', 'Van Der Westhuizen', 'Johannes',
+    '8503125009089', '082 123 4567', '14 Protea Street'],
+]
+
+const fresh = planHandover({ rows: NEW_SHEET, today: TODAY })
+const legacy = planHandover({ rows: OLD_SHEET, today: TODAY })
+
+check('the current sheet is recognised as ours', fresh.kind, 'raptor')
+check('the old sheet is recognised as the old one', legacy.kind, 'swordfish')
+/*
+ * A HEADING BOTH SHEETS USE IS EVIDENCE OF NEITHER, and this is the case that got the detection
+ * wrong twice before it was right. "Date of default" was worth keeping when the sheet was
+ * rewritten, so it is on both; counted as current, every old sheet comes back a "mixture" on that
+ * one column. So does `client_reference`, which reduces to the same thing as the old heading
+ * "Client Reference". Asserted on the old sheet, where the miscounting showed.
+ */
+check('a heading both sheets share is counted towards neither',
+  legacy.matched.filter((m) => m.via === 'label').length, 0)
+ok('...and the old-only headings are what identify it',
+  legacy.matched.filter((m) => m.via === 'was').length >= 5)
+ok('...and says so in words somebody can act on', /older sheet/.test(legacy.note))
+
+/*
+ * THE SAME DEBTOR OUT OF BOTH. This is the whole promise: the surname, the reference and the
+ * money come out identical whichever sheet the client sent.
+ */
+for (const [key, expected] of [
+  ['name', 'Van Der Westhuizen'], ['first_name', 'Johannes'],
+  ['client_reference', 'GPS3/10103'], ['id_number', '8503125009089'],
+  ['cell_1', '082 123 4567'], ['street_1', '14 Protea Street'],
+]) {
+  check(`both sheets give the same ${key}`,
+    [fresh.ready[0]?.values[key], legacy.ready[0]?.values[key]], [expected, expected])
+}
+check('and the same money', [fresh.totalCapital, legacy.totalCapital], [48250, 48250])
+check('neither row is refused', [fresh.refused.length, legacy.refused.length], [0, 0])
+/* The old sheet's initials column is read as the NAME, which is where its contents actually are. */
+check('the old sheet’s "Debtor Initials" is mapped to the name, not to initials',
+  legacy.matched.find((m) => m.heading === 'Debtor Initials')?.key, 'name')
+
+/*
+ * TWO HEADINGS FOR ONE COLUMN, AND ONE OF THEM EMPTY.
+ *
+ * The fixture above is the client's old sheet TIDIED, and that is why it passed while the real
+ * file did not. The real sheet carries "Debtor Surname" AND "Debtor Initials" -- surname empty in
+ * all 45 rows, initials holding all 45 surnames -- and "Client Prefix" AND "Client Reference",
+ * prefix empty and reference holding the real ones. Only one heading can own a column, and that
+ * was decided by whichever came first, so the importer took both empty columns and refused every
+ * account for having no name and no reference while both sat one column to the right.
+ *
+ * The body decides it now. Asserted on a sheet shaped like the real one rather than the clean one.
+ */
+const DECOY_SHEET = [
+  ['Client Prefix', 'Client Reference', 'Amount', 'Date of Default',
+    'Debtor Surname', 'Debtor Initials', 'Debtor Firstname'],
+  ['', 'GPS3/10103', '48250.00', '2026/09/17', '', 'Van Der Westhuizen', 'Johannes'],
+  ['', 'GPS3/10104', '1550.60', '2026/09/17', '', 'Buitendag', 'Maria'],
+]
+const decoy = planHandover({ rows: DECOY_SHEET, today: TODAY })
+check('the column with the surnames in it wins, not the one that is named after them',
+  decoy.ready[0]?.values.name, 'Van Der Westhuizen')
+check('...and the reference comes from the column that has references',
+  decoy.ready[0]?.values.client_reference, 'GPS3/10103')
+check('...so nothing is refused', [decoy.refused.length, decoy.ready.length], [0, 2])
+/*
+ * THE LOSER IS NAMED, WITH THE WINNER BESIDE IT -- and it is NOT in `unrecognised`, which is the
+ * firm's own correction. It used to be, and the sentence on the screen read "Not recognised, so not
+ * imported: ... Debtor Surname". Both halves were untrue: Raptor recognised the heading perfectly
+ * and the surnames imported, through the column headed "Debtor Initials" one to the right.
+ *
+ * Asserted BOTH WAYS, because a check that only looked for the new list would pass while the old
+ * false sentence went on being drawn.
+ */
+ok('the empty heading that lost is reported rather than dropped',
+  decoy.superseded.some((x) => x.heading === 'Debtor Surname')
+  && decoy.superseded.some((x) => x.heading === 'Client Prefix'))
+ok('...and is not called unrecognised, because it was recognised',
+  !decoy.unrecognised.includes('Debtor Surname') && !decoy.unrecognised.includes('Client Prefix'))
+/* AND THE LINE SAYS WHERE THE DATA CAME FROM INSTEAD. "The surname came from Debtor Initials" is
+   the one fact worth a person's attention here, and it is the fact the old sentence left out. */
+check('...naming the heading that was read in its place',
+  decoy.superseded.find((x) => x.heading === 'Debtor Surname')?.insteadOf, 'Debtor Initials')
+check('...and what the firm calls the column',
+  decoy.superseded.find((x) => x.heading === 'Debtor Surname')?.label,
+  'Surname, or the business name')
+/* WITH THE COUNT, which is what proves the right one won rather than merely that one did. */
+check('...and that the loser was the empty one',
+  decoy.superseded.find((x) => x.heading === 'Debtor Surname')?.filled, 0)
+ok('...and the winner is the one in the mapping',
+  decoy.matched.some((m) => m.heading === 'Debtor Initials' && m.key === 'name'))
+
+/*
+ * A TIE KEEPS THE FIRST, which is the old behaviour and the right one where there is nothing to
+ * choose on: two columns equally full are a question for a person, not a coin toss that changes
+ * between two runs of the same file.
+ */
+const tied = planHandover({
+  rows: [
+    ['Capital on Default', 'Amount', 'Client Reference', 'Date of Default', 'Debtor Surname'],
+    ['48250.00', '99999.00', 'GPS3/10103', '2026/09/17', 'Van Der Westhuizen'],
+  ],
+  today: TODAY,
+})
+check('two equally full columns keep the first', tied.totalCapital, 48250)
+ok('...and the second is reported', tied.superseded.some((x) => x.heading === 'Amount'))
+/*
+ * AND THIS IS THE ONE THAT REACHED THE FIRM. Their sheet carries "Amount" and "Capital on Default"
+ * with the same figure in both, so one of them is always redundant -- and the screen told them
+ * "Capital on Default: not imported" over a handover whose amounts were perfect. Of all the columns
+ * to say that about, the capital is the one that empties a room.
+ */
+ok('...as a twin rather than as something that failed',
+  !tied.unrecognised.includes('Amount'))
+check('...and it says the figure came from the other heading',
+  tied.superseded.find((x) => x.heading === 'Amount')?.insteadOf, 'Capital on Default')
+
+/* ---------- 4. a heading nobody knows is reported, never guessed ---------- */
+
+const odd = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+    'Person or business', 'Mystery column'],
+  ['A1', '100', '2026-01-01', 'Dube', 'Person', 'something']],
+  today: TODAY,
+})
+check('an unknown heading is named rather than mapped by position',
+  odd.unrecognised, ['Mystery column'])
+ok('...and does not take a column with it', odd.matched.length === 5)
+
+/* A sheet of nothing we know is not a sheet of nulls; it says so. */
+const nonsense = planHandover({ rows: [['Alpha', 'Beta'], ['1', '2']], today: TODAY })
+check('a file that is not a handover sheet is refused as one', nonsense.kind, 'unknown')
+/*
+ * FOUR, NOT FIVE, AND THE ONE THAT LEFT IS THE POINT. `debtor_kind` was required and nothing
+ * enforced it, so the firm imported eight accounts off their Swordfish sheet and read "This sheet
+ * has no Person or business. Nothing can be imported from it." above eight accounts that had
+ * imported perfectly.
+ *
+ * NO OLD SHEET CAN EVER SUPPLY IT -- `Role` says debtor or surety, a different fact -- so requiring
+ * it refuses every old sheet, against the firm's instruction that one must still import. It is read
+ * off the ID or the registration number instead; see debtorKindFrom below.
+ *
+ * ASSERTED BY NAME as well as by count, because a count alone passes if some other required column
+ * is quietly dropped in its place.
+ */
+check('...naming every required column it lacks', nonsense.missingRequired.length, 4)
+ok('...and person-or-business is not one of them',
+  !nonsense.missingRequired.includes('Person or business'))
+for (const label of ['Your reference', 'Handover amount', 'Date of default',
+  'Surname, or the business name']) {
+  ok(`...${label} is still required`, nonsense.missingRequired.includes(label))
+}
+/*
+ * AND THE SHEET THE FIRM ACTUALLY SENT IMPORTS WITH NOTHING MISSING. The regression in one line:
+ * an old sheet with no Person or business column, carrying a valid ID, must report no missing
+ * required column at all.
+ */
+const swordfishShaped = planHandover({
+  rows: [
+    ['Client Reference', 'Amount', 'Date of Default', 'Debtor Initials', 'Debtor ID', 'Role'],
+    ['BF-026', '770.45', '2026/09/17', 'Kibido', '8403140043082', 'Debtor'],
+  ],
+  today: TODAY,
+})
+check('an old sheet is missing nothing it is required to have',
+  swordfishShaped.missingRequired, [])
+check('...and the row is accepted', swordfishShaped.ready.length, 1)
+/* AND `Role` IS STILL A QUESTION FOR A PERSON. It is the one heading on that sheet nobody has
+   decided about, and burying it under twenty-seven false alarms is how it stayed undecided. */
+check('...while the heading nobody has decided about is still named',
+  swordfishShaped.unrecognised, ['Role'])
+
+/* ---------- 5. refuse and warn are different things ---------- */
+
+/*
+ * The last column is the EMAIL, not the street address, and that is the change rather than a
+ * tidy-up. THE FIRM: "we will never be posting something. Never ever we will post a letter. We
+ * will send everything via email." So an email address is what a row needs to be free of
+ * warnings, and 'x' in an address column no longer buys one anything.
+ */
+const rows = (...data) => planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name', 'ID number', 'Cell number 1', 'Email address'], ...data],
+  today: TODAY,
+})
+
+/* REFUSALS: nothing here can open a correct ledger. */
+const noName = rows(['A1', '100', '2026-01-01', 'Person', '', '', '082 123 4567', 'a@b.co.za'])
+ok('a row with no name is refused', noName.refused.length === 1)
+const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('a row with no handover amount is refused', noMoney.refused.length === 1)
+/*
+ * ---- A DATE NOBODY CAN READ, AND NO DATE AT ALL, ARE WARNINGS TOO ----
+ *
+ * THE FIRM: "it should also show you in a rejection state, but I have an option to accept it --
+ * kind of like a warning -- and then make it three months before the handover. Not having the
+ * date of default is not a deal breaker for starting to work the account, but it would be good
+ * to confirm it. Make it three months, because most of the clients hand over on 90 days."
+ *
+ * The same substitute the future-date case below uses, because it is the same question asked
+ * from the other end: what do we open on while the client is asked for the real one.
+ */
+const badDate = rows(['A1', '100', '31/02/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('a date that does not exist no longer refuses the row', badDate.refused.length, 0)
+check('...and it opens three months before handover',
+  badDate.rows[0].defaultDateUsed, '2026-06-21')
+/*
+ * AND THE ROW STILL SAYS WHICH IT IS. The fixture's 31/02/2026 is a typo in the cell, and telling
+ * somebody the file's order could not account for it is telling them the wrong thing to go and
+ * check -- which is exactly what the firm went and checked. The substitute is ADDED to that
+ * sentence, never written over it: without the diagnosis the client cannot be told what to fix.
+ */
+ok(`...saying there is no such day (${firstMessage(badDate.rows[0])})`,
+  /there is no 31 February/.test(firstMessage(badDate.rows[0])))
+ok('...and not blaming the order it was read in',
+  !/order can account/.test(firstMessage(badDate.rows[0])))
+ok('...and naming what it opened on instead',
+  /21\/06\/2026/.test(firstMessage(badDate.rows[0])))
+
+/* NO DATE AT ALL, which is the case the firm was actually looking at. */
+const noDate = rows(['A1', '100', '', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('no date of default no longer refuses the row', noDate.refused.length, 0)
+check('...and it opens three months before handover too',
+  noDate.rows[0].defaultDateUsed, '2026-06-21')
+ok('...still saying there was none', /No date of default/.test(firstMessage(noDate.rows[0])))
+ok('...and why it matters', /in duplum runs from it/.test(firstMessage(noDate.rows[0])))
+/*
+ * A WARNING, SO IT STILL NEEDS A PERSON. The account opens only once somebody has read the
+ * sentence and pressed Accept -- which is the whole of what makes a guessed date defensible.
+ */
+ok('a row with no date still has to be answered',
+  noDate.rows[0].problems.some((p) => p.key === 'default_date' && p.level === 'warn'))
+/*
+ * AND THE 90 DAYS ARE THE FIRM'S OWN, said on the screen. A substitute nobody can account for is
+ * one nobody will defend when a debtor's attorney asks where the date came from.
+ */
+ok('...and says where three months comes from',
+  /most clients hand over/.test(firstMessage(noDate.rows[0])))
+/*
+ * A DATE OF DEFAULT IN THE FUTURE IS ACCEPTED ON A SUBSTITUTE, NOT REFUSED.
+ *
+ * THE FIRM, reversing their own instruction of two days earlier: "just say that it can be
+ * accepted, but when it's accepted it will be minimum 30 days before handover. Let's make it
+ * default three months before handover. However, still send a notification and make a note for
+ * the client, send it to the communications department, and make a note on the system."
+ *
+ * The reasoning behind the refusal has not gone away -- in duplum, prescription and interest are
+ * all measured from this date. What changed is who carries it: a refusal stopped the work and put
+ * the whole row back on the client, and the firm would rather open the account, work it, and
+ * settle the date alongside. Which is only defensible because nothing about it is silent, and
+ * that is what most of this block asserts.
+ */
+const future = rows(['A1', '100', '15/03/2027', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('a date of default in the future no longer refuses the row', future.refused.length, 0)
+check('...so the account can be opened', future.ready.length, 1)
+/* A WARNING, so the row still needs a decision. It does not slip through unread. */
+check('...but it still has to be answered',
+  problemsOf(future.rows[0]).filter((p) => p.level === 'warn').map((p) => p.key), ['default_date'])
+ok(`...saying what was wrong (${firstMessage(future.rows[0])})`,
+  /in the future/.test(firstMessage(future.rows[0])))
+
+/*
+ * AND THE SUBSTITUTE IS NAMED IN THE MESSAGE, which is what carries it everywhere it has to go:
+ * the draft table, the client's email, the batch query, and the account's own note through
+ * noteForAccount. One sentence doing four jobs is why it has to hold BOTH dates.
+ */
+ok('...naming the date it will be opened on instead', /21\/06\/2026/.test(firstMessage(future.rows[0])))
+ok('...and the date the client actually sent', /15\/03\/2027/.test(firstMessage(future.rows[0])))
+ok('...and that the client must still confirm it',
+  /client must confirm/i.test(firstMessage(future.rows[0])))
+
+/*
+ * THE SUBSTITUTE ITSELF, carried on the planned row rather than written into `values`. The draft
+ * is the record of exactly what the client sent -- overwriting it there would erase the thing
+ * the query is about.
+ */
+check('the row carries the date it will open on', future.rows[0].defaultDateUsed, '2026-06-21')
+check('...while the sheet\u2019s own value is untouched',
+  future.rows[0].values.default_date, '15/03/2027')
+/* Every other row carries none, so a substitution cannot be applied where none was decided. */
+check('a row with a good date substitutes nothing',
+  rows(['A1', '100', '20/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+    .rows[0].defaultDateUsed, null)
+
+/*
+ * TODAY ITSELF IS NOT THE FUTURE. An off-by-one here substitutes a date on every account a client
+ * hands over on the day it defaults, which is a normal thing for a client to do -- and the
+ * failure would be silent, because the row would import perfectly on the wrong date.
+ */
+const dueToday = rows(['A1', '100', '21/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('an account that defaulted today is not in the future', dueToday.rows[0].defaultDateUsed, null)
+const yesterday = rows(['A1', '100', '20/09/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('nor is yesterday', yesterday.rows[0].defaultDateUsed, null)
+
+/*
+ * AND THE TWO DOORS NO LONGER AGREE, WHICH IS NOW THE POINT.
+ *
+ * validateNewDebtor still refuses a future handover date outright, and should: somebody typing
+ * one account by hand has the client on the telephone and can ask. An import is forty-five rows
+ * that arrived overnight from a spreadsheet, and stopping all of them to chase one date is what
+ * the firm asked us to stop doing. Asserted so the difference is deliberate rather than drift.
+ */
+const blankDebtor = {
+  accountNumber: '', clientReference: 'A1', firstName: '', surname: 'Dube', idNumber: '',
+  capital: '100', handoverDate: '', interestRateAnnual: '24',
+  mobile: '', workPhone: '', altNumber: '', email: '', address: '', employer: '',
+  kin1Name: '', kin1Phone: '', kin2Name: '', kin2Phone: '',
+}
+const byHand = validateNewDebtor({ ...blankDebtor, handoverDate: '2027-03-15' }, TODAY)
+ok('the by-hand form refuses a future handover date too',
+  byHand.some((p) => p.field === 'handoverDate'))
+/* Presence before absence: the same input dated today must pass, or the line above is satisfied
+   by a form that objects to everything. */
+check('...and accepts one dated today',
+  validateNewDebtor({ ...blankDebtor, handoverDate: TODAY }, TODAY)
+    .filter((p) => p.field === 'handoverDate').length, 0)
+
+/*
+ * A THIRTEENTH MONTH STILL NAMES THE ORDER -- but it takes a file that CONTRADICTS itself to
+ * reach that message, and the first attempt at this fixture did not.
+ *
+ * A lone 03/13/2026 proves the file is month-first, so the date parses and nothing is wrong with
+ * it at all. The message only appears where the file has already been settled the other way: one
+ * row that can only be day-first, one that can only be month-first, and no order that reads both.
+ */
+const wrongWayRound = rows(
+  ['A1', '100', '31/01/2026', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '03/13/2026', 'Person', 'Mokoena', '', '082 123 4567', 'a@b.co.za'])
+ok('a file written both ways round is read day-first', wrongWayRound.dates.contradictory)
+ok('...and the row that cannot be reports the order, not a missing day',
+  /day\/month\/year/.test(firstMessage(wrongWayRound.rows[1])))
+
+/*
+ * AND THE ORDER REACHES THE ROWS. A plan that detects month-first and then reads its rows
+ * day-first anyway would be the same bug wearing a detection routine.
+ */
+const american = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name'],
+  ['A1', '100', '03/18/2026', 'Person', 'Dube'],
+  ['A2', '100', '02/09/2024', 'Person', 'Mokoena']],
+  today: TODAY,
+})
+check('a month-first file is detected', american.dates.order, 'month-first')
+check('...and every row is read that way, including the one that reads either way',
+  american.ready.map((r) => r.values.default_date), ['03/18/2026', '02/09/2024'])
+ok('...with none of them refused', american.refused.length === 0)
+
+const muddled = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name'],
+  ['A1', '100', '18/03/2026', 'Person', 'Dube'],
+  ['A2', '100', '03/18/2026', 'Person', 'Mokoena']],
+  today: TODAY,
+})
+ok('a file written both ways round says so instead of picking one',
+  muddled.dates.contradictory && /both ways round/.test(muddled.note))
+
+/*
+ * WARNINGS: the firm can work without these and would rather know. The ID above all -- every one
+ * of the 45 rows in the client's own file had a telephone number in it, so refusing would have
+ * refused the whole book, and a check that refuses a whole book gets turned off.
+ */
+const dodgyId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 123 4567', 'a@b.co.za'])
+check('an ID that is not an ID warns rather than refuses',
+  [dodgyId.refused.length, problemsOf(dodgyId.ready[0]).filter((p) => p.level === 'warn').length], [0, 1])
+ok('...and says what will happen to it', /rather than guessed at/.test(firstMessage(dodgyId.ready[0])))
+/*
+ * THIRTEEN DIGITS THAT FAIL THE CHECKSUM ARE A DIFFERENT WRONG, and worth saying differently: a
+ * transposed pair is something a person can find and correct, where the wrong column is not.
+ * The checksum is isValidSaId, the same one the by-hand form uses, so the two cannot drift.
+ */
+const transposed = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009098', '082 123 4567', 'a@b.co.za'])
+ok(`a transposed ID is named as one (${firstMessage(transposed.ready[0])})`,
+  /transposed pair/.test(firstMessage(transposed.ready[0])))
+const goodId = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '8503125009089', '082 123 4567', 'a@b.co.za'])
+check('...and a real ID says nothing at all', problemsOf(goodId.ready[0]).length, 0)
+
+/*
+ * THE NUMBER EXCEL BROKE. 40 of 42 "Cell Phone 2" values in the firm's own import file were nine
+ * digits, because Excel read 0129403445 as a number and dropped the zero. Those cannot be
+ * dialled. Reported as the missing zero rather than as "invalid": the person has to know what to
+ * put back, and "invalid" sends them looking for a typo that is not there.
+ */
+check('a good number is a good number', checkPhone('082 123 4567'), 'ok')
+check('...in international form too', checkPhone('+27821234567'), 'ok')
+check('...and with the brackets and dashes people type', checkPhone('(012) 348-2156'), 'ok')
+check('nine digits is the leading zero Excel ate', checkPhone('821234567'), 'lost-leading-zero')
+check('a word is not a telephone number', checkPhone('no number'), 'wrong')
+check('...nor is a number too short to be one', checkPhone('0821234'), 'wrong')
+
+/*
+ * AND IT IS PUT RIGHT RATHER THAN HANDED BACK.
+ *
+ * THE FIRM, looking at a screen of these: "if there is a thing and says there's no zero in the
+ * number, just have an option to click and say add it. Or should we automatically add zeros?"
+ *
+ * AUTOMATICALLY, AND THE ASYMMETRY IS WHY. A nine-digit number cannot be dialled at all, so
+ * leaving it alone and guessing wrong have the SAME cost -- which is the condition under which
+ * repairing imported data is safe, and it is not usually met. On the firm's own file it was 40
+ * cells in 42: hundreds of Accept presses on a repair nobody can evaluate by looking, since the
+ * original is unrecoverable from the nine digits.
+ */
+check('the zero goes back on', repairPhone('821234567'), '0821234567')
+check('...and the separators people type do not stop it', repairPhone('82 123 4567'), '0821234567')
+/* THE OTHER SHAPE EXCEL MAKES: +27 82 123 4567 read as text with the plus dropped. */
+check('eleven digits beginning 27 is the country code without its plus',
+  checkPhone('27821234567'), 'lost-country-code')
+check('...and comes back as a national number', repairPhone('27821234567'), '0821234567')
+/* AND NOTHING ELSE IS TOUCHED. A number already right is left exactly alone, and one nobody can
+   reconstruct is NOT guessed at -- which is the line between this and inventing data. */
+check('a good number is not meddled with', repairPhone('0821234567'), null)
+check('...nor is an international one', repairPhone('+27821234567'), null)
+check('...and a number too short to be one is not invented', repairPhone('0821234'), null)
+check('...nor is a word', repairPhone('no number'), null)
+
+/*
+ * REPORTED AS A NOTE, WHICH BLOCKS NOTHING. The level is the whole point: a warning that fires on
+ * most rows and whose answer is always the same press is a warning people stop reading -- and
+ * they stop reading the ones beside it, which are the ones that need somebody.
+ */
+const zeroRow = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '821234567', 'x']).ready[0]
+check('the repair is recorded', /lost its leading zero/.test(firstMessage(zeroRow)), true)
+check('...and shows what it was put back as', /0821234567/.test(firstMessage(zeroRow)), true)
+check('...as a note rather than something to answer',
+  (problemsOf(zeroRow).find((p) => /leading zero/.test(p.message)) ?? {}).level, 'note')
+/* AND THE SHEET KEEPS WHAT THE CLIENT SENT. The draft is the record of exactly that, and the
+   correction going back to them has to quote their own cell -- so the repair happens on the way
+   into the account, never in `values`. The same rule a substituted date of default follows. */
+check('...while the row still holds the number as it arrived',
+  zeroRow.values.cell_1, '821234567')
+
+/*
+ * AN EMAIL ADDRESS, checked for what stops it being deliverable rather than against the RFC. A
+ * pattern strict enough to be correct rejects addresses that work, and an address rejected here
+ * is a debtor the firm then cannot email at all.
+ */
+ok('an ordinary address passes', looksLikeEmail('j.vdwesthuizen@work.co.za'))
+ok('...and one with a plus in it', looksLikeEmail('sue+accounts@firm.com'))
+ok('a name is not an address', !looksLikeEmail('Johannes van der Westhuizen'))
+ok('...nor two addresses crammed into one cell', !looksLikeEmail('a@b.co.za, c@d.co.za'))
+ok('...nor one with no dot after the @', !looksLikeEmail('johannes@work'))
+/*
+ * NO EMAIL IS THE WARNING NOW, AND NO STREET ADDRESS IS NOT.
+ *
+ * THE FIRM: "we will never be posting something. Never ever we will post a letter. We will send
+ * everything via email." This warned about the street address and said a section 129 could not be
+ * POSTED -- wrong about the channel, and pointed at the wrong empty box.
+ *
+ * It was also noise. The street address was empty in all 45 rows of the file the firm sent, so
+ * the screen printed the same sentence forty-five times under the table. CLAUDE.md: a warning
+ * that fires when nothing is wrong is worse than no warning.
+ */
+const noEmail = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', ''])
+ok('no email address warns, because that is what a notice goes out on',
+  problemsOf(noEmail.ready[0]).some((p) => p.level === 'warn' && /sent by email/.test(p.message)))
+ok('...against the email column, so the screen can point at the box',
+  problemsOf(noEmail.ready[0]).some((p) => p.key === 'email_1'))
+/* Nothing anywhere may tell somebody a notice is posted. */
+const everyMessage = [...noEmail.ready, ...noEmail.refused]
+  .flatMap((r) => problemsOf(r).map((p) => p.message)).join(' ')
+ok('...and nothing says anything is posted', !/\bpost(ed|ing)?\b/i.test(everyMessage))
+
+/* An address that is missing is now shown as an empty box in the table, not said in a sentence. */
+const noStreet = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('an empty street address is not a problem at all', problemsOf(noStreet.ready[0]).length, 0)
+
+const noContact = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '', ''])
+ok('a debtor nobody can reach warns',
+  problemsOf(noContact.ready[0]).some((p) => /nobody can be contacted/.test(p.message)))
+
+/*
+ * EVERY PROBLEM SAYS WHICH COLUMN IT IS ABOUT, where it is about one. THE FIRM: "it should show
+ * which data is wrong." A sentence under a forty-column table cannot be traced back to a cell.
+ */
+const wrong = rows(['A1', 'not money', '2026-01-01', 'Person', '', '', '082 123 4567', 'a@b.co.za'])
+const keyed = problemsOf(wrong.rows[0])
+ok('the amount problem points at the amount', keyed.some((p) => p.key === 'capital'))
+ok('the name problem points at the name', keyed.some((p) => p.key === 'name'))
+/* Null where it belongs to the row rather than to one box -- a duplicated reference is about the
+   file, not about a cell anybody can correct on its own. */
+const sameRefTwice = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A1', '100', '2026-01-01', 'Person', 'Mokoena', '', '082 123 4567', 'a@b.co.za'])
+ok('a repeated reference points at the reference',
+  problemsOf(sameRefTwice.rows[1]).some((p) => p.key === 'client_reference'))
+ok('...and a problem about the whole row names no column',
+  problemsOf(noContact.ready[0]).some((p) => p.key === null))
+
+/* ---------- 5b. possible duplicates ---------- */
+
+/*
+ * THE FIRM: "it's possible that a client can put the same data twice on the same sheet, or that
+ * the same data has already been handed over for the same amount. So it should flag it and tell
+ * you: here's a possible duplicate handover, accept or discard."
+ *
+ * NEITHER OF THEM REFUSES. A client can genuinely hand the same debtor over twice for two
+ * different debts, and "accept or discard" is a choice, not a rule.
+ */
+const ID_A = '8503125009089'
+
+/* Twice in one file, under DIFFERENT references, which is the case the existing duplicate-
+   reference refusal cannot see -- it is the same debt typed twice, not the same reference. */
+const twiceInFile = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('the same debtor and amount twice in one file is flagged',
+  problemsOf(twiceInFile.rows[1]).some((p) => /Row 2 is the other one/.test(p.message)))
+check('...as a warning, not a refusal', twiceInFile.refused.length, 0)
+/* THE FIRM'S OWN WORD FOR IT: "it could be like a linked account -- just call it linked account,
+   not other account." The screen says what the firm calls the thing. */
+ok('...and calls it a linked account',
+  /linked account/.test(firstMessage(twiceInFile.rows[1])))
+ok('...and says what to do about it',
+  /Accept it if they genuinely owe twice/.test(firstMessage(twiceInFile.rows[1])))
+check('...and the first copy is not itself flagged', problemsOf(twiceInFile.rows[0]).length, 0)
+
+/* A THIRD COPY POINTS AT THE FIRST, not at the second: a chain of "row 4 duplicates row 3,
+   row 3 duplicates row 2" is one nobody unpicks. */
+const thrice = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A3', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('a third copy points at the first, not at the second',
+  /Row 2 is the other one/.test(firstMessage(thrice.rows[2])))
+
+/* Same name, different amount, and the other way round: either half alone is worthless. In the
+   firm's own file fourteen accounts are for exactly R380 and three surnames appear twice. */
+const sameNameOtherAmount = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '250', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('the same surname for a different amount is not a duplicate',
+  problemsOf(sameNameOtherAmount.rows[1]).length, 0)
+const sameAmountOtherName = rows(
+  ['A1', '380', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'],
+  ['A2', '380', '2026-01-01', 'Person', 'Mokoena', '', '082 123 4567', 'a@b.co.za'])
+check('...nor the same amount for a different surname',
+  problemsOf(sameAmountOtherName.rows[1]).length, 0)
+
+/*
+ * THE SAME ID FOR A DIFFERENT AMOUNT IS NOT A DUPLICATE, at the firm's correction: "it is also
+ * possible for the same debtor to be handed over twice ... the same ID number. You can create
+ * something called a linked account."
+ *
+ * This file asserted the opposite a commit ago, and the assertion was right about the code and
+ * wrong about the firm. One person with two debts is the ordinary case; flagged as a duplicate it
+ * would have had somebody discard a real account. It is two accounts for one debtor, which is
+ * what the account page shows instead.
+ */
+const sameIdOtherAmount = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'],
+  ['A2', '999', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'])
+check('the same ID for a different amount is a second debt, not a duplicate',
+  problemsOf(sameIdOtherAmount.rows[1]).length, 0)
+/* The same ID AND the same amount still is: one debt, typed twice. */
+const sameIdSameAmount = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', ID_A, '082 123 4567', 'a@b.co.za'],
+  ['A2', '100', '2026-01-01', 'Person', 'Mokoena', ID_A, '082 123 4567', 'a@b.co.za'])
+ok('the same ID for the same amount is flagged',
+  problemsOf(sameIdSameAmount.rows[1]).some((p) => /Row 2 is the other one/.test(p.message)))
+/* THE ID BEATS THE SURNAME where the two disagree: the row above has a different surname and is
+   still caught, because the identifier is the ID wherever there is a usable one. */
+check('...even though the surnames differ', sameIdSameAmount.refused.length, 0)
+
+/*
+ * AND THE ID COLUMN THAT HELD A TELEPHONE NUMBER MUST NOT MATCH. Every one of the 45 rows in the
+ * client's own file had a cell number there; matched on, it would have reported 45 duplicates of
+ * nothing and taught the firm to ignore the whole warning on its first use.
+ */
+const phoneInIdColumn = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '0821234567', '082 123 4567', 'a@b.co.za'],
+  ['A2', '250', '2026-01-01', 'Person', 'Mokoena', '0821234567', '082 123 4567', 'a@b.co.za'])
+ok('a telephone number in the ID column is never a duplicate signal',
+  !problemsOf(phoneInIdColumn.rows[1]).some((p) => /duplicate/i.test(p.message)))
+
+/* ALREADY ON THE BOOK, which is the other half of what the firm asked for. */
+const onBook = (data) => planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname', 'ID number', 'Cell number 1', 'Email address'], data],
+  existingAccounts: [
+    {
+      reference: 'ACF10085', clientReference: 'CR-1', idNumber: null, name: 'Dube', capital: 100,
+      status: 'Active: Activated', subStatus: 'Promise To Pay',
+      heldBy: 'jennifer-id', heldByName: 'Jennifer Adams',
+    },
+    { reference: 'ACF10086', idNumber: ID_A, name: 'Ntuli', capital: 4200 },
+  ],
+  today: TODAY,
+})
+const onBookAlready = onBook(['A9', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+ok('a debt already on the book is flagged',
+  /Already on the book/.test(firstMessage(onBookAlready.rows[0])))
+ok('...and names the account to go and look at',
+  /ACF10085/.test(firstMessage(onBookAlready.rows[0])))
+check('...still as a warning', onBookAlready.refused.length, 0)
+/*
+ * AND IT SAYS ENOUGH TO DECIDE ON. THE FIRM: "there might be another one, and that's the
+ * reference number for the client, and the surname is Peter, and the account is currently being
+ * worked by Jennifer ... then we can see who worked on that account and allocate it to that
+ * person." A reference alone is a warning somebody has to leave the screen to act on.
+ *
+ * THE POSITION, NOT THE STATUS COLUMN -- CLAUDE.md's first rule. "Active: Activated" describes
+ * how the row got into the table; "Arranged" is what the person deciding needs.
+ */
+ok(`...the surname (${firstMessage(onBookAlready.rows[0])})`,
+  /Dube/.test(firstMessage(onBookAlready.rows[0])))
+ok('...where it stands, as a position rather than a status column',
+  /Arranged/.test(firstMessage(onBookAlready.rows[0]))
+  && !/Active: Activated/.test(firstMessage(onBookAlready.rows[0])))
+ok('...and whose desk it is on',
+  /Jennifer Adams/.test(firstMessage(onBookAlready.rows[0])))
+check('...and the desk is offered as a suggestion',
+  suggestedDesk(onBookAlready.rows[0].linkedTo)?.name, 'Jennifer Adams')
+/* An account nobody holds suggests nobody, rather than suggesting the pile as though it were a
+   person. There is no desk to follow onto. */
+const unheld = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business', 'Surname'],
+    ['A9', '100', '2026-01-01', 'Person', 'Dube']],
+  existingAccounts: [{ reference: 'ACF10099', idNumber: null, name: 'Dube', capital: 100 }],
+  today: TODAY,
+})
+check('an account on nobody’s desk suggests nobody',
+  suggestedDesk(unheld.rows[0].linkedTo), null)
+ok('...and says so rather than leaving it out',
+  /nobody/.test(firstMessage(unheld.rows[0])))
+const byId = onBook(['A9', '4200', '2026-01-01', 'Person', 'Someone', ID_A, '082 123 4567', 'a@b.co.za'])
+ok('...matched on the ID as well as on the surname', /ACF10086/.test(firstMessage(byId.rows[0])))
+/* And a second debt for somebody already on the book is not a duplicate of their first. */
+const secondDebt = onBook(['A9', '77', '2026-01-01', 'Person', 'Ntuli', ID_A, '082 123 4567', 'a@b.co.za'])
+check('a second debt for a debtor already on the book is not flagged',
+  problemsOf(secondDebt.rows[0]).length, 0)
+const notOnBook = onBook(['A9', '101', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('a rand different is not the same debt', problemsOf(notOnBook.rows[0]).length, 0)
+/* A book that could not be read is not a book full of duplicates. */
+const noBook = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('no book to compare against says nothing', problemsOf(noBook.rows[0]).length, 0)
+
+/* ---------- 6. one debt, one ledger ---------- */
+
+const twice = rows(
+  ['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
+  ['A1', '200', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
+)
+/*
+ * ---- THE SAME REFERENCE TWICE IS A LINKED ACCOUNT, NOT A BROKEN FILE ----
+ *
+ * THE FIRM: "it's the same reference number, but two accounts. It could be like a linked account
+ * ... the same person with two different accounts from the same client. The first thing that
+ * should happen is it should ask you: this looks like a linked account, do you want to accept it
+ * or reject it? But there should be an accept option."
+ *
+ * BOTH OF THESE REFUSED A MOMENT AGO, and the refusal rested on a misreading: this column holds
+ * the CLIENT's reference, which is theirs to reuse. What a debtor quotes when they pay is the
+ * reference Raptor generates on import, so two rows sharing a client reference collide over
+ * nothing -- and refusing them sent a second genuine debt back to the client to argue about.
+ */
+check('the same reference twice opens both, as a question rather than a refusal',
+  [twice.ready.length, twice.refused.length], [2, 0])
+ok('...saying it looks like a linked account',
+  /linked account/.test(firstMessage(twice.rows[1])))
+ok('...and naming the row it is linked to', /Row 2 is the other one/.test(firstMessage(twice.rows[1])))
+/* The FIRST use is not itself flagged: a pair is one question, and asking it twice reads as two.
+   Asked of the LINKED problem only -- this fixture's rows carry an unrelated email warning, and
+   counting every problem would make this pass or fail for a reason that is not the subject. */
+check('...and the first use is not flagged as linked',
+  problemsOf(twice.rows[0]).filter((x) => /linked account/.test(x.message)).length, 0)
+/* A row still has to be ANSWERED. The account opens only once somebody has pressed Accept, which
+   is the whole of what makes taking a repeated reference safe. */
+ok('...and it still has to be answered',
+  problemsOf(twice.rows[1]).some((p) => p.key === 'client_reference' && p.level === 'warn'))
+
+const already = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business',
+    'Surname, or the business name'], ['A1', '100', '2026-01-01', 'Person', 'Dube']],
+  existingReferences: new Set(['A1']),
+  today: TODAY,
+})
+check('a reference the client has already handed over is not refused either',
+  already.refused.length, 0)
+ok(`...it is asked about (${firstMessage(already.rows[0])})`,
+  /linked account/.test(firstMessage(already.rows[0])))
+
+/* AND WITH THE BOOK READ IN FULL, it says which account and whose desk it is on. */
+const linkedOnBook = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Person or business', 'Surname'],
+    ['CR-1', '900', '2026-01-01', 'Person', 'Dube']],
+  existingAccounts: [{
+    reference: 'ACF10085', clientReference: 'CR-1', idNumber: null, name: 'Dube', capital: 100,
+    status: 'Active: Activated', subStatus: 'Promise To Pay',
+    heldBy: 'jennifer-id', heldByName: 'Jennifer Adams',
+  }],
+  today: TODAY,
+})
+check('a client reference already on the book is a linked account, not a refusal',
+  linkedOnBook.refused.length, 0)
+ok(`...naming the account (${firstMessage(linkedOnBook.rows[0])})`,
+  /ACF10085/.test(firstMessage(linkedOnBook.rows[0])))
+check('...and suggesting the desk it is already on',
+  suggestedDesk(linkedOnBook.rows[0].linkedTo)?.id, 'jennifer-id')
+/*
+ * ONE QUESTION, NOT TWO. This row matches on the client's reference AND would match as the same
+ * debtor; saying both reads as two separate accounts to go and look at.
+ */
+check('...said once even when both tests would fire',
+  problemsOf(linkedOnBook.rows[0]).filter((p) => /linked account/.test(p.message)).length, 1)
+
+/* Blank rows under the data are the template's formatting, not debtors with nothing filled in. */
+const padded = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'x'],
+  ['', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', ''])
+check('the blank rows the template carries are not read as debtors', padded.rows.length, 1)
+
+/* The line number is the one Excel shows, so "row 7" means row 7 on the person's screen. */
+check('a problem names the row as the spreadsheet numbers it', twice.rows[1]?.line, 3)
+
+/* ---------------------------------------------------------------------------------------------
+ * A COLUMN THE FIRM DECLINES IS NOT A COLUMN NOBODY RECOGNISED.
+ *
+ * THE FIRM'S SHEET PRODUCED TWENTY-EIGHT "not recognised, so not imported" headings, and two of
+ * them were. `Interest Rate` is not one of the two: Raptor knows exactly what it is and declines
+ * it, because the rate is in the agreement the firm already holds and `toDebtorInput` opens every
+ * account at 0% deliberately -- an account at nought is one somebody notices, an account at a
+ * guessed 24% is one nobody does.
+ *
+ * FILING A DECISION UNDER "not recognised" INVITES SOMEBODY TO UNDO IT, which is why the decision
+ * is now written down with its reason beside it, reported in its own sentence, and checked here.
+ * ------------------------------------------------------------------------------------------- */
+
+const declined = planHandover({
+  rows: [
+    ['Client Reference', 'Amount', 'Date of Default', 'Debtor Initials', 'Interest Rate',
+      'Percentage', 'Gender', 'Fax Number 1', 'Role'],
+    ['BF-026', '770.45', '2026/09/17', 'Kibido', '24', '0.25', '', '', 'Debtor'],
+  ],
+  today: TODAY,
+})
+ok('a declined column is reported as declined, not as unrecognised',
+  declined.notCollected.some((n) => n.heading === 'Interest Rate')
+  && !declined.unrecognised.includes('Interest Rate'))
+/* THE REASON TRAVELS WITH IT. "Not imported" with no reason is what somebody opens a ticket about. */
+ok('...with the reason beside it',
+  /agreement/i.test(declined.notCollected.find((n) => n.heading === 'Interest Rate')?.why ?? ''))
+/*
+ * AND THE COUNT, WHICH IS WHAT TURNS HOUSEKEEPING INTO A WARNING. An empty `Gender` is a column
+ * the client has not got round to deleting; an `Interest Rate` with a figure in every row is the
+ * client handing us something we are throwing away. The screen draws those as two different
+ * sentences in two different colours, so the planner has to tell them apart.
+ */
+check('a declined column with data in it says how much',
+  declined.notCollected.find((n) => n.heading === 'Interest Rate')?.filled, 1)
+check('...and an empty one says nought',
+  declined.notCollected.find((n) => n.heading === 'Gender')?.filled, 0)
+/*
+ * AND THE SHEET'S OWN RATE STILL DOES NOT REACH THE ACCOUNT, which is the decision this list
+ * protects — and it is a different decision from what the rate ends up being.
+ *
+ * The sheet above supplies 24 in one column and 0.25 in another, two units with nothing saying
+ * which is which. The account opens at the firm's standing rate because that is the firm's
+ * standing rate, NOT because the sheet said 24. Asserted with a client whose mandate says 15: if
+ * the sheet were being read, the account would open at 24.
+ */
+check('a declined interest rate does not reach the account',
+  toDebtorInput(declined.ready[0].values, declined.ready[0].defaultDate, 15).interestRateAnnual, '15')
+check('...and with no mandate rate it is the firm s standing one, not the sheet s',
+  toDebtorInput(declined.ready[0].values, declined.ready[0].defaultDate).interestRateAnnual,
+  String(DEFAULT_INTEREST_RATE_ANNUAL))
+/*
+ * AND THE TWO LISTS MAY NEVER BOTH CLAIM A HEADING. `declined` is consulted BEFORE the alias table,
+ * so a heading added to both would be silently declined -- a column the sheet asks for, quietly not
+ * imported, with a reason on screen saying the firm meant it. Held over the whole table rather than
+ * over one heading, because the next collision will be somewhere else.
+ */
+const aliases = aliasIndex()
+for (const group of NOT_COLLECTED) {
+  for (const h of group.headings) {
+    ok(`"${h}" is declined and not also a column the sheet asks for`, !aliases.has(headingKey(h)))
+  }
+}
+/* AND EVERY ONE CARRIES A REASON. A declined column with an empty `why` draws a dangling dash. */
+for (const group of NOT_COLLECTED) {
+  ok(`a reason is given for ${group.headings[0]}`, group.why.trim().length > 20)
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * PERSON OR BUSINESS, READ OFF THE EVIDENCE.
+ *
+ * A business opened as a person is addressed as "Mr", traced through Home Affairs instead of CIPC,
+ * and carries a registration number in a field labelled ID. Every import in Raptor's history opened
+ * every account as a person, and the Swordfish sheet cannot say which is which at all -- so
+ * requiring the column refused the sheet and defaulting silently got it wrong.
+ *
+ * THE PRECEDENCE IS THE WHOLE CARE: what the client TYPED, then a fact, then a guess.
+ * ------------------------------------------------------------------------------------------- */
+
+check('what the client typed wins over anything derived',
+  debtorKindFrom({ debtor_kind: 'Business', id_number: '8403140043082' }),
+  { kind: 'company', from: 'stated' })
+check('...in both directions',
+  debtorKindFrom({ debtor_kind: 'Person', registration_number: '2019/940923/07' }),
+  { kind: 'individual', from: 'stated' })
+check('a registration number is only ever a company\u2019s',
+  debtorKindFrom({ registration_number: '2019/940923/07' }),
+  { kind: 'company', from: 'registration-number' })
+check('a valid ID is only ever a person\u2019s',
+  debtorKindFrom({ id_number: '8403140043082' }), { kind: 'individual', from: 'id-number' })
+/*
+ * THE CHECKSUM, NOT THE LENGTH, and this is the assertion the old sheet earns. All 45 of its rows
+ * had a cell phone in the ID column; nine numeric digits must not be allowed to decide what a
+ * debtor is.
+ */
+check('a cell phone in the ID column decides nothing',
+  debtorKindFrom({ id_number: '0635684927', name: 'Kibido' }),
+  { kind: 'individual', from: 'default' })
+/* THE NAME IS THE SOFT SIGNAL AND IS READ LAST, so it can never overturn an ID. */
+check('an ID outranks a business-looking name',
+  debtorKindFrom({ id_number: '8403140043082', name: 'Kibido Trust' }),
+  { kind: 'individual', from: 'id-number' })
+for (const name of ['Mielies en Meer (Pty) Ltd', 'Mielies en Meer Pty Ltd', 'Bosveld Transport CC',
+  'Bosveld Transport c.c.', 'Grootplaas Boerdery (Edms) Bpk', 'Die Van Wyk Familie Trust',
+  'Smit en Seun Inc', 'Hoop vir Almal NPC', 'Kalahari Mining Ltd']) {
+  check(`"${name}" is a business`, debtorKindFrom({ name }).kind, 'company')
+}
+/*
+ * AND A SURNAME IS NOT. The pattern is anchored to the END of the name for exactly this: a loose
+ * search for "inc" makes a debtor called Inez into a close corporation, and a statutory demand
+ * addressed to a company that is a person is a defective demand.
+ */
+for (const name of ['Kibido', 'Ncube', 'Inez', 'Limpopo', 'Van Der Westhuizen', 'Trustwell Dube']) {
+  check(`"${name}" is a person`, debtorKindFrom({ name }).kind, 'individual')
+}
+check('nothing at all is a person, and says it was a default',
+  debtorKindFrom({}), { kind: 'individual', from: 'default' })
+
+/*
+ * AND IT REACHES THE ACCOUNT, which is the half that was missing for the whole of Raptor's history:
+ * the planner can read it perfectly and the mapper can still open a person.
+ */
+const business = planHandover({
+  rows: [
+    ['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+      'Company registration number'],
+    ['A1', '100', '2026-01-01', 'Bosveld Transport CC', '2019/940923/07'],
+  ],
+  today: TODAY,
+})
+check('a business on the sheet opens as a business',
+  toDebtorInput(business.ready[0].values, business.ready[0].defaultDate).debtorKind, 'company')
+/* AND ITS IDENTITY IS THE REGISTRATION NUMBER, not an empty ID field. */
+check('...carrying its registration number as its identity',
+  toDebtorInput(business.ready[0].values, business.ready[0].defaultDate).idNumber, '2019/940923/07')
+
+/*
+ * A GUESS IS SAID ON THE ROW, A FACT IS NOT. A note per row on nineteen thousand accounts is how a
+ * screen becomes unreadable, so the two silent cases have to stay silent -- and the two decided
+ * cases have to speak.
+ */
+const guessed = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name'],
+    ['A1', '100', '2026-01-01', 'Bosveld Transport CC'],
+    ['A2', '100', '2026-01-01', 'Kibido']],
+  today: TODAY,
+})
+ok('a kind read off the name says so on the row',
+  problemsOf(guessed.rows[0]).some((p) => /registered name/i.test(p.message)))
+ok('...and a row with nothing to read it from says that instead',
+  problemsOf(guessed.rows[1]).some((p) => /does not say/i.test(p.message)))
+/* A NOTE, NEVER A WARNING. Neither blocks anything and neither is work for anybody: 97% of the book
+   has no ID number, so a warning here would be a warning on nearly every account the firm imports. */
+ok('...and neither of them blocks the row',
+  guessed.refused.length === 0
+  && guessed.rows.every((r) => problemsOf(r).filter((p) => /person|business|registered name/i
+    .test(p.message)).every((p) => p.level === 'note')))
+/* AND A STATED ANSWER SAYS NOTHING AT ALL. */
+const stated = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+    'Person or business'], ['A1', '100', '2026-01-01', 'Dube', 'Person']],
+  today: TODAY,
+})
+ok('a client who answered is not told about it',
+  !problemsOf(stated.rows[0]).some((p) => /person|business/i.test(p.message)))
+/* A WORD NEITHER LIST KNOWS IS STILL REPORTED. The client answered, just not in our vocabulary, and
+   "Sole proprietor" silently read as a person is the kind of thing nobody finds for a year. */
+const oddKind = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+    'Person or business'], ['A1', '100', '2026-01-01', 'Dube', 'Sole proprietor']],
+  today: TODAY,
+})
+ok('an answer in neither vocabulary is reported',
+  problemsOf(oddKind.rows[0]).some((p) => /Sole proprietor/.test(p.message)))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE SCREEN DRAWS THE THREE APART.
+ *
+ * The planner can sort them perfectly and the card can still print one sentence over all three,
+ * which is exactly the state this started in. Read off the source because the lists are only worth
+ * having if somebody sees them separately.
+ * ------------------------------------------------------------------------------------------- */
+
+/* `card` is read once at the top of this file and is ALREADY COMMENT-STRIPPED, which every
+   assertion here depends on: the card explains at length what it no longer says, so a search over
+   the raw source would find the old sentence quoted in the note above the new one. The trap this
+   codebase has walked into three times. */
+ok('the card source was stripped of its comments', !/Nothing can be imported from it\./
+  .test(card.slice(0, card.indexOf('PlanSummary'))))
+
+ok('the card draws each of the three lists', /plan\.unrecognised\.length > 0/.test(card)
+  && /plan\.superseded\.length > 0/.test(card)
+  && /plan\.notCollected\.some/.test(card))
+/*
+ * AND "not imported" IS SAID OF ONE LIST ONLY. The sentence is honest about a heading nobody knows
+ * and about a declined column with data in it; said over a twin it is false, because the data came
+ * in through the other heading. Held as the absence of that phrase anywhere near the twins.
+ */
+const twinLine = card.slice(card.indexOf('plan.superseded.length > 0'),
+  card.indexOf('plan.superseded.length > 0') + 600)
+ok('the twins block was found', twinLine.length > 200)
+ok('...and does not tell the firm a twin was not imported', !/not imported/.test(twinLine))
+/* IT NAMES THE WINNER INSTEAD, which is the one thing on that line worth reading. */
+ok('...naming where the column was read from', /insteadOf/.test(twinLine))
+/*
+ * AND A DECLINED COLUMN WITH DATA IS DRAWN APART FROM AN EMPTY ONE. Same list, two different facts:
+ * an empty `Gender` is housekeeping and an `Interest Rate` with a figure in every row is the client
+ * handing us something we are discarding. One sentence over both is the fault all of this fixes.
+ */
+ok('a declined column with data is drawn separately from an empty one',
+  /notCollected\.filter\(\(n\) => n\.filled > 0\)/.test(card)
+  && /notCollected\.filter\(\(n\) => n\.filled === 0\)/.test(card))
+ok('...and the one with data says how many values', /n\.filled\}/.test(card))
+ok('...and carries the firm s reason', /n\.why/.test(card))
+/*
+ * AND THE MISSING-COLUMN LINE READS THE OUTCOME, NOT THE FLAG. "Nothing can be imported from it"
+ * over eight ready accounts is the sentence the firm met, and it came of trusting
+ * `missingRequired` rather than asking whether anything had in fact been refused.
+ */
+ok('the missing-column sentence asks whether anything was actually refused',
+  /plan\.ready\.length === 0[\s\S]{0,120}Nothing can be imported/.test(card))
+/* NOT RED OVER A WORKING IMPORT. A red line somebody cannot act on is how they learn to skip it. */
+ok('...and is only red when nothing came through',
+  /plan\.ready\.length === 0 \? 'text-negative-700'/.test(card))
+/*
+ * EVERY COLOUR NAMES A TOKEN THAT EXISTS. index.css says it: a Tailwind utility naming a token
+ * that is not defined COMPILES TO NOTHING -- no warning, and the warning is drawn in the body
+ * colour on a white card. Written first as `text-warning-700`, which is not a token in this app.
+ */
+const css = readFileSync(new URL('../../src/index.css', import.meta.url), 'utf8')
+for (const token of [...card.matchAll(/text-\[var\((--[a-z0-9-]+)\)\]/g)].map((m) => m[1])) {
+  ok(`${token} is a real token`, css.includes(`${token}:`))
+}
+
+/* ---------------------------------------------------------------- report */
+
+if (failures.length) {
+  console.log(`\n${failures.length} FAILED:\n`)
+  for (const f of failures) console.log('  ✗ ' + f + '\n')
+  process.exit(1)
+}
+console.log(`${pass} passed, 0 failed`)
+console.log(`
+Either sheet, read without anybody declaring which -- the same debtor, the same money and the same
+surname out of both, with the old sheet's "Debtor Initials" corrected to the name because that is
+where its surnames actually are. A heading nobody knows is named rather than mapped by position; dates
+are read day/month/year the way South Africa writes them, with the order settled ONCE for the whole
+file so an American sheet cannot come out half one way and half the other; and an ID that is not an
+ID warns rather than refusing a whole book.`)

@@ -1,0 +1,547 @@
+/**
+ * THE LIBRARY, REACHED FROM INSIDE AN ACCOUNT — in a real browser.
+ *
+ * At the firm's instruction: "everything that we have in the library, to be in the account as
+ * well as an option."
+ *
+ * WHY THIS NEEDS THE BROWSER AND NOT ONLY check-account-templates.mjs. That file reads source and
+ * asserts the wiring; it cannot tell you the picker never rendered. CLAUDE.md records why this
+ * layer exists: a panel shipped, was provably in the deployed bundle, and was invisible. Three
+ * new controls were just placed on two screens, which is exactly that risk again.
+ *
+ * AND ONE THING ONLY A BROWSER CAN ANSWER: whether the words that land in the box carry THIS
+ * debtor's figures. The merge runs through useMemo, mergeValuesFor, the balance struck off three
+ * ledgers and a template parsed at runtime. Source-reading says the call is wired; only running
+ * it says the number came out right — and a template merged against the library's samples would
+ * put a fabricated balance into a real demand.
+ *
+ * Run: node scripts/qa/e2e/account-templates.mjs
+ */
+import {
+  PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
+} from './harness.mjs'
+import { COMPANY, PROFILE, TEAM, USER_ID, accountsPage } from './fixtures.mjs'
+
+const t = makeRunner('account-templates')
+const seen = []
+
+/* The one account this whole file is about. Its balance is what every assertion below reads. */
+const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000' }
+
+/*
+ * THE FIRM'S WORDING, as the library would hold it. Deliberately full of merge fields — a
+ * template with no fields in it would merge identically against samples and against the account,
+ * so it could not tell the two apart, which is the one thing this file exists to do.
+ */
+const TEMPLATES = [
+  {
+    id: 'tpl-sms-1', scope: 'collections', kind: 'sms', name: 'First contact',
+    subject: null, format: 'text',
+    body: 'Good day {{debtor_name}}. Your account {{reference}} is {{balance}} in arrears. '
+      + 'Please telephone {{agent_name}}.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'sms-first', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /* Retired. Offered by the library, which keeps it so somebody can answer "what did we used to
+       send?", and NOT offered here, which is a different question. */
+    id: 'tpl-sms-old', scope: 'collections', kind: 'sms', name: 'Retired wording',
+    subject: null, format: 'text', body: 'Old words.',
+    position: null, language: 'en', active: false, attachment_id: null,
+    seed_key: null, updated_at: '2026-01-01T08:00:00Z',
+  },
+  {
+    id: 'tpl-letter-1', scope: 'collections', kind: 'letter', name: 'Section 129 notice',
+    subject: null, format: 'document',
+    body: JSON.stringify({
+      defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+      blocks: [
+        { kind: 'heading', level: 1, spans: [{ text: 'NOTICE IN TERMS OF SECTION 129(1)(a)' }] },
+        { kind: 'paragraph', spans: [{ text: 'Dear {{debtor_name}}, you owe {{balance}}.' }] },
+      ],
+    }),
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'letter-s129', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * THE COVERING EMAIL, WHICH CARRIES THE LETTER ABOVE. attachment_id is what makes its "please
+     * find the enclosed document" true.
+     *
+     * A STATEMENT OF ACCOUNT, AND IT USED TO BE THE ACKNOWLEDGEMENT OF DEBT. The swap is the point
+     * rather than a detail. An AoD covering email cannot be sent by hand any more -- it would go
+     * out with no way to open anything, which is exactly what the firm met: "there's no link to
+     * open it in the email that goes out." So the by-hand email that posts a document is now the
+     * statement, and it is the honest fixture for proving an attachment travels with its message.
+     */
+    id: 'tpl-email-1', scope: 'collections', kind: 'email',
+    name: 'Statement of account (individual)',
+    subject: 'Statement of account - account {{reference}}', format: 'text',
+    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed document. The balance is {{balance}}.',
+    position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
+    seed_key: 'email-account-statement-individual', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * AND THE ACKNOWLEDGEMENT OF DEBT, WHICH EXISTS HERE ONLY TO BE ABSENT.
+     *
+     * It was offered by hand until the firm sent one and it arrived with nothing to open. The
+     * covering email is half a message: the other half is a token made at the moment of sending,
+     * which no template saved weeks earlier can hold. It goes out from the Signing panel now, with
+     * the button under it. Kept in the fixture so the assertion below has something that could
+     * have appeared and did not.
+     */
+    id: 'tpl-email-aod', scope: 'collections', kind: 'email',
+    name: 'Acknowledgement of debt - covering email (individual)',
+    subject: 'Acknowledgement of debt - account {{reference}}', format: 'text',
+    body: 'Dear {{debtor_name}},\n\nPlease read and sign the attached.',
+    position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
+    seed_key: 'email-aod-individual', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * AND ONE THE WORKFLOW SENDS, which exists in this fixture ONLY to be absent from the picker.
+     * Without it the assertion below would pass on any code at all -- there would be nothing that
+     * could have appeared and did not.
+     */
+    id: 'tpl-email-wf', scope: 'collections', kind: 'email', name: 'Section 129 covering email',
+    subject: 'Section 129 notice - account {{reference}}', format: 'text',
+    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed notice.',
+    position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
+    seed_key: 'email-s129', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * A TEMPLATE THIS ACCOUNT CANNOT FULLY ANSWER, which is the case the warning exists for and
+     * the case that must NOT be silent.
+     *
+     * IT USED TO BE {{respond_by}}, "not the firm's detail and not on the account either, so
+     * nothing can fill it" — and that stopped being true the day Raptor learned to count ten
+     * working days. The check failed on a real improvement, which is the right way round.
+     *
+     * {{debtor_address}} replaces it, and it is a better test for being DATA-DRIVEN rather than
+     * structural: the field is perfectly fillable, and this fixture's account simply has no
+     * address contact on it. That is the state a real account is in until a client sends one, and
+     * it is the one a section 129 cannot be posted from.
+     */
+    /*
+     * TWO SCRIPTS, WITH THE FIRM'S OWN SEED KEYS, because the panel resolves them BY key rather
+     * than offering a picker: the opening script pops first and the workflow script is behind the
+     * verification tick. A fixture with a made-up key would leave the panel saying the script is
+     * not in the library -- which is honest and tests nothing.
+     *
+     * AND THEY ARE SHAPED LIKE THE REAL ONES: the headings are what callScriptParts reads to tell
+     * the words from the directions, the branches and the DO NOT list.
+     */
+    id: 'tpl-script-1', scope: 'collections', kind: 'call_script',
+    name: 'Opening a call — an individual',
+    subject: null, format: 'text',
+    body: 'Goes to\nIndividual\nGoal of the call\nReach the right person and verify them.\n'
+      + 'WHAT THE COLLECTOR SAYS\nGood day, may I speak to {{debtor_name}}?\n'
+      + '[Check the name and the date of birth against the account.]\n'
+      + 'CAPTURE ON THE ACCOUNT\n—  RPC once verified\n'
+      + 'DO NOT\nSay the creditor or the balance before the person is verified.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'script-open-individual', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    id: 'tpl-script-2', scope: 'collections', kind: 'call_script', name: 'Handover call',
+    subject: null, format: 'text',
+    body: 'Goes to\nAny\nGoal of the call\nMake first contact and ask for the money.\n'
+      + 'WHAT THE COLLECTOR SAYS\n[After verification]\n'
+      + 'I am calling about {{balance}} outstanding. I have you at {{debtor_address}} — is that '
+      + 'still right?\n'
+      + 'IF THEY SAY\nCannot pay it all\nWhat can you realistically do?\n'
+      + 'CAPTURE ON THE ACCOUNT\n—  PTP, RTP or RPC\n'
+      + 'DO NOT\nName a settlement figure. Nothing has been approved at this stage.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'script-handover-call', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * A BRANCH SCRIPT, so the row of one-tap branches is a real row. The firm: "branch scripts are
+     * one tap away at all times... a collector must be able to jump to any of them mid-call
+     * without losing the panel." With none of them in the library the row is correctly absent and
+     * the rule is untested.
+     */
+    id: 'tpl-script-3', scope: 'collections', kind: 'call_script', name: 'A dispute on the call',
+    subject: null, format: 'text',
+    body: 'Goes to\nAny\nGoal of the call\nGet the dispute in writing.\n'
+      + 'WHAT THE COLLECTOR SAYS\nThank you for telling me. I need it in writing.\n'
+      + 'CAPTURE ON THE ACCOUNT\n—  DISP\n'
+      + 'DO NOT\nTell the debtor the account is on hold before the written dispute is in.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'script-dispute-raised', updated_at: '2026-09-01T08:00:00Z',
+  },
+]
+
+/* The firm's own row. Filled in, so the letter has a trust account to name. */
+const FIRM = [{
+  firm_name: 'Bredell Ferreira',
+  /* Bank and branch code APART, the way the firm asked for them to be stored. {{firm_bank}} joins
+     them back together for a notice already written -- which is the half worth driving here. */
+  trust_bank: 'Standard Bank',
+  trust_branch_code: '051001',
+  trust_account_name: 'Bredell Ferreira Trust',
+  trust_account_number: '01 234 5678',
+  trust_account_type: 'Legal Practitioner Trust Account',
+  payment_instruction: 'Payment must be made into our trust account.',
+  phone: '015 291 1234',
+  email: 'info@bredellferreira.co.za',
+  website: 'www.bredellferreira.co.za',
+  physical_address: '25 Kerk Street\nPolokwane\n0699',
+  postal_address: 'PO Box 1234\nPolokwane\n0700',
+  office_hours: 'Monday to Friday, 08:00 \u2013 16:30',
+  signatory_name: 'J Bredell',
+  signatory_title: 'Duly authorised legal representative',
+  email_font: 'Georgia, "Times New Roman", Times, serif',
+  email_size_pt: '10.5',
+  updated_at: '2026-09-01T08:00:00Z',
+}]
+
+const handlers = [
+  [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
+  [(u) => u.includes('/rest/v1/profiles'), (u) => {
+    const one = /id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
+    return { body: one ? [PROFILE].filter((p) => p.id === one) : [PROFILE] }
+  }],
+  [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
+  [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
+  [(u) => u.includes('/rest/v1/firm_settings'), () => ({ body: FIRM })],
+  [(u) => u.includes('/rest/v1/message_templates'), () => ({ body: TEMPLATES })],
+  [(u) => u.includes('/rest/v1/letterheads'), () => ({ body: [] })],
+  /*
+   * A NUMBER AND AN ADDRESS ON THE ACCOUNT, because both buttons are disabled without one --
+   * SMS is refused with "No phone number on this account yet", which is correct behaviour and
+   * would have made every assertion below unreachable.
+   */
+  [(u) => u.includes('/rest/v1/account_contacts'), () => ({
+    body: [
+      {
+        id: 'ct-1', account_id: ACCOUNT.id, kind: 'mobile', value: '0824567890',
+        label: null, person_name: null, person_role: null, is_primary: true,
+        verified_at: null, retired_at: null, retired_reason: null, notes: null,
+        created_at: '2026-03-01T08:00:00Z',
+      },
+      {
+        id: 'ct-2', account_id: ACCOUNT.id, kind: 'email', value: 'debtor@example.test',
+        label: null, person_name: null, person_role: null, is_primary: true,
+        verified_at: null, retired_at: null, retired_reason: null, notes: null,
+        created_at: '2026-03-01T08:00:00Z',
+      },
+    ],
+  })],
+  [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
+  [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({
+    body: [ACCOUNT],
+    headers: { 'content-range': '0-0/1' },
+  })],
+]
+
+const server = startServer()
+const browser = await chromium.launch()
+try {
+  const { page } = await signedInPage(browser, PROFILE, handlers, seen)
+
+  let up = false
+  for (let i = 0; i < 40 && !up; i += 1) {
+    try { await page.goto(`http://localhost:${PORT}/accounts/${ACCOUNT.id}`, { timeout: 2000 }); up = true }
+    catch { await new Promise((r) => setTimeout(r, 500)) }
+  }
+  t.ok('the account opens', up)
+  await page.waitForTimeout(2500)
+
+  /* ---------- the row of things you can do, which has to be ONE row of ONE size ---------- */
+
+  /*
+   * THE FIRM, LOOKING AT THIS ROW: "all these things bigger, smaller." They were right and the
+   * cause was a missing `items-start`: a flex line stretches its children to its tallest, and
+   * three buttons in this row hang a line of status under themselves after they are used -- so
+   * recording a trace made that column 66px and every other button on the line stretched to match
+   * it, labels floating in the middle of tall boxes.
+   *
+   * ONLY A BROWSER CAN SEE THIS. It is the whole reason this layer exists: the markup was right,
+   * every button was in the bundle, and the row was the wrong shape. Measured rather than read.
+   */
+  const row = page.locator('[data-qa="record-actions"]').first()
+  t.ok('the account has a row of actions', await row.isVisible())
+  const buttons = await row.evaluate((el) => Array.from(el.children).map((child) => {
+    /* A child is either the button itself or a wrapper holding it plus a floating note. The
+       BUTTON is what has to match, so measure the button wherever it is. */
+    const btn = child.matches('button, a') ? child : child.querySelector('button, a')
+    return btn ? { label: (btn.textContent ?? '').trim(), h: Math.round(btn.getBoundingClientRect().height) } : null
+  }).filter(Boolean))
+  /* ASSERTED PRESENT BEFORE ANYTHING ABOUT THEIR SIZES. An empty row makes "every height is the
+     same" true and meaningless -- CLAUDE.md's first trap, in its browser form. */
+  t.ok(`...with the buttons in it (${buttons.length})`, buttons.length >= 8)
+  const heights = [...new Set(buttons.map((b) => b.h))]
+  t.check(`...every one of them the same height (${heights.join(', ')}px)`, heights.length, 1)
+
+  /*
+   * AND THEY STAY THAT HEIGHT WITH SOMETHING TALL BESIDE THEM, which is the rule rather than the
+   * symptom.
+   *
+   * WHY A TALL ELEMENT IS PUT THERE ON PURPOSE. What actually made the row ragged was a collector
+   * recording a trace: two lines of status appeared under that button and every other button on
+   * the line grew to match. Driving a real trace here would take the XDS modal, a count and a POST
+   * -- and would test the trace, not the row. The row's rule is simply "a tall child does not
+   * change the others", so the check states exactly that.
+   *
+   * WITHOUT THIS THE ASSERTION ABOVE IS VACUOUS: nothing in this fixture's row is tall, so every
+   * button is 38px whether or not the row stretches, and deleting `items-start` would pass.
+   */
+  await row.evaluate((el) => {
+    const tall = document.createElement('div')
+    tall.id = 'qa-tall'
+    tall.style.cssText = 'height:64px;width:1px'
+    el.appendChild(tall)
+  })
+  const stretched = await row.evaluate((el) => Array.from(el.querySelectorAll(':scope > * button, :scope > button, :scope > a'))
+    .map((b) => Math.round(b.getBoundingClientRect().height)))
+  await row.evaluate((el) => el.querySelector('#qa-tall')?.remove())
+  const grew = stretched.filter((h) => h !== heights[0])
+  t.check(`...even with something tall on the line (${[...new Set(stretched)].join(', ')}px)`,
+    grew.length, 0)
+  await t.shot(page, '79-account-actions')
+
+  /* ---------- the SMS box ---------- */
+
+  const smsButton = page.getByRole('button', { name: 'SMS', exact: true }).first()
+  t.ok('the account offers an SMS', await smsButton.isVisible())
+  await smsButton.click()
+  await page.waitForTimeout(600)
+
+  const useTemplate = page.getByRole('button', { name: 'Use a template' }).first()
+  /*
+   * THE PLACEMENT ASSERTION. This is the one a unit check cannot make: the control is wired, in
+   * the bundle, and either on the screen or not.
+   */
+  t.ok('...with the firm’s wording offered inside it', await useTemplate.isVisible())
+  await useTemplate.click()
+  await page.waitForTimeout(600)
+
+  /* Retired wording is kept by the library and not offered to send. */
+  t.check('a retired template is not offered',
+    await page.getByRole('button', { name: /Retired wording/ }).count(), 0)
+  t.ok('...and a live one is',
+    await page.getByRole('button', { name: /First contact/ }).first().isVisible())
+
+  await page.getByRole('button', { name: /First contact/ }).first().click()
+  await page.waitForTimeout(500)
+
+  const smsText = await page.locator('textarea').first().inputValue()
+  /*
+   * MERGED AGAINST THIS DEBTOR, and asserted on a value that could only have come from the
+   * account. The fixture's surname is what the app addressed; the library's sample is
+   * "Mr Van Der Westhuizen", so finding THAT here would mean a fabricated name went into a real
+   * message.
+   */
+  t.check(`the wording arrives merged, not in braces (${smsText})`,
+    /\{\{/.test(smsText), false)
+  t.ok(`...against this account, not the library's samples (${smsText})`,
+    !smsText.includes('Van Der Westhuizen') && !smsText.includes('48,250.00'))
+  /*
+   * AND THE BALANCE IS A REAL FIGURE OFF THIS ACCOUNT -- the strongest thing this file can say.
+   * The number went through mergeValuesFor, the statement struck off the three ledgers and the
+   * app's own money formatting, and came out as the account's own. Asserted as the FIGURE rather
+   * than as "no braces remain": a template that lost the sentence entirely would also have no
+   * braces in it.
+   */
+  t.ok(`...and the debtor's own balance (${JSON.stringify(smsText)})`,
+    /R\s?180,000\.00/.test(smsText))
+  /* The reference is the client's own, which is what appears on the debtor's paperwork. */
+  t.ok('...carrying the reference the debtor knows', smsText.includes('REF/0'))
+
+  /*
+   * AND IT IS PRICED. Annexure B item 1(c) is per SEGMENT, so a template that runs past 160
+   * characters costs twice what the firm thinks it does. The cost line is live while you type
+   * and a template dropped into the box must not bypass it.
+   */
+  const priceLine = await page.getByText(/plus VAT/).first().innerText()
+  t.ok(`...and priced the moment it lands (${priceLine})`, /R\d+\.\d\d plus VAT/.test(priceLine))
+
+  /*
+   * AND PRICED AT ONE SEGMENT, WHICH IS THE WHOLE POINT OF THIS ASSERTION.
+   *
+   * THE BUG THIS CAUGHT, found by looking at the screenshot this file takes. en-ZA groups
+   * thousands with a NON-BREAKING space, so a merged {{balance}} arrived carrying U+00A0 -- which
+   * is not in the GSM alphabet, so one of them dropped the whole message to UCS-2 and cut every
+   * segment from 160 characters to 70. This message is 94 characters: one segment at R3.50 with
+   * an ordinary space, TWO at R7.00 with the non-breaking one. Every templated SMS carrying a
+   * balance cost the firm double, and the warning it produced named the offending character as
+   * " ", which nobody could act on.
+   *
+   * ASSERTED ON THE SEGMENT COUNT AND THE ENCODING NOTE TOGETHER. The count alone would go green
+   * again on a message that merely got shorter.
+   */
+  const counts = await page.getByText(/characters .* message/).first().innerText()
+  t.ok(`...as ONE message, not two (${counts})`, /\b1 message\b/.test(counts))
+  t.check('...with nothing in it forcing the expensive encoding',
+    await page.getByText(/cuts each message to 70 characters/).count(), 0)
+  await t.shot(page, '80-account-sms-template')
+
+  await page.getByRole('button', { name: 'Cancel' }).first().click()
+  await page.waitForTimeout(400)
+
+  /* ---------- the call script ---------- */
+
+  await page.getByRole('button', { name: 'Call script' }).first().click()
+  await page.waitForTimeout(600)
+  /*
+   * SCOPED TO THE PANEL, AND THAT IS NOT TIDINESS. The account page BEHIND this modal draws the
+   * balance in its own figures, so an unscoped "the balance is nowhere on the screen" passes or
+   * fails on the page rather than on the panel -- and the rule being tested is about what the
+   * PANEL draws before the verification tick.
+   */
+  const panel = page.locator('[role="dialog"]').first()
+  /*
+   * THE OPENING SCRIPT POPS FIRST, WITH NO PICKER. The panel chooses by debtor type and by where
+   * the account stands -- the firm: "the opening script pops first, always." A picker was what it
+   * had, and a collector choosing a script while a debtor is talking is the thing being removed.
+   *
+   * READ OFF THE PARAGRAPH, not off the text node. Every merged value is its own span -- see
+   * Merged -- so getByText lands on the span holding the words before the name, and the name
+   * itself is the next one. The <p> is the line.
+   */
+  const opening = await panel.locator('p', { hasText: /may I speak to/ }).first().innerText()
+  t.ok(`the opening script is on screen without being asked for (${JSON.stringify(opening)})`,
+    /may I speak to Mhlongo/.test(opening))
+  /* Reading charges nothing, and the screen says so — every other button in that row does. */
+  t.ok('...saying plainly that reading charges nothing',
+    await page.getByText(/Reading this charges nothing/).first().isVisible())
+  /*
+   * AND NOTHING IDENTIFYING IS DRAWN UNTIL THE TICK. The firm: "confirming the account exists is
+   * itself a disclosure. The panel must not display the debtor's name, the creditor or the balance
+   * until the verification tick is set, because a collector reads what is on the screen."
+   *
+   * ASSERTED ON THE BALANCE, which is the thing a collector would read out. The debtor's name is
+   * in the opening script's own words -- asking for them by name is how a call starts -- so the
+   * balance is what separates the locked state from the unlocked one.
+   */
+  t.check('the balance is nowhere in the panel before the person is verified',
+    await panel.getByText(/R\s?180,000\.00/).count(), 0)
+  t.ok('...and the panel says why', await panel.getByText(/until the person is verified/).first().isVisible())
+  t.ok('...and that the rest is locked',
+    await panel.getByText(/locked until you have verified who you are speaking to/).first().isVisible())
+  /* THE DIRECTIONS ARE DRAWN APART FROM THE WORDS and are never read aloud. */
+  t.ok('a bracketed direction is on screen as a direction',
+    await panel.getByText(/Check the name and the date of birth/).first().isVisible())
+  /* AND THE DO NOT LIST IS THERE, always visible: the firm's own audit line. */
+  t.ok('the DO NOT list is drawn with the script',
+    await panel.getByText(/Say the creditor or the balance before the person is verified/).first().isVisible())
+  await t.shot(page, '81-account-call-script-locked')
+
+  /* ---------- the tick, and what it unlocks ---------- */
+
+  await panel.getByRole('button', { name: /It is the debtor, and they verified/ }).first().click()
+  await page.waitForTimeout(500)
+  const script = await panel.locator('p', { hasText: /I am calling about/ }).first().innerText()
+  /* The figure, not the absence of a placeholder: "does not contain {{balance}}" would also pass
+     on a script that lost the sentence entirely. */
+  t.ok(`the workflow script carries this debtor's balance (${JSON.stringify(script)})`,
+    /R\s?180,000\.00/.test(script))
+  /*
+   * AND THE FIELD THIS ACCOUNT COULD NOT ANSWER IS A NAMED GAP, not braces and not a blank.
+   *
+   * THE FIRM: "if a field is empty, show the field name in red rather than an empty space." Both
+   * of the alternatives get read out loud on a recorded call -- the braces, or a sentence that
+   * stops mid-air. This fixture's account has no address contact, which is the state a real
+   * account is in until a client sends one.
+   */
+  t.check('no merge field survives onto the screen as braces',
+    await panel.getByText(/\{\{debtor_address\}\}/).count(), 0)
+  /* NAMED SHORT, because this one is read out loud mid-sentence: the catalogue's label for
+     {{debtor_address}} is "Where the notice is posted, on its own lines", which a collector would
+     read as prose. See gapName. */
+  t.ok(`...and the gap names the field, short (${JSON.stringify(script)})`,
+    /no debtor address/.test(script))
+  t.ok('...and said once at the top as well',
+    await panel.getByText(/do not improvise a figure on a recorded call/i).first().isVisible())
+  /* EVERY BRANCH IS ONE TAP AWAY -- what the debtor just said, and who is on the line. */
+  t.ok('the branches are one tap away',
+    await panel.getByText(/What they just said/).first().isVisible())
+  /* AND THE CALL CANNOT BE CLOSED WITHOUT A CODE -- on a live call. Opened by hand from the
+     account, as here, there has been no call and none is demanded. */
+  t.ok('the sixteen codes are on the screen',
+    await panel.getByRole('button', { name: 'PTP', exact: true }).first().isVisible())
+  await panel.getByRole('button', { name: 'PIF', exact: true }).first().click()
+  await page.waitForTimeout(300)
+  /* PIF MOVES NOTHING, AND SAYS SO: money is recorded off money, never off a call. */
+  t.ok('...and a code that records no position says what does',
+    await panel.getByText(/recorded off the money/).first().isVisible())
+  await t.shot(page, '82-account-call-script-verified')
+  await page.locator('button[aria-label="Close"]').first().click()
+  await page.waitForTimeout(400)
+
+  /* ---------- the email, and the letter its template carries ---------- */
+
+  /*
+   * THE FIRM: "if I save the email template and have an attachment to the email template, it
+   * should also replicate that when I'm in the account and I want to send something."
+   *
+   * WHY THIS NEEDS THE BROWSER AND WAS NOT COVERED BEFORE. check-account-templates asserts the
+   * wiring by reading source; the SMS box and the call script are driven here. The EMAIL path --
+   * the one that has to draw a PDF, size it and hang it on the message -- was asserted only by
+   * source-reading. That is the half with a round trip and a PDF library in it.
+   */
+  await page.getByRole('button', { name: 'Email', exact: true }).first().click()
+  await page.waitForTimeout(800)
+
+  const pick = page.getByRole('button', { name: 'Use a template' }).first()
+  t.ok('the email composer offers the firm\u2019s templates', await pick.isVisible())
+  await pick.click()
+  await page.waitForTimeout(600)
+
+  /* The covering email, which carries the section 129. The list says so before it is picked. */
+  t.ok('...marking the one that posts a letter',
+    await page.getByText('posts a letter').first().isVisible())
+  /*
+   * AND WHAT THE WORKFLOW SENDS IS NOT IN THE LIST.
+   *
+   * THE FIRM: "you can remove all of the email templates from the emails except for the statement
+   * of account and the acknowledgements of debt, because the other stuff works with workflows."
+   *
+   * THE ROW STILL EXISTS -- it is in the fixture above, and in the real library it is what the
+   * section 129 sequence sends. What changed is that a collector is not offered it by hand, which
+   * is the difference between narrowing a picker and breaking a workflow.
+   */
+  t.ok('a notice the workflow sends is not offered by hand',
+    await page.getByRole('button', { name: /Section 129 covering email/ }).count() === 0)
+  /*
+   * NOR THE ACKNOWLEDGEMENT OF DEBT, WHICH REVERSED.
+   *
+   * It was offered, and the firm sent one: "there's no link to open it in the email that goes out.
+   * The link is copied in another place and then you have to email it." The link is a token made
+   * at the moment of sending, so a covering email picked from a list can never carry one -- it
+   * goes out from the Signing panel instead, which issues the document and puts the button under
+   * these same words.
+   */
+  t.ok('...nor the acknowledgement of debt, which would go without its link',
+    await page.getByRole('button', { name: /Acknowledgement of debt/ }).count() === 0)
+
+  await page.getByRole('button', { name: /Statement of account/ }).first().click()
+  await page.waitForTimeout(2500)
+
+  t.check('picking it fills the subject',
+    await page.getByLabel(/Subject/).first().inputValue(),
+    'Statement of account - account REF/0')
+  t.ok('...and the body, merged against this debtor',
+    (await page.locator('textarea').first().inputValue()).includes('Mhlongo'))
+  /*
+   * AND THE LETTER CAME WITH IT. message_templates.attachment_id is what makes "please find the
+   * enclosed notice" true; an email that says it and encloses nothing is a worse message than one
+   * that says nothing at all.
+   */
+  const attached = await page.getByText(/\.pdf/).first().innerText().catch(() => '')
+  t.ok(`the letter it carries is attached as a PDF (${attached})`, /\.pdf/.test(attached))
+  await t.shot(page, '82-account-email-template')
+} finally {
+  await browser.close()
+  stopServer(server)
+}
+
+const good = t.finish(`The firm's wording, reached from the account it is about: offered in the SMS
+box, in the email composer and as a call script, merged against this debtor rather than against the
+library's samples, priced the moment it lands, honest about the one field nothing could fill -- and
+a covering email brings the letter it posts with it, drawn and attached.`)
+process.exit(good ? 0 : 1)

@@ -1,0 +1,437 @@
+import { useCallback, useState } from 'react'
+import { AlarmClock, AlertTriangle, CalendarClock, Loader2 } from 'lucide-react'
+import { Modal, FormField, inputClass } from '../ui/Modal'
+import { useAuth } from '../../store/AuthContext'
+import { useAppStore } from '../../store/AppStore'
+import { DiaryDatePicker, longDate } from './DiaryDatePicker'
+import {
+  DEFAULT_DIARY_CAPACITY, DIARY_KINDS, DIARY_KIND_ORDER, atCapacity, daysBetween, shiftDate,
+  type DayLoad, type DiaryKind,
+} from '../../lib/diaryPriority.ts'
+import { diaryReserveOf, selfBookingLimit } from '../../lib/collectorGrade.ts'
+import { diarise } from '../../lib/diary.ts'
+import { setReminder } from '../../lib/reminders.ts'
+import {
+  REMINDER_PRESETS, atDayAndTime, clockTime, dueAt, whenItLands,
+} from '../../lib/reminderTime.ts'
+import { addWorkingDays } from '../../lib/workingDays.ts'
+import { DictateButton } from '../ui/Dictate'
+import { clockToday } from '../../lib/clock.ts'
+
+/**
+ * When does this account come back?
+ *
+ * ONE BOX FOR BOTH SCALES, at the firm's instruction — the action row had grown to ten buttons
+ * and two of them were asking the same question. "Ring me back in an hour" and "I'll call you on
+ * the fifth" are the same sentence from the debtor's side; only the horizon differs, and the
+ * horizon is exactly what this box is for.
+ *
+ *   LATER TODAY is a reminder. It pops on screen wherever you are and has to be answered. It is
+ *   not in anybody's diary and it does not survive the day, because an hour is not a day.
+ *
+ *   ON A DAY is the diary: the queue somebody sits down to work, ordered by the priority ladder
+ *   and counted by a team leader.
+ *
+ * The day is the default because it is the common case, and because the consequence of getting
+ * it wrong is smaller: a diary entry waits, a reminder interrupts.
+ *
+ * Either way it lands on whoever is doing it. Moving work to somebody else is escalation, not
+ * diarising — see the note where the owner picker used to be.
+ */
+export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaultOwnerId, onClose, onDone }: {
+  accountId: string
+  /** How the account reads in the confirmation: "Piet Pompies · BF-10023". */
+  accountLabel: string
+  /** Warns if the chosen date is past it, or close. Null for an account with no date on file. */
+  prescriptionDate: string | null
+  /** Whose diary to put it in. Defaults to the person doing the diarising. */
+  defaultOwnerId?: string | null
+  onClose: () => void
+  onDone: () => void | Promise<void>
+}) {
+  const { currentUser } = useAuth()
+  const { users } = useAppStore()
+
+  const today = clockToday()
+  // Always the person doing the diarising. See the note where the picker used to be.
+  const ownerId = defaultOwnerId ?? currentUser?.id ?? null
+  // Five working days out: far enough that a debtor has had time to do what they said, near
+  // enough that nothing goes cold. The agent overrides it constantly, which is the point.
+  const [mode, setMode] = useState<'day' | 'today'>('day')
+  const [dueOn, setDueOn] = useState(() => addWorkingDays(today, 5))
+  const [kind, setKind] = useState<DiaryKind>('review')
+  const [reason, setReason] = useState('')
+  /** Minutes out, for a reminder today. An hour is what a debtor says most often. */
+  const [minutes, setMinutes] = useState(60)
+  const [custom, setCustom] = useState('')
+  /** Which day the reminder is on. Today unless somebody picks otherwise. */
+  const [remindOn, setRemindOn] = useState(today)
+  /*
+   * How full the chosen diary day already is, reported up by the calendar.
+   *
+   * Null until the counts land. The warning below is deliberately silent in that gap: a box that
+   * says nothing and then says "already full" is better than one that says "there is room" and
+   * then contradicts itself while somebody is reading it.
+   */
+  const [dayFull, setDayFull] = useState<DayLoad | null>(null)
+  /** Has the agent read the over-capacity warning and gone ahead anyway? */
+  const [acceptedOver, setAcceptedOver] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const owner = users.find((u) => u.id === ownerId)
+  /*
+   * THE SELF-BOOKING LIMIT, NOT THE WHOLE DAY.
+   *
+   * The firm's rule: a clerk who works 50 accounts a day may only diarise 40 of them himself,
+   * leaving 10 for whatever a team leader hands him. So the warning here fires at 40 — and the
+   * distributor in handOut.ts still fills all 50, which is the only reason the slots are held
+   * back at all. Warning at the full capacity would let an agent's own bookings eat the room a
+   * hand-out needs, and the first anybody would know of it is a plan that runs a week past the
+   * window it was asked for.
+   *
+   * Reserving nothing (a reserve of 0) is a real choice and gives back the whole day.
+   */
+  const fullDay = owner?.diaryCapacity && owner.diaryCapacity > 0
+    ? owner.diaryCapacity : DEFAULT_DIARY_CAPACITY
+  const reserve = diaryReserveOf(owner?.diaryReserve)
+  const capacity = selfBookingLimit(fullDay, reserve)
+
+  /*
+   * A day at or past the agent's own working rate.
+   *
+   * WARNED, NEVER REFUSED, at the firm's instruction. An agent who told the debtor "the 25th"
+   * gets the 25th however full it is — they made a promise on a call and the app does not get to
+   * overrule it. What the app can do is make sure nobody fills a day to forty by accident, one
+   * account at a time, each booking looking reasonable on its own.
+   *
+   * The rate is the agent's own number, set on the diary page. See DiaryCapacity.
+   */
+  const overCapacity = mode === 'day' && dayFull !== null && dayFull.date === dueOn
+    && atCapacity(dayFull)
+  const onDayLoad = useCallback((l: DayLoad) => setDayFull(l), [])
+  const chooseDay = useCallback((d: string) => {
+    setDueOn(d)
+    // A fresh day is a fresh decision — an acceptance carried over from the last one would let
+    // the second booking through without the warning ever being read.
+    setAcceptedOver(false)
+  }, [])
+
+  /*
+   * Prescription is the one deadline that cannot be argued with: after it the debt cannot be
+   * enforced at all, so a diary date on the far side of it books work on something that will no
+   * longer exist. Warned rather than blocked — there are real reasons to diarise a prescribed
+   * account (a written acknowledgement, a client instruction) and the agent knows them.
+   */
+  const daysToPrescription = prescriptionDate ? daysBetween(dueOn, prescriptionDate) : null
+  const prescriptionWarning = daysToPrescription === null ? null
+    : daysToPrescription < 0
+      ? `This account prescribes on ${longDate(prescriptionDate as string)} — before the day you have chosen. By then it cannot be enforced.`
+      : daysToPrescription <= 30
+        ? `Only ${daysToPrescription} day${daysToPrescription === 1 ? '' : 's'} between that day and prescription on ${longDate(prescriptionDate as string)}.`
+        : null
+
+  /*
+   * Where a reminder lands. Null while there is nothing usable, which disables the button.
+   *
+   * The presets are relative to NOW, so they only mean anything on today — "in 15 minutes" on a
+   * day next week is not a sentence. Pick another day and the clock time becomes the only way to
+   * say when, which is why it stops being optional there.
+   */
+  const remindingToday = remindOn === today
+  const remindAt = mode !== 'today' ? null
+    : remindingToday && !custom ? dueAt(minutes)
+      : custom ? atDayAndTime(remindOn, custom) : null
+  const customBad = mode === 'today' && custom !== '' && remindAt === null
+
+  async function save() {
+    setBusy(true)
+    setError(null)
+    try {
+      if (mode === 'today') {
+        if (!remindAt || !ownerId) return
+        await setReminder({
+          accountId,
+          ownerId,
+          minutes,
+          at: remindAt,
+          body: reason.trim() || `Come back to ${accountLabel.split(' · ')[0]}`,
+          createdBy: currentUser?.id ?? null,
+        })
+        await onDone()
+        onClose()
+        return
+      }
+      await diarise({
+        accountId,
+        ownerId,
+        dueOn,
+        kind,
+        reason,
+        alsoNoteOnAccount: true,
+        actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+      })
+      await onDone()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="When does this come back?" onClose={onClose} width={520}>
+      <div className="space-y-3">
+        {/*
+          The two horizons, side by side, because the debtor's sentence is the same either way
+          and only the scale differs. Two buttons rather than a dropdown: there are exactly two,
+          and which one you are on has to be obvious at a glance — the consequence of being on
+          the wrong one is a reminder that interrupts a colleague's afternoon, or a callback that
+          never happens.
+        */}
+        <div className="flex gap-1 p-0.5 rounded-lg bg-slate-100">
+          {([
+            ['day', 'In the diary'],
+            ['today', 'A reminder'],
+          ] as const).map(([value, label]) => (
+            <button key={value} type="button" onClick={() => setMode(value)}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm transition-colors ${
+                mode === value ? 'bg-white shadow-sm font-medium text-navy-950' : 'text-slate-500 hover:text-slate-700'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/*
+          The account, and nothing else. Each side used to carry a sentence explaining what it
+          did — which the footer of this same box already says, in the present tense and with the
+          actual time in it. One of the two had to go and it was not the one with the time.
+        */}
+        <p className="text-xs text-slate-400 -mt-1">{accountLabel}</p>
+
+        {mode === 'today' ? (
+          <>
+            {/*
+              The presets come first and only work on today, because they are relative to now —
+              "in 15 minutes" on a day next week is not a sentence. They disappear rather than
+              grey out when another day is chosen: a row of dead buttons invites a second attempt
+              at pressing them.
+            */}
+            {remindingToday && (
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
+                <span className="text-xs font-medium text-slate-500">Remind me in</span>
+                {/*
+                  PILLS, ONE LINE EACH. They were boxes two lines tall — the interval above the
+                  clock time it worked out to — five of them in a grid, and against the calendar
+                  underneath they read as the heavy half of the box when they are the throwaway
+                  half. This is the control somebody hits without thinking while a debtor is
+                  still on the line.
+                */}
+                {REMINDER_PRESETS.map((p) => (
+                  <button key={p.minutes} type="button"
+                    onClick={() => { setMinutes(p.minutes); setCustom('') }}
+                    /*
+                      The clock time each one works out to has left the pill. It is said once, in
+                      the footer, for the one actually chosen: "Pops up at 15:40". Printed on all
+                      five it was four speculative times and one real one, and it cost a second
+                      line on every pill to show them.
+                    */
+                    title={`Pops up at ${clockTime(dueAt(p.minutes))}`}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                      !custom && minutes === p.minutes
+                        ? 'border-gold-500 bg-gold-400 text-navy-950 font-medium'
+                        : 'border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/*
+              One line, as a sentence: "or at 15:40". It was a labelled field of its own, which
+              is a heading and a full-width box to say what four words say.
+            */}
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span>{remindingToday ? 'or at' : 'At'}</span>
+              {/* Sized by the wrapper: inputClass carries w-full, which wins over a width set here. */}
+              <span className="w-[5.25rem] shrink-0">
+                <input className={`${inputClass} py-1.5 px-2 text-center tabular-nums`} placeholder="15:40"
+                  value={custom} onChange={(e) => setCustom(e.target.value)} />
+              </span>
+              {customBad && (
+                // A moment already gone would pop the instant it saved, which reads as a fault.
+                <span className="text-[11px] text-[var(--c-rust-deep)]">
+                  {remindingToday
+                    ? 'Not a time later today. Use 24-hour, like 15:40.'
+                    : 'Use 24-hour, like 15:40.'}
+                </span>
+              )}
+            </div>
+
+            {/*
+              OPEN, NOT BEHIND A BUTTON. It was folded away for a while on the reasoning that a
+              reminder is almost always for today — true, and beside the point. The calendar is
+              the part of this box that reads well; it was the row of preset boxes above it that
+              was heavy, and folding the good half away to make room was the wrong cut.
+
+              The same calendar the diary uses, with the per-day counts turned off — a reminder
+              books nothing, and a number under the date would say it did.
+            */}
+            <div>
+              <span className="block text-xs font-medium text-slate-500 mb-1.5">Which day</span>
+              <DiaryDatePicker
+                ownerId={ownerId}
+                capacity={null}
+                showLoad={false}
+                value={remindOn}
+                onChange={(d) => {
+                  setRemindOn(d)
+                  // Presets are relative to now, so another day has no preset to fall back on.
+                  if (d !== today && !custom) setCustom('09:00')
+                }}
+                today={today}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+        <div>
+          <span className="block text-xs font-medium text-slate-500 mb-1.5">When</span>
+          <DiaryDatePicker
+            ownerId={ownerId}
+            capacity={capacity}
+            value={dueOn}
+            onChange={chooseDay}
+            today={today}
+            onLoad={onDayLoad}
+          />
+        </div>
+
+        {/*
+          Said in accounts, not in percentages, and it names the agent's own number back to them
+          so the sentence is arguable-with: if 30 is wrong, the place to fix it is the diary page,
+          not this booking.
+        */}
+        {overCapacity && dayFull && (
+          <p className="flex items-start gap-2 text-xs text-[var(--c-gold-dark)] bg-[var(--tint-gold)] rounded-lg px-3 py-2">
+            <AlertTriangle size={14} className="shrink-0 mt-px" />
+            {/*
+              The sentence has to stay TRUE once a reserve is set. dayFull.capacity is now the
+              self-booking limit, not the working day — saying "you work 40 a day" to somebody who
+              works 50 is a small lie that makes the whole warning untrustworthy, and the reserve
+              is exactly the thing they would query.
+            */}
+            <span>
+              {longDate(dueOn)} already has {dayFull.booked} account{dayFull.booked === 1 ? '' : 's'} on
+              it, and this one makes {dayFull.booked + 1}.{' '}
+              {reserve > 0
+                ? `You book ${capacity} of your ${fullDay} a day yourself — the other ${reserve} are kept for work sent to you.`
+                : `You work ${fullDay} a day.`}
+            </span>
+          </p>
+        )}
+
+        {prescriptionWarning && (
+          <p className="flex items-start gap-2 text-xs text-[var(--c-rust-deep)] bg-[var(--tint-rust-deep)] rounded-lg px-3 py-2">
+            <AlertTriangle size={14} className="shrink-0 mt-px" />
+            <span>{prescriptionWarning}</span>
+          </p>
+        )}
+
+        <FormField label="What kind of work">
+          <select value={kind} onChange={(e) => setKind(e.target.value as DiaryKind)} className={inputClass}>
+            {DIARY_KIND_ORDER.map((k) => (
+              <option key={k} value={k}>{DIARY_KINDS[k].label}</option>
+            ))}
+          </select>
+          {/*
+            The ladder is not obvious from the labels, so the box says what choosing this one
+            does. An agent who knows that "Broken PTP" jumps the queue will use it honestly;
+            one who does not will pick whatever is at the top.
+          */}
+          <span className="block text-[11px] text-slate-400 mt-1.5">{DIARY_KINDS[kind].why}</span>
+        </FormField>
+          </>
+        )}
+
+        {/*
+          Optional, at the firm's instruction. It was required, and required is wrong: sometimes
+          the date IS the whole thought ("ring him Tuesday"), and a mandatory box only teaches
+          people to type a full stop. Where somebody does write one it lands on the account's
+          timeline too, so it is findable by whoever reads the account rather than the diary.
+        */}
+        {/* One field, both sides: on a day it is the note, later today it is what the nudge says. */}
+        <FormField label={mode === 'today' ? 'What for' : 'Note'}>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            placeholder={mode === 'today'
+              ? 'Ring him back — he is in a meeting until three.'
+              : 'Said he would pay R2 000 on the 25th once his commission is in.'}
+            className={`${inputClass} resize-none`}
+          />
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            {/* Talk it instead of typing it. Free, built into the browser — see Dictate.tsx. */}
+            <DictateButton size="small" value={reason} onChange={setReason} />
+            <span className="text-[11px] text-slate-400">
+              {mode === 'today'
+                ? 'Optional — it is what the popup says.'
+                : 'Goes on the account\u2019s timeline as well as the diary.'}
+            </span>
+          </div>
+        </FormField>
+
+        {/*
+          NO "whose diary" PICKER, at the firm's instruction: one person does not put work into
+          another person's diary. It lands in yours, and if it belongs to somebody else — a team
+          leader, or the liaison with a recommendation for litigation — that is an escalation,
+          which is a different act with a different record. See the Dispute action on the account.
+        */}
+
+        {error && <p className="text-sm text-negative-700">{error}</p>}
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-slate-400">
+            {mode === 'today'
+              ? remindAt ? `Pops up ${whenItLands(remindAt)}, on whatever page you are on.` : 'Pick a time.'
+              : `Lands in your diary for ${longDate(dueOn)}.`}
+          </span>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
+              Cancel
+            </button>
+            {/*
+              The confirmation IS the button. A second modal on top of this one to ask "are you
+              sure" is a box somebody dismisses without reading; a button that has changed its
+              own words to "Book it anyway", next to a warning saying why, cannot be pressed by
+              habit — the thing you were about to press is no longer there.
+            */}
+            <button type="button"
+              onClick={() => { if (overCapacity && !acceptedOver) setAcceptedOver(true); else void save() }}
+              disabled={busy || (mode === 'today' && !remindAt)}
+              className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg disabled:opacity-50 ${
+                overCapacity && !acceptedOver
+                  ? 'bg-[var(--c-gold-dark)] text-white hover:opacity-90'
+                  : 'bg-navy-950 text-white hover:bg-navy-900'}`}>
+              {busy
+                ? <Loader2 size={14} className="animate-spin" />
+                : mode === 'today' ? <AlarmClock size={14} />
+                  : overCapacity && !acceptedOver ? <AlertTriangle size={14} /> : <CalendarClock size={14} />}
+              {mode === 'today' ? 'Remind me'
+                : overCapacity && !acceptedOver ? 'Book it anyway' : 'Diarise'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/** The default a "call me back" style action should use: a week's working days out. */
+export function defaultDiaryDate(today: string): string {
+  return addWorkingDays(today, 5)
+}
+
+export { shiftDate }

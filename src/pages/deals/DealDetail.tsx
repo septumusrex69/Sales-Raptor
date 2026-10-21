@@ -1,8 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload, Trash2, Mail, Building2 } from 'lucide-react'
+import {
+  ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload,
+  Trash2, Mail, MessageSquare, Building2,
+  FileSignature,
+} from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import { SendMandateModal } from '../../components/leads/SendMandateModal'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
@@ -15,9 +20,25 @@ import type { ActivityType, ProposalStatus, TaskType } from '../../types'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { WriteButton } from '../../components/email/MessageActions'
+import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
+import { DashboardHero } from '../../components/dashboard/DashboardHero'
+import { HeroOwner } from '../../components/RecordOwner'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordActionsMore, RecordFigure,
+  RecordFigures, RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
+  RecordTabs, useRecordLayout,
+} from '../../components/record/RecordShell'
+import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmWhatsAppButton } from '../../components/record/WhatsAppButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
+import {
+  RecordComment, RecordCommentFact, RecordCommentSummary,
+} from '../../components/record/RecordComment'
 import type { WonDealDetails } from '../../store/AppStore'
+import { clockNow } from '../../lib/clock.ts'
 
 
 interface MockDocument {
@@ -26,6 +47,8 @@ interface MockDocument {
   uploadedAt: string
   size: string
 }
+
+type DealTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks' | 'Documents'
 
 export function DealDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -58,6 +81,14 @@ export function DealDetail() {
   const deal = deals.find((d) => d.id === id)
   const canEdit = canEditOwned(currentUser, deal?.ownerId)
 
+  /*
+   * Which tab, and how the Overview is arranged. The layout key is per page type rather than per
+   * deal: it is a preference about eyes, not about a piece of business.
+   */
+  const [tab, setTab] = useState<DealTab>('Overview')
+  const [layout, chooseLayout] = useRecordLayout('raptor.deal.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
+
   const [editOpen, setEditOpen] = useState(false)
   const [wonOpen, setWonOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
@@ -65,11 +96,26 @@ export function DealDetail() {
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
+  const [mandateOpen, setMandateOpen] = useState(false)
+  /**
+   * Answering a message that is already on the deal.
+   *
+   * THE DEAL HAD NO REPLY AT ALL. The card listed the conversation and offered no way to take
+   * part in it, so answering a client meant leaving for the client page or for Outlook. The firm
+   * asked for the same actions everywhere: "the same functions for the emailing inside the leads,
+   * the deals, the clients as well."
+   */
+  const [replyTarget, setReplyTarget] = useState<ComposeOpening | null>(null)
+  /* Every address that is us — see the same note on the client page. */
+  const mine = useMemo(
+    () => [currentUser?.email].filter((a): a is string => !!a),
+    [currentUser?.email],
+  )
   const [showClientEmails, setShowClientEmails] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [docs, setDocs] = useState<MockDocument[]>([
-    { id: 'doc1', name: 'Signed_MSA.pdf', uploadedAt: new Date().toISOString(), size: '212 KB' },
+    { id: 'doc1', name: 'Signed_MSA.pdf', uploadedAt: clockNow().toISOString(), size: '212 KB' },
   ])
 
   const dealActivities = useMemo(() => activities.filter((a) => a.dealId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()), [activities, id])
@@ -123,6 +169,11 @@ export function DealDetail() {
 
   const visibleEmails = showClientEmails ? clientEmails : dealEmails
   const dealTasks = useMemo(() => tasks.filter((t) => t.dealId === id), [tasks, id])
+  /** Work still outstanding, which is what "open tasks" means to somebody reading a deal. */
+  const openDealTasks = useMemo(
+    () => dealTasks.filter((t) => t.status !== 'Completed' && t.status !== 'Cancelled').length,
+    [dealTasks],
+  )
   const dealProposals = useMemo(() => proposals.filter((p) => p.dealId === id), [proposals, id])
 
   if (!deal) {
@@ -139,276 +190,498 @@ export function DealDetail() {
   const isHandover = kind === 'Handover'
   const isClosed = deal.stage === 'Won' || deal.stage === 'Rejected'
 
+  /*
+   * What has been SENT, in the order it goes out.
+   *
+   * These three dates lived in the Deal Information panel, which is the last place somebody looks
+   * and the first thing they want to know: has the quote gone? has the mandate? has the invoice?
+   */
+  const paperTrail = [
+    deal.quotationSentAt && `Quotation ${formatDate(deal.quotationSentAt)}`,
+    deal.mandateSentAt && `Mandate ${formatDate(deal.mandateSentAt)}`,
+    deal.invoiceSentAt && `Invoice ${formatDate(deal.invoiceSentAt)}`,
+  ].filter(Boolean) as string[]
+
+  /*
+   * The contact's numbers, so a deal can be worked from the deal.
+   *
+   * A deal has no telephone of its own — the person does. Mobile before office: a mobile is
+   * answered by them, a switchboard is answered by somebody else.
+   */
+  const contactNumbers = [
+    ...(contact?.mobile ? [{ label: 'Mobile', value: contact.mobile }] : []),
+    ...(contact?.phone ? [{ label: 'Office', value: contact.phone }] : []),
+  ]
+
+  /*
+   * The panels, built once and placed by whichever layout is chosen — the same shape the
+   * Account, Lead and Client pages use. A prop added to one arrangement cannot be forgotten in
+   * the other two, and that bug is invisible until somebody switches layout.
+   */
+  /** What this deal is, in fields. */
+  const infoPanel = (
+    <Card className="@container">
+      <CardHeader title="Deal Information" />
+      {/* Laid out to the CARD's width, not the window's. `md:` asks about the window, so this
+          put three columns inside a 246px side column and squeezed every value to 80px. */}
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
+        <Field label="Deal Name" value={deal.name} />
+        <Field label="Date Created" value={deal.createdAt ? formatDate(deal.createdAt) : undefined} />
+        <Field label="Company" value={company?.name} />
+        <Field label="Contact" value={contact ? `${contact.firstName} ${contact.lastName}` : undefined} />
+        <Field label="Owner" value={userById(deal.ownerId)?.name} />
+        <Field label="Stage" value={deal.stage} />
+        <Field label="Probability" value={`${deal.probability}%`} />
+        <Field label="Expected Close Date" value={formatDate(deal.expectedCloseDate)} />
+        <Field label="Service" value={deal.service} />
+        <Field label="Lead Source" value={deal.source} />
+        <Field label="Competitor" value={deal.competitor} />
+        {deal.rejectionReason && <Field label="Rejection Reason" value={deal.rejectionReason} />}
+        <Field label="Weighted Value" value={formatCurrency(Math.round((deal.value * deal.probability) / 100))} />
+        {deal.quotationSentAt && <Field label="Quotation Sent" value={formatDate(deal.quotationSentAt)} />}
+        {deal.mandateSentAt && <Field label="Mandate Sent" value={formatDate(deal.mandateSentAt)} />}
+        {deal.invoiceSentAt && <Field label="Invoice Sent" value={formatDate(deal.invoiceSentAt)} />}
+        {deal.handoverAmount != null && <Field label="Agreed Book" value={formatCurrency(deal.handoverAmount)} />}
+        {deal.accountsCount != null && <Field label="Number of Accounts / Matters" value={deal.accountsCount.toString()} />}
+        {deal.contractStartDate && <Field label="Starting Date" value={formatDate(deal.contractStartDate)} />}
+      </dl>
+      {deal.notes && (
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
+          <p className="text-sm text-slate-600 whitespace-pre-line">{deal.notes}</p>
+        </div>
+      )}
+    </Card>
+  )
+
+  /** Its own tab: a thread grows without limit and does not belong on an overview. */
+  const emailsPanel = (
+    <Card>
+      <CardHeader
+        title="Emails"
+        subtitle={
+          showClientEmails
+            ? `${visibleEmails.length} message${visibleEmails.length === 1 ? '' : 's'} across the whole client`
+            : `${dealEmails.length} message${dealEmails.length === 1 ? '' : 's'} on this deal`
+        }
+        action={
+          <div className="flex items-center gap-2">
+            {company && (
+              <button
+                onClick={() => setShowClientEmails((v) => !v)}
+                aria-pressed={showClientEmails}
+                title="Show every email on this client, including messages raised from its other deals"
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
+                  showClientEmails ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Building2 size={12} /> Whole client
+              </button>
+            )}
+            <WriteButton onClick={() => setComposeOpen(true)} />
+            <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+          </div>
+        }
+      />
+      {visibleEmails.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          {showClientEmails ? 'No emails on this client yet.' : 'No emails on this deal yet.'}
+        </p>
+      ) : (
+        <EmailActivityList
+          activities={applyRowLimitKeeping(visibleEmails, emailLimit, focusedEmailId)}
+          focusId={focusedEmailId}
+          mine={mine}
+          onAnswer={(a, mode) => {
+            /*
+             * The deal's own contact leads. `recipients` carries addresses and labels, not ids,
+             * so there is nothing to match an activity's contact_id against here -- and the deal
+             * has one contact by definition, which is who the conversation is with.
+             */
+            const theirAddress = contact?.email ?? recipients[0]?.email ?? null
+            if (!theirAddress && mode !== 'forward') return
+            setReplyTarget(openingFor(
+              {
+                rawSubject: a.subject,
+                fromName: null,
+                fromAddress: theirAddress,
+                to: a.emailToRecipients ?? [],
+                cc: a.emailCcRecipients ?? [],
+                body: a.notes ?? '',
+                occurredAt: a.activityDate,
+                messageId: a.emailMessageId ?? null,
+              },
+              mode,
+              mine,
+            ))
+          }}
+        />
+      )}
+    </Card>
+  )
+
+  /** Everything that is not an email. */
+  const notesPanel = (
+    <Card padded={false}>
+      <div className="p-5 flex items-center justify-between">
+        <h3 className="font-semibold text-slate-800 text-[15px]">Notes &amp; Updates</h3>
+        <div className="flex items-center gap-3">
+          <RowLimitSelect value={noteLimit} onChange={setNoteLimit} />
+          <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
+            <Plus size={13} /> Add Note
+          </button>
+        </div>
+      </div>
+      {/* Everything that happened to this deal, not only what someone typed. "When did the
+          quotation go out?" is answered here, next to the notes about it, rather than
+          being a date on its own in another tab — and the same list, in the same shape, is
+          what a client's page shows. */}
+      <div className="px-5 pb-5">
+        {dealActivities.length === 0 ? (
+          <p className="text-sm text-slate-400">Nothing recorded yet.</p>
+        ) : (
+          <NoteActivityList activities={dealActivities} limit={noteLimit} />
+        )}
+      </div>
+    </Card>
+  )
+
+  /** Its own tab as well: a task list is work, not context. */
+  const tasksPanel = (
+    <Card padded={false}>
+      <div className="p-5 flex items-center justify-between">
+        <h3 className="font-semibold text-slate-800 text-[15px]">Tasks</h3>
+        <button onClick={() => setTaskOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
+          <Plus size={13} /> Add Task
+        </button>
+      </div>
+      {/* One line a task — the checking list's density, which the firm asked for on every list.
+          The type and due date ride after the title instead of making each row two. */}
+      <div className="px-5 pb-5">
+        {dealTasks.length === 0 && <p className="text-sm text-slate-400">No tasks yet.</p>}
+        {dealTasks.map((t) => (
+          <div key={t.id} className="flex items-center gap-2.5 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={t.status === 'Completed'}
+              onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? clockNow().toISOString() : undefined })}
+              className="w-3.5 h-3.5 accent-brand-600 shrink-0"
+            />
+            <span className={`truncate min-w-0 font-medium ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`} title={t.title}>{t.title}</span>
+            <span className="ml-auto shrink-0 text-slate-400">{t.type} · Due {formatDate(t.dueDate)}</span>
+            <UserAvatar userId={t.ownerId} size={18} />
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+
+  /** The quotes that have gone out. */
+  const proposalsPanel = (
+    <Card padded={false}>
+      <div className="p-5 flex items-center justify-between">
+        <h3 className="font-semibold text-slate-800 text-[15px]">Quotes / Proposals</h3>
+        <button onClick={() => setProposalOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
+          <Plus size={13} /> Create Proposal
+        </button>
+      </div>
+      {/* A row a proposal, not a card a proposal: the checking list's shape, which the firm
+          asked for on every list. The description becomes the service's tooltip and its own
+          truncated column; the six status buttons shrink to fit the row and scroll sideways
+          with it on an iPad rather than wrapping under it. */}
+      <div className="px-5 pb-5">
+        {dealProposals.length === 0 && <p className="text-sm text-slate-400">No proposals yet.</p>}
+        {dealProposals.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full list-table whitespace-nowrap">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-400">
+                  <th className="px-2 py-1.5 text-left font-medium">Service</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Valid until</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Price</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Status</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Description</th>
+                  <th className="px-2 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {dealProposals.map((p) => (
+                  <tr key={p.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <td className="px-2 py-1.5 font-medium text-slate-700">{p.service}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{formatDate(p.validityDate)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-semibold text-slate-800">{formatCurrency(p.pricing)}</td>
+                    <td className="px-2 py-1.5"><ProposalStatusBadge status={p.status} /></td>
+                    <td className="px-2 py-1.5 text-slate-500">
+                      {p.description ? <span className="block max-w-[16rem] truncate" title={p.description}>{p.description}</span> : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex gap-1">
+                        {(['Draft', 'Sent', 'Viewed', 'Accepted', 'Declined', 'Expired'] as ProposalStatus[]).map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => updateProposal(p.id, { status: s })}
+                            className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                              p.status === s ? 'bg-brand-600 text-white border-brand-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            Mark {s}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+
+  /** What is attached to the deal. */
+  const documentsPanel = (
+    <Card padded={false}>
+      <div className="p-5 flex items-center justify-between">
+        <h3 className="font-semibold text-slate-800 text-[15px]">Documents</h3>
+        <button
+          onClick={() =>
+            setDocs((prev) => [{ id: `doc${prev.length + 1}`, name: `Document_${prev.length + 1}.pdf`, uploadedAt: clockNow().toISOString(), size: `${(Math.random() * 500 + 50).toFixed(0)} KB` }, ...prev])
+          }
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
+        >
+          <Upload size={13} /> Upload Document
+        </button>
+      </div>
+      <div className="px-5 pb-5">
+        {docs.map((d) => (
+          <div key={d.id} className="flex items-center gap-2.5 py-1 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+            <FileText size={14} className="text-slate-400 shrink-0" />
+            <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+            <span className="ml-auto shrink-0 text-slate-400">{d.size} · Uploaded {formatDate(d.uploadedAt)}</span>
+            <button onClick={() => setDocs((prev) => prev.filter((x) => x.id !== d.id))} className="p-1 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+
+  /** The dates, in the order they happened. */
+  const historyPanel = (
+    <Card padded={false}>
+      <div className="p-5">
+        <h3 className="font-semibold text-slate-800 text-[15px]">History</h3>
+      </div>
+      <div className="px-5 pb-5">
+        <HistoryRow label="Deal created" date={deal.createdAt} />
+        {dealActivities
+          .filter((a) => ['Deal Stage Change', 'Deal update', 'Deal Won', 'Deal Rejected'].includes(a.type))
+          .map((a) => (
+            <HistoryRow key={a.id} label={a.subject} date={a.activityDate} />
+          ))}
+        {deal.wonAt && <HistoryRow label="Deal marked Won" date={deal.wonAt} />}
+        {deal.rejectedAt && <HistoryRow label="Deal rejected" date={deal.rejectedAt} />}
+      </div>
+    </Card>
+  )
+
   return (
     <div className="space-y-5">
       <Link to="/deals" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
         <ArrowLeft size={15} /> Back to Deals
       </Link>
 
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-lg font-semibold text-slate-800">{deal.name}</h2>
-              <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5">
-                {kind}
-              </span>
-            </div>
-            <p className="text-sm text-slate-500 mt-1">
-              {company?.name}
-              {contact ? ` · ${contact.firstName} ${contact.lastName}` : ''}
-            </p>
-          </div>
-          <div className="text-right">
-            {/* A handover earns nothing at signature, so showing a deal value would be
-                inventing one. Its size is the book, and even that is what the client says
-                rather than what arrives. */}
-            <p className="text-xs text-slate-400">{isHandover ? 'Agreed Book' : 'Deal Value'}</p>
-            <p className="text-xl font-bold text-slate-800">
-              {isHandover
-                ? deal.handoverAmount != null
-                  ? formatCurrency(deal.handoverAmount)
-                  : '—'
-                : formatCurrency(deal.value)}
-            </p>
-            {isHandover && deal.accountsCount != null && (
-              <p className="text-xs text-slate-400">{deal.accountsCount} accounts</p>
-            )}
-            <div className="flex items-center gap-1.5 justify-end mt-1.5">
-              <UserAvatar userId={deal.ownerId} size={20} />
-              <span className="text-xs text-slate-500">{userById(deal.ownerId)?.name}</span>
-            </div>
-          </div>
-        </div>
+      {/*
+        The same band, figures, comment and action row every other record page wears.
 
-        <div className="flex flex-wrap items-center gap-2 mt-5 pt-4 border-t border-slate-100">
-          <div className="flex flex-wrap gap-2">
+        This page had none of it: a plain white card with the name and the value in it, then a
+        row of small buttons in a size nothing else used. The firm asked for one grammar across
+        the app, and a deal is where a lead becomes a client — the page you should least have to
+        relearn.
+      */}
+      <DashboardHero
+        eyebrow={`Deal \u00b7 ${kind}`}
+        title={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {deal.name}
+            <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
+          </span>
+        }
+        subtitle={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5">
+            {company && (
+              <Link to={`/companies/${company.id}`} className="text-gold-400 hover:underline">
+                {company.name}
+              </Link>
+            )}
+            {contact && (
+              <>
+                <span className="text-white/30">·</span>
+                <span>{contact.firstName} {contact.lastName}</span>
+              </>
+            )}
+          </span>
+        }
+      >
+        <HeroOwner ownerId={deal.ownerId} label="Owner" />
+      </DashboardHero>
+
+      <RecordFigures count={isHandover ? 5 : 4}>
+        {/* A handover earns nothing at signature, so showing a deal value would be inventing one.
+            Its size is the book — and even that is what the client says rather than what
+            arrives. */}
+        <RecordFigure
+          label={isHandover ? 'Agreed book' : 'Deal value'}
+          value={isHandover
+            ? deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '\u2014'
+            : formatCurrency(deal.value)}
+          note={isHandover ? 'what the client says they will hand over' : undefined}
+          strong
+        />
+        {isHandover && (
+          <RecordFigure label="Accounts"
+            value={deal.accountsCount != null ? String(deal.accountsCount) : '\u2014'}
+            note={deal.accountsCount == null ? 'not estimated yet' : 'on the mandate'} />
+        )}
+        <RecordFigureShell label="Stage">
+          <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
+        </RecordFigureShell>
+        <RecordFigure label="Expected close" value={formatDate(deal.expectedCloseDate)} small />
+        <RecordFigure label="Service" value={deal.service ?? '\u2014'} small />
+      </RecordFigures>
+
+      {/*
+        The two lines the next person needs, above the actions, exactly as on an account, a lead
+        and a client. The paperwork rides along with it: what has been sent and when is the thing
+        somebody actually opens a deal to find out, and it was buried in the panel below.
+      */}
+      <RecordComment
+        text={deal.mainComment}
+        at={deal.mainCommentAt}
+        placeholder="Where does this deal stand? Two lines is plenty."
+        onSave={(text) => updateDeal(deal.id, {
+          mainComment: text || undefined,
+          mainCommentAt: clockNow().toISOString(),
+          mainCommentBy: currentUser?.id,
+        })}
+        summary={(
+          <RecordCommentSummary>
+            <RecordCommentFact label="Paperwork">
+              {paperTrail.length > 0
+                ? paperTrail.map((p) => (
+                  <span key={p} className="text-xs px-2 py-0.5 rounded-md bg-white border border-slate-200">
+                    {p}
+                  </span>
+                ))
+                : <span className="text-slate-400">Nothing sent yet</span>}
+            </RecordCommentFact>
+            <RecordCommentFact label="Quotes / proposals">
+              {dealProposals.length === 0
+                ? <span className="text-slate-400">None yet</span>
+                : <span className="font-medium tabular-nums">{dealProposals.length}</span>}
+            </RecordCommentFact>
+            <RecordCommentFact label="Open tasks">
+              {openDealTasks === 0
+                ? <span className="text-slate-400">None</span>
+                : <span className="font-medium tabular-nums">{openDealTasks}</span>}
+            </RecordCommentFact>
+          </RecordCommentSummary>
+        )}
+      />
+
+      <Card>
+        <RecordActions>
+          {/*
+            The contact's own numbers, so a deal can be worked from the deal. Nothing is charged:
+            a client is the person paying us, not a debtor. See CrmCallButton.
+          */}
+          <CrmCallButton
+            numbers={contactNumbers}
+            to={{ dealId: deal.id, contactId: deal.contactId, companyId: deal.companyId }}
+            subject={contact ? `${contact.firstName} ${contact.lastName}` : deal.name}
+            className={`${ACTION_BASE} ${ACTION_ENABLED}`}
+          />
+          {/* WhatsApp beside Call (S9): opens WhatsApp itself; nothing is charged on the sales side. */}
+          <CrmWhatsAppButton numbers={contactNumbers} to={{ dealId: deal.id, contactId: deal.contactId, companyId: deal.companyId }} subject={contact ? `${contact.firstName} ${contact.lastName}` : deal.name} firstName={contact?.firstName} />
+          <RecordAction icon={MessageSquare} label="SMS"
+            onClick={contactNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+            title={contactNumbers.length > 0
+              ? 'Text the contact on this deal \u2014 nothing is charged'
+              : 'No phone number on this deal\u2019s contact'} />
+          <RecordAction icon={Mail} label="Email" onClick={() => setComposeOpen(true)}
+            title="Send from your connected mailbox" />
+          <RecordAction icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)}
+            title="Write on the timeline" />
+          {/* The mandate, sent to sign online (the firm, 18 Oct). Signing it wins this deal by itself;
+              "Mandate Signed" stays for a client who signed on paper. */}
+          {canEdit && isHandover && !isClosed && (
+            <RecordAction icon={FileSignature} label={deal.mandateSentAt || deal.stage === 'Mandate Sent' ? 'Resend mandate' : 'Send mandate'} primary onClick={() => setMandateOpen(true)}
+              title={deal.mandateSentAt || deal.stage === 'Mandate Sent' ? 'Send the agreement again, with a new sign-online link (the firm: "he says send it again")' : 'Email the debt collection agreement to sign online'} />
+          )}
+          {canEdit && (
+            <RecordAction icon={CheckCircle2} label={isHandover ? 'Mandate Signed' : 'Mark Won'} primary={!isHandover || isClosed}
+              onClick={isClosed ? undefined : () => setWonOpen(true)}
+              title={isClosed ? 'This deal is already closed.' : undefined} />
+          )}
+
+          <RecordActionsMore>
+            <RecordMoreAction icon={CheckSquare} label="Create task" onClick={() => setTaskOpen(true)} />
             {canEdit && !isClosed && !isHandover && !deal.quotationSentAt && (
-              <ActionButton icon={FileText} label="Quotation Sent" onClick={() => logDealDocument(deal.id, 'quotation')} />
+              <RecordMoreAction icon={FileText} label="Quotation sent" onClick={() => logDealDocument(deal.id, 'quotation')} />
             )}
             {canEdit && !isClosed && isHandover && !deal.mandateSentAt && (
-              <ActionButton icon={FileText} label="Mandate Sent" onClick={() => logDealDocument(deal.id, 'mandate')} />
+              <RecordMoreAction icon={FileText} label="Mandate sent" onClick={() => logDealDocument(deal.id, 'mandate')} />
             )}
             {canEdit && !deal.invoiceSentAt && !isHandover && deal.stage === 'Won' && (
-              <ActionButton icon={Send} label="Invoice Sent" onClick={() => logDealDocument(deal.id, 'invoice')} />
+              <RecordMoreAction icon={Send} label="Invoice sent" onClick={() => logDealDocument(deal.id, 'invoice')} />
             )}
-            {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
-            <ActionButton icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)} />
-            <ActionButton icon={CheckSquare} label="Create Task" onClick={() => setTaskOpen(true)} />
-            {canEdit && <ActionButton icon={CheckCircle2} label={isHandover ? 'Mandate Signed' : 'Mark Won'} tone="success" onClick={() => setWonOpen(true)} disabled={isClosed} />}
-            {canEdit && <ActionButton icon={XCircle} label="Mark Rejected" tone="danger" onClick={() => setRejectOpen(true)} disabled={isClosed} />}
-          </div>
-        </div>
+            {canEdit && <RecordMoreAction icon={Pencil} label="Edit deal" onClick={() => setEditOpen(true)} />}
+            {canEdit && (
+              <RecordMoreAction icon={XCircle} label="Mark rejected" danger
+                onClick={isClosed ? undefined : () => setRejectOpen(true)}
+                title={isClosed ? 'This deal is already closed.' : undefined} />
+            )}
+          </RecordActionsMore>
+        </RecordActions>
       </Card>
 
-        <Card>
-          <CardHeader title="Deal Information" />
-          <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 text-sm">
-            <Field label="Deal Name" value={deal.name} />
-            <Field label="Date Created" value={deal.createdAt ? formatDate(deal.createdAt) : undefined} />
-            <Field label="Company" value={company?.name} />
-            <Field label="Contact" value={contact ? `${contact.firstName} ${contact.lastName}` : undefined} />
-            <Field label="Owner" value={userById(deal.ownerId)?.name} />
-            <Field label="Stage" value={deal.stage} />
-            <Field label="Probability" value={`${deal.probability}%`} />
-            <Field label="Expected Close Date" value={formatDate(deal.expectedCloseDate)} />
-            <Field label="Service" value={deal.service} />
-            <Field label="Lead Source" value={deal.source} />
-            <Field label="Competitor" value={deal.competitor} />
-            {deal.rejectionReason && <Field label="Rejection Reason" value={deal.rejectionReason} />}
-            <Field label="Weighted Value" value={formatCurrency(Math.round((deal.value * deal.probability) / 100))} />
-            {deal.quotationSentAt && <Field label="Quotation Sent" value={formatDate(deal.quotationSentAt)} />}
-            {deal.mandateSentAt && <Field label="Mandate Sent" value={formatDate(deal.mandateSentAt)} />}
-            {deal.invoiceSentAt && <Field label="Invoice Sent" value={formatDate(deal.invoiceSentAt)} />}
-            {deal.handoverAmount != null && <Field label="Agreed Book" value={formatCurrency(deal.handoverAmount)} />}
-            {deal.accountsCount != null && <Field label="Number of Accounts / Matters" value={deal.accountsCount.toString()} />}
-            {deal.contractStartDate && <Field label="Starting Date" value={formatDate(deal.contractStartDate)} />}
-          </dl>
-          {deal.notes && (
-            <div className="mt-4 pt-4 border-t border-slate-100">
-              <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
-              <p className="text-sm text-slate-600 whitespace-pre-line">{deal.notes}</p>
-            </div>
-          )}
-        </Card>
+      {/*
+        Tabs over the detail, like every other record page. This was one scroll of seven cards:
+        information, then every email, then every note, then tasks, quotes, documents and the
+        history somebody scrolled past to reach. The long lists get their own tabs.
+      */}
+      <RecordTabs<DealTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Emails', label: 'Emails', count: dealEmails.length },
+          { id: 'Notes', label: 'Notes', count: dealActivities.length - dealEmails.length },
+          { id: 'Tasks', label: 'Tasks', count: dealTasks.length },
+          { id: 'Documents', label: 'Documents', count: docs.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+        /* Only on Overview, because it is the only tab with more than one panel to arrange. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
+      />
 
-      {/* Email on the deal, not only on the client. Working a deal means writing to the person
-          about that deal, and having to leave for the client page to do it is how a thread ends
-          up recorded against no deal at all. Every message logged here carries the deal, and
-          addActivity fills in the client from it, so it lands on both records. */}
-      <Card>
-        <CardHeader
-          title="Emails"
-          subtitle={
-            showClientEmails
-              ? `${visibleEmails.length} message${visibleEmails.length === 1 ? '' : 's'} across the whole client`
-              : `${dealEmails.length} message${dealEmails.length === 1 ? '' : 's'} on this deal`
-          }
-          action={
-            <div className="flex items-center gap-2">
-              {company && (
-                <button
-                  onClick={() => setShowClientEmails((v) => !v)}
-                  aria-pressed={showClientEmails}
-                  title="Show every email on this client, including messages raised from its other deals"
-                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
-                    showClientEmails ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <Building2 size={12} /> Whole client
-                </button>
-              )}
-              <button
-                onClick={() => setComposeOpen(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                <Mail size={12} /> Compose
-              </button>
-              <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
-            </div>
-          }
+      {tab === 'Overview' && (
+        <RecordLayout
+          layout={layout}
+          details={infoPanel}
+          /* Notes in the middle, and still on their own tab — both places, at the firm's asking. */
+          main={<div className="space-y-5">{proposalsPanel}{notesPanel}</div>}
+          side={[historyPanel]}
         />
-        {visibleEmails.length === 0 ? (
-          <p className="text-sm text-slate-400">
-            {showClientEmails ? 'No emails on this client yet.' : 'No emails on this deal yet.'}
-          </p>
-        ) : (
-          <EmailActivityList activities={applyRowLimitKeeping(visibleEmails, emailLimit, focusedEmailId)} focusId={focusedEmailId} />
-        )}
-      </Card>
+      )}
 
-        <Card padded={false}>
-          <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Notes &amp; Updates</h3>
-            <div className="flex items-center gap-3">
-              <RowLimitSelect value={noteLimit} onChange={setNoteLimit} />
-              <button onClick={() => setActivityOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
-                <Plus size={13} /> Add Note
-              </button>
-            </div>
-          </div>
-          {/* Everything that happened to this deal, not only what someone typed. "When did the
-              quotation go out?" is answered here, next to the notes about it, rather than
-              being a date on its own in another tab — and the same list, in the same shape, is
-              what a client's page shows. */}
-          <div className="px-5 pb-5">
-            {dealActivities.length === 0 ? (
-              <p className="text-sm text-slate-400">Nothing recorded yet.</p>
-            ) : (
-              <NoteActivityList activities={dealActivities} limit={noteLimit} />
-            )}
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Tasks</h3>
-            <button onClick={() => setTaskOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
-              <Plus size={13} /> Add Task
-            </button>
-          </div>
-          <div className="px-5 pb-5 divide-y divide-slate-50">
-            {dealTasks.length === 0 && <p className="text-sm text-slate-400">No tasks yet.</p>}
-            {dealTasks.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 py-2.5">
-                <input
-                  type="checkbox"
-                  checked={t.status === 'Completed'}
-                  onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? new Date().toISOString() : undefined })}
-                  className="w-4 h-4 accent-brand-600"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{t.title}</p>
-                  <p className="text-xs text-slate-400">{t.type} · Due {formatDate(t.dueDate)}</p>
-                </div>
-                <UserAvatar userId={t.ownerId} size={22} />
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Quotes / Proposals</h3>
-            <button onClick={() => setProposalOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline">
-              <Plus size={13} /> Create Proposal
-            </button>
-          </div>
-          <div className="px-5 pb-5 space-y-3">
-            {dealProposals.length === 0 && <p className="text-sm text-slate-400">No proposals yet.</p>}
-            {dealProposals.map((p) => (
-              <div key={p.id} className="border border-slate-100 rounded-xl p-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-700">{p.service}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Valid until {formatDate(p.validityDate)}</p>
-                  </div>
-                  <ProposalStatusBadge status={p.status} />
-                </div>
-                <p className="text-lg font-bold text-slate-800 mt-2">{formatCurrency(p.pricing)}</p>
-                {p.description && <p className="text-xs text-slate-500 mt-1">{p.description}</p>}
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  {(['Draft', 'Sent', 'Viewed', 'Accepted', 'Declined', 'Expired'] as ProposalStatus[]).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => updateProposal(p.id, { status: s })}
-                      className={`text-xs font-medium px-2.5 py-1 rounded-full border ${
-                        p.status === s ? 'bg-brand-600 text-white border-brand-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      Mark {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-800 text-[15px]">Documents</h3>
-            <button
-              onClick={() =>
-                setDocs((prev) => [{ id: `doc${prev.length + 1}`, name: `Document_${prev.length + 1}.pdf`, uploadedAt: new Date().toISOString(), size: `${(Math.random() * 500 + 50).toFixed(0)} KB` }, ...prev])
-              }
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
-            >
-              <Upload size={13} /> Upload Document
-            </button>
-          </div>
-          <div className="px-5 pb-5 divide-y divide-slate-50">
-            {docs.map((d) => (
-              <div key={d.id} className="flex items-center gap-3 py-2.5">
-                <FileText size={18} className="text-slate-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-700 truncate">{d.name}</p>
-                  <p className="text-xs text-slate-400">{d.size} · Uploaded {formatDate(d.uploadedAt)}</p>
-                </div>
-                <button onClick={() => setDocs((prev) => prev.filter((x) => x.id !== d.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5">
-            <h3 className="font-semibold text-slate-800 text-[15px]">History</h3>
-          </div>
-          <div className="px-5 pb-5 space-y-3">
-            <HistoryRow label="Deal created" date={deal.createdAt} />
-            {dealActivities
-              .filter((a) => ['Deal Stage Change', 'Deal update', 'Deal Won', 'Deal Rejected'].includes(a.type))
-              .map((a) => (
-                <HistoryRow key={a.id} label={a.subject} date={a.activityDate} />
-              ))}
-            {deal.wonAt && <HistoryRow label="Deal marked Won" date={deal.wonAt} />}
-            {deal.rejectedAt && <HistoryRow label="Deal rejected" date={deal.rejectedAt} />}
-          </div>
-        </Card>
+      {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
+      {tab === 'Tasks' && tasksPanel}
+      {tab === 'Documents' && documentsPanel}
 
 
 
@@ -418,6 +691,33 @@ export function DealDetail() {
 
 
 
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={contactNumbers}
+          target={{ dealId: deal.id }}
+          who={contact ? `${contact.firstName} ${contact.lastName}` : deal.name}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, dealId: deal.id, companyId: deal.companyId, contactId: deal.contactId })}
+        />
+      )}
+
+      {mandateOpen && (
+        <SendMandateModal
+          leadId={deal.leadId ?? null}
+          dealId={deal.id}
+          clientName={company?.name ?? deal.name.replace(/\s*-\s*collections mandate$/i, '')}
+          party={leads.find((l) => l.id === deal.leadId)?.party}
+          email={contact?.email ?? recipients[0]?.email ?? null}
+          contactName={contact ? `${contact.firstName} ${contact.lastName}`.trim() : null}
+          onClose={() => setMandateOpen(false)}
+          onSent={(subject, bodyText, note) => {
+            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id })
+            /* A line in Notes as well as the email in Emails: the firm looks for "mandate sent" there. */
+            addActivity({ type: 'Deal update', subject: note, dealId: deal.id, contactId: contact?.id })
+          }}
+        />
+      )}
       {composeOpen && (
         <ComposeEmailModal
           to={contact?.email ?? recipients[0]?.email}
@@ -428,6 +728,21 @@ export function DealDetail() {
             // Carries the deal; addActivity fills the client in from it, so one record lands on
             // both the deal's thread and the client's — no second copy. The Message-ID is what
             // lets the recipient's reply find its way back to this deal specifically.
+            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id, emailMessageId })
+          }
+        />
+      )}
+      {replyTarget && (
+        <ComposeEmailModal
+          to={replyTarget.to}
+          recipients={recipients}
+          initialCc={replyTarget.cc}
+          initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          inReplyTo={replyTarget.inReplyTo}
+          contextNote={`Filed against this deal${company ? ` and ${company.name}` : ''}${deal.leadId ? ", and the lead's history" : ''} — one record, visible on each.`}
+          onClose={() => setReplyTarget(null)}
+          onSent={(subject, bodyText, emailMessageId) =>
             addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id, emailMessageId })
           }
         />
@@ -467,9 +782,9 @@ export function DealDetail() {
 
 function HistoryRow({ label, date }: { label: string; date: string }) {
   return (
-    <div className="flex items-center justify-between text-sm border-b border-slate-50 pb-2.5 last:border-0">
-      <span className="text-slate-600">{label}</span>
-      <span className="text-xs text-slate-400">{formatDateTime(date)}</span>
+    <div className="flex items-center justify-between gap-3 text-[12.5px] whitespace-nowrap border-b border-slate-50 py-1.5 last:border-0">
+      <span className="text-slate-600 truncate min-w-0" title={label}>{label}</span>
+      <span className="text-slate-400 shrink-0 tabular-nums">{formatDateTime(date)}</span>
     </div>
   )
 }
@@ -486,14 +801,11 @@ function ProposalStatusBadge({ status }: { status: ProposalStatus }) {
   return <span className={`badge ${tone[status]}`}>{status}</span>
 }
 
-function ActionButton({ icon: Icon, label, onClick, tone, disabled }: { icon: typeof Pencil; label: string; onClick: () => void; tone?: 'success' | 'danger'; disabled?: boolean }) {
-  const toneClass = tone === 'success' ? 'border-emerald-100 text-emerald-600 hover:bg-emerald-50' : tone === 'danger' ? 'border-red-100 text-red-600 hover:bg-red-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-  return (
-    <button onClick={onClick} disabled={disabled} className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${toneClass}`}>
-      <Icon size={14} /> {label}
-    </button>
-  )
-}
+/*
+ * ActionButton used to live here — its own size, its own colours, its own idea of what disabled
+ * looks like. It is now RecordAction in components/record/RecordShell, shared with the Account,
+ * Lead and Client pages, because the firm asked for one grammar across the app.
+ */
 
 function Field({ label, value }: { label: string; value?: string }) {
   return (

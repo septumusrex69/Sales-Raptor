@@ -1,0 +1,1421 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { handoverRateBlock } from '../../lib/commissionRule'
+import {
+  AlertTriangle, ArrowRight, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X,
+} from 'lucide-react'
+import { Card, CardHeader } from '../ui/Card'
+import { ClientPicker } from '../ui/ClientPicker'
+import { DictateButton } from '../ui/Dictate'
+import { useAppStore } from '../../store/AppStore'
+import { useAuth } from '../../store/AuthContext'
+import {
+  discardHandover, fetchDiscardableBatches, type DiscardableBatch,
+} from '../../lib/handoverDiscard.ts'
+import { parseCsv } from '../../lib/csv'
+import { readXlsxRows } from '../../lib/xlsx'
+import { readSingleCsvFromZip } from '../../lib/zip'
+import {
+  displayDate, planHandover, type DateOrder, type HandoverPlan, parseMoney,
+} from '../../lib/handoverImport.ts'
+import { matchDocuments, type MatchPlan } from '../../lib/documentMatch.ts'
+import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
+import {
+  acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft, fetchOpenDrafts,
+  rejectDraftRow, saveDraft, setDraftRowValue, updateDraftRow,
+  type HandoverDraft, type JudgedDraft,
+} from '../../lib/handoverDraft'
+import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
+import { canDiscardHandover } from '../../lib/permissions.ts'
+import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts'
+import { suggestedDesk } from '../../lib/linkedAccount.ts'
+import { suggestedNote } from '../../lib/noteSuggestion.ts'
+import { downloadBytes } from '../../lib/xlsxWrite.ts'
+import {
+  fetchClientCommission, fetchExistingAccounts, fetchUnallocatedBatches,
+  type UnallocatedBatch,
+} from '../../lib/accountBook'
+import { formatCurrency } from '../../data/mockData'
+import { needsMandate } from '../../lib/mandateRule'
+import { firmToday } from '../../lib/dateLabels'
+
+/* THE FIRM'S DAY, IN SAST -- it becomes every new account's handover date (prompt 11), and the UTC
+   day is yesterday until two in the morning. */
+const today = () => firmToday()
+
+/** Which of this screen's actions is running. See the note on `busy`. */
+type BusyJob = 'load' | 'read' | 'hold' | 'approve' | 'discard' | 'undo'
+
+/**
+ * EVERY COLUMN OF THE SHEET, IN THE SHEET'S OWN ORDER.
+ *
+ * THE FIRM: "I can see only limited information, not all the information that was on the sheet.
+ * It should show me all of the information ... if there are missing fields like an address ...
+ * there should just be nothing in there. All the fields of the handover sheet should pretty much
+ * be in there. And it should show which data is wrong. So you should be able to scroll it."
+ *
+ * Six columns were shown and the other thirty-four were unreachable, so a row warned about an
+ * empty address with nowhere on the screen to type one. An empty box says "nothing here" better
+ * than a sentence under the table does, and it can be filled in.
+ */
+const SHOWN = HANDOVER_COLUMNS.map((c) => c.key)
+
+/** The columns holding a date, so the table can show one the way the firm writes it. */
+const DATE_KEYS = new Set(HANDOVER_COLUMNS.filter((c) => c.kind === 'date').map((c) => c.key))
+const MONEY_KEYS = new Set(HANDOVER_COLUMNS.filter((c) => c.kind === 'money').map((c) => c.key))
+
+/**
+ * A MONEY CELL, DRAWN AS MONEY.
+ *
+ * THE FIRM, looking at their own draft: "look at this handover sheet, and the amounts." The
+ * column read `1134.4000000000001`, and the total above it read R 35 582 000 000 003 956.
+ *
+ * THE TOTAL WAS parseMoney's FAULT and is fixed there. THIS IS THE OTHER HALF: Excel stores what
+ * a formula produced rather than what the cell displays, so a sheet showing 1 134,40 genuinely
+ * holds thirteen digits of IEEE 754 noise. The reader is right to pass it through -- it is what
+ * the file says -- but a handover amount column full of that reads as a broken screen.
+ *
+ * THE SAME RULE THE DATES FOLLOW, including the half that matters: anything that cannot be read
+ * comes back UNTOUCHED, because that is the one somebody has to look at and correct. A figure
+ * this quietly tidied into something plausible would be a figure nobody checks.
+ */
+const displayMoney = (raw: string | null | undefined): string => {
+  const text = (raw ?? '').trim()
+  if (!text) return ''
+  const n = parseMoney(text)
+  return n === null ? text : n.toFixed(2)
+}
+
+/** A column's heading, by its key. Module level: the table and the decision list both need it. */
+const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key
+
+/*
+ * THE ROW NUMBER IS PINNED, AND ONLY THE ROW NUMBER.
+ *
+ * THE FIRM: "keep the rows fixed to the left here so it doesn't move, so if you move around you
+ * can always know in which row you are, because you're working on a specific query." Forty
+ * columns scroll past and every decision underneath the table is addressed by row -- "Row 7
+ * BF-206" -- so a number that scrolls off is the one thing on the screen tying a cell to the
+ * question being answered about it.
+ *
+ * ONE COLUMN IS WHY THIS WORKS NOW AND DID NOT BEFORE. An earlier attempt pinned the row number
+ * AND the reference, and the second of those needs a left offset equal to the MEASURED width of
+ * the first: given a fixed one it drifts, and the pinned headings drew on top of the scrolled
+ * ones -- "ROW :LIACCOUNT NUMBER" across the table. The first column needs no measurement at
+ * all. `left: 0` is exact by construction.
+ *
+ * TWO DETAILS ARE LOAD-BEARING. The pinned cells carry their own opaque background, or the
+ * scrolled columns pass underneath and show through. And the right-hand edge is an inset
+ * box-shadow rather than a border: the table collapses its borders, and a collapsed border on a
+ * sticky cell is the one part Safari does not reliably paint -- and the firm is on an iPad.
+ */
+
+/** The pinned column's edge. Inset shadow, not a border -- see above. */
+const PINNED = 'sticky left-0 bg-white shadow-[inset_-1px_0_0_#e2e8f0]'
+
+/** Marked with a star in the header, the same way the .xlsx marks them. */
+const required = new Set(HANDOVER_COLUMNS.filter((c) => c.required).map((c) => c.key))
+
+/**
+ * The sheet as a GRID, header row and all.
+ *
+ * readXlsxRows rather than readXlsx, and parseCsv turned back into rows: the planner needs the
+ * header because the header is what tells it which sheet this is and which way round the dates
+ * go. Handed a list of objects keyed by heading, a repeated or blank heading has already been
+ * collapsed and the evidence is gone.
+ */
+async function readSheet(file: File): Promise<(string | null)[][]> {
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
+    return readXlsxRows(await file.arrayBuffer())
+  }
+  const text = name.endsWith('.zip')
+    ? await readSingleCsvFromZip(await file.arrayBuffer())
+    : await file.text()
+  const rows = parseCsv(text)
+  if (rows.length === 0) return []
+  const keys = Object.keys(rows[0])
+  return [keys, ...rows.map((r) => keys.map((k) => r[k] ?? ''))]
+}
+
+/**
+ * A handover, read and held until somebody says it is right.
+ *
+ * THE FIRM, on what this had to do: "it will scan each handover to see if everything is fine ...
+ * if it does not, some handovers should not be accepted, and it should show why. Then you should
+ * be able to edit it in the handover state on Raptor, and when it's ready say approve handover."
+ *
+ * SO NOTHING HERE WRITES AN ACCOUNT UNTIL APPROVE. Reading the sheet creates a DRAFT — in the
+ * database, at the firm's own instruction, because a two-hundred-row handover is an afternoon of
+ * corrections and an afternoon in a browser tab is an afternoon one closed laptop away from
+ * nothing. It also means the person who uploaded the sheet is not the only person who can finish
+ * it, which on a big batch is what actually happens.
+ *
+ * THE VERDICT IS RECOMPUTED, NEVER STORED. Every read puts the rows back through planHandover, so
+ * a corrected cell is judged by the code that judged the file — the screen cannot go on refusing
+ * a row for something already fixed.
+ */
+export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | null } = {}) {
+  const { companies, deals } = useAppStore()
+  const navigate = useNavigate()
+  /* The approver's own session, so the corrections email goes out on their mailbox. */
+  const { session, currentUser } = useAuth()
+  /* Administrator only -- see canDiscardHandover. Everyone else sees the batch and its counts and
+     no button, which is the honest shape: the information is not the privilege. */
+  const canDiscard = canDiscardHandover(currentUser)
+  /* A CLIENT IS ONE WITH A CODE OR A WON DEAL, which is how CompanyDetail decides it too. A list
+     of every company would offer the prospects a handover cannot come from. */
+  const clients = useMemo(() => {
+    const won = new Set(deals.filter((d) => d.stage === 'Won').map((d) => d.companyId))
+    return companies.filter((c) => !!c.code || won.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [companies, deals])
+
+  /*
+   * THE CLIENT CAN ARRIVE WITH THE PERSON, from "Upload a batch" on that client's own page.
+   *
+   * Seeded in an effect rather than in useState, because `clients` comes out of AppStore and is
+   * EMPTY on the first render while the tables load. Seeded from the initial value, the id would
+   * be thrown away as unknown a moment before the client it names turns up.
+   *
+   * AND ONLY IF IT IS A CLIENT WE WOULD OFFER. A <select> whose value matches no <option> draws
+   * blank while the state says otherwise -- the screen would show "Choose a client…" and the
+   * Hold button would be enabled, which is the worst of both.
+   */
+  const [companyId, setCompanyId] = useState('')
+  const [seeded, setSeeded] = useState(false)
+  useEffect(() => {
+    if (seeded || !forCompanyId || clients.length === 0) return
+    if (clients.some((c) => c.id === forCompanyId)) setCompanyId(forCompanyId)
+    setSeeded(true)
+  }, [forCompanyId, clients, seeded])
+  const [sheet, setSheet] = useState<File>()
+  const [pdfs, setPdfs] = useState<File[]>([])
+  const [plan, setPlan] = useState<HandoverPlan | null>(null)
+  const [docs, setDocs] = useState<MatchPlan | null>(null)
+  /*
+   * WHAT IS BUSY, AND NOT ONLY THAT SOMETHING IS.
+   *
+   * THE FIRM: "the approving 12 handovers, it looks like it's blurring -- as well as the hold it
+   * in Raptor also looks like it's blurring when it's loading."
+   *
+   * IT WAS NOT BLURRING. One `busy` string was shown on WHICHEVER button happened to render it,
+   * so pressing "Hold it in Raptor" put "Holding it in Raptor" inside the "Read the sheet"
+   * button, directly beside a "Hold it in Raptor" button that still said its own name. Two
+   * near-identical labels a centimetre apart read as one smeared one.
+   *
+   * The job says whose message it is. Every button still disables on ANY job -- two of these
+   * running at once is not a thing anybody wants -- but only the one doing the work renames
+   * itself.
+   */
+  const [busy, setBusy] = useState<{ job: BusyJob; message: string } | null>(null)
+  /** For the places that only care THAT something is running -- disabling, mostly. */
+  const busyMessage = busy?.message ?? null
+  const labelFor = (job: BusyJob, idle: string) =>
+    (busy?.job === job ? busy.message : idle)
+  const [error, setError] = useState<string | null>(null)
+  const [openDrafts, setOpenDrafts] = useState<HandoverDraft[]>([])
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [judged, setJudged] = useState<JudgedDraft | null>(null)
+  /* WHETHER THIS CLIENT'S ACCOUNTS CAN BE PRICED AT ALL, read when the draft opens -- a scale with no
+     boundaries is a reason to stop that no amount of row-fixing will clear, so it is said up front. */
+  const [rateBlock, setRateBlock] = useState<string | null>(null)
+  const draftCompany = judged?.draft.companyId ?? null
+  useEffect(() => {
+    if (!draftCompany) { setRateBlock(null); return }
+    let live = true
+    void fetchClientCommission(draftCompany)
+      .then((c) => { if (live) setRateBlock(handoverRateBlock(c.name, c)) })
+      .catch(() => { /* approveDraft reads it again and refuses on its own */ })
+    return () => { live = false }
+  }, [draftCompany])
+  const [done, setDone] = useState<string | null>(null)
+  /*
+   * WHAT HAPPENS NEXT, and it is a link rather than a sentence. THE FIRM: "the moment after that,
+   * it should go into a state where it's ready to allocate and refer the accounts to the clerks."
+   *
+   * Approving opens the accounts and stops. Nothing on the old screen said where they went, so
+   * somebody had to leave Settings, find the book, and rebuild the filter by hand to reach the
+   * seven they had just imported. Kept beside `done` rather than folded into it because it
+   * survives one thing the sentence does not: it names the batch.
+   */
+  const [allocate, setAllocate] = useState<{ handoverId: string; count: number } | null>(null)
+  /** The queued draft whose Discard has been pressed once. */
+  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null)
+
+  /**
+   * Batches imported recently whose accounts never reached a desk.
+   *
+   * THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+   * allocated. For example, if a system goes off in the middle of an import."
+   *
+   * The road now goes straight from approving into the hand-out, so the ordinary way to end up
+   * here is the one the firm named: somebody was interrupted between the two. Read after every
+   * approval as well as on load, so the warning appears the moment it becomes true.
+   */
+  const [unallocated, setUnallocated] = useState<UnallocatedBatch[]>([])
+  /**
+   * BATCHES OF THIS CLIENT'S THAT COULD STILL BE UNDONE.
+   *
+   * THE FIRM: "make sure that everything is being deleted" -- after a test import went in twice,
+   * with no way back inside the app. The general case is the one worth building for: a client
+   * sends the wrong file, or the same file twice, and two hundred accounts open that nobody
+   * should be collecting on.
+   */
+  const [batches, setBatches] = useState<DiscardableBatch[]>([])
+  /** The batch whose Discard has been pressed, and the word typed into it. */
+  const [discarding, setDiscarding] = useState<DiscardableBatch | null>(null)
+  const [typed, setTyped] = useState('')
+  const refreshDrafts = useCallback(async () => {
+    setOpenDrafts(await fetchOpenDrafts().catch(() => []))
+    /* Never fatal: a screen that will not render because a warning could not be counted is worse
+       than the warning being missing. */
+    setUnallocated(await fetchUnallocatedBatches().catch(() => []))
+  }, [])
+  useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  /* Re-read whenever the client changes AND after an import or a discard, so the list is never
+     offering to undo a batch that is already gone. */
+  const refreshBatches = useCallback(async () => {
+    setBatches(companyId ? await fetchDiscardableBatches(companyId).catch(() => []) : [])
+  }, [companyId])
+  useEffect(() => { void refreshBatches() }, [refreshBatches])
+
+  /*
+   * THE NEWEST READ WINS, and an older one that lands after it is thrown away.
+   *
+   * Every edit re-reads and re-judges the whole draft. Two of those can be out at once, and
+   * nothing makes them come back in the order they were sent -- so the slower, older one could
+   * land last and put the pre-edit judgement back on the screen. That is a corrected row going
+   * back to being a problem, with nothing on the screen saying why.
+   *
+   * A counter rather than an AbortController: the read is three requests deep through
+   * supabase-js and the point is which answer is allowed to render, not saving the bytes.
+   */
+  const readSeq = useRef(0)
+  const load = useCallback(async (id: string) => {
+    const seq = (readSeq.current += 1)
+    setBusy({ job: 'load', message: 'Reading the handover' })
+    try {
+      const fresh = await fetchDraft(id, today())
+      if (seq !== readSeq.current) return
+      setJudged(fresh)
+      setDraftId(id)
+    } catch (e) {
+      if (seq === readSeq.current) setError(e instanceof Error ? e.message : String(e))
+    } finally { if (seq === readSeq.current) setBusy(null) }
+  }, [])
+
+  /* ---------- reading the file ---------- */
+
+  async function read() {
+    if (!sheet) return
+    setBusy({ job: 'read', message: 'Reading the sheet' }); setError(null); setDone(null)
+    try {
+      const rows = await readSheet(sheet)
+      /*
+        THE CLIENT'S BOOK, so "the same data has already been handed over" can be said before the
+        sheet is held rather than after. Only where a client has been chosen -- the sheet can be
+        read without one, and a book comparison with no client is a comparison against nothing.
+        A failure to read it is not a failure to read the sheet: the duplicates within the file
+        are still worth having.
+      */
+      const existingAccounts = companyId
+        ? await fetchExistingAccounts(companyId).catch(() => [])
+        : []
+      const p = planHandover({ rows, existingAccounts, today: today() })
+      setPlan(p)
+      setDocs(pdfs.length
+        ? matchDocuments({
+          filenames: pdfs.map((f) => f.name),
+          references: p.rows.map((r) => r.values.client_reference ?? '').filter(Boolean),
+        })
+        : null)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
+  }
+
+  /*
+   * NO MANDATE, NO HANDOVER, at the firm's instruction: "a client needs a mandate before a
+   * handover can be imported."
+   *
+   * A REFUSAL AND NOT A WARNING, because the consequence is not untidy data. Collecting on a book
+   * the firm holds no signed mandate for is work it cannot lawfully charge for and cannot defend
+   * if the debtor's attorney asks on whose authority the demand was issued -- and by then two
+   * hundred accounts are open and letters have gone out.
+   *
+   * IT IS REFUSED HERE AND NOT ON THE FORM THAT CREATES THE CLIENT. A client is often loaded
+   * while the mandate is still in the post, and a form that will not save without a date is a
+   * form people fill in with a made-up one. The refusal belongs where the consequence is.
+   */
+  const client = clients.find((c) => c.id === companyId)
+  /* A CLIENT BROUGHT ACROSS FROM SWORDFISH IS EXEMPT (prompt 10) -- needsMandate decides it, and
+     the database's handovers_need_a_mandate trigger holds the same rule underneath. */
+  const noMandate = needsMandate(client)
+
+  async function hold() {
+    if (!plan || !sheet || !companyId || noMandate) return
+    setBusy({ job: 'hold', message: 'Holding it in Raptor' }); setError(null)
+    try {
+      const documentFor = new Map((docs?.matched ?? []).map((m) => [m.reference, m.filename]))
+      const id = await saveDraft({ companyId, filename: sheet.name, plan, documentFor })
+      setPlan(null); setDocs(null); setSheet(undefined); setPdfs([])
+      await refreshDrafts()
+      await load(id)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
+  }
+
+  /* ---------- working the draft ---------- */
+
+  /*
+   * ONE CELL, MERGED IN THE DATABASE. This used to build the row's whole `values` object by
+   * spreading the screen's copy of it and write that back -- and the screen's copy is a round
+   * trip old, because every edit re-reads and re-judges the draft. A second edit to the same row
+   * therefore undid the first: it saved, the warning cleared, and a moment later it was back.
+   * THE FIRM: "I changed the contact details ... and then the ticket went away, but now it tells
+   * me that it has not gone away."
+   */
+  async function edit(rowId: string, key: string, value: string) {
+    /* Written first, then the whole draft re-read: the verdict comes from the database's copy of
+       the row, so what the screen shows is what an approval would act on. */
+    await setDraftRowValue(rowId, key, value)
+    if (draftId) await load(draftId)
+  }
+
+  async function exclude(rowId: string, excluded: boolean) {
+    await updateDraftRow(rowId, { excluded })
+    if (draftId) await load(draftId)
+  }
+
+  /*
+   * ACCEPT, REJECT, OR PUT IT BACK. One call each, in handoverDraft.ts, because rejecting has to
+   * set BOTH the decision and `excluded` -- the decision is what the gate reads and `excluded` is
+   * what the approval honours, and a row rejected in one but not the other would be rejected on
+   * the screen and imported anyway.
+   */
+  async function decide(
+    rowId: string, decision: Decision, note: string | null, allocateTo: string | null = null,
+  ) {
+    if (decision === 'accepted') await acceptDraftRow(rowId, note, allocateTo)
+    else if (decision === 'rejected') await rejectDraftRow(rowId, note)
+    else await clearDraftRowDecision(rowId)
+    if (draftId) await load(draftId)
+  }
+
+  async function approve() {
+    if (!judged) return
+    setBusy({ job: 'approve', message: 'Opening the accounts' }); setError(null); setAllocate(null)
+    try {
+      const commission = await fetchClientCommission(judged.draft.companyId).catch(() => null)
+      const result = await approveDraft({
+        draftId: judged.draft.id,
+        today: today(),
+        /* THE CLIENT'S RATE, INHERITED RATHER THAN TYPED, and read fresh rather than off a
+           company row in the store -- commission is the client's and a stale copy of it is an
+           account invoiced at the wrong rate for the rest of its life. */
+        commission,
+        onProgress: (n, total) => setBusy({ job: 'approve', message: `Opening the accounts — ${n} of ${total}` }),
+        /* So the corrections can be emailed to the liaison through this person's own mailbox.
+           Missing, the import still runs and says the email did not go. */
+        accessToken: session?.access_token ?? null,
+      })
+      setDone(`${result.created} accounts opened.`
+        + (result.leftBehind ? ` ${result.leftBehind} left on the handover.` : '')
+        /* A note that did not save is worth saying: the note IS the record of what was overridden
+           and why, so losing one silently loses the reason an account was accepted. */
+        + (result.corrections
+          ? ` ${result.corrections} sent to the client liaison to correct.`
+          : '')
+        + (result.noteFailures.length
+          ? ` ${result.noteFailures.length} note(s) could not be saved: ${result.noteFailures.join('; ')}`
+          : '')
+        /* A query that did not raise, or an email that did not go, is the client never hearing
+           about it — so it is said on the screen rather than logged and lost. */
+        + (result.correctionProblems.length ? ` ${result.correctionProblems.join(' ')}` : ''))
+      /* Only when something was actually opened. An import that created nothing has nothing to
+         allocate, and a link to an empty list reads as a bug in the import. */
+      if (result.created > 0) {
+        setAllocate({ handoverId: result.handoverId, count: result.created })
+      }
+      /*
+       * THE REFUSED ROWS, STRAIGHT INTO THEIR DOWNLOADS. THE FIRM: "it should also be downloaded
+       * automatically for the user."
+       *
+       * The same file the liaison was emailed, so the person who ran the import is holding what
+       * the client is holding -- and can send it on themselves if the email did not go. Only
+       * when there were refusals: an empty sheet in somebody's Downloads is a file they have to
+       * open to find out it says nothing.
+       */
+      if (result.refusedSheet) {
+        downloadBytes(result.refusedSheet.filename, result.refusedSheet.bytes,
+          result.refusedSheet.contentType)
+      }
+      setJudged(null); setDraftId(null)
+      await refreshDrafts()
+      /*
+       * AND STRAIGHT ON TO ALLOCATING THEM.
+       *
+       * THE FIRM: "the primary thing that should happen is after this, it should immediately go
+       * to allocate the accounts. The road would be import handover, accept the handovers,
+       * allocate, back to the screen ... it leaves room for human error, because if the person
+       * just moves to another place it's not going to be referred."
+       *
+       * A LINK IS NOT A STEP. Somebody who has just watched twelve accounts open has finished
+       * what they came to do as far as the screen is concerned, and the next thing is on a
+       * different page behind a button they have to notice. Twelve accounts on nobody's desk is
+       * the state this whole feature exists to avoid, and it was one distraction away.
+       *
+       * THE LINK STAYS ANYWAY, at the firm's instruction -- "so keep that there". This navigation
+       * is the road; the link is what is left if somebody comes back to the screen, and the
+       * unallocated warning below is what is left if they never do.
+       *
+       * ONLY WHERE SOMETHING OPENED. An import that created nothing has nothing to allocate, and
+       * a hand-out screen over an empty list reads as a broken import.
+       */
+      if (result.created > 0) {
+        navigate(`/accounts?handover=${result.handoverId}&handout=1`)
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
+  }
+
+  /* ---------- the screen ---------- */
+
+  /* One discard for both the open table and the queue below it, so the two cannot come to mean
+     different things -- and so the list is refreshed either way. */
+  async function discard(id: string) {
+    setBusy({ job: 'discard', message: 'Discarding' }); setError(null)
+    try {
+      await discardDraft(id)
+      if (draftId === id) { setJudged(null); setDraftId(null) }
+      await refreshDrafts()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
+  }
+
+  if (judged) return (
+    <DraftTable
+      judged={judged} busy={busyMessage} error={error}
+      approving={busy?.job === 'approve' ? busy.message : null}
+      onEdit={edit} onExclude={exclude} onApprove={approve} onDecide={decide} rateBlock={rateBlock}
+      onBack={() => { setJudged(null); setDraftId(null) }}
+      onDiscard={() => discard(judged.draft.id)} />
+  )
+
+  return (
+    <Card>
+      <CardHeader
+        title="Import a handover"
+        subtitle="The client's sheet and their PDFs. Nothing is written until you approve it." />
+
+      {/*
+        AND WHAT AN EARLIER IMPORT LEFT BEHIND.
+        
+        THE FIRM: "there should be a state where it's a warning that 12 accounts has not been
+        allocated. For example, if a system goes off in the middle of an import."
+        
+        ABOVE THE FORM, because it is about work that is already in the building. Under the
+        upload boxes it would be read as something about the file somebody is holding.
+        
+        BOUNDED TO RECENT BATCHES -- see unallocated_batches. The inherited book is unallocated
+        and always will be; a warning that counted it would be on the screen for ever and read by
+        nobody, which CLAUDE.md names as worse than no warning.
+      */}
+      {unallocated.length > 0 && (
+        <div className="mb-4 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+          <p className="text-sm font-medium text-navy-950 flex items-center gap-1.5">
+            <AlertTriangle size={14} className="text-gold-600 shrink-0" />
+            {unallocated.length === 1
+              ? 'A recent handover has accounts on nobody\u2019s desk.'
+              : `${unallocated.length} recent handovers have accounts on nobody\u2019s desk.`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {unallocated.map((b) => (
+              <li key={b.handoverId} className="text-[13px] text-slate-600">
+                <Link to={`/accounts?handover=${b.handoverId}&handout=1`}
+                  className="font-medium text-brand-700 hover:underline">
+                  Allocate {b.unallocated.toLocaleString('en-ZA')} of {b.total.toLocaleString('en-ZA')}
+                </Link>
+                {' \u00b7 '}{b.reference ?? 'a handover'}
+                {b.companyName ? ` \u00b7 ${b.companyName}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/*
+        THE CLIENT IS PICKED, NOT READ. A handover sheet says what each debtor owes and never
+        whose book it is -- "Client Division" on the old sheet was a person's name in the client's
+        office. This is the control the firm asked for: "you can choose which client does the
+        handover batch fall on."
+      */}
+      <label className="block mb-4">
+        <span className="block text-xs font-medium text-slate-500 mb-1">Whose handover is this</span>
+        <ClientPicker clients={clients} value={companyId} onChange={setCompanyId}
+          placeholder="Search for a client by name or code…" />
+      </label>
+
+      {/*
+        AND WHAT CAME IN THAT SHOULD NOT HAVE.
+        
+        DIRECTLY UNDER THE CLIENT PICKER, because it is empty until a client is chosen and the
+        picker is what chooses one. It sat ABOVE the picker and the firm could not find it:
+        "I still see the 12 accounts. There's no option to delete it or to reverse the handover."
+        A panel that fills in above the control that fills it is a panel nobody looks at twice.
+        
+        THE FIRM: "make sure that everything is being deleted." A client sends the wrong file, or
+        the same file twice, and two hundred accounts open that nobody should be collecting on --
+        and until now the only way back was a database console, which on an iPad is no way back.
+        
+        ONLY WHERE THERE IS SOMETHING TO UNDO. A client whose batches have all been worked shows
+        nothing here, because a Discard button beside nothing is a button somebody presses to find
+        out what it does.
+      */}
+      {batches.length > 0 && (
+        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-500">Handovers already in</p>
+          {/* One line a batch, the checking-list look: what it was, then the warning, then the
+              button, with whatever does not fit cut off and whole in the tooltip. */}
+          <ul className="mt-1 divide-y divide-slate-100">
+            {batches.map((b) => (
+              <li key={b.handoverId} className="flex items-baseline gap-x-2 py-1 text-[12.5px] whitespace-nowrap">
+                <span className="min-w-0 truncate text-slate-700 tabular-nums">
+                  {b.reference ?? 'A handover'} · {b.accounts.toLocaleString('en-ZA')}
+                  {b.accounts === 1 ? ' account' : ' accounts'} · {formatCurrency(b.capital)}
+                </span>
+                {/*
+                  SAID BEFORE IT IS PRESSED, not after. Debtors having already been written to is
+                  the thing somebody most needs to know and the thing this does NOT refuse over --
+                  a wrongly imported batch is exactly the case where the handover email has gone.
+                */}
+                {b.noticesSent > 0 && (
+                  <span className="shrink-0 text-[11px] text-amber-700">
+                    {b.noticesSent} notice{b.noticesSent === 1 ? '' : 's'} already sent to debtors
+                  </span>
+                )}
+                {b.blockers.length > 0 ? (
+                  <span className="min-w-0 truncate text-[11px] text-slate-400" title={b.blockers.join(' ')}>
+                    Cannot be undone — {b.blockers[0]}
+                  </span>
+                ) : canDiscard ? (
+                  <button type="button" onClick={() => { setDiscarding(b); setTyped('') }}
+                    className="shrink-0 text-[12px] font-medium text-negative-700 hover:underline">
+                    Discard
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+
+          {/*
+            TYPED, NOT TAPPED. The same shape deleting a document uses, for a bigger reason: this
+            removes every account a batch opened, with their contacts, diary entries and workflow
+            runs. A misplaced tap cannot spell DISCARD, and somebody who types it has read the
+            number above it.
+          */}
+          {discarding && (
+            <div className="mt-3 rounded-lg border border-negative-100 bg-negative-50 p-3">
+              <p className="text-sm font-medium text-negative-700">
+                Undo this handover?
+              </p>
+              <p className="text-xs text-slate-600 mt-1">
+                {discarding.accounts.toLocaleString('en-ZA')}
+                {discarding.accounts === 1 ? ' account' : ' accounts'} worth{' '}
+                {formatCurrency(discarding.capital)} will be removed, with their contacts, diary
+                entries and workflow runs. The handover itself stays on record, marked as
+                discarded.
+                {discarding.noticesSent > 0 && ` ${discarding.noticesSent} notice${
+                  discarding.noticesSent === 1 ? ' has' : 's have'} already gone to debtors; that cannot be undone.`}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="DISCARD"
+                  aria-label="Type DISCARD to confirm"
+                  className="text-sm rounded-lg border border-slate-200 px-2.5 py-1.5 font-mono w-32 bg-white" />
+                <button type="button"
+                  disabled={typed.trim().toUpperCase() !== 'DISCARD' || busy?.job === 'undo'}
+                  onClick={async () => {
+                    /* `undo`, not `discard`: discarding a DRAFT already owns that job name, and
+                       sharing it would grey this button out while an unrelated draft is going. */
+                    setBusy({ job: 'undo', message: 'Undoing the handover' }); setError(null)
+                    try {
+                      const { accounts } = await discardHandover({
+                        handoverId: discarding.handoverId,
+                        by: currentUser?.id ?? null,
+                        reason: null,
+                        /*
+                         * FOR THE CLIENT'S OWN NOTE, and read off the card rather than fetched
+                         * inside the write — by the time the batch is marked its accounts are
+                         * already gone, so there is nothing left to add up. These are the exact
+                         * figures the person is looking at as they type DISCARD.
+                         */
+                        companyId,
+                        reference: discarding.reference,
+                        capital: discarding.capital,
+                        noticesSent: discarding.noticesSent,
+                      })
+                      setDiscarding(null); setTyped('')
+                      setDone(`${accounts.toLocaleString('en-ZA')} ${accounts === 1 ? 'account was' : 'accounts were'} removed.`)
+                      await refreshBatches(); await refreshDrafts()
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e))
+                    } finally { setBusy(null) }
+                  }}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg bg-negative text-white disabled:opacity-40">
+                  {busy?.job === 'undo' ? 'Undoing…' : 'Undo the handover'}
+                </button>
+                <button type="button" onClick={() => { setDiscarding(null); setTyped('') }}
+                  className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+
+      <div className="space-y-3">
+        <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">
+          <input type="file" accept=".csv,.zip,.xlsx,.xlsm" className="sr-only"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) { setSheet(f); setPlan(null) } }} />
+          <span className={`shrink-0 w-8 h-8 rounded-lg grid place-items-center ${sheet ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+            {sheet ? <CheckCircle2 size={16} /> : <FileUp size={16} />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-slate-700">The handover sheet</span>
+            <span className="block text-xs text-slate-400 truncate">
+              {sheet ? sheet.name : 'Ours or the older one — whichever the client sent.'}
+            </span>
+          </span>
+          <span className="text-xs font-medium text-brand-600 shrink-0">{sheet ? 'Change' : 'Choose'}</span>
+        </label>
+
+        {/* MANY AT ONCE, matched by their filenames. The firm: "uploading 200 handovers one by one
+            is a tedious task." */}
+        <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">
+          <input type="file" accept=".pdf" multiple className="sr-only"
+            onChange={(e) => { setPdfs([...(e.target.files ?? [])]); setPlan(null) }} />
+          <span className={`shrink-0 w-8 h-8 rounded-lg grid place-items-center ${pdfs.length ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+            <Paperclip size={16} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-slate-700">Their PDFs, if there are any</span>
+            <span className="block text-xs text-slate-400 truncate">
+              {pdfs.length ? `${pdfs.length} files` : 'Select them all at once — each is matched by its filename.'}
+            </span>
+          </span>
+          <span className="text-xs font-medium text-brand-600 shrink-0">{pdfs.length ? 'Change' : 'Choose'}</span>
+        </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 mt-4">
+        {/*
+          EACH BUTTON WEARS ITS OWN LABEL. Reading `busy` directly put "Holding it in Raptor"
+          inside this button while the one beside it still said "Hold it in Raptor" -- two
+          near-identical labels a centimetre apart, which is what the firm saw as blurring.
+        */}
+        <button type="button" onClick={() => void read()} disabled={!sheet || !!busy}
+          className="btn-primary inline-flex items-center gap-2">
+          {busy?.job === 'read' ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+          {labelFor('read', 'Read the sheet')}
+        </button>
+        {plan && (
+          <button type="button" onClick={() => void hold()} disabled={!companyId || !!busy || noMandate}
+            title={companyId ? undefined : 'Choose which client this handover is from first'}
+            className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
+              bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
+            {busy?.job === 'hold'
+              ? <Loader2 size={15} className="animate-spin" />
+              : <Check size={15} />}
+            {labelFor('hold', 'Hold it in Raptor')}
+          </button>
+        )}
+      </div>
+
+      {/* Said the moment the client is chosen, not after the sheet has been read: somebody who
+          has to go and find a mandate should not first spend ten minutes on the file. */}
+      {noMandate && (
+        <p className="text-sm text-negative-700 mt-3">
+          {client?.name} has no signed mandate on record, so no handover can be imported for them.{' '}
+          {/*
+            AND A WAY TO GO AND DO IT. THE FIRM, on this exact refusal: "there was no option where
+            I can upload a contract." There genuinely was not -- the mandate date could only ever
+            be set on the form that creates the client -- so this sentence named a thing that
+            could not be done. The link lands on the client's mandate card, which sets the date
+            and takes the signed mandate itself.
+          */}
+          <Link to={`/companies/${client?.id}`} className="font-medium underline">
+            Open {client?.name} and record the mandate
+          </Link>, then come back.
+        </p>
+      )}
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+      {done && <p className="text-sm text-positive-700 mt-3">{done}</p>}
+      {allocate && (
+        /*
+          STRAIGHT INTO THE HAND-OUT, not onto a filtered list with the work still to find.
+          THE FIRM: "after I've accepted the handovers, it should immediately go to a state of
+          where they should be allocated and referred."
+        */
+        <Link to={`/accounts?handover=${allocate.handoverId}&handout=1`}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
+          Allocate and refer {allocate.count.toLocaleString('en-ZA')}
+          {allocate.count === 1 ? ' account' : ' accounts'}
+          <ArrowRight size={14} />
+        </Link>
+      )}
+
+      {plan && <PlanSummary plan={plan} docs={docs} />}
+
+      {openDrafts.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">
+            Waiting to be approved
+          </p>
+          {/*
+            A DIV HOLDING TWO BUTTONS, NOT ONE BUTTON HOLDING ANOTHER. This was a single <button>
+            wrapping the whole row; a discard inside it would be a button inside a button, which
+            no browser nests and which opens the draft on the way to throwing it away.
+          */}
+          <div className="space-y-1.5">
+            {openDrafts.map((d) => (
+              <div key={d.id}
+                className="flex items-center gap-3 px-3 py-1.5 rounded-md border border-slate-200 text-[12.5px] whitespace-nowrap">
+                {/* One line: the file, then whose and when in grey after it. */}
+                <button type="button" onClick={() => void load(d.id)}
+                  className="flex-1 min-w-0 text-left truncate">
+                  <span className="text-slate-700">{d.filename}</span>
+                  <span className="text-slate-400">
+                    {' · '}{clients.find((c) => c.id === d.companyId)?.name ?? 'Unknown client'}
+                    {' · '}{new Date(d.createdAt).toLocaleDateString('en-ZA')}
+                  </span>
+                </button>
+                <button type="button" onClick={() => void load(d.id)}
+                  className="text-xs font-medium text-brand-600 hover:underline">Open</button>
+                {/*
+                  THE FIRM: "there's another sheet that was now queued for handover that I didn't
+                  import and complete. I should be able to delete that." Nothing on this list
+                  could be got rid of without opening it first.
+
+                  ASKED TWICE, IN PLACE. A window.confirm on an iPad is a system dialog over the
+                  app; the second press of the same button is the same gesture and stays on the
+                  screen somebody is looking at. Nothing is destroyed either way -- discarding
+                  marks the draft and leaves its rows, so a sheet thrown away by accident is a
+                  question for somebody with database access rather than a lost afternoon.
+                */}
+                <button type="button" disabled={!!busy}
+                  onClick={() => {
+                    if (confirmDiscard !== d.id) { setConfirmDiscard(d.id); return }
+                    setConfirmDiscard(null)
+                    void discard(d.id)
+                  }}
+                  onBlur={() => setConfirmDiscard((c) => (c === d.id ? null : c))}
+                  className={`text-xs font-medium ${confirmDiscard === d.id
+                    ? 'text-negative-700 underline' : 'text-slate-400 hover:text-negative-600'}`}>
+                  {confirmDiscard === d.id ? 'Sure?' : 'Discard'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+
+/**
+ * One row's problems, and the decision they are waiting on.
+ *
+ * THE FIRM: "you could say accept it, or reject it. You can also put in a note, for example to
+ * the person working the account: the ID number is wrong, so the ID number needs to be
+ * confirmed. So that goes on the notes or the main comment."
+ *
+ * THE NOTE IS TYPED BEFORE THE DECISION, not after it, because that is the order somebody thinks
+ * in: they read what is wrong, write down what to do about it, and then say whether the account
+ * goes in. Asked for afterwards it would be a second dialog on a decision already made, and it
+ * would be skipped.
+ *
+ * ACCEPT IS NOT OFFERED ON A REFUSED ROW. There is nothing to accept -- no capital, or no date of
+ * default, or no name to address a letter from. It is corrected in the table above or it is
+ * rejected, and an Accept button on it would be offering to open a ledger that cannot be right.
+ */
+function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
+  row: JudgedDraft['rows'][number]
+  busy: string | null
+  onAccept: (note: string | null, allocateTo: string | null) => Promise<void>
+  onReject: (note: string | null) => Promise<void>
+  onReopen: () => Promise<void>
+}) {
+  const problems = row.planned?.problems ?? []
+  /* The desk the linked account is already on, where there is one. See linkedAccount.ts. */
+  const desk = suggestedDesk(row.planned?.linkedTo ?? null)
+  const [toDesk, setToDesk] = useState(false)
+  /*
+   * THE BOX STARTS WITH THE INSTRUCTION ALREADY IN IT. THE FIRM: "you can automatically fill the
+   * note for the clerk ... fill it automatically and then just accept, and they can remove it if
+   * they need to."
+   *
+   * ONLY AS AN OPENING VALUE, never as a controlled default. useState's initialiser runs once, so
+   * what the person then types, edits or CLEARS is theirs and survives every re-render -- and
+   * this component re-renders on each save, because the whole draft is re-read to re-judge it.
+   * Written as `note || suggested` in the textarea instead, clearing the box would put the
+   * suggestion straight back and the field could not be emptied at all.
+   *
+   * A note already saved on the row wins: it is what a person decided, and a suggestion is not.
+   */
+  const [note, setNote] = useState(() => row.note ?? suggestedNote(problems))
+  const decided = row.decision !== null
+  const refused = row.planned?.refused === true
+
+  return (
+    <div className={`rounded-lg border px-3 py-2.5 ${
+      row.decision === 'rejected' ? 'border-slate-200 bg-slate-50'
+        : row.decision === 'accepted' ? 'border-gold-300 bg-gold-50/40'
+          : refused ? 'border-negative-300' : 'border-slate-200'}`}>
+      <div className="flex items-baseline gap-2 mb-1">
+        <span className={`text-xs font-medium tabular-nums shrink-0 ${
+          refused ? 'text-negative-700' : 'text-slate-500'}`}>
+          Row {row.line}
+        </span>
+        <span className="text-xs text-slate-400 truncate">
+          {row.values.client_reference ?? 'no reference'}
+          {row.values.name ? ` \u00b7 ${row.values.name}` : ''}
+        </span>
+        {decided && (
+          <span className="ml-auto text-[11px] font-medium text-slate-500">
+            {row.decision === 'accepted' ? 'Accepted' : 'Rejected'}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-0.5 mb-2">
+        {problems.map((p, i) => (
+          <p key={i} className={`text-xs ${
+            p.level === 'refuse' ? 'text-negative-700'
+              : p.level === 'note' ? 'text-slate-400' : 'text-slate-500'}`}>
+            {p.level === 'refuse' && <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />}
+            {/* SAID, AND SAID AS DONE. A note is something the import put right on the way in --
+                it is here to be audited, not acted on, so it carries no warning mark and the word
+                in front of it says which kind of line it is. */}
+            {p.level === 'note' && <span className="text-slate-400">Fixed: </span>}
+            {/* The column, so a sentence can be traced to one of forty boxes without reading it
+                twice. The cell is marked in the table as well; this is for somebody working down
+                the list rather than across the row. */}
+            {p.key && <span className="text-slate-400">{label(p.key)}: </span>}
+            {p.message}
+          </p>
+        ))}
+      </div>
+
+      {decided ? (
+        <div className="flex items-baseline gap-3">
+          {row.note && <p className="text-xs text-slate-600 min-w-0 flex-1">{row.note}</p>}
+          {/* THE WAY BACK. A decision recorded with no way to undo it is a typo nobody can fix,
+              and putting the row back to undecided holds the approval again, which is correct. */}
+          <button type="button" disabled={!!busy} onClick={() => void onReopen()}
+            className="ml-auto text-[11px] font-medium text-slate-400 hover:text-slate-600 shrink-0">
+            Change
+          </button>
+        </div>
+      ) : (
+        <>
+          {/*
+            A TEXTAREA, NOT A ONE-LINE BOX, now that it can be spoken into. THE FIRM: "you should
+            be able to write a note and dictate and tell the note, just don't have to write it,
+            just to talk." A spoken note is two or three sentences where a typed one was four
+            words, and a single line that scrolls sideways hides everything but the end of it --
+            which is the half nobody needs to check.
+          */}
+          <textarea
+            value={note}
+            disabled={!!busy}
+            rows={3}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="A note for whoever works this account — optional"
+            className="w-full resize-none rounded border border-slate-200 px-2 py-1.5 text-[13px]
+              mb-2 focus:border-brand-500 focus:outline-none" />
+          {/*
+            THE MICROPHONE BELONGS TO THE BOX, so it sits under it rather than in the row of
+            decisions -- where it would lead, and Accept is what should. This note is the record
+            of why an ID number nobody could verify was accepted anyway, written by somebody
+            working down a list of eleven of them on an iPad, which is exactly the job people
+            stop doing properly when it is slow.
+          */}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <DictateButton size="small" value={note} onChange={setNote} />
+            {/*
+              SAID, SO IT IS NOT MISTAKEN FOR SOMEBODY'S WORDS. A note that arrived by itself and
+              looks typed is one nobody edits -- and it goes onto the account under the name of
+              whoever pressed Accept. Shown only while it is still ours: the moment a person
+              changes a character it is theirs, and labelling it would then be wrong.
+            */}
+            {note === suggestedNote(problems) && note !== '' && (
+              <span className="text-[11px] text-slate-400">
+                Suggested — change it or clear it.
+              </span>
+            )}
+          </div>
+          {/*
+            AND WHOSE DESK IT SHOULD OPEN ON, where this looks like a second debt for a debtor
+            somebody is already working.
+
+            THE FIRM: "usually these accounts should be worked by the same people ... we can see
+            who worked on that account and then allocate it to that person. Do you want to
+            allocate it to a new person, or to another person in the allocation state? So we need
+            to give that option as well."
+
+            OFFERED, AND OFF UNTIL IT IS PRESSED. The account it points at may be settled,
+            withdrawn, or on the desk of somebody who has left -- and an account appearing on a
+            collector's list that nobody chose to put there is worse than one waiting in the pile,
+            because the pile is a place people look and a list is a place they trust.
+          */}
+          {desk && (
+            <label className="mb-2 flex items-start gap-2 text-[13px] text-slate-600">
+              <input type="checkbox" className="mt-0.5" checked={toDesk} disabled={!!busy}
+                onChange={(e) => setToDesk(e.target.checked)} />
+              <span>
+                Open it on {desk.name}’s desk, with the account it is linked to.
+                <span className="block text-[11px] text-slate-400">
+                  Otherwise it goes to the unallocated pile with the rest of the handover.
+                </span>
+              </span>
+            </label>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {canAccept(row) && (
+              <button type="button" disabled={!!busy}
+                onClick={() => void onAccept(note.trim() || null, toDesk ? desk?.id ?? null : null)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
+                  rounded-lg bg-gold-400 text-navy-950 border border-gold-500">
+                <Check size={13} /> Accept
+              </button>
+            )}
+            <button type="button" disabled={!!busy}
+              onClick={() => void onReject(note.trim() || null)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5
+                rounded-lg border border-slate-200 text-slate-600 hover:border-negative-300
+                hover:text-negative-700">
+              <X size={13} /> Reject
+            </button>
+            {refused && (
+              <span className="text-[11px] text-slate-400">
+                Correct it above, or reject it — it cannot be accepted as it stands.
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** What the file turned out to be, before it is held. */
+function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | null }) {
+  return (
+    <div className="mt-4 space-y-3">
+      <p className="text-sm text-slate-600">{plan.note}</p>
+      {/*
+        A MISSING COLUMN IS NOT ALWAYS A DEAD FILE, AND THIS SAID IT WAS.
+        ----------------------------------------------------------------
+        "Nothing can be imported from it" was drawn off the flag rather than off the outcome, and
+        the two disagree on two of the four required columns. The firm met it with eight accounts
+        sitting ready underneath: "This sheet has no Person or business. Nothing can be imported
+        from it." A date of default does the same -- its absence is a warning and a three-month
+        substitute, at the firm's own instruction that "not having the date of default is not a
+        deal breaker for starting to work the account".
+
+        So the sentence reads the REAL answer, which the planner has already worked out. Nothing
+        ready means nothing can be imported and it says so in red; something ready means the rows
+        below say what was used instead, and a red line over a working import is how people learn
+        to ignore red lines.
+      */}
+      {plan.missingRequired.length > 0 && (
+        <p className={`text-sm ${plan.ready.length === 0 ? 'text-negative-700' : 'text-[var(--c-gold-deep)]'}`}>
+          This sheet has no {plan.missingRequired.join(', ')}.{' '}
+          {plan.ready.length === 0
+            ? 'Nothing can be imported from it.'
+            : `${plan.ready.length === 1 ? 'The row' : 'All ' + plan.ready.length + ' rows'} below `
+              + 'still came through — each one says what was used instead.'}
+        </p>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {[
+          { label: 'Handovers', value: plan.rows.length, note: 'rows with something in them' },
+          { label: 'Ready', value: plan.ready.length, note: 'nothing wrong with them' },
+          { label: 'Not accepted', value: plan.refused.length, note: 'reasons on each row' },
+          { label: 'Capital', value: formatCurrency(plan.totalCapital), note: 'on the ready ones' },
+        ].map((c) => (
+          <div key={c.label} className="rounded-lg bg-slate-50 px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide text-slate-400">{c.label}</p>
+            <p className="text-lg font-semibold text-slate-800 tabular-nums">
+              {typeof c.value === 'number' ? c.value.toLocaleString('en-ZA') : c.value}
+            </p>
+            <p className="text-[11px] text-slate-500">{c.note}</p>
+          </div>
+        ))}
+      </div>
+      {/*
+        THREE SENTENCES WHERE THERE WAS ONE, AND ONLY ONE OF THEM IS A WARNING.
+        ---------------------------------------------------------------------
+        This said "Not recognised, so not imported: ..." over every heading the mapper did not use,
+        and on the firm's own sheet that was twenty-eight of them -- including "Capital on Default",
+        whose figure had imported perfectly through the "Amount" column beside it. Twenty-six false
+        alarms burying two real ones is how people learn to skip a line of a screen.
+
+        Each list now says the true thing about its own members, and they are drawn in descending
+        order of how much somebody should care.
+      */}
+      {/*
+        A HEADING NOBODY RECOGNISED IS NAMED, never mapped by position. The cost of a wrong guess
+        is a telephone number in the ID field, which is what the old sheet did on its own. This is
+        the one that is actually a question for a person, so it keeps the strongest wording.
+      */}
+      {plan.unrecognised.length > 0 && (
+        <p className="text-xs text-[var(--c-gold-deep)]">
+          Not recognised, so not imported: {plan.unrecognised.join(', ')}. Tell us what{' '}
+          {plan.unrecognised.length === 1 ? 'it holds' : 'they hold'} and we will map{' '}
+          {plan.unrecognised.length === 1 ? 'it' : 'them'}.
+        </p>
+      )}
+      {/*
+        A COLUMN THE FIRM DECLINES, AND IT ONLY RAISES ITS VOICE WHEN THERE IS SOMETHING IN IT.
+        An empty "Home Phone 2" is a column the client has not got round to deleting; one with eight
+        numbers in it is the client handing us telephone numbers nobody will ring. Same list, two
+        different facts, so the ones with data are drawn separately and in amber.
+      */}
+      {plan.notCollected.some((n) => n.filled > 0) && (
+        <div className="text-xs text-[var(--c-gold-deep)] space-y-0.5">
+          {plan.notCollected.filter((n) => n.filled > 0).map((n) => (
+            <p key={n.heading}>
+              <span className="font-medium">{n.heading}</span> has {n.filled}{' '}
+              {n.filled === 1 ? 'value' : 'values'} and is not imported — {n.why}.
+            </p>
+          ))}
+        </div>
+      )}
+      {plan.notCollected.some((n) => n.filled === 0) && (
+        <p className="text-xs text-slate-400">
+          Empty columns the sheet no longer asks for, so nothing is lost:{' '}
+          {plan.notCollected.filter((n) => n.filled === 0).map((n) => n.heading).join(', ')}.
+        </p>
+      )}
+      {/*
+        AND THE TWINS, WHICH ARE NOT A PROBLEM AT ALL -- but naming the winner is the whole value
+        of the line. On the firm's sheet every surname came out of a column headed "Debtor
+        Initials" while "Debtor Surname" sat empty in all forty-five rows. Somebody should see that
+        once, and then go and fix the client's sheet.
+      */}
+      {plan.superseded.length > 0 && (
+        <p className="text-xs text-slate-400">
+          Two headings for one column, so the fuller one was read:{' '}
+          {plan.superseded.map((x) => `${x.label} came from “${x.insteadOf}”, not “${x.heading}”`)
+            .join('; ')}.
+        </p>
+      )}
+      {docs && (
+        <p className="text-xs text-slate-500">
+          {docs.matched.length} PDFs matched to a handover
+          {docs.unmatched.length > 0 && ` · ${docs.unmatched.length} could not be placed`}
+          {docs.ambiguous.length > 0 && ` · ${docs.ambiguous.length} could belong to more than one`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The draft itself: every row, what is wrong with it, and the boxes to fix it in. */
+/**
+ * The sheet as a table, with every problem answerable where it is written.
+ *
+ * EXPORTED, because a client query about a handover shows the SAME table. THE FIRM: "in the query
+ * ticket ... it should show all of the details like it's ready for an import, and when the
+ * details is changed it can be approved and imported." Drawn twice it would drift, and the
+ * failure would not be two tables looking different -- it would be one of them judging a row by
+ * rules the other had moved on from.
+ */
+export function DraftTable({
+  judged, busy, approving, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide,
+  backLabel, rateBlock,
+}: {
+  judged: JudgedDraft
+  /**
+   * Why this client's accounts cannot be priced, where they cannot (prompt 9): a scale on the
+   * register with no rand boundaries. Said beside the button rather than discovered after pressing
+   * it -- approveDraft refuses the same thing, so the two agree.
+   */
+  rateBlock?: string | null
+  /** Anything running, which disables the whole table. */
+  busy: string | null
+  /**
+   * The APPROVAL's own progress, which is the only message this table renames a button for.
+   *
+   * Separate from `busy` because they are different questions. Read off `busy`, pressing Discard
+   * relabelled the approve button "Discarding" -- the same fault the firm saw on the screen
+   * before this one, where one message was worn by whichever button happened to render it.
+   */
+  approving?: string | null
+  error: string | null
+  onEdit: (rowId: string, key: string, value: string) => Promise<void>
+  onExclude: (rowId: string, excluded: boolean) => Promise<void>
+  onApprove: () => Promise<void>
+  onDecide: (
+    rowId: string, decision: Decision, note: string | null, allocateTo?: string | null,
+  ) => Promise<void>
+  onBack: () => void
+  onDiscard: () => Promise<void>
+  /** What "Back" goes back to. Named, because on a query ticket it is not the import screen. */
+  backLabel?: string
+}) {
+  /* The order the WHOLE FILE was read in, settled when it was first read and stored on the
+     draft. Reading each cell on its own would show a date differently from how it was judged. */
+  const order: DateOrder = judged.draft.dateOrder === 'month-first' ? 'month-first' : 'day-first'
+
+  /*
+   * EACH COLUMN AS WIDE AS WHAT IS IN IT, at the firm's asking -- see handoverColumnWidth.ts for
+   * why the browser could not work this out for itself.
+   *
+   * Measured on what the cell will SHOW, not on what is stored: a date is held as the sheet's
+   * reader produced it and drawn as dd/mm/yyyy, and sizing the column to the stored form would
+   * be sizing it to a string nobody is looking at.
+   */
+  const widths = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const k of SHOWN) {
+      out[k] = columnWidthCh(label(k), judged.rows.map((r) => (
+        DATE_KEYS.has(k) ? displayDate(r.values[k], order) : r.values[k]
+      )))
+    }
+    return out
+  }, [judged.rows, order])
+
+  /*
+   * ---- THE COLUMNS THIS SHEET DOES NOT USE ARE FOLDED AWAY ----
+   *
+   * THE FIRM, on an iPad: the table was 6 239 pixels wide, and the sidebar and the Settings menu
+   * leave a window on it of about 500. Thirty-seven of the forty-three columns were empty on
+   * every row of the sheet in front of them and cost 5 103 of those pixels -- so reaching the six
+   * columns with anything in them meant scrolling past ten screens of empty boxes. "Company
+   * registration number" was 248 pixels of nothing, on every row.
+   *
+   * That is the cost of the minimum width the firm asked for ("just make the thing longer so I
+   * can actually see that stuff"), which is right for a column with something in it and wrong
+   * for one with nothing.
+   *
+   * TWO KINDS ARE NEVER FOLDED, AND THIS IS THE PART THAT MATTERS. A REQUIRED column that is
+   * empty is the whole reason a row is refused -- hiding the box somebody has to type in would
+   * be hiding the only thing they came here to do. And a column carrying a PROBLEM is the one
+   * the reason under the table is pointing at; folded away, the sentence names a box that is not
+   * on the screen. Both are exactly the columns that look emptiest.
+   */
+  const [showEmpty, setShowEmpty] = useState(false)
+  const folded = useMemo(() => foldableColumns(SHOWN, judged.rows.map((r) => ({
+    values: r.values, problemKeys: (r.planned?.problems ?? []).map((p) => p.key),
+  })), required), [judged.rows])
+  const hidden = new Set(showEmpty ? [] : folded)
+  const columns = SHOWN.filter((k) => !hidden.has(k))
+
+  return (
+    <Card>
+      <CardHeader
+        title={judged.draft.filename}
+        subtitle={`${judged.ready} ready · ${judged.refused} not accepted · `
+          + `${formatCurrency(judged.totalCapital)} capital`}
+        action={
+          <button type="button" onClick={onBack}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700">
+            {backLabel ?? 'Back'}
+          </button>
+        } />
+
+      {/*
+        APPROVE IS OFFERED WHILE ROWS ARE STILL REFUSED, and says how many it would leave behind.
+        Refusing to let a batch in until every row is perfect is how a client waits a week for 194
+        good accounts because six have no date of default. The refused rows stay on the draft with
+        their reasons.
+      */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/*
+          HELD UNTIL EVERY PROBLEM HAS AN ANSWER, at the firm's instruction. It used to import
+          whatever was importable and leave the rest behind, which made a warning advice somebody
+          could scroll past -- and forty-five identical warnings under a table is advice everybody
+          scrolls past.
+
+          The COUNT comes off the gate rather than off `ready`, because the two have to agree: a
+          button reading "Approve 44 handovers" on a draft that cannot be approved is the screen
+          disagreeing with itself.
+        */}
+        <button type="button" onClick={() => void onApprove()}
+          disabled={!!busy || !judged.gate.ready || !!rateBlock}
+          title={rateBlock ?? judged.gate.why ?? undefined}
+          className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
+            bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
+          {approving ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+          {approving ?? `Approve ${judged.gate.importing} `
+            + `${judged.gate.importing === 1 ? 'handover' : 'handovers'}`}
+        </button>
+        {(rateBlock ?? judged.gate.why) && !busy && (
+          <span className="text-xs text-negative-700">{rateBlock ?? judged.gate.why}</span>
+        )}
+        <button type="button" onClick={() => void onDiscard()} disabled={!!busy}
+          className="ml-auto text-xs font-medium text-negative-700 hover:underline">
+          Discard this handover
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-negative-700 mb-3">{error}</p>}
+
+      {/*
+        SAID, AND UNDONE IN ONE PRESS. A table quietly missing columns is worse than a wide one:
+        somebody looking for "Employer" would conclude Raptor does not import it. So the number is
+        on the screen and the way back is next to it.
+
+        The count is of columns THIS SHEET left empty, which is the honest description -- they are
+        not columns Raptor has dropped, they are boxes the client sent nothing in.
+      */}
+      {folded.length > 0 && (
+        <p className="text-xs text-slate-500 mb-2">
+          {folded.length} {folded.length === 1 ? 'column is' : 'columns are'} empty on this sheet
+          {showEmpty ? ' and shown' : ' and folded away'}.{' '}
+          <button type="button" onClick={() => setShowEmpty(!showEmpty)}
+            className="font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
+            {showEmpty ? 'Fold them away' : 'Show them'}
+          </button>
+        </p>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+              {/* z-20: above both the scrolled headings and the pinned cells below it. */}
+              <th className={`${PINNED} z-20 py-2 pr-2 font-medium`}>Row</th>
+              {columns.map((k) => (
+                <th key={k} className="py-2 pr-2 font-medium whitespace-nowrap">
+                  {label(k)}{required.has(k) && <span className="text-gold-600"> *</span>}
+                </th>
+              ))}
+              <th className="py-2 pr-2 font-medium">PDF</th>
+              <th className="py-2 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {judged.rows.map((row) => {
+              return (
+                <tr key={row.id}
+                  className={`border-t border-slate-100 align-top ${row.excluded ? 'opacity-40' : ''}`}>
+                  <td className={`${PINNED} z-10 py-2 pr-2 text-slate-400 tabular-nums`}>
+                    {row.line}
+                  </td>
+                  {columns.map((k) => {
+                    /*
+                      THE CELL SAYS WHICH DATA IS WRONG, at the firm's asking. A problem carries
+                      the column it is about, so the box itself is marked -- a refusal in red, a
+                      warning in gold -- and the sentence under the table stops being the only
+                      way to find out which of forty boxes it meant.
+                    */
+                    const isDate = DATE_KEYS.has(k)
+                    const worst = (row.planned?.problems ?? []).filter((pr) => pr.key === k)
+                    const bad = worst.some((pr) => pr.level === 'refuse')
+                    /* A NOTE LEAVES THE BOX ALONE. The number in it was put right on the way into
+                       the account; marking the cell gold would send somebody to look at a cell
+                       there is nothing to do to, which on the firm's own file was 40 cells in 42. */
+                    const iffy = !bad && worst.some((pr) => pr.level === 'warn')
+                    /* What the box draws, which is also what a blur is judged against. */
+                    const isMoney = MONEY_KEYS.has(k)
+                    const shown = isDate
+                      ? displayDate(row.values[k], order)
+                      : isMoney
+                        ? displayMoney(row.values[k])
+                        : row.values[k] ?? ''
+                    return (
+                      <td key={k} className="py-1.5 pr-2">
+                        {/*
+                          EDITED IN PLACE, on blur rather than on every keystroke: each save
+                          re-reads the whole draft to re-judge it, and doing that per character
+                          would be a request a letter.
+                        */}
+                        <input
+                          /*
+                            A DATE IS SHOWN THE WAY SOUTH AFRICA WRITES IT. The stored value is
+                            whatever the sheet's reader produced, which for an .xlsx date cell is
+                            yyyy/mm/dd -- so the table was showing the firm its own reader's
+                            format on a file the firm fills in day-first. One that cannot be
+                            parsed comes back untouched, because that is the one somebody has to
+                            look at and correct.
+
+                            `key` on the date cells so React re-mounts the input when the value
+                            behind it changes: these are uncontrolled (defaultValue), and an edit
+                            elsewhere that re-judges the draft would otherwise leave the old text
+                            sitting in the box.
+                          */
+                          key={isDate || isMoney ? `${k}:${row.values[k] ?? ''}` : undefined}
+                          defaultValue={shown}
+                          disabled={!!busy || row.excluded}
+                          title={worst.map((pr) => pr.message).join(' ') || undefined}
+                          /*
+                            COMPARED WITH WHAT THE BOX WAS SHOWING, not with what is stored.
+                            A date is held as the sheet's reader produced it -- 2026/03/18 -- and
+                            drawn as 18/03/2026, so those two never matched and merely tabbing
+                            through a date cell saved the row, rewriting the stored date into the
+                            displayed form on the way past. Two rows of the firm's own draft on
+                            staging carry a date nobody typed for exactly that reason.
+                          */
+                          onBlur={(e) => {
+                            if (e.target.value.trim() === shown.trim()) return
+                            void onEdit(row.id, k, e.target.value)
+                          }}
+                          style={{ minWidth: `${widths[k]}ch` }}
+                          className={`w-full rounded border px-1.5 py-1 text-[13px]
+                            focus:border-brand-500 focus:outline-none ${
+                            bad ? 'border-negative-400 bg-negative-50'
+                              : iffy ? 'border-gold-400 bg-gold-50'
+                                : 'border-transparent hover:border-slate-200'}`} />
+                      </td>
+                    )
+                  })}
+                  <td className="py-2 pr-2 text-[11px] text-slate-400 truncate max-w-[9rem]">
+                    {row.documentFilename ?? '—'}
+                  </td>
+                  <td className="py-2">
+                    <button type="button" disabled={!!busy}
+                      onClick={() => void onExclude(row.id, !row.excluded)}
+                      title={row.excluded ? 'Put it back' : 'Leave this one out'}
+                      className="text-slate-300 hover:text-negative-600">
+                      <X size={14} />
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/*
+        THE REASONS, UNDER THE TABLE RATHER THAN IN IT. A cell wide enough to hold "Date of default
+        could be two different days" is a table nobody can read across; the row number ties them.
+      */}
+      {/*
+        EACH ONE IS A DECISION, NOT A SENTENCE TO SCROLL PAST. THE FIRM: "currently you need to go
+        down and read that, but then you have to go back up and remove the account if there is a
+        problem ... it should be in a pending state, and the approving cannot happen if all of the
+        bottom things have not been sorted out."
+
+        So every row carrying a problem gets Accept or Reject here, where the reasons are, rather
+        than sending somebody back up a forty-column table to find the × on the right line.
+      */}
+      <div className="mt-4 space-y-3">
+        {/*
+          AND A REPAIRED NUMBER IS NOT A ROW THAT NEEDS DECIDING. `canAccept` is the same rule the
+          gate uses, so the list here and the thing that blocks approval cannot come to different
+          answers -- a row appearing here with no buttons under it, or an approval blocked by a
+          row nobody was shown, are the two ways that goes wrong.
+        */}
+        {judged.rows.filter((r) => canAccept(r) || r.planned?.refused).map((row) => (
+          <DecisionRow key={row.id} row={row} busy={busy}
+            onAccept={(note, allocateTo) => onDecide(row.id, 'accepted', note, allocateTo)}
+            onReject={(note) => onDecide(row.id, 'rejected', note)}
+            onReopen={() => onDecide(row.id, null, null)} />
+        ))}
+      </div>
+    </Card>
+  )
+}

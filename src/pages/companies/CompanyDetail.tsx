@@ -1,21 +1,39 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake, CalendarClock, Users2, Link2, Unlink, Trash2, Inbox, Plus } from 'lucide-react'
+import {
+  UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
+  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy,
+} from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useBackLink, useRecordName } from '../../lib/backLink'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { StatusBadge, StageBadge, ClassificationBadge } from '../../components/ui/Badge'
+import { StatusBadge, StageBadge, ClassificationBadge, ServiceBadge } from '../../components/ui/Badge'
 import { InlineSelect } from '../../components/ui/InlineSelect'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
+  RecordActionsMore, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
+  RecordTabs, useRecordLayout,
+} from '../../components/record/RecordShell'
+import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmWhatsAppButton } from '../../components/record/WhatsAppButton'
+import { isClientCompany } from '../../lib/companyRollup'
+import { ClientReportButton } from '../../components/companies/ClientReportButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
+import {
+  RecordComment, RecordCommentFact, RecordCommentSummary,
+} from '../../components/record/RecordComment'
 import { PhoneLink } from '../../components/PhoneLink'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { WriteButton } from '../../components/email/MessageActions'
 import { EditContactModal } from '../../components/contacts/EditContactModal'
 import { AddContactModal } from '../../components/contacts/AddContactModal'
 import { formatCurrency, formatDate, leadClassifications } from '../../data/mockData'
-import { parseEmailActivity } from '../../lib/emailActivity'
+import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
@@ -24,20 +42,59 @@ import { HeroOwner } from '../../components/RecordOwner'
 import { ClientQueries } from './ClientQueries'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
-import { LogHandoverModal } from '../../components/companies/LogHandoverModal'
 import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
-import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
+import { ClientPicker } from '../../components/ui/ClientPicker'
+import { CommissionCard } from '../../components/companies/CommissionCard'
+import { handoverRateBlock } from '../../lib/commissionRule'
+import { MandateCard } from '../../components/companies/MandateCard'
+import { createDebtorAccount, fetchAccountReferences, fetchClientCommission } from '../../lib/accountBook'
+import { uploadDocument } from '../../lib/accountWorkspace'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
-import type { Company, Contact } from '../../types'
-import { isAssignableOwner } from '../../lib/permissions'
+import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
+import { WelcomeCard } from '../../components/companies/WelcomeCard'
+import { ClientBookRings } from '../../components/companies/ClientBookRings'
+import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
+import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
+import { ClientUpcomingPayover } from '../../components/companies/ClientUpcomingPayover'
+import { ClientRecentActivity } from '../../components/companies/ClientRecentActivity'
+import { outcomeRing, type OutcomeRow } from '../../lib/clientOutcomes'
+import { ruleKind } from '../../lib/commissionRule'
+import { HandOutModal } from '../accounts/HandOutModal'
+import type { Selection } from '../../lib/accountAllocation'
+import type { Company, Contact, ProductService } from '../../types'
+import { canBeClientLiaison, canEditOwned, canViewTrust } from '../../lib/permissions'
+import { ClientAccountPanel } from '../../components/companies/ClientAccountPanel'
+import { ClientSettlements } from '../../components/companies/ClientSettlements'
+import { ClientPayoversPanel } from '../../components/companies/ClientPayoversPanel'
+import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
+import { supabase } from '../../lib/supabase'
+import { clockNow } from '../../lib/clock.ts'
+
+/*
+ * ACCOUNT IS A TAB, NOT A PANEL ON THE OVERVIEW, and it is gated separately from the rest of the
+ * page. The firm: "Now we are going to need a financial section where we see a client balance."
+ * A sales representative works this screen every day and may not see the payment split, so the
+ * statement -- which is payovers, commission taken off them and what the client is invoiced --
+ * cannot simply sit in the Overview's scroll.
+ */
+type ClientTab = 'Overview' | 'Account' | 'Payovers' | 'Emails' | 'Notes' | 'Tasks'
 
 export function CompanyDetail() {
   const focusedEmailId = useFocusedEmailId()
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  /*
+   * Every address that is US, so a reply-all never copies the sender back into their own thread.
+   * A list rather than one address: mail reaches an agent at their own address and at whatever
+   * the firm forwards to them.
+   */
+  const mine = useMemo(
+    () => [currentUser?.email].filter((a): a is string => !!a),
+    [currentUser?.email],
+  )
   const {
     companies,
     contacts,
@@ -46,8 +103,8 @@ export function CompanyDetail() {
     activities,
     tasks,
     users,
+    teams,
     addActivity,
-    addHandover,
     updateCompany,
     updateContact,
     addContact,
@@ -57,17 +114,42 @@ export function CompanyDetail() {
     addTask,
   } = useAppStore()
   const company = companies.find((c) => c.id === id)
+  /* BACK GOES WHERE YOU CAME FROM (the firm, 10 Oct: from Kagiso Mokoena's account, "go back to
+     Kagiso", not to all clients). The clients list when opened from it or directly. */
+  useRecordName(company?.name)
+  const back = useBackLink({ to: '/companies', label: 'Back to Clients' })
   const isAdmin = currentUser?.role === 'Administrator'
-  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
+  /*
+   * THE SAME RULE AS THE ADD FORM, which it was not.
+   *
+   * This read `isAssignableOwner` -- Administrator, Sales, Liaison -- which is "who may be given a
+   * LEAD or a DEAL", a different question with a different answer. So the two doors onto one field
+   * offered two different lists, and the firm's instruction ("there should only be liaisons or
+   * liaison manager") reached only one of them.
+   */
+  const reps = useMemo(
+    () => users.filter((u) => u.status === 'Active' && canBeClientLiaison(u)), [users])
   const [noteOpen, setNoteOpen] = useState(false)
   const [courtesyCallOpen, setCourtesyCallOpen] = useState(false)
-  const [handoverOpen, setHandoverOpen] = useState(false)
   // Adding a debtor by hand. The references are fetched when the modal opens rather than on every
   // page load: they are only ever used to propose the next number in the client's series.
   const [debtorOpen, setDebtorOpen] = useState(false)
   const [debtorRefs, setDebtorRefs] = useState<string[]>([])
   const [debtorBusy, setDebtorBusy] = useState(false)
   const [debtorError, setDebtorError] = useState<string | null>(null)
+  /*
+   * THE ACCOUNT JUST OPENED BY HAND, WAITING TO BE GIVEN TO SOMEBODY.
+   *
+   * The firm: "once you've added an account manually in a client it should do the same thing --
+   * it should take you to the assign and refer page to diarise, and it should be allocated to a
+   * person." Adding by hand used to write the row and drop the person on the account screen, so
+   * an account phoned in by a client arrived on nobody's desk and in nobody's diary -- the exact
+   * state the hand-out screen exists to end, reached by the one door that skipped it.
+   *
+   * The id rather than a boolean, because it IS the selection the hand-out screen works on.
+   */
+  const [handOutNew, setHandOutNew] = useState<string | null>(null)
+  const [handOutNote, setHandOutNote] = useState<string | null>(null)
   const [ownerOpen, setOwnerOpen] = useState(false)
   const [dealOpen, setDealOpen] = useState(false)
   const [followUpOpen, setFollowUpOpen] = useState(false)
@@ -79,7 +161,15 @@ export function CompanyDetail() {
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [editCompanyOpen, setEditCompanyOpen] = useState(false)
   const [addContactOpen, setAddContactOpen] = useState(false)
-  const [replyTarget, setReplyTarget] = useState<{ to: string; subject: string; contactId?: string } | null>(null)
+  /**
+   * The composer's opening, for whichever of the three answers was pressed.
+   *
+   * One state for reply, reply-all and forward rather than three: they open the same modal with
+   * different fields, and three states is how a forward ends up carrying a reply's Cc line.
+   */
+  const [replyTarget, setReplyTarget] = useState<
+    (ComposeOpening & { contactId?: string }) | null
+  >(null)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
@@ -88,16 +178,43 @@ export function CompanyDetail() {
   const companyContacts = useMemo(() => contacts.filter((c) => c.companyId === id), [contacts, id])
   const companyLeads = useMemo(() => leads.filter((l) => l.companyId === id), [leads, id])
   const companyDeals = useMemo(() => deals.filter((d) => d.companyId === id), [deals, id])
-  // The signed mandate a batch arrives under, so a handover is tied to the agreement it came
-  // in on rather than floating against the client in general.
-  const mandateDeal = useMemo(
-    () => companyDeals.find((d) => d.stage === 'Won' && d.handoverAmount != null),
-    [companyDeals],
-  )
   const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
-  const isClient = wonDeals.length > 0 || !!company?.code
+  /* The same rule as the Clients list (isClientCompany), signed mandate included. */
+  const isClient = !!company && isClientCompany(company, wonDeals.length > 0)
+  /*
+   * Every number that could reach this client.
+   *
+   * A company has one switchboard number of its own; the people are on the contacts below. The
+   * Call button rings the one there is, which is what somebody phoning a client expects.
+   */
+  /*
+   * Which tab, and how the Overview is arranged. The layout key is per page type rather than per
+   * client: it is a preference about eyes, not about a company.
+   */
+  /* ?tab=Account opens the client's ledger directly -- Trust -> Client balances links there. */
+  const [tab, setTab] = useState<ClientTab>(() =>
+    new URLSearchParams(window.location.search).get('tab') === 'Account' ? 'Account' : 'Overview')
+  const [layout, chooseLayout] = useRecordLayout('raptor.client.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
+
+  /*
+   * What this client actually buys, taken from their deals.
+   *
+   * A company carries no services column of its own: what they wanted was captured on the lead
+   * and what they signed is on the deals, so the deals are the honest answer to "what do we do
+   * for them?".
+   */
+  const companyServices = useMemo(
+    () => [...new Set(companyDeals.map((d) => d.service).filter(Boolean))] as ProductService[],
+    [companyDeals],
+  )
+
+  const clientNumbers = useMemo(
+    () => (company?.phone ? [{ label: 'Switchboard', value: company.phone }] : []),
+    [company?.phone],
+  )
   const companyActivities = useMemo(
     () => activities.filter((a) => a.companyId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
     [activities, id],
@@ -109,10 +226,26 @@ export function CompanyDetail() {
   // Paid-to-date vs. handover amount. Can exceed 100% — payments here include
   // fees on top of the handover amount, which this system deliberately never
   // discloses, so the ratio isn't meant to cap at 100.
-  const collectionsCoefficient =
-    company?.handoverAmount !== undefined && company.handoverAmount > 0 && company?.paymentsToDate !== undefined
-      ? (company.paymentsToDate / company.handoverAmount) * 100
-      : undefined
+  /*
+   * THE RECOVERY RATE FOR THE FIGURES ROW (S9, 19 Oct), from client_account_outcomes -- the same call
+   * the ring and Collections performance read, withdrawn accounts left out -- so the tile, the ring
+   * and the chart's last point are one figure. It replaced "Paid to date" and "Coefficient": the
+   * coefficient divided ALL payments, fees included, by capital, and stood beside a ring stating a
+   * different percentage for the same client.
+   */
+  const bookId = company ? company.parentCompanyId ?? company.id : null
+  const [outcomes, setOutcomes] = useState<OutcomeRow[] | null>(null)
+  useEffect(() => {
+    if (!bookId) return
+    let live = true
+    supabase.rpc('client_account_outcomes', { p_client: bookId }).then(({ data }) => {
+      if (live) setOutcomes(((data ?? []) as Record<string, unknown>[]).map((r) => ({ outcome: String(r.outcome), accounts: Number(r.accounts), capital: Number(r.capital), collected: Number(r.collected) })))
+    })
+    return () => { live = false }
+  }, [bookId])
+  const recovery = outcomes ? outcomeRing(outcomes) : null
+  /* A mandate filed from Attention required reloads the mandate card's own list. */
+  const [mandateKey, setMandateKey] = useState(0)
 
   if (!company) {
     return (
@@ -122,10 +255,414 @@ export function CompanyDetail() {
     )
   }
 
+  /*
+   * The panels, built once and placed by whichever layout is chosen.
+   *
+   * Defining them here rather than three times over is the whole reason the layouts can be
+   * trusted to stay the same page: a prop added to one arrangement cannot be forgotten in the
+   * other two, and that bug is invisible until somebody switches layout.
+   */
+  /** Who to ring, and the people you deal with there. */
+  const contactPanel = (
+    <Card className="@container">
+      <CardHeader
+        title="Contact Details"
+        action={
+          <button onClick={() => setEditCompanyOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Pencil size={12} /> Edit
+          </button>
+        }
+      />
+      {/*
+        Three across when the CARD is wide enough, stacked when it is not. `sm:` asks about the
+        WINDOW, so in the three-column layout this laid out three columns inside a 300px card and
+        ran an email address off its right-hand edge. See the same note on the lead page.
+      */}
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Phone</p>
+          {company.phone ? (
+            <PhoneLink number={company.phone} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600" log={{ label: company.name, companyId: company.id }} />
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Email</p>
+          {company.email ? (
+            <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+              <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                <Mail size={13} />
+              </button>
+              {company.email}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Website</p>
+          {company.website ? (
+            <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+              <Globe size={13} /> {company.website}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-slate-400">Contact Persons</p>
+        <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+          <Plus size={12} /> Add Contact
+        </button>
+      </div>
+      {companyContacts.length === 0 ? (
+        <p className="text-sm text-slate-400">No contact persons yet.</p>
+      ) : (
+        // The checking list's shape, which the firm asked for on every list in the app: one
+        // line a person, job title after the name, each number in a column of its own.
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full list-table whitespace-nowrap">
+            <tbody>
+              {companyContacts.map((c) => (
+                <tr key={c.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-2 py-1.5">
+                    <Link to={`/contacts/${c.id}`} className="inline-flex items-center gap-2 max-w-[16rem]" title={`${c.firstName} ${c.lastName}${c.jobTitle ? ` · ${c.jobTitle}` : ''}`}>
+                      <UserAvatar userId={c.ownerId} size={18} />
+                      <span className="truncate">
+                        <span className="font-medium text-slate-700 hover:text-brand-600">{c.firstName} {c.lastName}</span>
+                        {c.jobTitle && <span className="text-slate-400"> · {c.jobTitle}</span>}
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.phone && (
+                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.mobile && (
+                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
+                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                      </PhoneLink>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                          <Mail size={11} />
+                        </button>
+                        {c.email}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
+                      <Pencil size={11} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The clients grouped under this one. */
+  const subAccountsPanel = subAccounts.length > 0 && (
+    <Card padded={false}>
+      <div className="p-5 pb-3">
+        <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
+      </div>
+      <div className="overflow-x-auto px-5 pb-5">
+        <table className="w-full list-table whitespace-nowrap">
+          <thead>
+            <tr className="text-left text-slate-400 border-b border-slate-100">
+              <th className="font-medium px-3 py-1.5">Sub-account</th>
+              <th className="font-medium px-2 py-1.5">Code</th>
+              <th className="font-medium px-2 py-1.5 text-right">Accounts</th>
+              <th className="font-medium px-2 py-1.5 text-right">Handover Amount</th>
+              <th className="font-medium px-2 py-1.5 text-right">Payments to Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {subAccounts.map((s) => (
+              <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
+                <td className="px-3 py-1.5">
+                  <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} title={s.name} className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
+                    {s.name}
+                  </Link>
+                </td>
+                <td className="px-2 py-1.5">
+                  {s.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{s.code}</span> : '—'}
+                </td>
+                <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{s.accountCount ?? '—'}</td>
+                <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
+                <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-slate-200" style={{ background: 'rgba(236,220,184,0.25)' }}>
+              <td className="px-3 py-1.5 font-bold text-slate-800">Total</td>
+              <td className="px-2 py-1.5"></td>
+              <td className="px-2 py-1.5 text-right font-bold text-slate-800 tabular-nums whitespace-nowrap">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
+              <td className="px-2 py-1.5 text-right font-bold text-slate-800 tabular-nums whitespace-nowrap">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
+              <td className="px-2 py-1.5 text-right font-bold text-slate-800 tabular-nums whitespace-nowrap">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+
+  /** Its own tab: a list that grows without limit does not belong on an overview. */
+  const emailsPanel = (
+    <Card>
+      <CardHeader
+        title="Emails"
+        subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
+        action={
+          <div className="flex items-center gap-2">
+            <WriteButton onClick={() => setComposeOpen(true)} />
+            <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+          </div>
+        }
+      />
+      {emailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No emails yet.</p>
+      ) : (
+        <EmailActivityList
+          activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
+            focusId={focusedEmailId}
+          showDeal
+          mine={mine}
+          onAnswer={(a, mode) => {
+            const theirAddress = a.contactId
+              ? contacts.find((c) => c.id === a.contactId)?.email
+              : company.email
+            /* A forward needs no address — it is going to somebody who was not on the thread. */
+            if (!theirAddress && mode !== 'forward') return
+            setReplyTarget({
+              ...openingFor(
+                {
+                  rawSubject: a.subject,
+                  fromName: null,
+                  fromAddress: theirAddress ?? null,
+                  to: a.emailToRecipients ?? [],
+                  cc: a.emailCcRecipients ?? [],
+                  body: a.notes ?? '',
+                  occurredAt: a.activityDate,
+                  messageId: a.emailMessageId ?? null,
+                },
+                mode,
+                mine,
+              ),
+              contactId: a.contactId,
+            })
+          }}
+        />
+      )}
+    </Card>
+  )
+
+  /** Everything that is not an email — courtesy calls, meetings, notes. */
+  const notesPanel = (
+    <Card>
+      <CardHeader
+        title="Notes"
+        subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
+        action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
+      />
+      {nonEmailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No activity recorded yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
+        </div>
+      )}
+    </Card>
+  )
+
+  /** What is still being sold to them. */
+  const openDealsPanel = (
+    <Card>
+      <CardHeader title="Open Deals" subtitle={`${openDeals.length} active`} />
+      {openDeals.length === 0 ? (
+        <p className="text-sm text-slate-400">No open deals.</p>
+      ) : (
+        // One line a row at 12.5px, the checking list's density, which the firm asked for on
+        // every list; the money cannot wrap and so cannot put its minus sign above the figure.
+        <div>
+          {openDeals.map((d) => (
+            <Link key={d.id} to={`/deals/${d.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+              <span className="ml-auto shrink-0 text-right tabular-nums whitespace-nowrap text-slate-500">{formatCurrency(d.value)}</span>
+              <span className="shrink-0"><StageBadge stage={d.stage} /></span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** What they have already signed. */
+  const wonDealsPanel = (
+    <Card>
+      <CardHeader title="Won Deals" subtitle={`${wonDeals.length} closed`} />
+      {wonDeals.length === 0 ? (
+        <p className="text-sm text-slate-400">No won deals yet.</p>
+      ) : (
+        <div>
+          {wonDeals.map((d) => (
+            <Link key={d.id} to={`/deals/${d.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+              <span className="ml-auto shrink-0 text-right tabular-nums whitespace-nowrap font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The leads this client came from. */
+  const leadsPanel = (
+    <Card>
+      <CardHeader title="Leads" />
+      {companyLeads.length === 0 ? (
+        <p className="text-sm text-slate-400">No leads for this company.</p>
+      ) : (
+        <div>
+          {companyLeads.map((l) => (
+            <Link key={l.id} to={`/leads/${l.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0">{l.firstName} {l.lastName}</span>
+              <span className="ml-auto shrink-0"><StatusBadge status={l.status} /></span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The firmographics. */
+  const companyInfoPanel = (
+    <Card>
+      <CardHeader title="Client information" />
+      <dl className="space-y-3 text-sm">
+        {/* CLASS, moved here off the figures row (S9): it is set once and read rarely, and the
+            figures row is for what a client is asked about. Still set in place, as it always was. */}
+        <div className="flex justify-between gap-3 items-center">
+          <dt className="text-slate-400">Class</dt>
+          <dd>
+            <InlineSelect
+              value={company.classification}
+              options={leadClassifications}
+              onChange={(classification) => updateCompany(company.id, { classification })}
+            >
+              {company.classification ? (
+                <ClassificationBadge classification={company.classification} />
+              ) : (
+                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+              )}
+            </InlineSelect>
+          </dd>
+        </div>
+        <Field label="Industry" value={company.industry} />
+        <Field label="Province" value={company.province} />
+        <Field label="City" value={company.city} />
+        <Field label="Address" value={company.address} />
+        <Field label="Signed by (Marketing Agent)" value={company.marketingAgent} />
+        <div className="flex justify-between gap-3 items-center">
+          <dt className="text-slate-400">Account Owner</dt>
+          <dd className="flex items-center gap-1.5">
+            <span className="text-slate-700 font-medium">{users.find((u) => u.id === company.accountOwnerId)?.name ?? '—'}</span>
+            {/*
+              SAID ON THE PANEL, NOT ONLY INSIDE THE BOX THAT CHANGES IT.
+              
+              Three routes create a client WITHOUT asking who the liaison is -- Quick Add's company
+              form, the Swordfish import and converting a lead -- and all three fall back to
+              whoever is signed in. So a client can arrive owned by an administrator or a sales rep
+              and look entirely ordinary here; the warning inside "Reassign" only reaches somebody
+              who already suspected something. One word, where the name is.
+            */}
+            {(() => {
+              const owner = users.find((u) => u.id === company.accountOwnerId)
+              if (!owner || canBeClientLiaison(owner)) return null
+              return (
+                <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5
+                  rounded-md bg-amber-100 text-amber-900"
+                  title={`A client’s liaison should be a Liaison or a Liaison Manager. ${owner.name} is a ${owner.role}.`}>
+                  not a liaison
+                </span>
+              )
+            })()}
+            <button onClick={() => setOwnerOpen(true)} aria-label="Reassign the liaison" title="Reassign the liaison"
+              className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
+              <Pencil size={12} />
+            </button>
+          </dd>
+        </div>
+        {/*
+          THE MANDATE IS NOT A FIELD HERE ANY MORE. It was `{company.mandateSignedAt && <Field
+          .../>}` -- rendered only once it was already set, so the one screen that could have
+          fixed a missing mandate showed nothing at all where it was missing. THE FIRM: "there
+          was no option where I can upload a contract ... there should be a function inside the
+          client section where it says upload a mandate." It is MandateCard now, which shows the
+          absence, sets the date and takes the signed mandate itself.
+        */}
+        <Field label="Created" value={formatDate(company.createdAt)} />
+        {/*
+          ALSO ON FILE (S9): what a signed mandate ADDED beside a detail that was already here, and
+          the closer's name for the client once the signed name took over -- the firm: "Don't
+          replace stuff." Shown with where it came from, because two telephone numbers with no
+          source are a guess about which to ring.
+        */}
+        {(company.otherDetails ?? []).length > 0 && (
+          <div className="pt-3 border-t border-slate-100" data-testid="client-other-details">
+            <dt className="text-xs font-medium text-slate-500 mb-2">Also on file</dt>
+            <dd className="space-y-2">
+              {(company.otherDetails ?? []).map((d, i) => (
+                <div key={`${d.label}-${i}`} className="flex justify-between gap-3">
+                  <span className="text-slate-400">{d.label}</span>
+                  <span className="text-right">
+                    <span className="block text-slate-700 font-medium break-all">{d.value}</span>
+                    <span className="block text-[11px] text-slate-400">{d.source}{d.at ? `, ${formatDate(d.at)}` : ''}</span>
+                  </span>
+                </div>
+              ))}
+            </dd>
+          </div>
+        )}
+      </dl>
+    </Card>
+  )
+
+  /** Its own tab as well: a task list is work, not context. */
+  const tasksPanel = (
+    <Card>
+      <CardHeader title="Tasks" />
+      {companyTasks.length === 0 ? (
+        <p className="text-sm text-slate-400">No tasks yet.</p>
+      ) : (
+        <div>
+          {companyTasks.map((t) => (
+            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="text-slate-700 truncate min-w-0" title={t.title}>{t.title}</span>
+              <span className="ml-auto shrink-0 text-slate-400">Due {formatDate(t.dueDate)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+
   return (
     <div className="space-y-5">
-      <Link to="/companies" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={15} /> Back to Clients
+      <Link to={back.to} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700" data-testid="back-link">
+        <ArrowLeft size={15} /> {back.label}
       </Link>
 
       <DashboardHero
@@ -161,62 +698,120 @@ export function CompanyDetail() {
               const line = summaryLine([company.industry, summaryLine([company.city, company.province], ', ')])
               return line ? <span>{line}</span> : null
             })()}
+            {/*
+              WHAT THEY ARE TO US, IN THE BAND (S9, 19 Oct, after the firm's mock): a client with a
+              live book, and the services they signed for, as tags under the name -- read before
+              anything else on the page, as the debtor's band reads its position.
+            */}
+            {(isClient || companyServices.length > 0) && (
+              <span className="mt-2 flex w-full flex-wrap items-center gap-1.5" data-testid="client-hero-tags">
+                {isClient && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-2.5 py-0.5 text-[11.5px] font-medium text-white">
+                    <span className={`h-1.5 w-1.5 rounded-full ${(company.accountCount ?? 0) > 0 ? 'bg-emerald-400' : 'bg-white/40'}`} />
+                    {(company.accountCount ?? 0) > 0 ? 'Active' : 'No accounts yet'}
+                  </span>
+                )}
+                {companyServices.map((sv) => (
+                  <span key={sv} className="rounded-full border border-white/20 px-2.5 py-0.5 text-[11.5px] text-white/85">{sv}</span>
+                ))}
+              </span>
+            )}
           </span>
         }
       >
         <HeroOwner ownerId={company.accountOwnerId} label="Client Liaison" />
       </DashboardHero>
 
+      {/*
+        The same row of figures the Account and Lead pages wear, from the same component.
+
+        It used to be a line of stats inside a card, at a different size, in a different order to
+        the debtor page next door. The firm's point: a client liaison moving between a client and
+        the debtors they handed over should not have to learn the page twice.
+      */}
+      {/*
+        THE FIVE FIGURES A CLIENT IS ASKED ABOUT (S9, 19 Oct, after the firm's mock): how many
+        accounts, how much was handed over, how much of it we have brought in, what they are billed,
+        and what they are worth to the firm. Each with its mark, the recovery rate with its own ring.
+        Class moved to Client information -- it is set once and read rarely.
+      */}
+      <RecordFigures count={5}>
+        <RecordFigure icon={Users} label="Accounts" value={String(company.accountCount ?? 0)}
+          note="handed over to us" />
+        <RecordFigure icon={Database} label="Capital handed over" value={formatCurrency(company.handoverAmount ?? 0)}
+          note={company.estimatedHandoverAmount != null
+            ? `estimated ${formatCurrency(company.estimatedHandoverAmount)} at signup`
+            : 'total book value'} />
+        <RecordFigure label="Recovery rate" strong
+          aside={<MiniRing pct={recovery?.recoveryRate ?? 0} />}
+          value={recovery?.recoveryRate == null ? '—' : `${recovery.recoveryRate}%`}
+          note={recovery ? `${formatCurrency(recovery.collected)} collected` : 'Reading…'} />
+        {(() => {
+          /* THE RULE THEY ARE BILLED ON, from the commission card's own reading of it. */
+          const kind = ruleKind(company)
+          const value = kind === 'flat' && typeof company.commissionRate === 'number'
+            ? `${(company.commissionRate * 100).toFixed(2).replace(/\.00$/, '')}%`
+            : kind === 'scale' || kind === 'scale_without_bands' ? 'Sliding scale' : 'Not set'
+          return (
+            <RecordFigure icon={Percent} label="Commission" value={value} danger={kind === 'none'}
+              note={kind === 'flat' ? 'of everything collected' : kind === 'none' ? 'nothing signed' : 'on the capital handed over'} />
+          )
+        })()}
+        <RecordFigure icon={Trophy} label="Deals won" value={formatCurrency(lifetimeValue)}
+          note={`${openDeals.length} open`}
+          onClick={() => navigate(buildDrilldownUrl('/deals', { company: company.id, open: '1', view: 'table' }))}
+          title="Open this client's deals" />
+      </RecordFigures>
+
+      {/*
+        The two lines the next person needs, and the facts they would otherwise go hunting for.
+
+        Above the actions, exactly where it sits on a debtor's account, because it answers the
+        question somebody opens the page with — what is going on here? — before they decide which
+        button to press. The deals and the book ride along with it: they lived several panels
+        down, and this puts them where the eye already is.
+      */}
+      <RecordComment
+        text={company.mainComment}
+        at={company.mainCommentAt}
+        placeholder="Where does this client stand? Two lines is plenty."
+        onSave={(text) => updateCompany(company.id, {
+          mainComment: text || undefined,
+          mainCommentAt: clockNow().toISOString(),
+          mainCommentBy: currentUser?.id,
+        })}
+        summary={(
+          <RecordCommentSummary>
+            <RecordCommentFact label="Services">
+              {companyServices.length > 0
+                ? companyServices.map((sv) => <ServiceBadge key={sv} service={sv} />)
+                : <span className="text-slate-400">Nothing signed yet</span>}
+            </RecordCommentFact>
+            <RecordCommentFact label="Deals">
+              {companyDeals.length === 0
+                ? <span className="text-slate-400">None yet</span>
+                : (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(lifetimeValue)}</span>
+                    <span className="text-slate-400">won · {openDeals.length} still open</span>
+                  </>
+                )}
+            </RecordCommentFact>
+            <RecordCommentFact label="Book">
+              {company.accountCount
+                ? (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(company.handoverAmount ?? 0)}</span>
+                    <span className="text-slate-400">over {company.accountCount} accounts</span>
+                  </>
+                )
+                : <span className="text-slate-400">Nothing handed over</span>}
+            </RecordCommentFact>
+          </RecordCommentSummary>
+        )}
+      />
+
       <Card>
-        <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
-          {/* Class sits outside the debt-collection block: it applies to every client, and it
-              was previously invisible on any client without handover totals — including the
-              ones nobody had graded yet, which are exactly the ones you'd want to grade. */}
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-            <InlineSelect
-              value={company.classification}
-              options={leadClassifications}
-              onChange={(classification) => updateCompany(company.id, { classification })}
-            >
-              {company.classification ? (
-                <ClassificationBadge classification={company.classification} />
-              ) : (
-                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
-              )}
-            </InlineSelect>
-          </div>
-          {(company.accountCount !== undefined || company.handoverAmount !== undefined) && (
-            <>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
-                <p className="text-2xl font-bold text-slate-800 mt-0.5">{company.accountCount ?? 0}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
-                <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(company.handoverAmount ?? 0)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Paid to Date</p>
-                <p className="text-2xl font-bold text-[var(--c-gold-deep)] mt-0.5">{formatCurrency(company.paymentsToDate ?? 0)}</p>
-              </div>
-              {collectionsCoefficient !== undefined && (
-                <div>
-                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Coefficient</p>
-                  <p className="text-2xl font-bold text-slate-800 mt-0.5">{collectionsCoefficient.toFixed(0)}%</p>
-                </div>
-              )}
-            </>
-          )}
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Deals Won</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(lifetimeValue)}</p>
-          </div>
-          <Link to={buildDrilldownUrl('/deals', { company: company.id, open: '1', view: 'table' })} className="hover:opacity-70">
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deals</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{openDeals.length}</p>
-          </Link>
-        </div>
 
         {company.estimatedHandoverAmount != null && (
           <p className="text-xs text-slate-400 mt-3">
@@ -227,358 +822,234 @@ export function CompanyDetail() {
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
-          {isClient && (
-            <button onClick={() => setDealOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Handshake size={13} /> Add Deal
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setFollowUpOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <CalendarClock size={13} /> Schedule Follow-up
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setMeetingOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Users2 size={13} /> Schedule Meeting
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setCourtesyCallOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Phone size={13} /> Log Courtesy Call
-            </button>
-          )}
-          {isClient && (
-            <button onClick={() => setHandoverOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Inbox size={13} /> Import Handover
-            </button>
-          )}
+        {/* THE RULE ABOVE THE ACTIONS ONLY WHEN THERE IS SOMETHING ABOVE IT: without the estimate
+            line it drew an empty band across the top of the card (seen on the iPad, 19 Oct). */}
+        <div className={company.estimatedHandoverAmount != null ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
           {/*
-            Beside the import, because they are the two ways an account gets into the book and a
-            person looking for one will look for the other. The import takes a batch; this takes
-            the single account a client phones in, which until now had no way in at all.
+            The same action row as the Account and Lead pages, in the same order of thought:
+            reach them first, then record what happened, then move the record on. A client page
+            whose first button was "Add Deal" put the paperwork before the phone.
+
+            Nothing here charges anybody. Every comparable action on a debtor raises an Annexure B
+            fee, because a debtor pays for the work of collecting from them — a client is the
+            person paying US. See CrmCallButton, which never reaches the charge engine.
           */}
-          {isClient && (
-            <button
-              onClick={async () => {
-                setDebtorError(null)
-                // Fetched BEFORE the modal opens, not alongside it. The reference it proposes is
-                // worked out once when the form mounts, so references arriving a moment later
-                // would leave the field blank — which is exactly what it did.
-                setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
-                setDebtorOpen(true)
-              }}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              <UserPlus size={13} /> Add Debtor
-            </button>
-          )}
-          <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            <StickyNote size={13} /> Add Note
-          </button>
-          {subAccounts.length === 0 && (
-            <button onClick={() => setParentOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Link2 size={13} /> {company.parentCompanyId ? 'Change Parent' : 'Assign to Parent'}
-            </button>
-          )}
-          {isAdmin && (
-            <button onClick={() => setDeleteOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
-              <Trash2 size={13} /> Delete
-            </button>
-          )}
+          <RecordActions>
+            <CrmCallButton
+              numbers={clientNumbers}
+              to={{ companyId: company.id }}
+              subject={company.name}
+              className={`${ACTION_BASE} ${ACTION_ENABLED}`}
+            />
+            {/* WhatsApp beside Call (S9): opens WhatsApp itself; nothing is charged on the sales side. */}
+            <CrmWhatsAppButton numbers={clientNumbers} to={{ companyId: company.id }} subject={company.name} firstName={null} />
+            <RecordAction icon={MessageSquare} label="SMS"
+              onClick={clientNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+              title={clientNumbers.length > 0
+                ? 'Text this client — nothing is charged'
+                : 'No phone number on this client yet'} />
+            <RecordAction icon={Mail} label="Email"
+              onClick={company.email ? () => setEmailOpen(true) : undefined}
+              title={company.email ? 'Send from your connected mailbox' : 'No email address on this client yet'} />
+            <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
+              title="Write on the timeline" />
+            {/*
+              THE TWO WAYS AN ACCOUNT GETS ONTO THIS BOOK, both on the outside now.
+              THE FIRM: "if I record a batch, that is an absolutely useless exercise. You should
+              say upload a batch ... I see the add a debtor we can kind of put on the outside."
+
+              "Record a batch" typed a capital figure and a count and created nothing. It is gone;
+              a batch is now created by APPROVING an uploaded handover, with a capital figure
+              added up from the accounts rather than keyed by somebody.
+            */}
+            {isClient && (
+              <RecordAction icon={Upload} label="Upload a batch" primary
+                onClick={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)}
+                title="Read a handover sheet and its PDFs, and check it before anything is written" />
+            )}
+            {isClient && (
+              <RecordAction icon={UserPlus} label="Add debtor"
+                onClick={async () => {
+                  setDebtorError(null)
+                  setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
+                  setDebtorOpen(true)
+                }}
+                title="The single account a client phones in" />
+            )}
+            {/* The client's collection report (S9): the firm's Excel dashboard, remade as a PDF. */}
+            {isClient && (
+              <ClientReportButton client={{ id: company.id, name: company.name, code: company.code ?? null, accountIds: [company.id, ...subAccounts.map((s) => s.id)] }} />
+            )}
+
+            {/*
+              Everything else, folded away. Twelve buttons wrapped to three lines on an iPad and
+              pushed the panels below off the screen; nothing is removed, because the fix for a
+              crowded row is not to take away the button somebody needs twice a month.
+            */}
+            <RecordActionsMore>
+              {/* "Add debtor" moved OUT of this menu, at the firm's asking. The references are
+                  still fetched before the modal opens rather than alongside it: the reference it
+                  proposes is worked out once when the form mounts, so ones arriving a moment
+                  later would leave the box blank — which is exactly what it did. */}
+              {isClient && (
+                <RecordMoreAction icon={Phone} label="Log courtesy call" onClick={() => setCourtesyCallOpen(true)}
+                  title="Record a call you made some other way" />
+              )}
+              {isClient && <RecordMoreAction icon={CalendarClock} label="Schedule follow-up" onClick={() => setFollowUpOpen(true)} />}
+              {isClient && <RecordMoreAction icon={Users2} label="Schedule meeting" onClick={() => setMeetingOpen(true)} />}
+              {isClient && <RecordMoreAction icon={Handshake} label="Add deal" onClick={() => setDealOpen(true)} />}
+              {subAccounts.length === 0 && (
+                <RecordMoreAction icon={Link2}
+                  label={company.parentCompanyId ? 'Change parent' : 'Assign to parent'}
+                  onClick={() => setParentOpen(true)} />
+              )}
+              {isAdmin && <RecordMoreAction icon={Trash2} label="Delete" danger onClick={() => setDeleteOpen(true)} />}
+            </RecordActionsMore>
+          </RecordActions>
         </div>
       </Card>
 
-      <ClientBookCard companyId={company.id} />
+      {/*
+        Tabs over the detail, like the Account and Lead pages — and for the same reason.
+        Everything below used to be one scroll: contact details, sub-accounts, every email ever
+        sent, every note, the queries, the handover book, then the deals somebody actually came
+        for. The long lists get their own tabs so the Overview stays readable at a glance.
+      */}
+      <RecordTabs<ClientTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Emails', label: 'Emails', count: emailActivities.length },
+          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
+          { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
+          /* The client's payover folder: every run and the copies that were sent (the firm, 8 Oct).
+             Towards the end, at the firm's asking (10 Oct: "so it's the last one there"). */
+          ...(canViewTrust(currentUser) ? [{ id: 'Payovers' as const, label: 'Payovers' }] : []),
+          /* The client's ledger. Only for somebody who may see the trust side; hidden rather than
+             refusing, like every other money screen. Right of Payovers at the firm's asking (10
+             Oct): it is read as the sum of those runs, so it comes after them. */
+          ...(canViewTrust(currentUser) ? [{ id: 'Account' as const, label: 'Account' }] : []),
+        ]}
+        active={tab}
+        onChange={setTab}
+        /* Only on Overview, because it is the only tab with more than one panel to arrange. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
+      />
 
-      <Card>
-        <CardHeader
-          title="Contact Details"
-          action={
-            <button onClick={() => setEditCompanyOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-              <Pencil size={12} /> Edit
-            </button>
-          }
-        />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
-          <div>
-            <p className="text-xs text-slate-400 mb-0.5">Phone</p>
-            {company.phone ? (
-              <PhoneLink number={company.phone} className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600" log={{ label: company.name, companyId: company.id }} />
-            ) : (
-              <span className="text-slate-300">—</span>
-            )}
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 mb-0.5">Email</p>
-            {company.email ? (
-              <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                  <Mail size={13} />
-                </button>
-                {company.email}
-              </span>
-            ) : (
-              <span className="text-slate-300">—</span>
-            )}
-          </div>
-          <div>
-            <p className="text-xs text-slate-400 mb-0.5">Website</p>
-            {company.website ? (
-              <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                <Globe size={13} /> {company.website}
-              </span>
-            ) : (
-              <span className="text-slate-300">—</span>
-            )}
-          </div>
+      {tab === 'Account' && company && (
+        <div className="space-y-4">
+          <ClientAccountPanel companyId={company.id} />
+          {/* The client's accepted settlements, each a link to the account holding its proof. */}
+          <ClientSettlements companyId={company.id} />
         </div>
-
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-slate-400">Contact Persons</p>
-          <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
-            <Plus size={12} /> Add Contact
-          </button>
-        </div>
-        {companyContacts.length === 0 ? (
-          <p className="text-sm text-slate-400">No contact persons yet.</p>
-        ) : (
-          <div className="space-y-1">
-            {companyContacts.map((c) => (
-              <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
-                <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
-                  <UserAvatar userId={c.ownerId} size={30} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">{c.firstName} {c.lastName}</p>
-                    <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
-                  </div>
-                </Link>
-                <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                  {c.phone && (
-                    <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
-                  )}
-                  {c.mobile && (
-                    <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
-                      <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                    </PhoneLink>
-                  )}
-                  {c.email && (
-                    <span className="inline-flex items-center gap-1">
-                      <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                        <Mail size={11} />
-                      </button>
-                      {c.email}
-                    </span>
-                  )}
-                  <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
-                    <Pencil size={11} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {subAccounts.length > 0 && (
-        <Card padded={false}>
-          <div className="p-5 pb-3">
-            <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
-          </div>
-          <div className="overflow-x-auto px-5 pb-5">
-            <table className="w-full text-sm border border-slate-100 rounded-xl overflow-hidden">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 bg-slate-50/70">
-                  <th className="font-medium px-4 py-2.5">Sub-account</th>
-                  <th className="font-medium px-3 py-2.5">Code</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Accounts</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Handover Amount</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Payments to Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subAccounts.map((s) => (
-                  <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
-                    <td className="px-4 py-2.5">
-                      <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
-                        {s.name}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {s.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{s.code}</span> : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.accountCount ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
-                  </tr>
-                ))}
-                <tr className="border-t border-slate-200" style={{ background: 'rgba(236,220,184,0.25)' }}>
-                  <td className="px-4 py-2.5 font-bold text-slate-800">Total</td>
-                  <td className="px-3 py-2.5"></td>
-                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
-                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
-                  <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      )}
+      {tab === 'Payovers' && company && (
+        <ClientPayoversPanel companyId={company.id} />
       )}
 
-      <Card>
-        <CardHeader
-          title="Emails"
-          subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
-          action={
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setComposeOpen(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-              >
-                <Mail size={12} /> Compose
-              </button>
-              <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
-            </div>
-          }
-        />
-        {emailActivities.length === 0 ? (
-          <p className="text-sm text-slate-400">No emails yet.</p>
-        ) : (
-          <EmailActivityList
-            activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
-              focusId={focusedEmailId}
-            showDeal
-            onReply={(a) => {
-              const replyToAddress = a.contactId ? contacts.find((c) => c.id === a.contactId)?.email : company.email
-              if (!replyToAddress) return
-              const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-              setReplyTarget({
-                to: replyToAddress,
-                subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}`,
-                contactId: a.contactId,
-              })
-            }}
-          />
-        )}
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Notes"
-          subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
-          action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
-        />
-        {nonEmailActivities.length === 0 ? (
-          <p className="text-sm text-slate-400">No activity recorded yet.</p>
-        ) : (
-          <div className="space-y-2.5">
-            <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
-          </div>
-        )}
-      </Card>
-
-      {/* Beside the handover book, because these are the two things a liaison opens this page
-          for: what came in, and what is stuck. */}
-      <ClientQueries companyId={company.id} />
-
-      {/* Above the deals: for a debt collection client this is the relationship. What they
-          signed is one line on a deal; what they actually send is the work. */}
-      <HandoverBook company={company} onLog={() => setHandoverOpen(true)} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          <Card>
-            <CardHeader title="Open Deals" subtitle={`${openDeals.length} active`} />
-            {openDeals.length === 0 ? (
-              <p className="text-sm text-slate-400">No open deals.</p>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {openDeals.map((d) => (
-                  <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                    <span className="text-sm font-medium text-slate-700">{d.name}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-slate-500">{formatCurrency(d.value)}</span>
-                      <StageBadge stage={d.stage} />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Won Deals" subtitle={`${wonDeals.length} closed`} />
-            {wonDeals.length === 0 ? (
-              <p className="text-sm text-slate-400">No won deals yet.</p>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {wonDeals.map((d) => (
-                  <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                    <span className="text-sm font-medium text-slate-700">{d.name}</span>
-                    <span className="text-sm font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Leads" />
-            {companyLeads.length === 0 ? (
-              <p className="text-sm text-slate-400">No leads for this company.</p>
-            ) : (
-              <div className="divide-y divide-slate-50">
-                {companyLeads.map((l) => (
-                  <Link key={l.id} to={`/leads/${l.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                    <span className="text-sm font-medium text-slate-700">{l.firstName} {l.lastName}</span>
-                    <StatusBadge status={l.status} />
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-
+      {tab === 'Overview' && (
         <div className="space-y-5">
-          <Card>
-            <CardHeader title="Company Information" />
-            <dl className="space-y-3 text-sm">
-              <Field label="Industry" value={company.industry} />
-              <Field label="Province" value={company.province} />
-              <Field label="City" value={company.city} />
-              <Field label="Address" value={company.address} />
-              <Field label="Signed by (Marketing Agent)" value={company.marketingAgent} />
-              <div className="flex justify-between gap-3 items-center">
-                <dt className="text-slate-400">Account Owner</dt>
-                <dd className="flex items-center gap-1.5">
-                  <span className="text-slate-700 font-medium">{users.find((u) => u.id === company.accountOwnerId)?.name ?? '—'}</span>
-                  <button onClick={() => setOwnerOpen(true)} className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
-                    <Pencil size={12} />
-                  </button>
-                </dd>
-              </div>
-              {company.mandateSignedAt && <Field label="Mandate Signed" value={formatDate(company.mandateSignedAt)} />}
-              <Field label="Created" value={formatDate(company.createdAt)} />
-            </dl>
-          </Card>
+          {/*
+            THE OVERVIEW, READ AS A DASHBOARD FIRST (S9, 19 Oct, after the firm's mock: "take from it
+            what you think could be helpful"). Two rows before the reference material: how the book
+            is being collected and what needs doing; then what came in, what goes out next and what
+            was last said. Everything that was on the overview is still below, in the arrangement
+            the layout switcher chooses.
+          */}
+          {/*
+            TWO COLUMNS THAT RUN INDEPENDENTLY, not rows of cards: the charts take two thirds (a chart
+            in a third of an iPad's width collided its month labels), and what needs doing, what
+            goes out next and what was last said sit beside them. Rows would stretch every card to
+            its neighbour's height and leave boxes of nothing.
+          */}
+          <div className="grid items-start gap-5 lg:grid-cols-3">
+            <div className="min-w-0 space-y-5 lg:col-span-2">
+              <ClientCollectionsCard clientId={bookId ?? company.id} />
+              {/* Their handovers month by month (the firm, 18 Oct). */}
+              <ClientHandoverChart clientId={bookId ?? company.id} />
+              {/* What became of their accounts and where the active ones stand (the firm, 18 Oct),
+                  at a width the two rings fit. */}
+              <ClientBookRings clientId={bookId ?? company.id} />
+            </div>
+            <div className="min-w-0 space-y-5">
+              <ClientAttentionCard company={company}
+                canEdit={canEditOwned(currentUser, company.accountOwnerId)}
+                userId={currentUser?.id ?? null} userName={currentUser?.name ?? null}
+                unallocated={handOutNote}
+                onHandOut={() => { setHandOutNew(handOutNote); setHandOutNote(null) }}
+                onFiled={() => setMandateKey((k) => k + 1)} />
+              {/* Client money and the firm's commission on it: trust only, like the Payovers tab. */}
+              {canViewTrust(currentUser) && (
+                <ClientUpcomingPayover companyId={company.id} onOpen={() => setTab('Payovers')} />
+              )}
+              <ClientRecentActivity activities={companyActivities} users={users} onViewAll={() => setTab('Notes')} />
+            </div>
+          </div>
+        <RecordLayout
+          layout={layout}
+          details={contactPanel}
+          main={(
+            <div className="space-y-5">
+              {/* The new client's welcome (S8): assign a liaison, then the four steps ticked. */}
+              <WelcomeCard company={company} />
+              <HandoverBook company={company}
+                onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
+              {/* Notes in the middle, and still on their own tab — both places, at the firm's
+                  asking. Here they are capped at five with a "show more"; the tab is where you
+                  go for the lot. */}
+              {/* Notes in the middle, and still on their own tab — both places, at the firm's
+                  asking. Here they are capped at five with a "show more"; the tab is where you
+                  go for the lot. */}
+              {notesPanel}
+              {openDealsPanel}
+              {wonDealsPanel}
+            </div>
+          )}
+          side={[
+            /* Who they are first: the summary card of the side column (S9). */
+            companyInfoPanel,
+            <ClientBookCard key="book" companyId={company.id} />,
+            /*
+              TWO SECTIONS, at the firm's instruction: "queries are for clients and disputes are
+              for debtors ... there should be two different sections on the client portal about
+              which ones are their open disputes and which ones are their open queries."
 
-          <Card>
-            <CardHeader title="Tasks" />
-            {companyTasks.length === 0 ? (
-              <p className="text-sm text-slate-400">No tasks yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {companyTasks.map((t) => (
-                  <div key={t.id} className="text-sm">
-                    <p className="text-slate-700">{t.title}</p>
-                    <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
-                  </div>
-                ))}
+              Queries first: an import waiting on this client is something the firm is holding
+              them to, while a dispute is usually already being worked. The disputes carry the
+              anchor Attention required links to.
+            */
+            <ClientQueries key="client-queries" companyId={company.id} section="query" />,
+            <div key="client-disputes" id="client-disputes"><ClientQueries companyId={company.id} section="dispute" /></div>,
+            /*
+              ONE CARD, COMMISSION AND MANDATE (the firm, 19 Oct: "we should just combine the
+              collection commission and the mandate together"), and LOWER than it was: "once the
+              client is signed, you're not going to look at the mandate every day." Its gaps are
+              raised in Attention required at the top; this is the reference copy, and the rate is
+              also in the figures row.
+            */
+            <Card key="commission-mandate">
+              <div data-testid="commission-mandate">
+                <CommissionCard company={company} bare />
+                <MandateCard key={mandateKey} company={company} bare
+                  canEdit={canEditOwned(currentUser, company.accountOwnerId)}
+                  canDelete={currentUser?.role === 'Administrator' || currentUser?.role === 'Sales Manager'
+                    || currentUser?.role === 'Liaison Manager'}
+                  userId={currentUser?.id ?? null}
+                  userName={currentUser?.name ?? null}
+                  onSave={(patch) => updateCompany(company.id, patch)} />
               </div>
-            )}
-          </Card>
+            </Card>,
+            subAccountsPanel,
+            leadsPanel,
+          ]}
+        />
         </div>
-      </div>
+      )}
+
+      {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
+      {tab === 'Tasks' && tasksPanel}
 
       {emailOpen && company.email && (
         <ComposeEmailModal
@@ -599,11 +1070,25 @@ export function CompanyDetail() {
       {replyTarget && (
         <ComposeEmailModal
           to={replyTarget.to}
+          initialCc={replyTarget.cc}
           initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          inReplyTo={replyTarget.inReplyTo}
           onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, contactId: replyTarget.contactId, companyId: company.id })}
         />
       )}
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={clientNumbers}
+          target={{ companyId: company.id }}
+          who={company.name}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, companyId: company.id })}
+        />
+      )}
+
       {composeOpen && (
         <ChooseRecipientModal
           company={company}
@@ -654,22 +1139,114 @@ export function CompanyDetail() {
         <AddDebtorModal
           companyName={company.name}
           existingReferences={debtorRefs}
+          clientCode={company.code}
           busy={debtorBusy}
           error={debtorError}
           onClose={() => setDebtorOpen(false)}
-          onSave={async (input: NewDebtorInput) => {
+          onSave={async (input: NewDebtorInput, note: string | null, files: File[]) => {
             setDebtorBusy(true); setDebtorError(null)
             try {
               // Commission is the client's, not the account's, so it is inherited rather than
               // typed. It is stored as a fraction everywhere in the system — 0.3 is thirty
               // percent — and passing a percentage through here is what made one account read
               // as 2300% on the accounts list.
+              //
+              // On a scale it is priced on THIS account's capital (prompt 9), and a scale with no
+              // boundaries refuses, as a handover does -- one account is the same question.
+              const rule = await fetchClientCommission(company.id).catch(() => null)
+              const rateBlock = rule ? handoverRateBlock(rule.name, rule) : null
+              if (rateBlock) throw new Error(rateBlock)
               const account = await createDebtorAccount(
-                toAccountRow(input, company.id, null, await fetchClientCommissionRate(company.id).catch(() => null)),
+                toAccountRow(input, company.id, null, rule),
                 (id) => toContactRows(input, id),
               )
+              /*
+                THE NOTE, ON THE ACCOUNT, at the firm's asking: "at the add a debtor, there
+                should be a note as well." Written AFTER the account because it hangs off its id,
+                and the same table and source the import writes its notes to -- so the collector
+                who gets the account reads one timeline rather than two.
+
+                A NOTE THAT FAILS IS SAID, not swallowed: it is somebody's words about a debtor
+                they have just had on the telephone, and losing it silently is losing the only
+                record of that call.
+              */
+              if (note && account.id) {
+                const { error } = await supabase.from('account_notes').insert({
+                  account_id: account.id,
+                  body: note,
+                  author_name: currentUser?.name ?? 'Added by hand',
+                  created_by: currentUser?.id ?? null,
+                  source: 'manual',
+                })
+                if (error) {
+                  setDebtorError(`The account was opened, but the note did not save: ${error.message}`)
+                  setDebtorBusy(false)
+                  return
+                }
+              }
+              /*
+               * THE CASE FILES, AFTER THE ACCOUNT AND FOR THE SAME REASON AS THE NOTE: they are
+               * filed against its id, which did not exist until the row above was written.
+               *
+               * THE FIRM: "attach the case files. PDFs, Excel, images or whatever. When you upload
+               * a debtor." The batch import has always taken the client's PDFs; a debtor captured
+               * by hand was the one way in with no way to bring the paperwork with it.
+               *
+               * THROUGH uploadDocument, NOT A SECOND UPLOAD PATH. That is where the storage path,
+               * the row, the orphan cleanup when the row fails, and the perusal fee all live -- so
+               * a file arriving this way is the same kind of thing as one uploaded on the account
+               * page, and the fee rule is not written twice. Item 3 is raised once for the lot,
+               * because the firm's limit is one perusal a day per account however many files it
+               * was.
+               *
+               * ONE AT A TIME, DELIBERATELY. In parallel the first failure would leave the rest
+               * mid-flight with nothing able to say which landed, and the report below would be a
+               * guess.
+               *
+               * AND A FAILURE IS SAID, NOT SWALLOWED, exactly as the note's is. The account IS
+               * open -- this cannot undo that and must not pretend otherwise -- so it names what
+               * did not arrive, and the collector attaches those few on the account page rather
+               * than finding out months later that the mandate was never there.
+               */
+              const failed: string[] = []
+              for (const file of files) {
+                try {
+                  await uploadDocument({
+                    accountId: account.id,
+                    file,
+                    /* "Other" rather than a guess. A mandate, a contract and an age analysis all
+                       arrive in one choosing and nothing here can tell them apart; the collector
+                       re-files them on the account page, where the list of kinds is. */
+                    kind: 'Other',
+                    uploadedBy: currentUser?.id ?? null,
+                    uploadedByName: currentUser?.name ?? null,
+                  })
+                } catch (e) {
+                  failed.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
+                }
+              }
+              if (failed.length > 0) {
+                setDebtorError(`The account was opened, but ${failed.length} of ${files.length} `
+                  + `file${files.length === 1 ? '' : 's'} did not save: ${failed.join('; ')}`)
+                setDebtorBusy(false)
+                return
+              }
+
+              /*
+               * STRAIGHT ON TO ASSIGN AND REFER, rather than to the account.
+               *
+               * A new account needs a person and a date, and this is the moment somebody has the
+               * client on the telephone and knows which of the two it is. Landing on the account
+               * screen instead put it on nobody's desk and in nobody's diary, and left the
+               * finding of that to a report nobody was reading.
+               *
+               * THE SAME SCREEN THE ACCOUNTS LIST USES, on a selection of exactly this one
+               * account -- not a second allocation form written next to the first. commitHandOut
+               * is the only thing that allocates, so the diary entry, the notification and the
+               * handover workflow all follow from it the way they do for a batch.
+               */
               setDebtorOpen(false)
-              navigate(`/accounts/${account.id}`)
+              setHandOutNew(account.id)
             } catch (e) {
               setDebtorError(e instanceof Error ? e.message : String(e))
             } finally {
@@ -679,19 +1256,64 @@ export function CompanyDetail() {
         />
       )}
 
-      {handoverOpen && (
-        <LogHandoverModal
-          companyName={company.name}
-          onClose={() => setHandoverOpen(false)}
-          onSave={(input) => addHandover({ ...input, companyId: company.id, dealId: mandateDeal?.id })}
+      {/*
+        * THE ASSIGN-AND-REFER SCREEN, on the one account just opened.
+        *
+        * `allocate_and_refer` is the mode it opens in and there is deliberately no allocate-only
+        * (see HandOutMode), so finishing here gives the account a clerk AND a diary date -- and
+        * the allocation trigger starts the handover workflow off the back of it, exactly as it
+        * does for an account handed out of a batch.
+        */}
+      {handOutNew && (
+        <HandOutModal
+          selection={{ kind: 'ids', ids: [handOutNew] } as Selection}
+          selectedCount={1}
+          users={users}
+          teams={teams}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => {
+            /* Dismissed without handing it out. The account stands; say so rather than
+               navigating away from the only place that knows. */
+            setHandOutNote(handOutNew)
+            setHandOutNew(null)
+          }}
+          onDone={() => {
+            const id = handOutNew
+            setHandOutNew(null)
+            setHandOutNote(null)
+            /* On to the account itself, which is where somebody wants to be once it has a
+               person and a date on it. */
+            if (id) navigate(`/accounts/${id}`)
+          }}
         />
       )}
+
       {ownerOpen && (
         <EditOwnerModal
           currentOwnerId={company.accountOwnerId}
           reps={reps}
+          all={users}
           onClose={() => setOwnerOpen(false)}
-          onSave={(accountOwnerId) => updateCompany(company.id, { accountOwnerId })}
+          onSave={(accountOwnerId) => {
+            const from = company.accountOwnerId
+            updateCompany(company.id, { accountOwnerId })
+            /*
+             * AND THE OPEN TICKETS GO WITH THEM. THE FIRM: "if the liaison for a specific client is
+             * changed, the ticket goes to the new liaison."
+             *
+             * AFTER THE CLIENT IS SAVED AND NEVER IN ITS WAY. The liaison change is the thing the
+             * person pressed Save for; the tickets following is the consequence. Failing one would
+             * leave the firm unable to change a liaison because some ticket somewhere would not
+             * move — see moveClientTicketsToLiaison for the four kinds it refuses to touch.
+             */
+            void moveClientTicketsToLiaison({
+              companyId: company.id,
+              from,
+              to: accountOwnerId,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+            }).catch(() => { /* the liaison changed; a ticket that did not follow is not a failure
+                                of that, and the board still shows it to whoever holds it. */ })
+          }}
         />
       )}
       {dealOpen && <AddDealModal subjectName={company.name} onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
@@ -765,7 +1387,7 @@ function ChooseRecipientModal({
   ]
 
   return (
-    <Modal title="Compose Email" onClose={onClose} width={400}>
+    <Modal title="Write to them" onClose={onClose} width={400}>
       {recipients.length === 0 ? (
         <p className="text-sm text-slate-400">No one here has an email address on file yet.</p>
       ) : (
@@ -856,15 +1478,36 @@ function EditCompanyDetailsModal({ company, onClose, onSave }: { company: Compan
 function EditOwnerModal({
   currentOwnerId,
   reps,
+  all,
   onClose,
   onSave,
 }: {
   currentOwnerId: string
   reps: ReturnType<typeof useAppStore>['users']
+  /** Everybody, so the person ON RECORD can be named even where their role is not eligible. */
+  all: ReturnType<typeof useAppStore>['users']
   onClose: () => void
   onSave: (ownerId: string) => void
 }) {
   const [ownerId, setOwnerId] = useState(currentOwnerId)
+  /*
+   * THE OWNER ON RECORD, EVEN WHERE THEY MAY NOT BE ONE ANY MORE.
+   *
+   * THE BUG THIS EXISTS FOR, measured in a browser on the firm's own client: a company owned by a
+   * Pre-legal Agent opened this box, and because that role is not in the list the `select` had no
+   * option matching its value. The DOM then falls back to the FIRST option -- so the state held
+   * Samuel Ndaba, the screen said "Stephan", and Samuel was not offered anywhere. A box that
+   * displays one name while holding another is the worst thing a reassignment screen can do: press
+   * Save on what looks like a confirmation and you have given the client to somebody you never
+   * chose.
+   *
+   * So whoever is on record is always an option, whatever their role. It is marked rather than
+   * hidden, because the honest statement is "this is who it is, and they should not be" -- hiding
+   * them would leave the same lie with a tidier list.
+   */
+  const onRecord = reps.some((r) => r.id === currentOwnerId)
+    ? null
+    : all.find((u) => u.id === currentOwnerId) ?? null
   return (
     <Modal title="Reassign Account Owner" onClose={onClose} width={380}>
       <form
@@ -876,12 +1519,27 @@ function EditOwnerModal({
       >
         <FormField label="Account Owner" required>
           <select className={inputClass} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+            {onRecord && (
+              <option value={onRecord.id}>{onRecord.name} — {onRecord.role}, not a liaison</option>
+            )}
+            {reps.length === 0 && !onRecord && <option value="">Nobody holds that role yet</option>}
             {reps.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>
             ))}
           </select>
+          {onRecord && (
+            <span className="block text-[11px] text-amber-700 mt-1">
+              A client’s liaison should be a Liaison or a Liaison Manager. Choose one, or change
+              {' '}{onRecord.name.split(' ')[0]}’s role in Settings → Users.
+            </span>
+          )}
+          {reps.length === 0 && !onRecord && (
+            <span className="block text-[11px] text-slate-400 mt-1">
+              A Liaison or Liaison Manager. Set somebody’s role in Settings → Users.
+            </span>
+          )}
         </FormField>
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
@@ -1017,14 +1675,7 @@ function AssignParentModal({
 
         {mode === 'existing' ? (
           <FormField label="Parent Client" required>
-            <select className={inputClass} value={selectedId} onChange={(e) => setSelectedId(e.target.value)} required>
-              {candidates.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.code ? ` (${c.code})` : ''}
-                </option>
-              ))}
-            </select>
+            <ClientPicker clients={candidates} value={selectedId} onChange={setSelectedId} />
           </FormField>
         ) : (
           <>
@@ -1094,37 +1745,64 @@ function ClientBookCard({ companyId }: { companyId: string }) {
   if (!summary || summary.accounts === 0) return null
 
   return (
-    <Card>
+    /*
+      The link moved OUT of the header and down to the bottom.
+      
+      A long title, a long subtitle and a button all on one row is fine in a full-width card and
+      cramped in a narrow one — and this card lives in the side column, where it was squeezing the
+      button against the edge. Below the figures it has the whole width to itself at any size, and
+      it reads as the conclusion of the card rather than as a control competing with the heading.
+    */
+    <Card className="@container">
       <CardHeader
         title="Collections book"
         subtitle="The accounts actually handed over, as opposed to what the mandate estimated"
-        action={
-          <Link
-            to={`/accounts?client=${companyId}`}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-          >
-            Open the book <ArrowRight size={12} />
-          </Link>
-        }
       />
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+      {/* Every label reserves two lines, so a heading that wraps ("Capital handed over") does not
+          push its figure below the one beside it. The numbers share a baseline at every width. */}
+      <div className="grid grid-cols-2 @lg:grid-cols-3 gap-4">
         <div>
-          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
+          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight min-h-[2.2em]">Accounts</p>
           <p className="text-2xl font-bold text-slate-800 mt-0.5 tabular-nums">{summary.accounts.toLocaleString('en-ZA')}</p>
         </div>
         <div>
-          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Capital handed over</p>
+          <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight min-h-[2.2em]">Capital handed over</p>
           <p className="text-2xl font-bold text-slate-800 mt-0.5 tabular-nums">{formatCurrency(summary.capital)}</p>
         </div>
         {summary.commissionDrift > 0 && (
           <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Off their mandate rate</p>
+            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight min-h-[2.2em]">Off their mandate rate</p>
             <Link to={`/accounts?client=${companyId}&drift=1`} className="text-2xl font-bold text-amber-700 mt-0.5 tabular-nums block hover:underline">
               {summary.commissionDrift.toLocaleString('en-ZA')}
             </Link>
           </div>
         )}
       </div>
+
+      {/* Full width, so it never has to fight the heading for room. */}
+      <Link
+        to={`/accounts?client=${companyId}`}
+        className="mt-4 flex items-center justify-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+      >
+        Open the book <ArrowRight size={14} />
+      </Link>
     </Card>
+  )
+}
+
+/**
+ * THE RECOVERY RATE AS A SMALL RING, in the figure's icon place. Fills to exactly the figure beside
+ * it -- the one place a ring and a percentage sit together, and they agree.
+ */
+function MiniRing({ pct }: { pct: number }) {
+  const r = 15
+  const c = 2 * Math.PI * r
+  const filled = Math.max(0, Math.min(100, pct)) / 100 * c
+  return (
+    <svg viewBox="0 0 40 40" className="h-10 w-10" aria-hidden>
+      <circle cx="20" cy="20" r={r} fill="none" stroke="var(--color-slate-200)" strokeWidth="5" />
+      <circle cx="20" cy="20" r={r} fill="none" stroke="var(--color-gold-500)" strokeWidth="5"
+        strokeDasharray={`${filled} ${c}`} transform="rotate(-90 20 20)" strokeLinecap="round" />
+    </svg>
   )
 }

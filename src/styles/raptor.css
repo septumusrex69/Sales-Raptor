@@ -20,6 +20,8 @@ html[data-theme='raptor'] {
   /* ── Structure ─────────────────────────────────────────────────────────── */
   --color-surface: #f4f5f7;
   --color-card: #ffffff;
+  /* A pinned table cell's background (Payments in): the card, opaque. */
+  --color-card-solid: #ffffff;
 
   /* Neutrals run from Cloud Grey down to Raptor Navy, so every grey in the app belongs to
      the same family as the brand rather than sitting beside it. */

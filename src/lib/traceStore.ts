@@ -1,0 +1,968 @@
+/**
+ * A filed trace, and what has been made of it.
+ *
+ * THE RULES ONLY. No queries here, so every one of them can be checked without a database — the
+ * same split as accountStanding / accountStandingData.
+ *
+ * The distinction this file exists to hold: a trace ITEM is what the bureau claimed, and a
+ * CONTACT is what the firm rings. One becomes the other by somebody trying it and saying so. A
+ * bureau profile carries twenty-six numbers going back to 2008, several against ten other people;
+ * poured straight into the contact list, the list stops being worth reading.
+ */
+
+/** What a finding is. Phones are split by the bureau's own three columns, not lumped together. */
+export type TraceItemKind =
+  | 'mobile' | 'phone' | 'work' | 'email'
+  | 'address' | 'employer' | 'directorship' | 'property' | 'link'
+
+/**
+ * What happened when somebody actually tried it.
+ *
+ * FOUR, AND THE MIDDLE TWO ARE NOT THE SAME. A number that rings out is a live number nobody
+ * answered — worth trying again at a different hour. A number that is off, or dead, is not. The
+ * firm asked for exactly this distinction: "you called the person on the trace, you couldn't make
+ * contact, but it was ringing or the phone was off or whatever."
+ */
+export type TraceOutcome =
+  | 'verified' | 'no_answer' | 'unreachable' | 'not_theirs'
+  | 'reached_other' | 'moved_on' | 'denies_link'
+
+/**
+ * How an outcome reads at a glance. Green worked, amber is worth another try, red is dead, and
+ * grey is "we know nothing" -- which covers both untried and somebody else's number, because
+ * neither tells you anything about reaching this person.
+ */
+export type OutcomeTone = 'grey' | 'green' | 'amber' | 'red'
+
+/**
+ * EVERY OUTCOME, ONCE. The stored value means ONE thing wherever it appears; what changes between
+ * lists is the WORDING, which OUTCOMES_FOR decides. `label` here is the phone's wording, because
+ * that is the list most of them were written for and the one a reader meets first.
+ *
+ * FOUR OF THESE WERE WRITTEN FOR A TELEPHONE AND OFFERED AGAINST EVERYTHING. The firm found it:
+ * "if you click on the not tested, it says, okay, well, wrong person or disconnected. What does
+ * that mean? An address is an address or not an address. Employment the same."
+ */
+export const TRACE_OUTCOMES: { outcome: TraceOutcome; label: string; tone: OutcomeTone; meaning: string }[] = [
+  { outcome: 'verified', label: 'Reached the debtor', tone: 'green', meaning: 'It is them, and this reaches them.' },
+  /*
+   * A PERSON, BUT NOT THE DEBTOR -- and on two lists it means two different days' work.
+   *
+   * THE FIRM, of the debtor's own numbers: "it's possible in the details provided by the debtor
+   * that you could meet the spouse or reach the spouse, so there should be an option for reached
+   * someone." And of a linked person it is the ONLY kind of reaching there is: "it's very
+   * seldomly, actually doesn't really happen, that you've reached the debtor on the linked people.
+   * So don't, don't add anything there."
+   *
+   * AMBER, NOT GREEN. The line is live and a human answered it, which is worth more than a
+   * ring-out and less than the debtor -- and a green tick against a number that has never produced
+   * the debtor would read as a solved problem.
+   */
+  { outcome: 'reached_other', label: 'Reached someone else', tone: 'amber', meaning: 'Somebody answered, but not the debtor. Say who, and what they said.' },
+  { outcome: 'no_answer', label: 'No answer', tone: 'amber', meaning: 'A live number nobody picked up. Worth another hour of the day.' },
+  /*
+   * "Wrong person", not "Not the debtor". On a director's profile the subject is not the debtor
+   * at all, and a collector reading "not the debtor" against a director's own number would take
+   * it to mean something it does not.
+   */
+  { outcome: 'not_theirs', label: 'Wrong person', tone: 'grey', meaning: 'Somebody else answered. It is not their number.' },
+  { outcome: 'unreachable', label: 'Disconnected', tone: 'red', meaning: 'Switched off, unobtainable or disconnected.' },
+  /*
+   * WAS THERE, IS NOT NOW -- a different fact from "it was never them", and the one an address and
+   * an employer actually need. A former address is still evidence (it dates the move); it is
+   * simply not where to serve.
+   */
+  { outcome: 'moved_on', label: 'They have moved', tone: 'red', meaning: 'They were there and they are not any more.' },
+  /* THE BUREAU JOINED THEM AND A HUMAN HAS UNJOINED THEM. Worth storing rather than deleting: the
+     next trace will print the same link, and this says somebody has already asked. */
+  { outcome: 'denies_link', label: 'Says they do not know them', tone: 'grey', meaning: 'The bureau connected them. They say otherwise.' },
+]
+
+/**
+ * The same list with "not tested" on the front.
+ *
+ * Untried is a REAL choice, not the absence of one: picking it is the firm's "you can unverify
+ * it", and a picker that can only ever move forwards leaves a wrong outcome standing.
+ *
+ * EVERY OUTCOME THERE IS, for anything that needs the whole vocabulary. A PICKER uses
+ * outcomeOptionsFor(category) instead -- offering all seven against an address is the fault this
+ * was rebuilt to end.
+ */
+export const OUTCOME_OPTIONS: { outcome: TraceOutcome | null; label: string; tone: OutcomeTone; meaning: string }[] = [
+  { outcome: null, label: 'Not tested', tone: 'grey', meaning: 'Nobody has tried it yet.' },
+  ...TRACE_OUTCOMES,
+]
+
+/**
+ * WHICH OUTCOMES A LIST MAY OFFER, AND WHAT EACH IS CALLED THERE.
+ *
+ * THE RULE THIS EXISTS FOR: a question with no true answer is worse than no question. An address
+ * cannot be Disconnected and an employer cannot fail to pick up, and a column of "Not tested"
+ * against rows nobody could ever answer is how a column comes to mean nothing.
+ *
+ * AND LINKED PEOPLE HAVE NO "REACHED THE DEBTOR" AT ALL. Not an oversight -- the firm asked for it
+ * to be left off, because reaching the debtor on a relative's number almost never happens and an
+ * option that is almost never right is one that gets picked by mistake. The most that can come off
+ * a linked person is `reached_other`, and no dispute can be taken from one.
+ */
+export const OUTCOMES_FOR: Record<TraceCategoryId, { outcome: TraceOutcome; label: string }[]> = {
+  phones: [
+    { outcome: 'verified', label: 'Reached the debtor' },
+    { outcome: 'reached_other', label: 'Reached someone else' },
+    { outcome: 'no_answer', label: 'No answer' },
+    { outcome: 'not_theirs', label: 'Wrong person' },
+    { outcome: 'unreachable', label: 'Disconnected' },
+  ],
+  emails: [
+    { outcome: 'verified', label: 'They replied' },
+    { outcome: 'reached_other', label: 'Somebody else replied' },
+    { outcome: 'no_answer', label: 'No reply' },
+    { outcome: 'not_theirs', label: 'Not their address' },
+    /* A BOUNCE IS THE EMAIL'S DISCONNECTED: the address does not exist any more. */
+    { outcome: 'unreachable', label: 'Bounced' },
+  ],
+  /*
+   * EMPTY, BECAUSE AN ADDRESS AND AN EMPLOYER ARE NO LONGER WORKED -- see TRACE_CATEGORIES.
+   * Kept as keys rather than removed so outcomeOptionsFor never has to guard against a missing
+   * one, and so an outcome written before this change still reads back under its old label.
+   */
+  addresses: [],
+  employment: [],
+  people: [
+    { outcome: 'reached_other', label: 'Spoke to them' },
+    { outcome: 'no_answer', label: 'No answer' },
+    { outcome: 'not_theirs', label: 'Wrong number' },
+    { outcome: 'denies_link', label: 'Says they do not know them' },
+  ],
+  /* A COMPANY AND A DEED CANNOT BE RUNG. Empty rather than absent, so a caller asking for a list
+     gets one and the picker simply never draws -- see TRACE_CATEGORIES.worked. */
+  companies: [],
+  property: [],
+}
+
+/** What a list calls an outcome. Falls back to the phone's wording, which is TRACE_OUTCOMES. */
+export function outcomeLabelIn(category: TraceCategoryId, o: TraceOutcome | null | undefined): string | null {
+  if (!o) return null
+  return OUTCOMES_FOR[category]?.find((x) => x.outcome === o)?.label ?? outcomeLabel(o)
+}
+
+/** The picker's options for a list: "not tested" first, then whatever that list may say. */
+export function outcomeOptionsFor(category: TraceCategoryId): { outcome: TraceOutcome | null; label: string; tone: OutcomeTone }[] {
+  return [
+    { outcome: null, label: 'Not tested', tone: 'grey' },
+    ...OUTCOMES_FOR[category].map((o) => ({ ...o, tone: outcomeTone(o.outcome) })),
+  ]
+}
+
+export const outcomeLabel = (o: TraceOutcome | null | undefined): string | null =>
+  TRACE_OUTCOMES.find((x) => x.outcome === o)?.label ?? null
+
+export const outcomeTone = (o: TraceOutcome | null | undefined): OutcomeTone =>
+  TRACE_OUTCOMES.find((x) => x.outcome === o)?.tone ?? 'grey'
+
+/**
+ * How loudly the bureau's risk grade should read.
+ *
+ * Only a high grade earns red. A grade shown in red whatever it says is a grade nobody reads,
+ * and most profiles come back average.
+ */
+export const riskTone = (risk: string | null | undefined): OutcomeTone =>
+  risk === null || risk === undefined ? 'grey'
+    : /high|poor|adverse/i.test(risk) ? 'red'
+      : /average|medium|fair/i.test(risk) ? 'amber'
+        : 'green'
+
+export interface TraceItem {
+  id: string
+  traceId: string
+  accountId: string
+  kind: TraceItemKind
+  value: string
+  /** The second column: a job title, a township, how a link was made. */
+  label: string | null
+  /** The bureau's own columns, kept as evidence and never edited. */
+  peopleLinked: number | null
+  seenOn: string | null
+  amount: number | null
+  status: string | null
+  /** What we found out. Null until somebody has tried it. */
+  outcome: TraceOutcome | null
+  outcomeAt: string | null
+  outcomeNote: string | null
+  /** Set once this has earned a place on the account's principal details. */
+  promotedContactId: string | null
+}
+
+export interface FiledTrace {
+  id: string
+  accountId: string
+  subjectKind: 'debtor' | 'director'
+  directorId: string | null
+  reportKind: 'commercial' | 'consumer' | null
+  subjectName: string | null
+  idNumber: string | null
+  registrationNumber: string | null
+  companyStatus: string | null
+  contactScore: string | null
+  riskScore: string | null
+  enquiredOn: string | null
+  documentId: string | null
+  /**
+   * WHO PULLED IT, AND THEREFORE WHO WORKED IT.
+   *
+   * The same person does both: a trace is bought by the collector who is stuck, and they are the
+   * one who then rings down its list. It is the only person the data names, and the firm's limit
+   * is per person -- "if an individual has worked through a trace twice, it could go to the next
+   * person" -- so this is what roundsSpentBy counts on.
+   */
+  pulledBy: string | null
+  createdAt: string
+  items: TraceItem[]
+}
+
+const PHONE_KINDS: TraceItemKind[] = ['mobile', 'phone', 'work']
+
+/**
+ * THE SAME THREE, EXPORTED, so traceRound counts exactly what traceSummary counts.
+ *
+ * Written out again in that file they would eventually disagree about whether a trace is finished
+ * -- one saying every finding is tried and the other still counting one. `untried` and a round's
+ * `workable` are two readings of one list and have to stay one list.
+ */
+export const PHONE_KINDS_FOR_ROUND: readonly TraceItemKind[] = PHONE_KINDS
+
+/**
+ * The best number on the trace, and the reasoning is a hierarchy rather than a sort.
+ *
+ * WHAT WE KNOW BEATS WHAT THE BUREAU SAID. A number somebody has actually reached the debtor on
+ * is the principal number whatever its date; below that, a number that at least rang; and only
+ * then the bureau's own ordering, which is how recently it saw it. A number somebody has ruled
+ * out is never offered, however recent — that is the whole reason for recording an outcome.
+ */
+export function principalPhone(items: TraceItem[]): TraceItem | null {
+  const rank = (i: TraceItem): number => {
+    if (i.outcome === 'verified') return 0
+    /*
+     * A NUMBER THAT PRODUCED A HUMAN BEATS ONE THAT RANG OUT, and loses to one that produced the
+     * debtor. Somebody answered on it -- the spouse, the mother -- so the line is live and there
+     * is a person on the other end who knows them. That is a better bet than silence and a worse
+     * one than the debtor's own voice.
+     */
+    if (i.outcome === 'reached_other') return 1
+    if (i.outcome === 'no_answer') return 2
+    if (i.outcome === null) return 3
+    return 9 /* unreachable or not theirs: never principal. */
+  }
+  const usable = items.filter((i) => PHONE_KINDS.includes(i.kind) && rank(i) < 9)
+  if (usable.length === 0) return null
+  return [...usable].sort((a, b) => {
+    if (rank(a) !== rank(b)) return rank(a) - rank(b)
+    /* Then the bureau's evidence: most recently seen, and against the fewest other people. */
+    const seen = (b.seenOn ?? '').localeCompare(a.seenOn ?? '')
+    if (seen !== 0) return seen
+    return (a.peopleLinked ?? 99) - (b.peopleLinked ?? 99)
+  })[0]
+}
+
+/** The same reasoning for an address: confirmed first, then most recently seen. */
+export function principalAddress(items: TraceItem[]): TraceItem | null {
+  /* NOT THEIRS, AND NOT ONE THEY HAVE LEFT. A former address still dates the move and is kept as
+     evidence; it is simply not where anybody is served. */
+  const usable = items.filter(
+    (i) => i.kind === 'address' && i.outcome !== 'not_theirs' && i.outcome !== 'moved_on',
+  )
+  if (usable.length === 0) return null
+  return [...usable].sort((a, b) => {
+    const av = a.outcome === 'verified' ? 0 : 1, bv = b.outcome === 'verified' ? 0 : 1
+    if (av !== bv) return av - bv
+    return (b.seenOn ?? '').localeCompare(a.seenOn ?? '')
+  })[0]
+}
+
+/** Where they work, most recently seen first. Employment is the route to a garnishee. */
+export function currentEmployer(items: TraceItem[]): TraceItem | null {
+  /* THE CURRENT one. A job somebody has left is not a garnishee route, and the bureau's own
+     "seen on" cannot tell the two apart -- only somebody who rang the employer can. */
+  const jobs = items.filter(
+    (i) => i.kind === 'employer' && i.outcome !== 'not_theirs' && i.outcome !== 'moved_on',
+  )
+  if (jobs.length === 0) return null
+  return [...jobs].sort((a, b) => (b.seenOn ?? '').localeCompare(a.seenOn ?? ''))[0]
+}
+
+/**
+ * Property still held, biggest first.
+ *
+ * ONLY WHAT THEY STILL OWN. The deeds section lists every transaction, including houses sold
+ * fifteen years ago — and a sold property on a summary reads as an asset to somebody skimming.
+ * `status` carries the bureau's current-owner flag; anything else is history.
+ */
+export function heldProperty(items: TraceItem[]): TraceItem[] {
+  return items
+    .filter((i) => i.kind === 'property' && /owner/i.test(i.status ?? ''))
+    .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0))
+}
+
+/**
+ * What the panel says about a trace in a few lines.
+ *
+ * The firm's own list of what matters, in their words: "a principal telephone number, a principal
+ * address, property interests if they have properties, and next of kins" — plus where they work
+ * and what they direct, which they added afterwards.
+ */
+export interface TraceSummary {
+  phone: TraceItem | null
+  address: TraceItem | null
+  employer: TraceItem | null
+  properties: TraceItem[]
+  /** Links that share the debtor's surname. Candidates for a person to judge — never a fact. */
+  relatives: TraceItem[]
+  directorships: TraceItem[]
+  /** How many findings nobody has tried yet. The measure of whether the trace has been worked. */
+  untried: number
+}
+
+export function traceSummary(items: TraceItem[]): TraceSummary {
+  return {
+    phone: principalPhone(items),
+    address: principalAddress(items),
+    employer: currentEmployer(items),
+    properties: heldProperty(items),
+    /*
+     * A link is stored as a relative when the import judged the surname to match — see
+     * likelyRelatives. The label carries the bureau's own account of how they are connected.
+     */
+    relatives: items.filter((i) => i.kind === 'link' && i.status === 'relative'),
+    directorships: items.filter((i) => i.kind === 'directorship' && /active/i.test(i.status ?? '')),
+    /*
+     * EVERY FINDING SOMEBODY COULD TRY, which now includes the LINKED PEOPLE.
+     *
+     * It counted phones and emails only, so a trace read as fully worked through with every linked
+     * person untouched -- and "worked through" is the whole measure the trace rounds are built on
+     * (a round is spent when nothing is left to try). A number that is wrong on the debtor's own
+     * profile is exactly when the relatives become the work, so leaving them out understated the
+     * one case the count exists for.
+     *
+     * ADDRESSES AND EMPLOYERS ARE NOT COUNTED. They are confirmed by a letter coming back or by
+     * ringing the employer, which is not the same day's work as going down a list of numbers, and
+     * a trace that could never read as finished until somebody had posted something would read as
+     * unfinished for ever.
+     */
+    untried: items.filter(
+      (i) => (PHONE_KINDS.includes(i.kind) || i.kind === 'email' || i.kind === 'link')
+        && i.outcome === null,
+    ).length,
+  }
+}
+
+/**
+ * One row per thing, keeping the most recent of any repeats.
+ *
+ * A PROFILE LISTS EMPLOYMENT ONCE PER JOB TITLE, so the same company arrives three times — the
+ * same employer as "Technician" and as "Manager All Types". The trace table's key is one row per
+ * (trace, kind, value), so a batch carrying repeats was rejected WHOLE: the trace row had already
+ * been written, the findings were not, the import threw before its timeline note, and the account
+ * was left showing a trace with nothing in it and no way to tell why.
+ *
+ * Decided here rather than left to the database to complain about, and the newest wins, because a
+ * job title from 2009 is not what somebody does now.
+ *
+ * Its own function so it can be checked without a database — a source-level assertion that this
+ * exists passes just as happily on an importer that computes it and then ignores it.
+ */
+export function keepNewestPerThing<T extends { kind: string; value: string; seen_on?: string | null }>(
+  rows: T[],
+): T[] {
+  const best = new Map<string, T>()
+  for (const row of rows) {
+    const key = `${row.kind}|${row.value.toUpperCase()}`
+    const held = best.get(key)
+    if (!held || (row.seen_on ?? '') > (held.seen_on ?? '')) best.set(key, row)
+  }
+  return [...best.values()]
+}
+
+/**
+ * Which contact kind a finding becomes when it is promoted.
+ *
+ * A LINK BECOMES 'other', NOT A PHONE. A relative is a person, and what gets stored about them is
+ * their name — the number to reach them on is a separate thing the collector has to find. Filing
+ * a name under 'mobile' would put a name where a dialler expects a number.
+ */
+export function contactKindFor(kind: TraceItemKind): 'mobile' | 'phone' | 'work' | 'email' | 'address' | 'employer' | 'other' {
+  if (kind === 'mobile' || kind === 'phone' || kind === 'work' || kind === 'email') return kind
+  if (kind === 'address') return 'address'
+  if (kind === 'employer') return 'employer'
+  return 'other'
+}
+
+/**
+ * WHAT SAVING THIS FINDING WILL PUT ON THE ACCOUNT, in the words the account will use.
+ *
+ * THE FIRM: "here by the trace, it's also important to notify when you save something, what is
+ * it? Is it a work number? Is it the additional number? Is it an additional email? Is it a house
+ * number?" The button said "Save" and the row said nothing, so whether a number was about to land
+ * as a work line or a home line was a thing you found out afterwards by reading the contact list.
+ *
+ * THE SAME WORDS contactWhat GIVES, because it is the same fact and a reader meets it twice --
+ * once on the button and once on the row it produces. Two vocabularies for one thing is how "Home"
+ * and "Landline" end up on one screen.
+ *
+ * A LINKED PERSON IS THE ONE THAT IS NOT ITS OWN KIND: it lands as that person and their number,
+ * so the button says the person rather than the shape of the row.
+ */
+export function savesAs(item: TraceItem): string {
+  if (item.kind === 'link') {
+    return linkedNumber(item.label) ? 'a person and their number' : 'a linked person'
+  }
+  const word: Partial<Record<TraceItemKind, string>> = {
+    mobile: 'a mobile number',
+    phone: 'a home number',
+    work: 'a work number',
+    email: 'an email address',
+    address: 'an address',
+    employer: 'an employer',
+  }
+  return word[item.kind] ?? 'a contact'
+}
+
+/**
+ * Whether a finding may be put on the account's principal details.
+ *
+ * NOT ONE RULED OUT, and not one already there. The first is the point of recording an outcome at
+ * all; the second is what stops the same number arriving on the contact list three times because
+ * three people pressed the button.
+ */
+/**
+ * WHICH KINDS A PERSON MUST HAVE REACHED SOMEBODY ON BEFORE SAVING.
+ *
+ * THE FIRM: "if you're working a trace and it says no answer and you saved it as a home number,
+ * how can that be? That doesn't make sense. You can't save it as a home number if it has not been
+ * tested... wrong person and then save as their own number -- it doesn't make sense."
+ *
+ * They are right, and the fault was that Save asked nothing. Putting a number on the account marks
+ * the contact VERIFIED (see promoteTraceItem), so the old behaviour let somebody file a number
+ * that had rung out once, under a tick, as the debtor's home number -- and the next collector
+ * rings it believing somebody has already proved it.
+ *
+ * NUMBERS AND EMAILS ONLY. An address and an employer are not worked at all now, and a linked
+ * person saved as a next of kin is a record of who the bureau connected rather than a claim that
+ * a line works -- neither is a thing somebody can have "reached".
+ */
+const MUST_BE_REACHED: readonly TraceItemKind[] = ['mobile', 'phone', 'work', 'email']
+
+/** The two outcomes that mean a human answered. Either justifies putting it on the account. */
+const REACHED: readonly TraceOutcome[] = ['verified', 'reached_other']
+
+export function canPromote(item: TraceItem): boolean {
+  if (item.promotedContactId !== null) return false
+  /*
+   * NOT UNTIL SOMEBODY HAS ANSWERED ON IT. "No answer" is a live line and not a confirmed one;
+   * untested is not a finding at all. Both leave the button off rather than showing one that
+   * would file an unproven number under a tick.
+   */
+  if (MUST_BE_REACHED.includes(item.kind) && !REACHED.includes(item.outcome as TraceOutcome)) {
+    return false
+  }
+  /*
+   * THREE WAYS OF SAYING "DO NOT PUT THIS ON THE ACCOUNT", and each is somebody's finding rather
+   * than a guess: it was never them, they have left, or the person the bureau linked says they do
+   * not know them. Saving any of the three would put a dead detail on the contact list wearing the
+   * same clothes as a good one -- and since promoting now marks a contact VERIFIED (see
+   * promoteTraceItem), it would be a dead detail wearing a tick.
+   */
+  if (item.outcome === 'not_theirs') return false
+  if (item.outcome === 'moved_on') return false
+  if (item.outcome === 'denies_link') return false
+  return item.kind !== 'property'
+}
+
+/* ------------------------------------------------------------------ *
+ * The workspace: what the sections are, and what a row in one is.
+ * ------------------------------------------------------------------ */
+
+export type TraceCategoryId =
+  | 'phones' | 'emails' | 'addresses' | 'employment' | 'people' | 'companies' | 'property'
+
+export interface TraceCategory {
+  id: TraceCategoryId
+  title: string
+  kinds: TraceItemKind[]
+  /** The line under the heading: what a person DOES with this list, not what it contains. */
+  blurb: string
+  /** What the first column actually holds, so the header is never a generic "Value". */
+  valueHeading: string
+  /**
+   * Whether a row here can be tried and given an outcome.
+   *
+   * A house cannot be rung and a directorship cannot answer. Offering a picker against them
+   * would be asking a question with no true answer, which is how a column of "Not tested"
+   * against every property teaches people the column means nothing.
+   */
+  worked: boolean
+}
+
+/**
+ * The firm's own order, off the design they drew: numbers first because that is the work, then
+ * the other ways to reach them, then who and what they are attached to.
+ *
+ * Employment sits with the addresses rather than with the companies: where somebody WORKS is a
+ * route to a garnishee, which is a collections step, while a directorship is an asset question.
+ */
+export const TRACE_CATEGORIES: TraceCategory[] = [
+  {
+    id: 'phones', title: 'Phone numbers', kinds: ['mobile', 'phone', 'work'],
+    blurb: 'Record an outcome and save useful numbers to the account.',
+    valueHeading: 'Number / type', worked: true,
+  },
+  {
+    id: 'emails', title: 'Email addresses', kinds: ['email'],
+    blurb: 'Record an outcome and save useful addresses to the account.',
+    valueHeading: 'Address', worked: true,
+  },
+  /*
+   * NOT WORK, AT THE FIRM'S INSTRUCTION, AND THIS IS A REVERSAL.
+   *
+   * THE FIRM: "addresses or employment is not a prerequisite for having worked a trace. There's
+   * nothing need to be done with that. They just save as an address if you want to."
+   *
+   * WHICH IS HOW THESE ARE ACTUALLY USED. A number is confirmed by ringing it; an address is
+   * confirmed by posting something and waiting, or by somebody going there, and neither happens
+   * in the afternoon somebody works a trace. An outcome column that can only honestly be filled
+   * in weeks later is a column that stays empty and then stops being read -- and worse, it made
+   * an address something a collector had to answer for before the trace read as worked.
+   *
+   * traceRound already counted only numbers, emails and linked people, so the count does not
+   * move; what goes is the asking. They keep their Save button, which is the whole of what the
+   * firm wants done with them.
+   *
+   * WHAT IS LOST, SAID OUT LOUD: "They have moved" and "No longer there" were the two outcomes
+   * written for exactly these lists, and they are no longer offered anywhere. A stale address is
+   * still worth recording and there is now nowhere on a trace to record it. If that turns out to
+   * matter, it belongs on the ADDRESS on the account rather than on the trace -- the trace is the
+   * bureau's snapshot, and where somebody lives now is the account's own fact.
+   */
+  {
+    id: 'addresses', title: 'Addresses', kinds: ['address'],
+    blurb: 'Save one to the account if it is worth having.',
+    valueHeading: 'Address', worked: false,
+  },
+  {
+    id: 'employment', title: 'Employment', kinds: ['employer'],
+    blurb: 'Where they work is the route to a garnishee. Save one if it is worth having.',
+    valueHeading: 'Employer / role', worked: false,
+  },
+  {
+    /*
+     * WORKED, AT THE FIRM'S INSTRUCTION. It was false, so a linked person could not be marked at
+     * all -- the firm, testing on a real account: "there is a Cherie Hennen and I saved it as a
+     * next of kin. But Elise Ferreira is there. What if I haven't tried to call Elise Ferreira?
+     * There should be outcomes of these ones as well."
+     *
+     * ITS OWN FOUR OUTCOMES, and none of them is "reached the debtor" -- see OUTCOMES_FOR.
+     */
+    id: 'people', title: 'Linked people', kinds: ['link'],
+    blurb: 'A shared surname is a possible relative, not a confirmed one. Ring one, or save them as a next of kin.',
+    valueHeading: 'Name', worked: true,
+  },
+  {
+    id: 'companies', title: 'Companies', kinds: ['directorship'],
+    blurb: 'What they direct. An active directorship is an asset and a place to serve.',
+    valueHeading: 'Company', worked: false,
+  },
+  {
+    id: 'property', title: 'Property', kinds: ['property'],
+    blurb: 'Deeds the bureau holds against them. Only what they still own is an asset.',
+    valueHeading: 'Property', worked: false,
+  },
+]
+
+export const categoryById = (id: TraceCategoryId): TraceCategory =>
+  TRACE_CATEGORIES.find((c) => c.id === id) ?? TRACE_CATEGORIES[0]
+
+/** How many findings sit under each section. What the rail wears, so nobody opens an empty list. */
+export function categoryCounts(items: TraceItem[]): Record<TraceCategoryId, number> {
+  const out = {} as Record<TraceCategoryId, number>
+  for (const c of TRACE_CATEGORIES) out[c.id] = groupTraceRows(itemsIn(items, c)).length
+  return out
+}
+
+export const itemsIn = (items: TraceItem[], category: TraceCategory): TraceItem[] =>
+  items.filter((i) => category.kinds.includes(i.kind))
+
+/**
+ * One row per THING, not per row the bureau printed.
+ *
+ * A profile files the same number under Cell, Home and Work -- one real one carried a single
+ * number under all three, updated within a month of each other. Listed as the bureau printed
+ * them the collector sees fifteen numbers where there are six, rings the same one three times,
+ * and marks one of the three tested while the other two still read "Not tested".
+ *
+ * So a row is a number, carrying the types it was filed under and every finding behind it. An
+ * outcome recorded on the row is recorded on all of them, which is what makes the count honest.
+ * The bureau's rows are not thrown away -- they are still what is stored, and still what a
+ * report reads back.
+ */
+export interface TraceRow {
+  /** The thing itself, normalised. Grouping key and nothing else. */
+  key: string
+  /** As the bureau printed it, which is what a person should see and dial. */
+  value: string
+  /** Every type it was filed under: Home, Work, Mobile. */
+  kinds: TraceItemKind[]
+  /** Every finding behind this row. An outcome is written to all of them. */
+  items: TraceItem[]
+  label: string | null
+  /** The most recent date any of them was seen. */
+  seenOn: string | null
+  /** The WORST of them: a number held against ten people is held against ten people. */
+  peopleLinked: number | null
+  amount: number | null
+  status: string | null
+  /** The agreed outcome, or null where they have not all been given the same one. */
+  outcome: TraceOutcome | null
+  /** True when the findings behind this row disagree, which only a merge can produce. */
+  mixed: boolean
+  /** Already on the account's contact details. */
+  promoted: boolean
+}
+
+/**
+ * What two findings have to share to be the same thing.
+ *
+ * Spacing is how a number was typed, not a fact about it, so it comes out. Case is the same for
+ * an address. Anything else -- a name, a company -- is compared as printed but case-folded.
+ */
+export const traceRowKey = (item: TraceItem): string =>
+  item.kind === 'mobile' || item.kind === 'phone' || item.kind === 'work'
+    ? item.value.replace(/[^0-9+]/g, '')
+    : item.value.trim().toUpperCase().replace(/\s+/g, ' ')
+
+const KIND_ORDER: TraceItemKind[] = ['phone', 'work', 'mobile', 'email', 'address', 'employer', 'link', 'directorship', 'property']
+
+export function groupTraceRows(items: TraceItem[]): TraceRow[] {
+  const byKey = new Map<string, TraceItem[]>()
+  for (const item of items) {
+    const key = traceRowKey(item)
+    const held = byKey.get(key)
+    if (held) held.push(item); else byKey.set(key, [item])
+  }
+
+  return [...byKey.entries()].map(([key, group]) => {
+    const outcomes = new Set(group.map((i) => i.outcome))
+    const newest = group.reduce((a, b) => ((b.seenOn ?? '') > (a.seenOn ?? '') ? b : a))
+    return {
+      key,
+      /* The newest printing of it, so a number is shown the way it was most recently filed. */
+      value: newest.value,
+      kinds: [...new Set(group.map((i) => i.kind))].sort(
+        (a, b) => KIND_ORDER.indexOf(a) - KIND_ORDER.indexOf(b),
+      ),
+      items: group,
+      label: newest.label,
+      seenOn: group.reduce<string | null>((a, i) => ((i.seenOn ?? '') > (a ?? '') ? i.seenOn : a), null),
+      peopleLinked: group.reduce<number | null>(
+        (a, i) => (i.peopleLinked === null ? a : Math.max(a ?? 0, i.peopleLinked)), null),
+      amount: newest.amount,
+      status: newest.status,
+      outcome: outcomes.size === 1 ? group[0].outcome : null,
+      mixed: outcomes.size > 1,
+      /* On the account if ANY of them made it there -- it is one number either way. */
+      promoted: group.some((i) => i.promotedContactId !== null),
+    }
+  })
+}
+
+export type TraceSort = 'recent' | 'oldest' | 'fewest_links'
+
+export const TRACE_SORTS: { sort: TraceSort; label: string }[] = [
+  { sort: 'recent', label: 'Most recently seen' },
+  { sort: 'oldest', label: 'Oldest first' },
+  { sort: 'fewest_links', label: 'Held against fewest people' },
+]
+
+/** The picker above the list. 'any' is every row; the rest narrow to one outcome. */
+export type OutcomeFilter = TraceOutcome | 'any' | 'untested'
+
+/**
+ * The list a person is looking at: grouped, narrowed, and put in an order.
+ *
+ * ONE FUNCTION, because the count under the table and the rows in it have to be the same
+ * question asked once. Written twice they drift, and the failure is a table saying "showing 6 of
+ * 15" over a list of 5.
+ */
+export function workRows(input: {
+  items: TraceItem[]
+  category: TraceCategory
+  search?: string
+  outcome?: OutcomeFilter
+  sort?: TraceSort
+}): TraceRow[] {
+  const { items, category, search = '', outcome = 'any', sort = 'recent' } = input
+  const needle = search.trim().toUpperCase()
+
+  const rows = groupTraceRows(itemsIn(items, category)).filter((r) => {
+    if (needle !== '' && !`${r.value} ${r.label ?? ''}`.toUpperCase().includes(needle)) return false
+    if (outcome === 'any') return true
+    if (outcome === 'untested') return r.outcome === null && !r.mixed
+    return r.outcome === outcome
+  })
+
+  return rows.sort((a, b) => {
+    if (sort === 'fewest_links') {
+      /* Null is not "nought other people" -- it is "the bureau did not say", so it sorts last. */
+      const av = a.peopleLinked ?? Number.MAX_SAFE_INTEGER, bv = b.peopleLinked ?? Number.MAX_SAFE_INTEGER
+      if (av !== bv) return av - bv
+    }
+    const seen = sort === 'oldest'
+      ? (a.seenOn ?? '').localeCompare(b.seenOn ?? '')
+      : (b.seenOn ?? '').localeCompare(a.seenOn ?? '')
+    if (seen !== 0) return seen
+    return a.value.localeCompare(b.value)
+  })
+}
+
+/**
+ * One page of them, and the sentence under the table.
+ *
+ * CLAMPED, because the page number outlives the list it was counted against. Somebody on page 3
+ * types into the search box, four rows come back, and an unclamped slice hands them an empty
+ * table with a working Previous button -- which reads as the search having found nothing.
+ */
+export function pageOf<T>(rows: T[], page: number, size: number): {
+  rows: T[]
+  /** The page actually shown, which is not always the one asked for. */
+  page: number
+  pages: number
+  /** For "Showing 6 of 15": how many are on screen out of how many there are. */
+  showing: number
+  total: number
+} {
+  const pages = Math.max(1, Math.ceil(rows.length / size))
+  const safe = Math.min(Math.max(1, page), pages)
+  const slice = rows.slice((safe - 1) * size, safe * size)
+  return { rows: slice, page: safe, pages, showing: slice.length, total: rows.length }
+}
+
+/* ------------------------------------------------------------------ *
+ * What XDS is searched on, and whether it is safe to hand over.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The number a bureau search is run against, checked before it is copied anywhere.
+ *
+ * WHY THIS EXISTS. The Trace button copies the account's ID number so it can be pasted into the
+ * portal, and it copied whatever was in the field. On one account that was a TELEPHONE NUMBER --
+ * the ID was never captured and Swordfish's export carried a phone number in the ID column. It
+ * copied faithfully, and pasting it into XDS is a search the firm pays for, run against something
+ * that is not a person.
+ *
+ * So nothing is copied unless it can actually be what it claims to be. A missing number and a
+ * wrong number are told apart on purpose: one needs capturing, the other needs correcting, and a
+ * collector told only "no ID" would go and type the phone number in again.
+ *
+ * 24 accounts in the staging book are in the second state, every one of them carrying that same
+ * number on its contact list as well -- see BACKLOG.
+ */
+export type TraceSearchKey =
+  | { ok: true; value: string; what: 'ID number' | 'registration number' }
+  | { ok: false; found: string | null; why: 'missing' | 'not-an-id' | 'not-a-registration' }
+
+/**
+ * A company registration number: 2016/210735/07.
+ *
+ * A bureau prefixes a letter of its own (K2016/210735/07) and the firm's records do not, so the
+ * letter is allowed and ignored -- see normaliseRegistration, which is what strips it.
+ */
+const REGISTRATION = /^[A-Z]?\s*\d{4}\s*\/\s*\d{6}\s*\/\s*\d{2}$/i
+
+export function traceSearchKey(
+  debtorKind: 'individual' | 'company',
+  value: string | null | undefined,
+  /** Passed in rather than imported, so this file keeps importing nothing. See isValidSaId. */
+  validId: (id: string) => boolean,
+): TraceSearchKey {
+  const found = (value ?? '').trim()
+  if (found === '') return { ok: false, found: null, why: 'missing' }
+
+  if (debtorKind === 'company') {
+    return REGISTRATION.test(found)
+      ? { ok: true, value: found, what: 'registration number' }
+      : { ok: false, found, why: 'not-a-registration' }
+  }
+
+  /*
+   * Luhn-checked, not merely thirteen digits. A transposed pair is the commonest way a number gets
+   * typed wrong, and it is thirteen digits either way -- so a length check would pass exactly the
+   * number that traces somebody else.
+   */
+  const digits = found.replace(/\s/g, '')
+  return validId(digits)
+    ? { ok: true, value: digits, what: 'ID number' }
+    : { ok: false, found, why: 'not-an-id' }
+}
+
+/** What to tell somebody when there is nothing safe to search on. */
+export function searchKeyProblem(key: TraceSearchKey, debtorKind: 'individual' | 'company'): string | null {
+  if (key.ok) return null
+  if (key.why === 'missing') {
+    return debtorKind === 'company'
+      ? 'This account has no registration number on it, so there is nothing to search on. Add one under the debtor’s details.'
+      : 'This account has no ID number on it, so there is nothing to search on. Add one under the debtor’s details.'
+  }
+  /*
+   * NAMED, so it gets fixed. "Not a valid ID" sends somebody looking for a typo; saying it looks
+   * like a telephone number says which field it belongs in. The book has 24 of exactly this.
+   */
+  const looksLikeAPhone = /^0[1-8]\d{8}$/.test(key.found?.replace(/\D/g, '') ?? '')
+  return key.why === 'not-a-registration'
+    ? `The registration field holds “${key.found}”, which is not a registration number. Nothing was copied — correct it under the debtor’s details.`
+    : `The ID field holds “${key.found}”, which is not a valid ID number${
+      looksLikeAPhone ? ' — it looks like a telephone number' : ''
+    }. Nothing was copied — correct it under the debtor’s details.`
+}
+
+/**
+ * The number a link can actually be rung on.
+ *
+ * A LINKED PERSON HAS NO NUMBER OF THEIR OWN. The bureau's links block gives a name, how the link
+ * was made, and what it was made through -- and when it was made through a shared TELEPHONE, that
+ * telephone is the thing in the middle column. So the number is not the linked person's number in
+ * any strict sense; it is the number the two of them have in common, which is exactly the number
+ * somebody chasing a relative wants to ring.
+ *
+ * Where the link runs through a company instead, there is no number and this returns null rather
+ * than offering something to dial that is not a telephone at all.
+ */
+/**
+ * A COMPANY REGISTRATION NUMBER OUT OF WHATEVER THE BUREAU PRINTED BESIDE THE NAME.
+ *
+ * THE FIRM: "at the companies, like, you should ask if you can trace them." Tracing a linked
+ * company means searching CIPC on its registration number, and the bureau prints that in the row's
+ * label rather than as a field of its own.
+ *
+ * FOUND, NOT ASSUMED TO BE THE WHOLE LABEL -- same shape as linkedNumber below, and for the same
+ * reason: the label is "<role> · <what the bureau had>", so the number is somewhere inside it.
+ *
+ * NULL RATHER THAN A GUESS. traceSearchKey refuses anything that is not a registration number, so
+ * handing it a half-read string would produce "that is not a registration number" on a company
+ * whose number was simply never printed -- which reads as the firm's data being wrong rather than
+ * the bureau's being thin. Null falls through to the name, which every source can be searched on.
+ */
+export function registrationIn(label: string | null | undefined): string | null {
+  if (!label) return null
+  const match = /[A-Z]?\s*\d{4}\s*\/\s*\d{6}\s*\/\s*\d{2}/i.exec(label)
+  return match ? match[0].trim() : null
+}
+
+export function linkedNumber(label: string | null | undefined): string | null {
+  if (!label) return null
+  /*
+   * Found in the label rather than assumed to be the whole of it: the label is stored as
+   * "<type> · <what it ran through>", and on a telephone link the second half is the number.
+   * A local number, or one written in full with the country code.
+   */
+  const match = /(\+?27|0)\s*\d[\d\s-]{7,}\d/.exec(label)
+  if (!match) return null
+  const digits = match[0].replace(/[^\d+]/g, '')
+  /* Ten local digits, or eleven behind a 27. Anything else is a reference number, not a line. */
+  if (/^0\d{9}$/.test(digits)) return match[0].trim()
+  if (/^(\+?27)\d{9}$/.test(digits)) return match[0].trim()
+  return null
+}
+
+/** How the bureau says two people are connected, with the number taken out of it. */
+export function linkedHow(label: string | null | undefined): string | null {
+  if (!label) return null
+  const number = linkedNumber(label)
+  const words = number === null ? label : label.replace(number, '').trim()
+  /* Left with a bare separator once the number is gone, there is nothing left worth printing. */
+  const cleaned = words.replace(/^[\s··|-]+|[\s··|-]+$/g, '').trim()
+  return cleaned === '' ? null : cleaned
+}
+
+/**
+ * Everything anybody connected to this account still owns, in one list.
+ *
+ * THE FIRM: "if the directors of these companies, and we see that they have properties, that is
+ * displayed on the main page."
+ *
+ * EACH TRACE ALREADY SHOWED ITS OWN. What it could not show was the ANSWER: a company account
+ * with three directors traced draws four panels, each naming one property, and the question a
+ * collector is actually asking -- is there anything here worth attaching -- is spread across
+ * them and never added up. A company with no assets whose director owns three houses is the
+ * whole reason a suretyship gets called in, and it read as four separate footnotes.
+ *
+ * WHOSE IT IS TRAVELS WITH IT, and that is not decoration. A judgment against the company does
+ * not attach a director's house; it takes a suretyship, or piercing, and a collector who cannot
+ * see whose name is on the deed cannot tell which of those they are looking at. The subject's
+ * own name is carried on every row.
+ *
+ * STILL OWNED ONLY -- see heldProperty. A deeds section lists every transaction a person ever
+ * made, including houses sold fifteen years ago, and a sold property in a list headed "property"
+ * reads as an asset to anybody skimming.
+ *
+ * BIGGEST FIRST, across all of them, because that is the order somebody deciding what to do
+ * next reads in.
+ */
+export interface OwnedProperty {
+  /** The trace it came off, so the panel can open the right one. */
+  traceId: string
+  /** Whose property it is, as the report named them. */
+  owner: string | null
+  ownerKind: 'debtor' | 'director'
+  item: TraceItem
+}
+
+export function propertyAcross(
+  traces: readonly { id: string; subjectKind: 'debtor' | 'director'; subjectName: string | null; items: TraceItem[] }[],
+): OwnedProperty[] {
+  const rows: OwnedProperty[] = []
+  /* De-duplicated on the deed itself: a property a director holds shows on the commercial report
+     and again on that director's own consumer one, and counted twice it doubles what the account
+     looks worth. The first one wins, which is the newest trace the caller handed in. */
+  const seen = new Set<string>()
+  for (const t of traces) {
+    for (const item of heldProperty(t.items)) {
+      const key = item.value.toLowerCase().replace(/[\s,.]+/g, ' ').trim()
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push({ traceId: t.id, owner: t.subjectName, ownerKind: t.subjectKind, item })
+    }
+  }
+  return rows.sort((a, b) => (b.item.amount ?? 0) - (a.item.amount ?? 0))
+}
+
+/**
+ * WHAT THE TIMELINE SAYS WHEN SOMETHING IS SAVED OFF A TRACE.
+ *
+ * THE FIRM: "it should also go to the notes activity timeline -- this person was added to the
+ * trace and this is the situation."
+ *
+ * NOTHING WROTE ONE AT ALL. The only record that a finding had been promoted was the row quietly
+ * appearing in the contact list, so a collector reading the history saw a trace pulled and then
+ * nothing -- and six months later nobody could say where a number on the account had come from.
+ *
+ * IT NAMES THE SOURCE, which is the point: "from the trace" is what separates a number the bureau
+ * gave us from one a debtor read out on the telephone. Those are not equally good and the history
+ * is where that is settled.
+ *
+ * PURE, so the sentence can be held by a check without a database anywhere near it.
+ */
+export function promotedNote(input: {
+  what: string
+  value: string
+  personName?: string | null
+  personRole?: string | null
+  relationship?: string | null
+}): string {
+  const who = input.personName?.trim()
+  const role = input.personRole?.trim()
+  /* THE PERSON FIRST WHERE THERE IS ONE. "Nomsa Radebe (sister) added from the trace" is a
+     sentence; "a person and their number added from the trace" is a shrug. */
+  const head = who
+    ? `${who}${role ? ` (${role.toLowerCase()})` : ''} \u2014 ${input.value} \u2014 added from the trace`
+    : `${input.what} added from the trace: ${input.value}`
+  const why = input.relationship?.trim()
+  return why ? `${head}. ${why}` : `${head}.`
+}

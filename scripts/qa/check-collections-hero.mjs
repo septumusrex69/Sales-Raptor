@@ -1,0 +1,525 @@
+/**
+ * The Collections hero.
+ *
+ * A HERO IS WHERE A NUMBER GOES TO BE BELIEVED WITHOUT BEING CHECKED. It is the biggest type on
+ * the screen and the first thing read, and nobody cross-references it against the table four
+ * hundred pixels below. So the things that matter here are not how it looks — a screenshot shows
+ * that — but whether every figure on it comes from the same arithmetic as the rest of the page,
+ * and whether it says nothing where it knows nothing.
+ *
+ * Four ways a hero lies while looking perfect:
+ *
+ *   - comparing today with the calendar day before, so every Monday reads as an infinite
+ *     improvement on a Sunday that was always going to be nought
+ *   - inventing a percentage where the day before brought in nothing, because every increase on
+ *     nought is infinite
+ *   - formatting money differently from the tables underneath, so one screen shows two figures
+ *   - drawing a progress bar with its own rule, so the same collector is 46% here and 46% with a
+ *     different-shaped bar below
+ *
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-collections-hero.mjs
+ */
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { previousWorkingDay } from '../../src/lib/collectionPace.ts'
+import { greetingFor, greetingLine } from '../../src/lib/greeting.ts'
+
+let pass = 0
+const failures = []
+function check(name, actual, expected) {
+  if (Object.is(actual, expected)) { pass += 1; return }
+  failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    got      ${JSON.stringify(actual)}`)
+}
+const ok = (name, actual) => check(name, actual, true)
+
+/* ---------- the day before is a WORKING day ---------- */
+
+/*
+ * "UP 14% ON YESTERDAY" IS A LIE EVERY MONDAY if yesterday means the calendar day before. Nothing
+ * is collected on a Sunday, so Monday would always read as an infinite improvement and Tuesday as
+ * a collapse — a comparison that swings for reasons unconnected to the work is one people learn
+ * to ignore inside a week.
+ */
+check('an ordinary day looks at the one before it', previousWorkingDay('2026-09-18'), '2026-09-17')
+check('a Monday looks back to the Friday', previousWorkingDay('2026-09-14'), '2026-09-11')
+check('a Sunday does too', previousWorkingDay('2026-09-13'), '2026-09-11')
+/* 24 September is Heritage Day — the same calendar the whole of the pace arithmetic runs on. */
+check('a public holiday is stepped over', previousWorkingDay('2026-09-25'), '2026-09-23')
+check('and it crosses the year end', previousWorkingDay('2026-01-01'), '2025-12-31')
+/* It may leave the reporting period, and that is correct: the previous working day is a fact
+   about days, not about the month being reported on. */
+check('...and it crosses out of a month without complaining', previousWorkingDay('2026-09-11'), '2026-09-10')
+
+/* ---------- the hero itself ---------- */
+
+const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
+const hero = read('../../src/components/collections/CollectionsHero.tsx')
+/*
+ * THE HERO MOVED HOUSE. It was built for the collections dashboard and the firm moved it whole
+ * onto the company dashboard -- "I want the epicness of the collections dashboard, that picture
+ * that we made. That should be the main" -- so the screen that renders it is CompanyDashboard,
+ * and the figures it is given come off the shared hook rather than out of the page. The reads
+ * below follow each assertion to the file that now owns it; see check-collection-pace on why
+ * they are not widened into one haystack.
+ */
+const page = read('../../src/pages/CompanyDashboard.tsx')
+const hook = read('../../src/hooks/useCollectionsMonth.ts')
+const controls = read('../../src/components/collections/MonthControls.tsx')
+const floor = read('../../src/pages/CollectorDashboard.tsx')
+const css = read('../../src/index.css')
+/*
+ * THE STYLESHEET WITH ITS COMMENTS OUT. Two different assertions need it and both learned the
+ * same lesson from opposite ends.
+ *
+ * ANYTHING THAT SLICES BY POSITION. This file carves `.collections-hero` into pieces with
+ * indexOf, and the moment a comment mentions one of those selectors the boundary lands inside
+ * the prose instead of on the rule. It happened: a note explaining that `.collections-hero > *`
+ * addresses the same child was written ABOVE the rule it was explaining, which moved the end of
+ * the scrim's slice above its start and emptied it.
+ *
+ * AND ANYTHING THAT ASSERTS AN ABSENCE. The rule about image-set has to be read over the CODE,
+ * because the explanation of why image-set is gone necessarily says "image-set" several times --
+ * and the first version of that line failed on the fixed stylesheet for exactly that reason. The
+ * usual trap runs the other way, a check passing because of the comment about the fix; this is
+ * the same mistake reflected.
+ */
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '')
+
+/*
+ * ONE SCREEN WEARS THE PHOTOGRAPH, and that is the firm's instruction: "all of the other
+ * dashboards can just have the other hero section. There should only be one very special page."
+ * Asserted as an absence as well as a presence, because the failure is not a missing hero -- it
+ * is a second screen quietly putting it back on and the company dashboard no longer being the
+ * place you arrive.
+ */
+ok('the company dashboard wears the photograph', /<CollectionsHero/.test(page))
+ok('...and the collections floor wears the ordinary band instead',
+  !/<CollectionsHero/.test(floor) && /<DashboardHero/.test(floor))
+
+/*
+ * NOTHING IS INVENTED WHERE NOTHING IS KNOWN. Every increase on nought is infinite, so a day
+ * following a blank one gets no percentage at all rather than a confident "+100%".
+ */
+ok('a day after a blank one shows no comparison',
+  /collectedBefore <= 0\s*\n\s*\? null/.test(hook))
+ok('...and the hero says so in words rather than leaving a gap',
+  /No working day before it to compare/.test(hero))
+/*
+ * BOTH TILES THAT NEED IT, counted rather than found. Two of the four read off the target — what
+ * was collected against it, and what is still needed per day — and asserting the words appear
+ * "somewhere" passed happily with one of the two replaced by a confident R0. Found by
+ * break-testing this line.
+ */
+check('both target-dependent tiles say so when there is none',
+  (hero.match(/No target set for this period/g) ?? []).length, 2)
+ok('...and the pace tile too', /Nothing to measure against yet/.test(hero))
+
+/*
+ * THE COMPARISON GOES THROUGH THE SAME TEAM FILTER AS EVERYTHING ELSE. Without it a team leader
+ * filtered to one team would see their team's day set against the whole floor's day before.
+ */
+ok('the day before is filtered by team as well',
+  /const collectedBefore = \(beforeRows \?\? \[\]\)\s*\n\s*\.filter\(\(r\) => !teamId \|\| teamOf\(r\.userId\) === teamId\)/.test(hook))
+
+/*
+ * ONE FORMATTER AND ONE BAR. The hero had its own money formatter, grouping thousands with a hard
+ * space to match the mockup, while the tables underneath group with a comma — one screen showing
+ * "R 127 500" above "R 127,500" reads as two different figures for a moment, every time.
+ */
+ok('the hero uses the app’s own currency formatter', /const money = formatCurrency/.test(hero))
+ok('...and no hand-rolled one survives beside it', !/replace\(\/\\\\B\(\?=/.test(hero))
+ok('the hero’s bar laps on the same rule as the tables', /targetLaps\(achieved\)/.test(hero))
+ok('...including the colour it changes to',
+  /over \? 'bg-\[#3ecf8e\]' : 'bg-\[var\(--ch-champagne\)\]'/.test(hero))
+
+/* Every figure comes from the page's own `line`, which is what the tables are drawn from. */
+ok('collected comes from the same total as the tables', /collected: score\?\.collected \?\? 0/.test(hook))
+ok('the target comes from the same resolution', /target: line\?\.target \?\? null/.test(hook))
+ok('ahead-or-behind is measured against the day’s pace',
+  /againstPace: line\?\.target == null \? null : line\.collected - line\.target \* line\.expected/.test(hook))
+ok('...and what was expected by now is the same arithmetic',
+  /expectedByNow: line\?\.target == null \? null : line\.target \* line\.expected/.test(hook))
+/*
+ * AND THE TWO SCREENS ARE GIVEN THE SAME OBJECT. The firm asked for the figures to be repeated --
+ * "we can repeat the same figures" -- which is only safe while they are one calculation. A page
+ * assembling its own HeroFigures would satisfy every assertion above and still print a different
+ * month from the one the floor is reading.
+ */
+ok('the hero is handed the shared figures', /figures=\{month\.figures\}/.test(page))
+ok('...and the collections floor prints the same ones', /month\.figures\.collected/.test(floor))
+
+/*
+ * THE CONTROLS LIVE IN THE HERO. They used to sit in a card below the title, and a figure read
+ * under the wrong month or the wrong team is not slightly wrong, it is about somebody else.
+ */
+ok('the period picker is in the hero', /<SalesMonthPicker[\s\S]{0,200}variant="dark"/.test(controls))
+ok('...with the as-at date', /aria-label="Read the report as at"/.test(controls))
+ok('...and the team filter', /aria-label="Team"/.test(controls))
+ok('...and they are rendered into the hero’s own strip', /filters=\{<MonthControls/.test(page))
+/* And the caption that used to duplicate them is gone: two rows saying the same thing leaves the
+   reader working out which one is live. */
+ok('the controls are not captioned by a copy of themselves',
+  !/Collection period: <span/.test(hero))
+
+/* The firm's own lines, which is most of why the panel exists. */
+ok('the gold line under the headline is there', /Discipline drives results/.test(hero))
+ok('...and the rail beside it', /Higher<br \/>Performance<br \/>Closer<br \/>Tomorrow/.test(hero))
+/*
+ * The line at the foot went with the redesign. The firm's reference puts the control strip there
+ * instead, and a brand line squeezed beside a date picker is clutter rather than brand — so this
+ * asserts its ABSENCE, which is the thing that would otherwise creep back in.
+ */
+ok('...and the line at the foot went with the redesign', !/Built for a higher standard/.test(hero))
+
+/*
+ * THE HEADLINE IS THE FIRM'S LINE, IN TWO TONES, BROKEN BY HAND.
+ *
+ * The firm's reference sets the first half white and the second in champagne, across two lines.
+ * That only works as a deliberate break: left to wrap, the break lands wherever the window
+ * happens to be wide and the colour change falls in the middle of a phrase.
+ *
+ * SENTENCE CASE, NOT CAPITALS. It was set in capitals for one version, on the firm's instruction
+ * at the time; their reference for this design shows it in sentence case with the second half
+ * gold, and that is the newer instruction. Asserted rather than left implicit because the two
+ * treatments need opposite letter-spacing and reverting one without the other looks broken.
+ */
+const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
+ok('there is a heading to read', title.length > 40)
+/*
+ * THE FIRM'S OWN LINE, AND IT IS THE SKIN'S RATHER THAN THIS COMPONENT'S.
+ *
+ * It read "The sky is only / the beginning." here, in the markup, until the firm sent a desert
+ * photograph with a line of its own -- and that line then appeared over the mountain at dawn too.
+ * The firm: "for the first theme, it should say the sky thing about the sky, it's only the
+ * beginning. But the desert theme has something else, another saying. So each place will have its
+ * own saying."
+ *
+ * SO WHAT IS ASSERTED HERE IS THAT THE COMPONENT HAS NO WORDS OF ITS OWN. A sentence written back
+ * into this file is the whole of the fault, and it would look completely normal: the default skin
+ * would read correctly and only the other skins would be wrong.
+ */
+ok('the headline is the skin\u2019s line, not this file\u2019s',
+  /<span>\{theme\.heroLine\.first\}<\/span>/.test(title))
+ok('...and the second half is the second line',
+  /<br \/>[\s\S]*\{theme\.heroLine\.second\}/.test(title))
+ok('...in champagne rather than white',
+  /text-\[var\(--ch-champagne\)\]"\s*>\s*\{theme\.heroLine\.second\}/.test(title))
+/* Both of the real lines asserted against, because either one hard-coded here is the bug. */
+check('...with neither skin\u2019s words hard-coded into it',
+  /The sky is only|the beginning\.|at the horizon\./.test(title), false)
+ok('...and it reads the active skin rather than a fixed one',
+  /const \{ theme \} = useTheme\(\)/.test(hero))
+
+/*
+ * AND THE SAYINGS THEMSELVES, held in themes.ts.
+ *
+ * ONE SKIN'S LINE MISSING IS A HERO WITH `undefined` ACROSS IT at 52px, so every skin is required
+ * to carry both halves rather than the two that happen to have photographs of their own.
+ */
+const themes = read('../../src/lib/themes.ts')
+const sayings = [...themes.matchAll(/id: '([a-z-]+)'[\s\S]*?heroLine: \{ first: '([^']+)', second: '([^']+)' \}/g)]
+check('every skin carries a saying of its own',
+  sayings.length, (themes.match(/^    id: '/gm) || []).length)
+ok('the mountain keeps the line the firm wrote for it',
+  sayings.some(([, id, a, b]) => id === 'raptor' && a === 'The sky is only' && b === 'the beginning.'))
+ok('...and the baseline skin with it',
+  sayings.some(([, id, a, b]) => id === 'original' && a === 'The sky is only' && b === 'the beginning.'))
+ok('the desert carries the one they sent with the photograph',
+  sayings.some(([, id, a, b]) => id === 'desert'
+    && a === 'Our world doesn\\u2019t end' && b === 'at the horizon.'))
+/*
+ * THE APOSTROPHE IS THE TYPOGRAPHIC ONE. A straight quote in a 52px display line is the one
+ * character on this panel that reads as unfinished.
+ *
+ * READ OFF THE RAW LINE RATHER THAN THE CAPTURED HALVES, and that is the difference between a
+ * check and a check-shaped thing: the halves are captured out of single quotes, so they CANNOT
+ * contain a straight apostrophe and a test on them passes whatever anybody writes. What a
+ * typewriter apostrophe actually looks like in this file is an escaped one.
+ */
+const sayingLines = themes.match(/^\s*heroLine: \{ first: '.*$/gm) || []
+check('...and every one of them was read', sayingLines.length, sayings.length)
+ok('...with a real apostrophe, not a typewriter one', !sayingLines.some((l) => /\\'/.test(l)))
+/*
+ * ORDINARY SENTENCE CASE, AND THE CASE HAS BEEN ROUND THE HOUSES. The whole line was set in
+ * capitals once, then SKY and BEGINNING alone were lifted into them, and the firm settled on
+ * neither: "change it all back to small letters, it'll look better". The reason is the weight —
+ * at font-light a capital has no ascender or descender to give the line shape, so caps flatten it
+ * however they are arranged.
+ *
+ * Both of the rejected versions are asserted against, not just the last one. A check that only
+ * refused a blanket uppercase would pass on the two-lifted-words version, which is the one that
+ * was actually sent back most recently.
+ */
+ok('...and not set in capitals at all', !/\buppercase\b/.test(title))
+ok('...with no words lifted into them either', !/<Stress>/.test(hero))
+/*
+ * THE LINE IS TRACKED OPEN, AND IT IS SET IN THE STYLESHEET RATHER THAN AS A UTILITY CLASS.
+ *
+ * It was a class first. The raptor skin sets `html[data-theme='raptor'] h1 { letter-spacing:
+ * -0.012em }` as a global default and that selector outranks any Tailwind class, so the class sat
+ * in the markup, passed a source check exactly like this one, and rendered at -0.62px — tighter
+ * than before, while the firm was being told it had been opened up. Found by measuring it in the
+ * browser, which is why the browser check next door measures rather than reads.
+ *
+ * So what is asserted here is the RULE and its specificity, not a class on the element.
+ */
+const rule = /\.collections-hero h1[\s\S]{0,80}letter-spacing: (-?[\d.]+)em;/.exec(css)
+ok('the headline’s tracking is set in the stylesheet', Boolean(rule))
+ok(`...opened up rather than pulled in (${rule?.[1]}em)`, Number(rule?.[1]) > 0)
+ok('...at a specificity that beats the skin’s own h1 rule',
+  /html\[data-theme='raptor'\] \.collections-hero h1/.test(css))
+/* And no dead tracking class left behind on the element to disagree with it. */
+ok('...with no utility class left on the element pretending to do it',
+  !/<h1[\s\S]{0,200}tracking-\[/.test(title))
+/*
+ * BOLD, AND THIS REVERSED.
+ *
+ * It was set at 600 once, the firm read it back as thick, and it went to font-light with a note
+ * arguing that at 52px it is the LACK of weight that carries a display line. They have now looked
+ * at both against their own reference and asked for the heavy one: "make the font thicker like the
+ * other one."
+ *
+ * THAT IS THEIR CALL AND THE CHECK FOLLOWS IT. What a check is for here is stopping it drifting
+ * back on its own — the light setting is still argued for at length in this file's history and in
+ * the component's comment, and a sentence that persuasive is one somebody re-applies.
+ */
+ok('...at the weight the firm asked for', /font-bold\b/.test(title))
+check('...and not back at the hairline', /font-light\b/.test(title), false)
+/* And the helper that lifted individual words into capitals is gone rather than left unused. */
+ok('the helper that lifted them is gone too', !/function Stress\(/.test(hero))
+
+/*
+ * AND IT DOES NOT NAME THE SCREEN. The panel carried "Collections" twice at one point — a gold
+ * eyebrow and the heading right under it — and the design that replaced it carries the word
+ * nowhere at all. That is only safe because the route is titled in the bar above it, which it
+ * was NOT until this change: /performance was missing from AppLayout's table and the bar was
+ * blank. So the two are asserted together; the hero alone would pass on a screen that names
+ * itself nowhere. Comments are stripped before counting, because half this file's explanations
+ * say "Collections" and a count over the raw source is a count of prose. `\b` on both ends keeps
+ * the component's own name out of it — there is no word boundary inside `CollectionsHero`.
+ */
+const heroCode = hero.replace(/\/\*[\s\S]*?\*\//g, '')
+check('the panel leaves the naming to the bar', (heroCode.match(/\bCollections\b/g) ?? []).length, 0)
+ok('...and the bar has a title for the route',
+  /\{ test: \/\^\\\/performance\/, title: 'Collections' \}/.test(read('../../src/components/layout/AppLayout.tsx')))
+/* The specific route first, or a collector's own figures get the whole floor's title. */
+const titles = read('../../src/components/layout/AppLayout.tsx')
+ok('...with the collector’s own page titled before it',
+  titles.indexOf("title: 'Collector'") > 0
+  && titles.indexOf("title: 'Collector'") < titles.indexOf("title: 'Collections'"))
+
+/*
+ * THE GREETING IS RIGHT FOR THE TIME OF DAY. "Good morning" at four in the afternoon is the kind
+ * of detail that tells a person the screen is not paying attention.
+ */
+check('eight in the morning', greetingFor(new Date('2026-09-18T08:00:00')), 'Good morning')
+check('noon is already the afternoon', greetingFor(new Date('2026-09-18T12:00:00')), 'Good afternoon')
+check('and five is the evening', greetingFor(new Date('2026-09-18T17:00:00')), 'Good evening')
+check('the small hours are still the morning', greetingFor(new Date('2026-09-18T00:30:00')), 'Good morning')
+/* First name only: a greeting that answers with a full name reads as a letter from a bank. */
+check('the line uses the first name', greetingLine(new Date('2026-09-18T08:00:00'), 'Stephan Bredell'),
+  'Good morning, Stephan')
+/* And no dangling comma where the profile carries no name at all. */
+check('...and greets nobody by name rather than nobody',
+  greetingLine(new Date('2026-09-18T08:00:00'), ''), 'Good morning')
+check('...including where it is null', greetingLine(new Date('2026-09-18T08:00:00'), null), 'Good morning')
+ok('the hero renders it', /greetingLine\(clockNow\(\), currentUser\?\.name\)/.test(hero))
+
+/* ---------- the photograph ---------- */
+
+/*
+ * A BACKGROUND, NOT AN <img>, and the same three declarations the sign-in panel uses: modern
+ * browsers take image-set, Safari 14-16 the -webkit- form, anything older the plain JPEG.
+ */
+ok('the photograph is a background', /\.collections-hero \{/.test(css))
+const heroRule = cssCode.slice(cssCode.indexOf('.collections-hero {'), cssCode.indexOf('.collections-hero::before'))
+/*
+ * THE PICTURE AND THE WASH ARE TOKENS NOW, and what is asserted moved with them.
+ *
+ * THEY WERE WRITTEN INTO THE RULE on the reasoning that this photograph never changes. A second
+ * skin with its own dunes falsified that, and the alternative -- a whole second copy of this
+ * panel's geometry under a [data-theme] selector -- is the worse of the two.
+ *
+ * THE RULE THAT MATTERS IS UNCHANGED: whatever is declared, it is ONE PLAIN url(), for the
+ * Safari reason written out on `.login-photo`. So the rule has to read a token, and the token
+ * has to be a plain url.
+ */
+ok('...declared off a token, so a skin can change it',
+  /background-image: var\(--skin-collections-hero-image\);/.test(heroRule))
+const baseImage = css.match(/--skin-collections-hero-image:([^;]+);/)?.[1] ?? ''
+ok('...whose default is this photograph', /url\('\/brand\/collections-hero\.webp'\)/.test(baseImage))
+ok('...as one plain url, never an image-set', !/image-set/.test(baseImage))
+
+/*
+ * AND NOT AS image-set(), ANYWHERE IN THE STYLESHEET. This is the bug the firm found on an iPad
+ * and it is worth the whole comment, because the broken version looked MORE careful than the fix.
+ *
+ * Both photographs carried three declarations of one property -- a plain JPEG, then
+ * -webkit-image-set, then the standard image-set -- on the stated theory that a browser choking
+ * on the last falls back to the one above it. The build falsifies that theory. Lightning CSS
+ * reads the three as one intent and emits two: a -webkit-image-set carrying type(), which
+ * WebKit's prefixed form has never supported and therefore REJECTS, and a standard image-set.
+ * The plain url() safety net is optimised away. On any Safari that does not take the unprefixed
+ * form, both surviving declarations are invalid, nothing is left, and the hero renders as a flat
+ * navy panel -- which is exactly what was reported.
+ *
+ * ASSERTED OVER THE WHOLE STYLESHEET, not just this rule: the sign-in photograph had the
+ * identical bug and nobody had seen it, because that panel is hidden below lg. A check scoped to
+ * the hero would have left it there.
+ */
+/* Over the CODE, for the reason given where cssCode is built. */
+ok('image-set is not used anywhere in the stylesheet', !/image-set\(/.test(cssCode))
+ok('...including the sign-in photograph, which had the same bug',
+  /\.login-photo \{[\s\S]{0,200}background-image: url\('\/brand\/raptor-login\.webp'\);/.test(css))
+/* The dense-screen file survives as a resolution query, which is two conditions rather than two
+   alternatives for one property, and therefore nothing a minifier can collapse. */
+ok('...and the 2x file is still only fetched by a screen that needs it',
+  /@media \(min-resolution: 2dppx\) \{\s*\n\s*\.login-photo \{/.test(css))
+
+/*
+ * SMALL ENOUGH TO SHIP, AND BIG ENOUGH TO LOOK AT. Both ends, because they pull against each
+ * other and this asset has now been wrong at both.
+ *
+ * The source is a 2.3MB PNG and a hero that costs two megabytes on the screen people open first
+ * thing every morning is a hero that gets deleted. But it was encoded at 1800px wide from a
+ * 2048px source and then magnified into a panel 700px tall, and the firm's word for the result
+ * was "pixelated" — they were looking at compression artefacts being blown up.
+ *
+ * A floor on the file size is a crude proxy for "it was not encoded down to nothing", and crude
+ * is the point: it is the check that would have caught the 1800px encode, which passed a ceiling
+ * happily at 173KB.
+ */
+const sizes = {
+  webp: statSync(new URL('../../public/brand/collections-hero.webp', import.meta.url)).size,
+}
+ok(`the webp is under 400KB (${Math.round(sizes.webp / 1024)}KB)`, sizes.webp < 400 * 1024)
+ok(`...and over 250KB, which is what stops it being re-encoded down to mush (${Math.round(sizes.webp / 1024)}KB)`,
+  sizes.webp > 250 * 1024)
+
+/*
+ * THE JPEG IS GONE, and its absence is asserted rather than just not mentioned. It only existed as
+ * the fallback in an image-set cascade; that cascade was removed when it turned out to be the
+ * reason the photograph never reached Safari, and the JPEG then sat in a PUBLIC repository at
+ * 370KB with nothing referencing it. An unreferenced asset is pure cost, and the way it comes back
+ * is somebody re-running an encode script that writes both.
+ */
+ok('the unreferenced JPEG is not back', !existsSync(new URL('../../public/brand/collections-hero.jpg', import.meta.url)))
+ok('...and nothing in the stylesheet asks for one', !/collections-hero\.jpg/.test(css))
+
+/*
+ * THE SCRIM IS TWO GRADIENTS AND THEY COMPOUND. At 0.86 and 0.74 the foot of the panel went to
+ * almost solid navy and the photograph may as well not have been there — which is exactly what
+ * the first version did. Each has to be read as half of what reaches the eye.
+ */
+/*
+ * THE SCRIM IS A TOKEN TOO, and for a reason beyond tidiness: it is tuned to the photograph
+ * behind it. A cold blue wash over a warm dune reads as a screen with its colour wrong, so a skin
+ * that changes the picture has to be able to change the wash with it.
+ *
+ * READ FROM THE TOKEN'S DEFAULT rather than from the rule, which now says only `background:
+ * var(--skin-collections-scrim)`. What follows -- two passes, and how dark they get together --
+ * is unchanged and is the half worth guarding.
+ */
+ok('the scrim is declared off a token',
+  /background: var\(--skin-collections-scrim\);/
+    .test(cssCode.slice(cssCode.indexOf('.collections-hero::before'), cssCode.indexOf('.collections-hero > *'))))
+const scrim = css.match(/--skin-collections-scrim:([\s\S]*?);\n/)?.[1] ?? ''
+ok('there is a scrim to read', scrim.length > 200)
+const darkest = Math.max(...[...scrim.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1])))
+ok('the whole valley is in frame', /background-position: center;/.test(css))
+
+/*
+ * AND THE TWO PASSES COMPOUND, which is the trap this has fallen into twice. At 0.86 across and
+ * 0.74 down, neither of which looks extreme on its own, the foot of the panel reached 0.96 and
+ * the photograph may as well not have been there. What matters is what reaches the eye, so the
+ * darkest each pass gets is combined the way the browser combines them rather than read apart.
+ */
+const passes = scrim.split('linear-gradient').slice(1)
+check('there are two passes over the picture', passes.length, 2)
+const worst = passes.map((p) => Math.max(...[...p.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1]))))
+const combined = 1 - worst.reduce((acc, a) => acc * (1 - a), 1)
+ok(`together they leave the picture visible (${combined.toFixed(2)} at the worst corner)`, combined <= 0.9)
+/* And the horizontal pass is the heavy one: the type is on the left, the mountain on the right. */
+ok(`the heavy pass is the one across (${worst[0]} vs ${worst[1]})`, worst[0] > worst[1])
+
+/*
+ * IT IS A CARD, ROUNDED OFF THE SAME TOKEN AS EVERY OTHER HERO.
+ *
+ * It ran full bleed with square corners for a version — the panel had been called "bulky" and
+ * edge-to-edge was the answer to that. It was the wrong answer, and the firm said so: a square
+ * panel running into the sidebar beside eight rounded ones is the one screen somebody forgot to
+ * finish. A hard-coded 18px would pass a check for "round" and still drift the day a skin moves
+ * the token, so what is asserted is that this reads the SAME token .app-hero does.
+ */
+/*
+ * AND IT STANDS AS TALL AS THE FIRM INSISTED, FOR EVERY SKIN BUT ONE THAT ASKS.
+ *
+ * THE FIRM SENT BACK A SHORTENED VERSION ONCE: "you changed some shit... I asked you not to change
+ * that. You put the progress bar below the thing. You made the picture smaller. Keep that." So 540
+ * and 700 are an instruction.
+ *
+ * THE HEIGHT IS A TOKEN NOW, because a skin that brings its own photograph has to be able to bring
+ * the shape that suits it -- `cover` on a 1.3:1 box shows barely a third of a 3:1 frame. What is
+ * asserted is that the DEFAULT is untouched: a skin may shorten its own panel, and nothing may
+ * quietly shorten everybody's by editing the baseline.
+ */
+const heights = css.match(/--skin-collections-hero-min: (\d+)px;[\s\S]*?--skin-collections-hero-min-lg: (\d+)px;/)
+ok('the panel’s height is a token', Boolean(heights))
+/* TWO PRIMITIVES, NOT A PAIR. This file's check() is Object.is, so two arrays with the same
+   numbers in them are never equal and the assertion fails on correct code -- which is exactly
+   what it did when it was written as one comparison. */
+check('...and the baseline short side is the height the firm asked for', Number(heights?.[1]), 540)
+check('...and the tall side too', Number(heights?.[2]), 700)
+/* AND THE CHILD READS IT AT A SPECIFICITY THAT BEATS THE UTILITY CLASS ON THE ELEMENT. An
+   arbitrary Tailwind min-h- is one class; this is a class plus an element, so it wins outright
+   rather than on source order -- which is how the tracking rule was lost once already. */
+ok('...read by the child that carries the padding',
+  /\.collections-hero > div \{\s*\n\s*min-height: var\(--skin-collections-hero-min\);/.test(cssCode))
+
+ok('the panel is rounded off the shared token', /border-radius: var\(--skin-hero-radius\);/.test(heroRule))
+ok('...the same one every other hero uses',
+  /\.app-hero \{[\s\S]*?border-radius: var\(--skin-hero-radius\);/.test(css))
+/* And it sits inside the page's padding rather than cancelling it. */
+ok('...and it does not bleed past the page’s padding', !/collections-hero[^"]*-mx-6/.test(hero))
+
+/*
+ * THE FOUR FIGURES SIT ON ONE LINE.
+ *
+ * The labels above them are different lengths and one carries a date, so on any width where
+ * "Collected this period" wraps and "Ahead of pace" does not, the four big figures land at four
+ * different heights. The rendered proof is in the browser check next door, which measures them;
+ * this asserts the mechanism, because a passing measurement at one window width says nothing
+ * about the next.
+ */
+const tile = hero.slice(hero.indexOf('function Tile('))
+ok('the label reserves its second line', /min-h-\[2\.2em\]/.test(tile))
+/*
+ * min-height, NOT height: a third line has to push the figure down rather than be cut in half.
+ * `\b` is no good here — it sits happily between the `-` and the `h` of `min-h-`, so the first
+ * version of this line reported the correct code as broken. Found by running it.
+ */
+ok('...as a minimum rather than a cap', !/[^-]h-\[2\.2em\]/.test(tile))
+
+/*
+ * THE CONTROLS LOSE THEIR BOXES BUT NOT THEIR AFFORDANCE. A control drawn as text is a control
+ * nobody finds, so the skin that strips the chrome has to put it back on hover AND on keyboard
+ * focus — the second is the one that gets forgotten, and forgetting it locks out the people
+ * working the whole screen from the keyboard.
+ */
+const skin = css.slice(css.indexOf('.hero-controls select,'))
+ok('the chrome comes off in a skin scoped to the hero', /\.hero-controls select/.test(skin))
+ok('...and comes back on hover', /\.hero-controls select:hover/.test(skin))
+ok('...and on keyboard focus', /\.hero-controls select:focus-visible/.test(skin))
+ok('...for the date field too', /\.hero-controls input\[type='date'\]:focus-visible/.test(skin))
+ok('the shared month picker is left alone',
+  !/variant="bare"|variant="text"/.test(read('../../src/components/ui/SalesMonthPicker.tsx')))
+
+if (failures.length) {
+  console.log(`\n${failures.length} FAILED:\n`)
+  for (const f of failures) console.log('  ✗ ' + f + '\n')
+  process.exit(1)
+}
+console.log(`${pass} passed, 0 failed`)
+console.log(`
+Four figures over the controls that decide what they mean, every one of them from the same query
+the tables are drawn from, compared against the previous WORKING day so a Monday is not measured
+against a Sunday — and a photograph that costs a hundred-odd kilobytes rather than two megabytes.`)

@@ -1,0 +1,209 @@
+/**
+ * WHAT A LINE ON THE TRUST STATEMENT WAS (prompt 12).
+ *
+ * THE FIRM: "So that the trust fund completely reconciles and gets a zero balance. Every single
+ * payment going in or going out should be allocated and have a reason for being there."
+ *
+ * The database does the allocating (allocate_bank_line) and is the only thing that can. This file
+ * is the half a person sees: the names of the kinds, which kinds a line of each direction may be,
+ * and a SUGGESTION where the answer is obvious. A suggestion is never an allocation -- a person
+ * confirms every one, because each writes an entry on the trust ledger that cannot be taken back.
+ *
+ * PURE, no Supabase: the rules have to be assertable. The calls are in bankAllocationApi.ts.
+ */
+import { referenceIn } from './paymentsOut.ts'
+
+export type OutKind = 'payover' | 'refund' | 'business_transfer' | 'bank_charge' | 'other'
+export type InKind = 'bank_interest' | 'business_transfer_in' | 'other'
+export type AllocationKind = OutKind | InKind
+
+export interface StatementLine {
+  id: string
+  txnDate: string
+  /** Signed, as the bank wrote it: money out is negative. */
+  amount: number
+  description: string | null
+  direction: 'credit' | 'debit'
+  reference: string | null
+  bankAccount: string
+  bankAccountLabel: string | null
+}
+
+/** Something a line can be matched to: a run, a refund, or a drawing not yet on a statement. */
+export interface Candidate {
+  kind: 'payover' | 'refund' | 'business_transfer'
+  id: string
+  amount: number
+  label: string
+  /** The reference it was paid out on ('BF PO-LVM-2610', 'BF RAP-124059'); none for a drawing. */
+  reference?: string | null
+}
+
+/** The firm's words for each kind, and what it does, as the picker shows them. */
+export const KIND_LABEL: Record<AllocationKind, string> = {
+  payover: 'Payover to a client',
+  refund: 'Refund to a debtor',
+  business_transfer: 'Transfer to the business account',
+  bank_charge: 'Bank charges',
+  other: 'Other',
+  bank_interest: 'Bank interest received',
+  business_transfer_in: 'From the business account',
+}
+
+export const KIND_NOTE: Record<AllocationKind, string> = {
+  payover: 'Settles the payover run it paid.',
+  refund: 'Settles the refund to the debtor.',
+  business_transfer: 'The firm’s fees, commission, interest and VAT drawn from trust.',
+  bank_charge: 'The firm’s cost — owed by the business account to the trust.',
+  other: 'Recorded against nobody until somebody works out whose it was. Say what it was.',
+  bank_interest: 'Interest the bank paid on the trust account, credited to the firm.',
+  business_transfer_in: 'The business account paying the trust back, e.g. for bank charges.',
+}
+
+/** Which kinds a line may be. A debtor's payment IN is placed on their account, not allocated here. */
+export function kindsFor(direction: StatementLine['direction']): AllocationKind[] {
+  return direction === 'debit'
+    ? ['payover', 'refund', 'business_transfer', 'bank_charge', 'other']
+    : ['bank_interest', 'business_transfer_in', 'other']
+}
+
+/** Kinds that settle something particular, so the person must choose which. */
+export function needsTarget(kind: AllocationKind): boolean {
+  return kind === 'payover' || kind === 'refund'
+}
+
+/** Kinds where the reason is not optional. */
+export function needsReason(kind: AllocationKind): boolean {
+  return kind === 'other'
+}
+
+/*
+ * WHAT A BANK'S OWN WORDING LOOKS LIKE. FNB writes "##BANK CHARGE" (the firm's test statement),
+ * "#SERVICE FEE", "#MONTHLY ACC FEE", "CASH DEP FEE"; every bank writes interest as "INTEREST" or
+ * "CR INT". Anchored on the bank's words, not on any amount: a R57.50 debit is a bank charge
+ * because the bank said so, not because bank charges tend to be small.
+ */
+const CHARGE = /\bBANK\s*CHARGES?\b|\bSERVICE\s*FEE\b|\bMONTHLY\s*(ACC(OUNT)?\s*)?FEE\b|\bADMIN(ISTRATION)?\s*FEE\b|\bCASH\s*DEP(OSIT)?\s*FEE\b|\bTRANSACTION\s*FEE\b|#\s*[A-Z ]*FEE\b/i
+/* THE FIRM'S DRAWING REFERENCE (prompt 12 B3): what paymentsOut.ts writes on a drawing, BF FEES-YYMM. */
+const BF_FEES = /\bBF\s*FEES\b/i
+const INTEREST = /\bINTEREST\b|\bCR\.?\s*INT\b|\bINT\.?\s*CAP/i
+
+/*
+ * A DEBIT ORDER THAT CAME BACK. FNB: "RETURNED DEBIT SBB/2003 ZULU INSUFFICIENT FUNDS"; others write
+ * "UNPAID", "R/D" or "DEBIT ORDER REVERSAL". It is not a payment out of the firm to anybody: it is a
+ * debtor's receipt that was never money, and the job is to reverse that payment on its account.
+ */
+const RETURNED = /\bRETURNED\s*(DEBIT|D\/?O)\b|\bUNPAID\b|\bR\/D\b|\bINSUFFICIENT\s*FUNDS\b|\bDEBIT\s*ORDER\s*(REVERSAL|RETURN)/i
+/* Our own account numbers look like SBB/2003 -- a client code, a slash, a number. */
+const ACCOUNT_NO = /\b([A-Z]{2,5}\/\d{2,6})\b/
+
+/** What a bank line plainly is from the bank's own words, or null. Never a decision: a hint for which button to show. */
+export type LineNature = 'bank_charge' | 'bank_interest' | 'returned_debit'
+export function lineNature(description: string | null, direction: StatementLine['direction']): LineNature | null {
+  const d = description ?? ''
+  if (direction === 'credit') return INTEREST.test(d) ? 'bank_interest' : null
+  if (RETURNED.test(d)) return 'returned_debit'
+  if (CHARGE.test(d)) return 'bank_charge'
+  return null
+}
+
+/** The account a returned debit names ("SBB/2003"), so the screen can open it. */
+export function accountNumberIn(description: string | null): string | null {
+  return ACCOUNT_NO.exec(description ?? '')?.[1] ?? null
+}
+
+export interface Suggestion {
+  kind: AllocationKind
+  targetId: string | null
+  /** Why it was suggested, said to the person confirming it. */
+  why: string
+}
+
+/**
+ * THE OBVIOUS ANSWER, OR NONE.
+ *
+ * EXACT AMOUNTS ONLY, and only where exactly ONE candidate has it: two payover runs of R4 000 is a
+ * question for a person, and guessing between them settles the wrong client's run. The business
+ * account's own number in the description is the other unambiguous sign.
+ */
+/**
+ * WHAT TO DO ABOUT A DEBIT NOTHING ACCOUNTS FOR, as the Trust overview offers it. The firm, 8 Oct,
+ * at two "##BANK CHARGE" lines offered only "Find its run": "I can't match this with anything ...
+ * I think that means the company owes the trust fifty-seven rand." It does: a bank charge is the
+ * firm's cost, booked against the firm under Exceptions. Only a debit that is not a charge is a
+ * payment to find.
+ */
+export function unexplainedDebitAction(
+  description: string | null, candidateInvoice: string | null,
+): { label: string; to: string } {
+  if (CHARGE.test(description ?? '')) return { label: 'Book as a bank charge', to: '/trust/exceptions' }
+  if (candidateInvoice) return { label: `Match to ${candidateInvoice}`, to: '/trust/exceptions' }
+  return { label: 'Allocate it', to: '/trust/exceptions' }
+}
+
+export function suggestAllocation(
+  line: StatementLine,
+  candidates: Candidate[],
+  businessAccountNumber: string | null = null,
+): Suggestion | null {
+  const text = line.description ?? ''
+  const amt = Math.round(Math.abs(line.amount) * 100)
+  const mentionsBusiness = !!businessAccountNumber
+    && text.replace(/\s+/g, '').includes(businessAccountNumber.replace(/\s+/g, ''))
+
+  if (line.direction === 'credit') {
+    if (INTEREST.test(text)) return { kind: 'bank_interest', targetId: null, why: 'The bank calls it interest.' }
+    if (mentionsBusiness) {
+      return { kind: 'business_transfer_in', targetId: null, why: 'It names the business account.' }
+    }
+    return null
+  }
+
+  if (CHARGE.test(text)) return { kind: 'bank_charge', targetId: null, why: 'The bank calls it a charge or a fee.' }
+  /*
+   * THE REFERENCE IT WENT OUT ON, AND THE AMOUNT. The firm, 8 Oct: a payment out "should be matched
+   * ... by means of a reference number". A line that carries a payment's reference AND its exact
+   * amount is that payment, even where another payment is the same amount -- which is the case the
+   * amount alone has to leave for a person. The amount still has to agree: the database settles a
+   * payment only on the exact amount, and a reference with the wrong amount is a question.
+   */
+  const byRef = candidates.filter((c) => Math.round(c.amount * 100) === amt && referenceIn(text, c.reference))
+  if (byRef.length === 1) {
+    return { kind: byRef[0].kind, targetId: byRef[0].id, why: `It carries the reference ${byRef[0].reference} and the amount matches: ${byRef[0].label}.` }
+  }
+  for (const kind of ['payover', 'refund', 'business_transfer'] as const) {
+    const same = candidates.filter((c) => c.kind === kind && Math.round(c.amount * 100) === amt)
+    if (same.length === 1) {
+      return { kind, targetId: same[0].id, why: `The only ${KIND_LABEL[kind].toLowerCase()} of exactly this amount: ${same[0].label}.` }
+    }
+  }
+  /* A BF FEES DEBIT NOBODY RECORDED (prompt 12 B3: "If no transfer was recorded, offer 'Record it as
+     BF's drawing'"). After the matches above, so a drawing already recorded at this amount is matched
+     rather than recorded twice; this is only what is left. */
+  if (BF_FEES.test(text)) {
+    return { kind: 'business_transfer', targetId: null, why: 'It carries the firm’s drawing reference, and no drawing of this amount was recorded, so it records one.' }
+  }
+  if (mentionsBusiness) {
+    return { kind: 'business_transfer', targetId: null, why: 'It names the business account.' }
+  }
+  return null
+}
+
+/** The candidates a line could settle: same kind, same amount to the cent. */
+export function candidatesFor(line: StatementLine, kind: AllocationKind, candidates: Candidate[]): Candidate[] {
+  const amt = Math.round(Math.abs(line.amount) * 100)
+  return candidates.filter((c) => c.kind === kind && Math.round(c.amount * 100) === amt)
+}
+
+export function toStatementLine(r: Record<string, unknown>): StatementLine {
+  return {
+    id: String(r.id),
+    txnDate: String(r.txn_date),
+    amount: Number(r.amount),
+    description: (r.description as string | null) ?? null,
+    direction: r.direction === 'debit' ? 'debit' : 'credit',
+    reference: (r.reference as string | null) ?? null,
+    bankAccount: String(r.bank_account ?? ''),
+    bankAccountLabel: (r.bank_account_label as string | null) ?? null,
+  }
+}

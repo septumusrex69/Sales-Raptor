@@ -1,7 +1,7 @@
 import {
   Banknote, CalendarClock, FileSignature, FileSearch, HandCoins, Mail, MailOpen,
   MapPinned, MessageCircleQuestion, MessageSquare, MessagesSquare, Phone, ScrollText,
-  StickyNote, Undo2, type LucideIcon,
+  StickyNote, Undo2, MessageSquareQuote, FolderClosed, type LucideIcon,
 } from 'lucide-react'
 import type { TimelineEntry } from '../../lib/accountTimeline'
 
@@ -29,6 +29,13 @@ const PAYMENT: TimelineStyle = { icon: Banknote, ring: 'bg-positive-50', fg: 'te
 const REVERSAL: TimelineStyle = { icon: Undo2, ring: 'bg-negative-50', fg: 'text-negative' }
 const PROMISE: TimelineStyle = { icon: HandCoins, ring: 'bg-gold-50', fg: 'text-gold-600' }
 const NOTE: TimelineStyle = { icon: StickyNote, ring: 'bg-slate-100', fg: 'text-slate-500' }
+/*
+ * The main comment, changed. Gold, because gold is this palette's "carries weight" and this is
+ * the one line the next person reads before they ring — not another sticky note among fifty.
+ */
+/* A CLOSE, A HOLD OR A RE-OPEN (prompt 11): a change in where the account stands, not an action on it. */
+const STATUS: TimelineStyle = { icon: FolderClosed, ring: 'bg-slate-200', fg: 'text-slate-700' }
+const MAIN_COMMENT: TimelineStyle = { icon: MessageSquareQuote, ring: 'bg-gold-50', fg: 'text-gold-600' }
 /* A dispute takes the negative colour: it is the debtor pushing back, and it changes the call. */
 const QUERY: TimelineStyle = { icon: MessageCircleQuestion, ring: 'bg-negative-50', fg: 'text-negative' }
 
@@ -86,6 +93,8 @@ export function styleFor(entry: TimelineEntry): TimelineStyle {
   // and wears its icon. Everything else a person types is a plain note.
   if (entry.kind === 'note') return (entry.actionCode ? CHANNEL[entry.actionCode] : undefined) ?? NOTE
   if (entry.kind === 'query') return QUERY
+  if (entry.kind === 'main_comment') return MAIN_COMMENT
+  if (entry.kind === 'status') return STATUS
 
   const code = entry.actionCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1]
   const style: TimelineStyle = (code ? CHANNEL[code] : undefined) ?? FALLBACK
@@ -99,7 +108,26 @@ export function styleFor(entry: TimelineEntry): TimelineStyle {
 /** Chip colours for a promise's outcome, in the same family. */
 export const PROMISE_CHIP: Record<string, string> = {
   open: 'bg-gold-100 text-gold-600',
+  /* GOLD AND NOT RED. `defaulted` is the 48 hours the firm's own default letter promises, and in
+     that window the arrangement is still on its existing terms -- a payment revives it. Drawn as a
+     broken arrangement it would read as over, on the two days it is most worth a phone call. */
+  defaulted: 'bg-gold-100 text-[var(--c-gold-deep)] font-medium',
   kept: 'bg-positive-100 text-positive-700',
   broken: 'bg-negative-100 text-negative-700',
   cancelled: 'bg-slate-100 text-slate-500',
+}
+
+/**
+ * WHAT A PROMISE'S STATE IS CALLED ON A SCREEN, in the firm's words rather than the column's.
+ *
+ * `defaulted` is the one that needed saying: the chip printed the column, and "defaulted" tells a
+ * collector the arrangement is gone when what is actually true is that the debtor has two days to
+ * revive it. The words are the ones the letter uses, so the screen and the notice agree.
+ */
+export const PROMISE_WORDS: Record<string, string> = {
+  open: 'open',
+  defaulted: '48 hours to pay',
+  kept: 'kept',
+  broken: 'broken',
+  cancelled: 'cancelled',
 }

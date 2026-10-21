@@ -2,19 +2,52 @@
  * One account's story, in one stream.
  *
  * A collector picking up an account needs to know what happened, not which table it happened in.
- * So the fee ledger (every letter, call, SMS and trace), the payment ledger, the notes and the
- * promises are merged here into a single chronological list.
+ * So the payment ledger, the notes, the promises and the IMPORTED half of the fee ledger are
+ * merged here into a single chronological list.
+ *
+ * The imported half, because a fee Raptor raised is already on this list in words -- the function
+ * that charges a call writes "Called 011 592 0520" in the same breath, and the firm asked for the
+ * charge row under it to go. An imported fee has no such note and is all the history there is.
+ * See feeIsTheOnlyRecord in accountBalance.
  *
  * Interest accruals are deliberately left out. There are 29 to 56 of them on a typical migrated
  * account, they are computed rather than done, and they would bury the human events under a
  * monthly drumbeat nobody needs to read. Interest belongs on the Statement, which is the record
  * of money; this is the record of contact.
  */
+import { feeIsTheOnlyRecord, feeStands } from './accountBalance.ts'
 import type { AccountLedgers } from './accountBook'
-import type { AccountNote, PromiseToPay } from './accountWorkspace'
+import type { AccountContact, AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
+import { firmDay } from './dateLabels.ts'
+import { describeArrangement } from './arrangements.ts'
+import { PROMISE_ENDED, promiseCancelWords } from './promiseRules.ts'
 
-export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query'
+export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query' | 'main_comment' | 'status'
+
+/**
+ * WHERE THE ACCOUNT STANDS CHANGED: closed, put on hold, re-opened (prompt 11). The firm withdrew
+ * KLR/1006 and the timeline said nothing -- the account read as if nothing had happened, and the
+ * one entry it did show, a reversal a month earlier, was read as caused by the withdrawal. Each of
+ * these carries its own day, who and why, and the charge it raised, so neither can be mistaken for
+ * the other. Read from account_status_events, which a trigger fills on every change of book.
+ */
+export interface StatusChange {
+  id: string
+  at: string
+  fromBook: string | null
+  toBook: string | null
+  /** How it closed, where it closed: withdrawn, settled, paid_up, written_off. */
+  endedAs: string | null
+  reason: string | null
+  by: string | null
+  /** A charge raised with it -- the withdrawal fee -- incl. VAT, and how it is settled. */
+  charge: { total: number; settlement: string } | null
+}
+
+const ENDED_WORDS: Record<string, string> = {
+  withdrawn: 'Withdrawn by the client', settled: 'Settled', paid_up: 'Paid up', written_off: 'Written off',
+}
 
 export interface TimelineEntry {
   id: string
@@ -41,16 +74,28 @@ export interface TimelineEntry {
    * The split the firm asked for: "all of the actions, and then you can just hide the automated
    * actions ... so it only shows the writings, the comments, that type of important stuff."
    *
-   * It is a fact recorded at the source, never guessed from the text. A fee line is automatic
-   * because raising it is the machine's half of an action somebody else took; a note is automatic
-   * when Raptor composed it ("Trace done — 4 credit bureau searches"), and is not when a person
-   * typed the words. Payments, promises and a dispute's own history stay: money arriving and
-   * decisions being taken are the story, not bookkeeping about it.
+   * It is a fact recorded at the source, never guessed from the text. An imported fee line is
+   * automatic because it is an ACTION rather than a writing -- "Letter sent", logged by the old
+   * system -- and the firm asked for the switch in those terms; a note is automatic when Raptor
+   * composed it ("Trace done — 4 credit bureau searches"), and is not when a person typed the
+   * words. Payments, promises and a dispute's own history stay: money arriving and decisions being
+   * taken are the story, not bookkeeping about it.
    */
   automated: boolean
 }
 
-const dayOf = (iso: string) => iso.slice(0, 10)
+/* THE JOHANNESBURG DAY (prompt 11): a payment received at 00:00 on 3 Jul is stored as 22:00 on the
+   2nd, and the first ten characters of that said 02 Jul beside a statement that said 03 Jul. A plain
+   date passes through unchanged. */
+const dayOf = (iso: string) => (iso.length > 10 ? firmDay(iso) : iso.slice(0, 10))
+
+/* dd/mm/yyyy, which is how South Africa writes a date and how every other date on this screen is
+   drawn. Built by hand rather than through toLocaleDateString: en-ZA renders September as
+   "Sept" and groups with a non-breaking space, neither of which belongs in a sentence. */
+function displayDay(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-')
+  return y && m && d ? `${d}/${m}/${y}` : iso.slice(0, 10)
+}
 
 /**
  * Build the stream, newest first — and newest first WITHIN a day as well.
@@ -66,29 +111,246 @@ const dayOf = (iso: string) => iso.slice(0, 10)
  * day and something has to order them, or the timeline reshuffles itself between two loads. Money
  * still leads a day nobody recorded a time on. It no longer overrules a day where they did.
  */
-const RANK: Record<TimelineKind, number> = { payment: 0, promise: 1, query: 2, action: 3, note: 4 }
+/**
+ * A note ABOUT something, and which something.
+ *
+ * Set when the note is written, so nothing here has to read the words and guess. An email is on
+ * this list because correspondence is not a loose thought either: a collector scanning for "what
+ * did we actually tell them" is looking for envelopes, and inbound and outbound are different
+ * events wearing different colours. See timelineStyle.ts.
+ */
+const NOTE_ACTION: Record<string, string> = {
+  call: 'phone_call',
+  email_out: 'email_out',
+  email_in: 'email_in',
+}
+
+/*
+ * Within one day, the order things are shown in. A main comment change sits with the notes and
+ * just above them: on a day where somebody worked the account and rewrote the comment, the
+ * rewritten comment is the summary of the rest.
+ */
+const RANK: Record<TimelineKind, number> = {
+  payment: 0, promise: 1, query: 2, action: 3, main_comment: 4, note: 5,
+  /* A close on a day of work comes after it: it is what the day ended in. */
+  status: 6,
+}
+
+/**
+ * When the account opened and when it reached us. Both, because they are different days.
+ *
+ * THE FIRM: "on the activity timeline in a debtor, it doesn't show which date it's imported --
+ * date it handed over, and imported."
+ */
+export interface AccountOpening {
+  /** The day the account was handed over. Interest and the ledger run from it (prompt 11). */
+  handoverDate: string | null
+  /** The client's date of default, kept as a record; nothing accrues from it. */
+  defaultDate?: string | null
+  /** The day the row was written -- for an imported account, when the handover was approved. */
+  importedAt: string | null
+  /** The batch it came in on, where it came in on one. */
+  batchReference?: string | null
+}
+
+/** What a contact is called in a sentence: "Verified the mobile 082...", not "verified mobile". */
+function contactWord(kind: string): string {
+  if (kind === 'email') return 'the email address'
+  if (kind === 'address') return 'the address'
+  if (kind === 'employer') return 'the employer'
+  if (kind === 'work') return 'the work number'
+  if (kind === 'other') return ''
+  return `the ${kind} number`
+}
 
 export function buildTimeline(
   ledgers: AccountLedgers | null,
   notes: AccountNote[] = [],
   promises: PromiseToPay[] = [],
+  opening?: AccountOpening | null,
+  /**
+   * The debtor's numbers and addresses, for the two things a PERSON does to them.
+   *
+   * THE FIRM, having retired an email as a wrong address: "it doesn't show in my activity
+   * timeline. It should show things like this — oh, I just verified an email address on this
+   * date, or I just retired this and the retire reason is there."
+   *
+   * WHY IT MATTERS MORE THAN IT LOOKS. Both of these change what the firm may do next. A verified
+   * number is the one the Call button dials and the one a notice quotes; a retired one is
+   * deliberately never offered again. Neither left a trace anywhere, so an address that stopped
+   * being used had no answer to "who decided that, and why" — which is the question asked
+   * eighteen months later when a debtor says they were never contacted.
+   */
+  contacts: AccountContact[] = [],
+  statusChanges: StatusChange[] = [],
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = []
 
-  for (const f of ledgers?.fees ?? []) {
+  for (const c of statusChanges) {
+    const title = c.toBook === 'closed'
+      ? (c.endedAs ? ENDED_WORDS[c.endedAs] ?? 'Closed' : 'Closed')
+      : c.toBook === 'on_hold' ? 'Put on hold'
+        : c.fromBook === 'closed' || c.fromBook === 'on_hold' ? 'Re-opened' : null
+    if (!title) continue
+    const charge = c.charge
+      ? `${c.endedAs === 'withdrawn' ? 'Withdrawal charge' : 'Charge'} R${c.charge.total.toFixed(2)} incl. VAT, ${
+        c.charge.settlement === 'invoice' ? 'invoiced to the client' : 'set off against the next payover'}`
+      : null
+    entries.push({
+      id: `status:${c.id}`,
+      kind: 'status',
+      date: dayOf(c.at),
+      at: c.at,
+      title: c.reason ? `${title} — ${c.reason}` : title,
+      detail: charge,
+      by: c.by,
+      automated: false,
+    })
+  }
+
+  /*
+   * ---- THE FIRST THING THAT EVER HAPPENED TO THIS ACCOUNT ----
+   *
+   * THE FIRM: "on the activity timeline in a debtor, it doesn't show which date it's imported --
+   * date it handed over, and imported."
+   *
+   * The timeline began at the first fee or the first note, so an account with neither had an
+   * empty one and an account with both started in the middle of its own story. Two dates, and
+   * they are genuinely different: `handoverDate` is the day the debt fell due -- interest, in
+   * duplum and prescription all run from it -- and the import date is the day it reached us.
+   * Somebody asking "why is this account only three weeks old and already at R13 000" needs both.
+   *
+   * DATED AT THE HANDOVER, not at the import, so it sits at the bottom where the story starts.
+   * Dated at the import it would jump to the top of a book brought across from Swordfish and
+   * bury six years of history under a row saying the account exists.
+   *
+   * NOT AUTOMATED, although Raptor wrote it. The flag is for the logged actions and the sentences
+   * Raptor composes. This is neither; it is the account's first fact, and hidden it would take the
+   * answer with it.
+   */
+  if (opening && (opening.handoverDate || opening.importedAt)) {
+    const at = opening.handoverDate ?? opening.importedAt as string
+    entries.push({
+      id: 'opened',
+      kind: 'note',
+      date: dayOf(at),
+      at,
+      title: 'Handed over',
+      detail: [
+        /* TWO DATES, AND SAID AS TWO (prompt 11). The handover is what interest runs from; the
+           default is the client's record of when the debt fell due, and runs nothing. */
+        opening.handoverDate
+          ? `Handed over on ${displayDay(opening.handoverDate)}; interest runs from that day.`
+          : null,
+        opening.defaultDate
+          ? `The client gives the date of default as ${displayDay(opening.defaultDate)}.`
+          : 'No date of default is recorded.',
+        opening.importedAt
+          ? `It reached Raptor on ${displayDay(opening.importedAt)}${
+            opening.batchReference ? `, on ${opening.batchReference}` : ''}.`
+          : null,
+      ].filter(Boolean).join(' '),
+      automated: false,
+    })
+  }
+
+  /*
+   * ---- WHAT SOMEBODY DECIDED ABOUT A NUMBER OR AN ADDRESS ----
+   *
+   * TWO EVENTS, NOT THREE. Verifying and retiring are decisions a person made on a day; ADDING a
+   * contact is not, most of the time — the book came across from Swordfish with its numbers
+   * already on it, and one entry per imported contact would bury six years of history under a
+   * list of telephone numbers on the day of the import.
+   *
+   * NOT AUTOMATED, because the "just what people wrote" filter exists to thin the logged actions
+   * down to the writings. This is a DECISION, not a logged action: a person looked at a number,
+   * rang it, and chose.
+   */
+  for (const c of contacts) {
+    if (c.verifiedAt) {
+      entries.push({
+        id: `contact-ok:${c.id}`,
+        kind: 'action',
+        date: dayOf(c.verifiedAt),
+        at: c.verifiedAt,
+        title: `Verified ${contactWord(c.kind)} ${c.value}`,
+        detail: c.label,
+        automated: false,
+      })
+    }
+    if (c.retiredAt) {
+      entries.push({
+        id: `contact-off:${c.id}`,
+        kind: 'action',
+        date: dayOf(c.retiredAt),
+        at: c.retiredAt,
+        title: `Stopped using ${contactWord(c.kind)} ${c.value}`,
+        /* THE REASON IS THE POINT. "Retired" says a thing happened; "wrong number" says why, and
+           it is the only thing that stops the next collector tracing it all over again. */
+        detail: c.retiredReason,
+        automated: false,
+      })
+    }
+  }
+
+  /*
+   * ---- THE FEES, AND ONLY THE ONES NOTHING ELSE SAYS ----
+   *
+   * THE FIRM, reading an account where "Called 011 592 0520" had "Telephone call  R 28,75" under
+   * it: "still showing the charges on the notes is not necessary."
+   *
+   * AND THEY ARE NOT, FOR A FEE WE RAISED. Every charge Raptor makes is written beside a note in
+   * the same function, in words -- so the fee row repeats, in money, a line the collector has just
+   * read. Three rows for one telephone call is what that produced.
+   *
+   * THE IMPORTED ONES STAY, AND THAT IS NOT A HEDGE. On a migrated account the fee ledger is the
+   * only contact history there is: 59 215 fees came across against 1 523 notes. See
+   * feeIsTheOnlyRecord, which is where the reasoning and the list of systems live.
+   *
+   * NOT DONE WITH THE `automated` SWITCH, although it would have hidden these too. That switch
+   * also hides the notes Raptor composes -- "Trace done, 4 credit bureau searches" -- and the firm
+   * reads those. Defaulting it on to lose the fee lines would have taken the trace note with it.
+   */
+  for (const f of (ledgers?.fees ?? []).filter(feeIsTheOnlyRecord)) {
     entries.push({
       id: `fee:${f.id}`,
       kind: 'action',
       date: dayOf(f.incurredAt),
       at: f.incurredAt,
       title: feeLabel(f.description, f.segments),
-      detail: f.cancelledAt ? 'Cancelled. The fee stands — it attaches to the action being issued.' : null,
+      /*
+       * CANCELLED SAYS WHICH KIND, because there are two and they are opposite.
+       *
+       * This line used to say "the fee stands" of every cancelled fee. That is true of an imported
+       * promise to pay -- the firm: "if he breaks the promise to pay, he breaks it. If he makes it
+       * again, he makes it again. But it's still an action and a consultation" -- and it is FALSE
+       * of a receipt fee on a reversed payment, which is exactly the one the firm agreed comes off.
+       * One sentence for both would have told a collector the debtor still owed a fee that had
+       * just been taken off their balance. `feeStands` decides, so the words and the arithmetic
+       * cannot come apart.
+       */
+      detail: f.cancelledAt
+        ? (feeStands(f)
+          ? 'Cancelled. The charge stands — the arrangement ended, the work was still done.'
+          : 'Cancelled. It has come off the balance.')
+        : null,
       by: f.performedBy,
       amount: f.billed ? f.amountExclVat + f.vatAmount : null,
       free: !f.billed,
       actionCode: f.actionCode,
-      // Always. A fee line is Raptor charging for something a person did; the doing is already
-      // on the timeline as its own entry, written in words.
+      /*
+       * STILL AUTOMATIC, even though it is now the only record of the action.
+       *
+       * The firm's own words for the switch: "all of the actions, and then you can just hide the
+       * automated actions, so it only shows the writings, the comments, that type of important
+       * stuff." An imported "Letter sent" is an action, not a writing, so it belongs on the side
+       * of the switch they put it on -- and the busiest migrated account carries 822 of them.
+       *
+       * WHICH IS WHY THE FIRM'S COMPLAINT COULD NOT BE ANSWERED WITH THIS FLAG. Defaulting the
+       * switch on would have hidden the fee rows and the notes Raptor composes in the same motion,
+       * and the trace note is one a collector reads. The charge rows are gone from the list
+       * itself; this only decides where the surviving ones sit.
+       */
       automated: true,
     })
   }
@@ -99,8 +361,17 @@ export function buildTimeline(
       kind: 'payment',
       date: dayOf(p.receivedAt),
       at: p.receivedAt,
-      title: p.reversedAt ? 'Payment reversed' : 'Payment received',
-      detail: [p.method, p.reference, p.details, p.paidToClient ? 'Paid direct to client' : null]
+      /* RECEIVED, AND STRUCK THROUGH IF IT WAS REVERSED (prompt 11). "Payment reversed" as its own
+         title read as something the withdrawal did; the line says when, why and where it went. */
+      title: 'Payment received',
+      detail: [
+        p.reversedAt
+          ? (/^Returned unpaid - /.test(p.reversalReason ?? '')
+            /* A RECEIPT THE BANK RETURNED (prompt 12) says so: it never arrived. */
+            ? `Returned unpaid ${displayDay(firmDay(p.reversedAt))} — ${(p.reversalReason ?? '').replace(/^Returned unpaid - /, '')}`
+            : `Reversed ${displayDay(firmDay(p.reversedAt))}${p.reversalReason ? ` — ${p.reversalReason}` : ''}${p.reversedTo ? ` → ${p.reversedTo}` : ''}`)
+          : null,
+        p.method, p.reference, p.details, p.paidToClient ? 'Paid direct to client' : null]
         .filter(Boolean)
         .join(' · ') || null,
       amount: p.amount,
@@ -115,7 +386,11 @@ export function buildTimeline(
       id: `note:${n.id}`,
       // A query's own history is not an ordinary note: it belongs to a dispute, and a collector
       // scanning the timeline needs to see that at a glance rather than read for it.
-      kind: n.kind === 'query' ? 'query' : 'note',
+      /*
+       * A main comment change is not a note about the account, it is a change to the line
+       * everybody reads first. Its own kind, so it can look like one.
+       */
+      kind: n.kind === 'query' ? 'query' : n.kind === 'main_comment' ? 'main_comment' : 'note',
       date: dayOf(n.createdAt),
       at: n.createdAt,
       title: n.body,
@@ -140,23 +415,62 @@ export function buildTimeline(
        * call, and showing it as a plain sticky beside every other note lost that. The kind is
        * set when the note is written, so nothing here has to read the words and guess.
        */
-      actionCode: n.kind === 'call' ? 'phone_call' : null,
+      actionCode: NOTE_ACTION[n.kind] ?? null,
     })
   }
 
   for (const p of promises) {
+    /*
+     * AN ARRANGEMENT IS TWO EVENTS ON THE TIMELINE, NOT ONE ROW WEARING ITS LATEST STATUS.
+     *
+     * THE FIRM, LOOKING AT AN ACCOUNT WHERE THEY HAD JUST CANCELLED ONE: "I don't see that the
+     * payment arrangement has been created, I can only see that it's been cancelled." They were
+     * reading it correctly. There was ONE entry, dated the day the promise was made, carrying the
+     * CURRENT status as a chip -- so a cancelled arrangement read as an arrangement that had never
+     * existed, and a kept one read as though it had been kept the day it was agreed.
+     *
+     * THE TIMELINE IS THE RECORD OF CONTACT, and two things happened: the debtor undertook to pay,
+     * and later somebody closed that undertaking. They are days apart and often different people.
+     *
+     * THE FIRST ONE NO LONGER CARRIES THE VERDICT. `status: 'open'` on the entry dated the day it
+     * was made, whatever became of it -- because on that day it WAS open, and a chip saying
+     * "cancelled" beside "Promise to pay" is what made the two unreadable as one line.
+     */
     entries.push({
       id: `promise:${p.id}`,
       kind: 'promise',
       date: dayOf(p.createdAt),
       at: p.createdAt,
-      title: 'Promise to pay',
-      detail: [`due ${p.dueOn}`, p.method, p.notes].filter(Boolean).join(' · '),
+      title: 'Arrangement made',
+      detail: [`${describeArrangement(p)} · first payment ${p.dueOn}`, p.method, p.notes]
+        .filter(Boolean).join(' · '),
       amount: p.amount,
-      status: p.status,
+      status: 'open',
       // A promise is the single most important thing a collector produces. It never hides.
       automated: false,
     })
+    /*
+     * AND THE DAY IT ENDED, WHERE IT HAS. `resolvedAt` is written by resolvePromise and by the
+     * sweep, and it is null on a live one -- so nothing is invented for an arrangement still
+     * running, which is the common case and the one that must not grow a second line.
+     *
+     * THE REASON TRAVELS WITH IT. A cancellation now carries why (see promiseCancelWords), and
+     * that sentence is the whole point of the entry: "cancelled" alone is what the firm was
+     * complaining about one field further along.
+     */
+    if (p.resolvedAt && p.status !== 'open') {
+      entries.push({
+        id: `promise-end:${p.id}`,
+        kind: 'promise',
+        date: dayOf(p.resolvedAt),
+        at: p.resolvedAt,
+        title: PROMISE_ENDED[p.status] ?? 'Arrangement closed',
+        detail: promiseCancelWords(p),
+        amount: p.amount,
+        status: p.status,
+        automated: false,
+      })
+    }
   }
 
   return entries.sort((a, b) => {

@@ -19,12 +19,15 @@ export function RingDonut({
   centerLabel,
   centerColor = 'var(--c-ink)',
   caption,
+  legend = true,
 }: {
   data: RingDonutSlice[]
   centerValue: string
   centerLabel: string
   centerColor?: string
   caption?: string
+  /** Off where the card lists the slices itself, beside the ring (the client page's rings). */
+  legend?: boolean
 }) {
   const total = data.reduce((s, d) => s + d.value, 0)
   const gap = data.length > 1 ? 3 : 0
@@ -63,14 +66,14 @@ export function RingDonut({
         </div>
       </div>
       {caption && <span className="text-[11px] text-slate-400 text-center -mt-1">{caption}</span>}
-      <div className="flex items-center gap-3 text-[11px] flex-wrap justify-center">
+      {legend && <div className="flex items-center gap-3 text-[11px] flex-wrap justify-center">
         {data.map((d) => (
           <span key={d.name} className={`flex items-center gap-1 ${d.muted ? 'text-slate-400' : 'text-slate-600'}`}>
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: d.color }} />
             {d.name} <b className={d.muted ? 'font-semibold' : 'font-bold'}>{d.value}</b>
           </span>
         ))}
-      </div>
+      </div>}
     </div>
   )
 }

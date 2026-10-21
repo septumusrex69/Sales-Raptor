@@ -7,6 +7,12 @@ import type { VercelRequest } from '@vercel/node'
  * and be wrong, these look under every name a provider plausibly uses and keep the whole payload
  * either way. The first real delivery report is what settles it; until then nothing is silently
  * dropped, and `provider_raw` has the evidence.
+ *
+ * CONNECT MOBILE HAVE NOW TOLD US, and the answer was not one of the spellings we had. Jacques
+ * confirmed on 14 September 2026: the identifier we send as `id` on submit comes back on both a
+ * delivery report and a reply as `userid` — one word, no underscore. We accepted `user_id` and
+ * would have matched nothing: every real DLR would have answered `matched: false` and no message
+ * would ever have moved off "sent". Their exact spellings now lead each list.
  */
 
 /** Query string and body together, because a provider may use either and some use both. */
@@ -33,9 +39,18 @@ export function pick(p: Record<string, string>, keys: string[]): string | null {
   return null
 }
 
-/** Our own identifier, sent as `id` and echoed back. The only reliable way to find the row. */
-export const REFERENCE_KEYS = ['id', 'reference', 'ref', 'client_id', 'clientid', 'user_id', 'msgid', 'message_id']
+/**
+ * Our own identifier, sent as `id` on submit and echoed back. The only reliable way to find the row.
+ *
+ * `userid` is Connect Mobile's own spelling, confirmed by them, and it goes first. The rest stay
+ * as fallbacks: costing nothing, they cover a provider changing its mind or a second provider
+ * later, and a webhook that silently matches nothing is close to undetectable in production.
+ */
+export const REFERENCE_KEYS = [
+  'userid', 'id', 'reference', 'ref', 'client_id', 'clientid', 'user_id', 'msgid', 'message_id',
+]
 export const MSISDN_KEYS = ['da', 'msisdn', 'sa', 'from', 'source', 'sender', 'number', 'origin']
+/** `ud` is Connect Mobile's, on both a submit and a reply: the message text itself. */
 export const TEXT_KEYS = ['ud', 'text', 'message', 'body', 'content', 'msg']
 export const STATUS_KEYS = ['status', 'dlr', 'state', 'delivery_status', 'stat']
 

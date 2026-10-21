@@ -1028,6 +1028,45 @@ real data meets a real schema:
 | 2 | Item 1(b), registered letter under s57 — the Magistrates' Courts figure. **Awaiting; BF to supply.** Rarely used, so it does not block the build. | Tariff |
 | 3 | ~~The fee ceiling rule~~ — **resolved** (2b). It is the Note at the head of Annexure B: items 1–7 may not exceed min(capital, R1,225), R1,023 before March 2026. Implemented in `recoverableFee()`. | — |
 | 4 | ~~Whether the item 9 receipt-fee maximum is per instalment or in aggregate~~ — **resolved**: per instalment, confirmed by the business. So is the VAT-exclusive basis of every gazetted amount. | — |
+| 5 | **Whether interest runs on an account imported without its accrual history.** 23,009 of the 23,781 accounts on staging carry an interest rate and have **no** accrual row, so nothing accrues on them: `openAccrual` needs a posted period to run from and there is none. Only the 735 Swordfish-migrated accounts accrue. See below. | Interest, every settlement quotation |
+| 6 | **Which basis the receipt fee takes on the payment that settles an account.** The quotation is 10% of the **balance** (FCC, 2a, confirmed on 193 statements); the fee posted when a payment arrives is 10% of the **payment**. Pay the quoted settlement and the account is left open by up to R71. See below. | Settlement quotations |
+
+### 10a. Two found on 27 September 2026, both reported and neither changed
+
+Both surfaced when the firm read a payment simulation on BF-TEST-028 and asked "no interest?" The
+page now says when no interest is running (`repaymentLetter`), which was the part that was a
+straightforward defect. Neither of these is, and both move real money, so both are the firm's call.
+
+**Interest does not run on 97% of the book.** Accrual starts the day after the last posted period,
+so an account with no posted period never starts. The 735 Swordfish accounts came in with 12,078
+accrual rows and accrue correctly; the 23,009 accounts of the later imports came in with a rate,
+a handover date and no accrual ledger at all, and stand still. A brand-new account created in
+Raptor is in the same state. The obvious candidate for the missing start date is `handover_date`
+— but on the imported book those dates run back into 2025, so using them would add eighteen months
+of compound interest to 10,115 accounts' balances overnight, which is not a migration anyone should
+write unasked. A forward-only alternative is the later of the handover date and the date Raptor
+took the account on, which never touches what a client has already been invoiced.
+
+**A settlement quotation is a few rand short of settling.** Section 2a is confirmed: the FCC is
+10% of the balance before the fee, capped at R610, plus VAT, matching 193 live statements. But
+`receiptFeeOn` charges 10% of the **payment received**, which is the gazette's own wording for
+item 9 — so a debtor who pays the quoted figure attracts a slightly larger fee than the quotation
+allowed for and the account does not close:
+
+| Balance | Quoted settlement | Fee quoted | Fee actually posted | Left owing |
+|---|---|---|---|---|
+| R199.39 | R222.32 | R22.93 | R25.57 | R2.64 |
+| R1,000.00 | R1,115.00 | R115.00 | R128.23 | R13.23 |
+| R3,000.00 | R3,345.00 | R345.00 | R384.68 | R39.68 |
+| R5,398.50 | R6,019.33 | R620.83 | R692.22 | R71.39 |
+| R6,000.00 | R6,690.00 | R690.00 | R701.50 | R11.50 |
+| R13,474.39 | R14,175.89 | R701.50 | R701.50 | — |
+
+It disappears above about R13,500, where the R610 ceiling binds on both bases. Swordfish had the
+same inconsistency, which is why the quotation formula reproduces its statements exactly. Grossing
+the quotation up — `balance / (1 − 10% × 1.15)` below the ceiling — closes it to the cent, and
+would put every settlement figure above what the firm's own statements have always quoted. Not
+changed.
 
 ---
 

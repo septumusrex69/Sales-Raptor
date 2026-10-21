@@ -1,0 +1,273 @@
+import { Fragment, type ReactNode } from 'react'
+import { Mail, MessageSquare, Phone } from 'lucide-react'
+import { shortDate } from '../../lib/dateLabels.ts'
+import { markerIndex, words, type RunStep, type StepShape } from '../../lib/runSteps.ts'
+import { noticeChannels, noticeShape, noticesOf, type Notice } from '../../lib/stepPairs.ts'
+
+/**
+ * THE SEQUENCE AS A ROW OF DOTS, WHICH IS HOW THE FIRM DRAWS IT.
+ *
+ * THE FIRM, LOOKING AT THE LIST THIS REPLACED: "this doesn't work for me. The layout here, it's
+ * long... I have an idea. I'll draw you something. So it'll be like a flow diagram almost... it'll
+ * be little things and it'll have different like colours if it's been successful or not
+ * successful. But you can also like extend it to show every single step in the process." They then
+ * drew it: dots on a line, filled behind, hollow ahead, and a drop-down under it.
+ *
+ * WHY THE LIST WAS WRONG AND THIS IS NOT. An eleven-step sequence written out is eleven rows of
+ * equal weight, and the account screen carries two runs of it — so the one thing that needed doing
+ * was a row in a table twenty rows long. A dot says the only three things anybody reads at a
+ * glance: how far along this debtor is, whether anything has stopped, and what is next. The
+ * sentences are still there, one at a time, under the dot that is asking for them.
+ *
+ * IT IS A ROW OF BUTTONS, NOT A PICTURE. Every dot is pressable and says what it is, because the
+ * firm works on an iPad and a track you can only read is a track that has to be expanded to be
+ * used. `aria-label` carries the words the dot draws as a colour.
+ *
+ * AND IT CHANGES WITH THE ROOM IT IS GIVEN, which is a container query rather than the page's
+ * width: this panel sits in the account's narrow rail today and the same component has to read
+ * on a wide screen. Narrow, a step is a dot with its day number under it and eleven of them fit;
+ * wide, the firm's own words for the step appear underneath as well. The NAME is never the only
+ * place a step is identified -- the detail below the track and the drop-down both spell it out --
+ * so the narrow reading loses nothing, which is what makes dropping it honest.
+ */
+
+/** The channel a step goes out on, where it has one. A review step has none. */
+const CHANNELS: Record<string, typeof Mail> = { email: Mail, sms: MessageSquare, whatsapp: MessageSquare, call: Phone }
+
+/**
+ * WHAT EACH SHAPE LOOKS LIKE.
+ *
+ * FILLED IS BEHIND YOU AND HOLLOW IS AHEAD — the firm's own drawing, and the one convention that
+ * needs no key. Gold is the firm's attention colour everywhere else in Raptor, so a stopped step
+ * reads as "this one is yours" without a legend; green is the outcome colour, not a decoration.
+ */
+const DOT: Record<StepShape, string> = {
+  sent: 'bg-[var(--color-positive)] border-[var(--color-positive)]',
+  stopped: 'bg-[var(--c-gold)] border-[var(--c-gold)]',
+  waiting: 'bg-white border-slate-300',
+  cancelled: 'bg-white border-slate-200 border-dashed',
+}
+
+const LABEL: Record<StepShape, string> = {
+  sent: 'text-slate-600',
+  stopped: 'text-[var(--c-gold-deep)] font-medium',
+  waiting: 'text-slate-400',
+  cancelled: 'text-slate-300 line-through',
+}
+
+/**
+ * WHERE TODAY FALLS ON THE TRACK.
+ *
+ * AFTER THE LAST STEP THAT HAS COME DUE, which is the reading somebody wants: everything to the
+ * left of the mark should have happened, everything to the right has not. A step due TODAY sits
+ * on the left of it, because today is its day — it is late only tomorrow.
+ *
+ * Returns steps.length where the whole sequence is behind us, and 0 on a run dated into the
+ * future, so the mark is drawn at one end rather than not at all.
+ */
+export function WorkflowTrack({ steps, selectedId, onSelect, today }: {
+  steps: RunStep[]
+  selectedId: string | null
+  /**
+   * WHAT PRESSING A DOT DOES, OR NOTHING AT ALL.
+   *
+   * OMITTED ON THE OVERVIEW'S SUMMARY CARD, and the dots are then drawn as text rather than as
+   * buttons. That is the house rule about the action row applied to a track: "a button that looks
+   * live and swallows the click teaches people not to trust the row". The card has one link on it,
+   * Open, and it goes to the tab where the steps can actually be worked -- so a dot there is
+   * something to READ, and drawing it as a button would be eleven promises the card cannot keep.
+   *
+   * The words survive either way: `title` and `aria-label` carry them on the span as they do on
+   * the button, which is what makes the summary reading honest rather than merely quieter.
+   */
+  onSelect?: (id: string) => void
+  /**
+   * The firm's today, or null on a run that is over.
+   *
+   * NULL RATHER THAN A MARK AT THE END. A run the account has left stopped where it stopped, and
+   * a "today" caret past the last dot of a finished sequence says the sequence is still counting
+   * when it is not.
+   */
+  today: string | null
+}) {
+  /*
+   * ONE DOT PER STEP OF THE FIRM'S CHART, not per row of the table.
+   *
+   * THE FIRM, LOOKING AT AN ELEVEN-DOT SECTION 129: "there'll be much less steps in here. You
+   * know, it'll look smaller and better." Their chart has six steps; Raptor stores eleven because
+   * every step is a letter AND the SMS that follows it. Two rows is right in the database and two
+   * dots is wrong on a screen -- the debtor received one notice. See stepPairs.ts.
+   */
+  const notices = noticesOf(steps)
+  /*
+   * TODAY IS PLACED AGAINST THE LEADS, so the caret falls between notices rather than inside one.
+   * Computed off the same markerIndex the list uses, fed the rows it is allowed to fall between --
+   * a caret that could land between a letter and its own SMS would be marking a boundary that is
+   * five minutes wide.
+   */
+  const at = today === null ? -1 : markerIndex(notices.map((n) => n.lead), today)
+  const mark = (key: string) => (
+    <li key={key} className="flex items-start" aria-label="Today">
+      {/*
+        TODAY, AS A LINE THROUGH THE TRACK. The firm: "it's important to show where in the
+        workflow is it currently." Drawn taller than the dots rather than as a dot of its own,
+        because it is not a step and must not be counted as one -- and in gold, which is the
+        colour the rest of Raptor uses for "this is where you are wanted".
+      */}
+      <span aria-hidden className="mx-1 mt-[-2px] h-9 w-[2px] shrink-0 rounded-full bg-[var(--c-gold)]" />
+    </li>
+  )
+  return (
+    <div className="@container -mx-1 px-1 pb-1">
+      {/*
+        IT WRAPS RATHER THAN SCROLLING, AND THAT IS WHAT BOUGHT THE SIZE. The firm: "it could be
+        maybe a little bit bigger those little circles because it's not filling the whole screen."
+        Eleven dots big enough to press do not fit across the account's rail on one line -- at
+        twenty pixels they need two hundred and twenty and the rail gives two hundred -- so a
+        single scrolling line forced them down to sixteen and still left the right-hand end empty.
+        Wrapped, seven sit on a line, the line fills, and the dots are the size of a fingertip.
+
+        EACH STEP CARRIES THE CONNECTOR ON ITS LEFT, so a wrapped line begins with a short stub
+        and reads as a continuation rather than a new sequence -- and no tail hangs off the end.
+      */}
+      <ol className="flex flex-wrap items-start gap-y-2">
+        {notices.map((notice, i) => {
+          const step = notice.lead
+          const shape = noticeShape(notice)
+          /* Every channel the step goes out on, in the order they go: an envelope and a speech
+             bubble together are what "one notice and the text behind it" looks like. */
+          const icons = noticeChannels(notice).map((c) => CHANNELS[c]).filter(Boolean)
+          /* Selected when EITHER row is the one in focus, so opening the SMS from the drop-down
+             still lights the dot its notice is drawn as. */
+          const selected = notice.steps.some((s) => s.id === selectedId)
+          return (
+            <Fragment key={step.id}>
+              {at === i && mark(`mark-${i}`)}
+              {/*
+                THE TRACK FILLS THE RAIL RATHER THAN BUNCHING LEFT. Three dots at their own width
+                took a third of the column and left the rest empty, which is the other half of the
+                firm's "this workflow now looks really small in here". Each step after the first
+                grows, so the connectors share whatever room is left and the sequence reads across
+                the card -- and on a wrapped line the same rule fills that line too.
+                
+                CAPPED, so a two-step run does not draw one enormous line between two dots.
+                
+                ONLY IN THE RAIL. Wide, the columns are 76px and hold a name and a date under each
+                dot; stretching there would pull a labelled track apart.
+              */}
+              <li className="flex flex-1 items-start @sm:flex-none">
+                {/*
+                  THE LINE BETWEEN, drawn by the step on its right rather than as its own element:
+                  one connector per gap, and never a stray tail past the last dot. It is coloured
+                  by the step BEFORE it, so the filled part of the track is the part that has
+                  happened.
+                */}
+                {i > 0 && (
+                  <span aria-hidden className={`mt-[13px] h-[2px] w-2 min-w-2 max-w-16 flex-1 @sm:w-5 @sm:max-w-none @sm:flex-none ${
+                    noticeShape(notices[i - 1]) === 'sent' ? 'bg-[var(--color-positive)]/40' : 'bg-slate-200'
+                  }`} />
+                )}
+                <Dot onSelect={onSelect} notice={notice} selected={selected}>
+                  <span className={`flex h-7 w-7 items-center justify-center gap-px rounded-full border-2
+                    ${DOT[shape]} ${
+                    selected ? 'ring-2 ring-navy-950/25 ring-offset-1' : 'group-hover:ring-2 group-hover:ring-slate-200'
+                  }`}>
+                    {/*
+                      EVERY CHANNEL THIS STEP GOES OUT ON, inside the one dot. An envelope beside a
+                      speech bubble is what the firm's chart means by a step: the notice, and the
+                      text message telling the debtor to go and read it. Drawn as two dots they
+                      were identical apart from the icon and the day number under each read "1 1",
+                      which is what sent the firm looking for a way to make this smaller.
+                    */}
+                    {icons.map((Icon, n) => (
+                      <Icon key={n} size={icons.length > 1 ? 9 : 13}
+                        className={shape === 'waiting' || shape === 'cancelled' ? 'text-slate-400' : 'text-white'} />
+                    ))}
+                  </span>
+                  {/*
+                    THE DAY NUMBER, WHICH IS HOW THE FIRM WRITES THEIR OWN CHART. It is the one
+                    thing short enough to sit under a dot in the rail, and it is what makes the
+                    track a sequence rather than a row of beads -- two dots reading "1 1" are the
+                    email and the SMS that go out together. The unit it counts in is spelled out
+                    under the track and again in the detail, where there is room to write it.
+                  */}
+                  <span className={`hidden text-[9px] leading-none tabular-nums @sm:block ${LABEL[shape]}`}>
+                    {step.day}
+                  </span>
+                  {/* THE NOTICE'S OWN NAME, which is the lead row's: "Section 129 / letter of
+                      demand" rather than that and "Section 129 / letter of demand SMS" beside it. */}
+                  <span className={`hidden text-center text-[10px] leading-tight @sm:line-clamp-2 @sm:block ${LABEL[shape]}`}>
+                    {step.label}
+                  </span>
+                  {/*
+                    AND THE DATE, EVERYWHERE, BECAUSE IT IS THE ONE THAT ALWAYS MEANS SOMETHING.
+                    
+                    THE FIRM, LOOKING AT AN ARRANGEMENT'S TRACK IN THE RAIL: "this workflow now
+                    looks really small in here, the little things. I think we can make that look
+                    better." What was under those three dots was "0 0 0" -- the day number, which
+                    is the firm's own way of writing a chart and is exactly right on a section 129
+                    (1, 7, 12, 32, 39, 49) and worthless on an arrangement, where the steps are
+                    dated off each INSTALMENT and every one of them is day 0.
+                    
+                    THE DATE IS NEVER WORTHLESS. "27 Sep · 1 Oct · 4 Oct" is the question somebody
+                    opens this card to ask -- when is it going out -- and it is what the day
+                    number was standing in for while there was no room for it. There is room now:
+                    the dot's column is wide enough, and the track wraps.
+                  */}
+                  <span className="text-center text-[10px] leading-none text-slate-400 tabular-nums">
+                    {shortDate(step.sentAt ? step.sentAt.slice(0, 10) : step.dueOn)}
+                  </span>
+                </Dot>
+              </li>
+            </Fragment>
+          )
+        })}
+        {at === notices.length && mark('mark-end')}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * ONE DOT, PRESSABLE OR NOT, WITH THE SAME BOX EITHER WAY.
+ *
+ * ONE ELEMENT, TWO TAGS. The class list is the track's layout -- the dot's width, the gap under
+ * it, the container-query column -- and written out twice for the button and the span it would
+ * drift, which on a wrapped track is dots that no longer line up between the two screens that
+ * draw them.
+ *
+ * `group` STAYS ON BOTH, because the hover ring inside is written against it; on the span there is
+ * no hover to catch, which is the point.
+ */
+function Dot({ notice, selected, onSelect, children }: {
+  notice: Notice
+  selected: boolean
+  onSelect?: (id: string) => void
+  children: ReactNode
+}) {
+  const step = notice.lead
+  /*
+   * BOTH MESSAGES IN THE WORDS, because the dot now stands for both. "Section 129 - Sent, sent 27
+   * Sep 2026. Section 129 SMS - Waiting on you" is what somebody using a screen reader, or a long
+   * press on the iPad, has to hear -- a dot drawn half-gold whose label mentions only the letter
+   * would be announcing the half that is fine.
+   */
+  const said = notice.steps.map((s) => words(s)).join('. ')
+  const shared = {
+    title: said,
+    'aria-label': said,
+    /*
+     * WIDE ENOUGH FOR A DATE, WHICH IS WHAT THE RAIL PUTS UNDER A DOT NOW. It was the width of
+     * the dot itself -- twenty pixels -- which is why the only thing that fitted was a day
+     * number, and on an instalment-anchored sequence three of those read "0 0 0".
+     */
+    className: 'group flex w-11 shrink-0 flex-col items-center gap-1 @sm:w-[76px]',
+  }
+  if (!onSelect) return <span {...shared}>{children}</span>
+  return (
+    <button type="button" onClick={() => onSelect(step.id)}
+      aria-current={selected ? 'step' : undefined} {...shared}>
+      {children}
+    </button>
+  )
+}

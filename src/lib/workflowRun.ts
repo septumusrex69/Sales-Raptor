@@ -1,0 +1,339 @@
+/**
+ * A FILE GOING THROUGH A WORKFLOW: which steps, on which dates, and which of them wait for a
+ * person.
+ *
+ * The firm: "I'll send every letter by hand once and every SMS once. And then I want these things
+ * working automatically in the workflow."
+ *
+ * THE DATES ARE WORKED OUT ONCE, WHEN THE RUN STARTS, and stored. Not on the morning each step is
+ * due, and this is the decision the rest of the design hangs off:
+ *
+ *   - THE CALENDAR LIVES IN ONE PLACE. Business days, weekends and the South African public
+ *     holidays are `workingDays.ts`, and a scheduler that recomputed dates in SQL would be a
+ *     second copy of that calendar — the one that is wrong about Heritage Day in the year nobody
+ *     checks. Resolved here, the thing that wakes up each morning only has to compare a stored
+ *     date with today, which SQL can do without knowing what a public holiday is.
+ *   - A COLLECTOR SEES THE WHOLE SEQUENCE ON DAY ONE, with real dates, rather than a promise that
+ *     something will be worked out later.
+ *   - AND A DATED STEP CANNOT QUIETLY MOVE. A run is pinned to a frozen version, so nothing about
+ *     it changes when somebody edits a draft — but even the resolution of "day 32" is fixed at
+ *     the start rather than re-derived, so two files that entered on the same day stay in step.
+ *
+ * Pure: no database, no clock, no network. What it returns is what gets inserted.
+ */
+import { landsOn, landsOnInstalment, type DayUnit, type WorkflowNode } from './workflowBuilder.js'
+import type { Instalment } from './ptpSchedule.js'
+
+/** `skipped`: a staging clock jump passed over it -- it would have gone, and was not sent (prompt 10). */
+export type RunStepState = 'pending' | 'held' | 'sent' | 'cancelled' | 'failed' | 'skipped'
+
+export interface PlannedStep {
+  nodeId: string
+  /** The date it falls on, already through the version's day unit and the firm's calendar. */
+  dueOn: string
+  state: RunStepState
+  /** Why it is held, in the words the person who has to act on it will read. */
+  note: string | null
+  /**
+   * THE INSTALMENT THIS STEP IS DATED OFF, 1-based, or 0 where it is dated off the run.
+   *
+   * It is the step's IDENTITY as well as its date, which is why it is on the row and not derived:
+   * one node now produces several steps and (run_id, node_id, instalment_no) is what keeps two
+   * planners racing each other from doubling them.
+   *
+   * WHAT THE NOTICE QUOTES IS A DIFFERENT QUESTION and is deliberately not this. `nextUnpaid` —
+   * the earliest instalment not yet paid — decides that on the morning the message goes, and
+   * ptpSchedule explains why one definition is right on all five notices. The two agree while the
+   * arrangement is being kept; where they differ the debtor is behind, and a reminder that quotes
+   * the instalment they actually owe is the one to send.
+   */
+  instalmentNo: number
+}
+
+/**
+ * HOW MANY INSTALMENTS ARE WORTH DATING UP FRONT.
+ *
+ * Five years of monthly instalments, which is past anything the firm writes — their own letters
+ * report more than six as SLOW PAYING to the bureaus. It is a bound rather than a rule: the steps
+ * are dated when the run starts, and an arrangement long enough to reach this will have been
+ * rewritten several times (each rewrite is a new promise and a new run) before it does.
+ */
+export const PLANNED_INSTALMENTS = 60
+
+/**
+ * Every step of a run, dated.
+ *
+ * SORTED BY THE DATE IT LANDS ON, then by the node's own ordinal — which is not the same as
+ * sorting by day number once the unit is business days and two steps share a day. The email and
+ * the SMS of one step share a day and an order within it, and the SMS says "we emailed you".
+ */
+export function planRun(input: {
+  nodes: WorkflowNode[]
+  dayUnit: DayUnit
+  startedOn: string
+  /**
+   * THE ARRANGEMENT'S INSTALMENTS, where the version has a step anchored to one.
+   *
+   * EMPTY IS NOT AN ERROR, IT IS SILENCE. A version with instalment-anchored reminders planned on
+   * an account with no live arrangement produces no reminder steps at all — which is right: there
+   * is no instalment to remind anybody of, and a step dated off a date that does not exist would
+   * be a message quoting a blank amount. The run's own steps still plan.
+   */
+  instalments?: Instalment[]
+  holidays?: Record<string, string>
+  /**
+   * THE ARRANGEMENT WAS MADE IN SWORDFISH, NOT HERE -- so its confirmation has already happened.
+   *
+   * The firm, after the test import sent four debtors a confirmation of arrangements made weeks
+   * before: the workflow "should continue with the workflow. But it's not necessary to send the
+   * emails and the SMSs ... It should not [confirm] that arrangement that's been made. It's like
+   * the arrangement that was." So on an imported arrangement the run's own day-0 steps -- the
+   * confirmation -- are recorded as not sent, and the instalment reminders carry on for the dates
+   * still ahead. Set by the planner only for a promise workflow (plan.ts), so a section 129
+   * started on the same account still sends its day 1.
+   */
+  arrangementFromImport?: boolean
+}): PlannedStep[] {
+  const { nodes, dayUnit, startedOn, instalments = [], holidays = {}, arrangementFromImport = false } = input
+  /*
+   * ONE STEP PER INSTALMENT, FLATTENED BEFORE ANYTHING IS SORTED.
+   *
+   * SORTED BY THE DATE AND THEN THE ORDINAL, no longer by the day number — because on an
+   * instalment node the day number is a position on the chart and not a date, so comparing it
+   * against a run-anchored node's day would interleave the reminder for instalment 5 with the
+   * confirmation. The dates are already resolved by this point and `landsOn` is monotonic in the
+   * day, so sorting on them puts every run-anchored step exactly where the old sort had it.
+   */
+  return nodes
+    .flatMap((node) => {
+      if (node.anchor !== 'instalment') {
+        return [{ node, dueOn: landsOn(startedOn, node.day, dayUnit, holidays), instalmentNo: 0 }]
+      }
+      const offset = node.anchorOffset ?? 0
+      const unit = node.anchorUnit ?? dayUnit
+      return instalments.slice(0, PLANNED_INSTALMENTS).map((i) => ({
+        node,
+        dueOn: landsOnInstalment(i.dueOn, offset, unit, holidays),
+        instalmentNo: i.no,
+      }))
+    })
+    .sort((a, b) => (
+      a.dueOn.localeCompare(b.dueOn) || a.node.ordinal - b.node.ordinal || a.instalmentNo - b.instalmentNo
+    ))
+    .map(({ node, dueOn, instalmentNo }) => ({
+      nodeId: node.id,
+      dueOn,
+      instalmentNo,
+      /*
+       * PENDING, EVEN WHERE IT WAITS FOR A PERSON — and it used to be born `held`.
+       *
+       * The reasoning was that a step needing a person is a fact about the step, so saying it on
+       * day one shows a collector "day 39 · waits for you" beside the dates. What it actually
+       * produced: the firm started a section 129 and the account showed FOUR notices waiting on
+       * them with a Send it now button under each — the credit bureau listing dated 18 November
+       * and the intended summons dated 2 December, both two and a half months out. Pressing one
+       * would have told a debtor their default HAS been listed before it had been.
+       *
+       * HELD IS A THING THAT HAPPENED, NOT A PROPERTY. Every other hold is written by the runner
+       * on the morning the step comes due, from a reason that is true that morning; this one was
+       * a label applied months early to steps nobody had looked at. The runner holds these the
+       * same way on the day they fall due — planSend refuses a needsRelease step every time it is
+       * asked — so nothing is lost but the false urgency.
+       *
+       * WHAT THE CHART SAYS IS UNAFFECTED: the library's schedule reads `needsRelease` off the
+       * NODE and draws "Waits for you" on the row, which is where that fact belongs.
+       */
+      state: 'pending',
+      note: null,
+      /*
+       * NOTHING ABOUT AN INSTALMENT IS SENT ON OR BEFORE THE DAY THE ARRANGEMENT WAS AGREED.
+       *
+       * TWO RULES THAT TURNED OUT TO BE ONE, and the firm gave them in that order.
+       *
+       * FIRST, A MOMENT THAT HAS ALREADY PASSED. They agreed R x with the first payment due that
+       * same day; the reminder goes two working days BEFORE each instalment, so it was dated four
+       * days earlier -- before the arrangement existed. The runner sends anything overdue, so the
+       * debtor received, inside twelve seconds: "your payment is due on 27 September", "we confirm
+       * your arrangement", and "your payment is due today". Three emails at R25 each, for one
+       * arrangement, in the wrong order -- the reminder arriving BEFORE the confirmation of the
+       * thing it was reminding them about.
+       *
+       * THEN THE DAY ITSELF, which the firm ruled on next: "if a payment is due today, the same
+       * day arrangement, then it's not necessary to send two SMSs... in fact, you don't even have
+       * to send one, because you get sent the payment arrangement confirmation letter and the
+       * SMS." The debtor has just agreed the terms in conversation and been sent them in writing;
+       * a third message the same afternoon saying the payment is due today tells them nothing they
+       * were not told twice already, and costs them an SMS segment under item 1(c).
+       *
+       * SO THE COMPARISON IS `<=` AND THE REASON IS THE SAME REASON: on the day an arrangement is
+       * agreed, everything the instalment steps have to say has already been said by the
+       * confirmation. A day later it has not been -- the firm: "if the payment is due tomorrow or
+       * for the next day, then the confirmation email is enough, and then on the next day it will
+       * be reminded" -- so tomorrow's day-of message still goes, and where the reminder itself
+       * falls in the future all three go, which is the ordinary case.
+       *
+       * OVERDUE STILL SENDS EVERYWHERE ELSE, and that rule is right where it applies. A final
+       * notice the firm is late with is still true: the period it describes HAS elapsed, and the
+       * cron missing a night must not lose a statutory step. A reminder is the opposite shape --
+       * "this is coming" is false the moment the day arrives, and no amount of lateness makes it
+       * true again.
+       *
+       * CANCELLED RATHER THAN LEFT OUT. The chart still carries it, greyed, with the reason on it:
+       * the step existed and it did not go, which is the honest record. Dropped from the plan
+       * entirely, a three-instalment arrangement would quietly show eleven steps where the version
+       * says fourteen and nobody could tell which one was missing.
+       *
+       * ONLY AN INSTALMENT STEP CAN LAND HERE. A run-anchored day is counted from `startedOn`, so
+       * the confirmation itself is never caught by this; an instalment date is the debtor's and
+       * was set before we were asked.
+       */
+      ...(arrangementFromImport && instalmentNo === 0 && dueOn <= startedOn
+        ? {
+          state: 'cancelled' as RunStepState,
+          note: 'Not sent: the arrangement was made in Swordfish and confirmed to the debtor then.',
+        }
+        /* IMPORTED, A DAY ALREADY GONE IS STILL NOT SENT -- but the import day itself is. Nothing
+           confirmed the arrangement today, so "your payment is due today" is news, not repetition. */
+        : arrangementFromImport && instalmentNo > 0 && dueOn < startedOn
+        ? {
+          state: 'cancelled' as RunStepState,
+          note: 'This date had already passed when the arrangement came across from Swordfish, so it was not sent.',
+        }
+        : !arrangementFromImport && instalmentNo > 0 && dueOn <= startedOn
+        ? {
+          state: 'cancelled' as RunStepState,
+          note: dueOn < startedOn
+            ? 'This date had already passed when the arrangement was agreed, so it was not sent.'
+            : 'The arrangement was agreed on this day and the confirmation of it said so, so this '
+              + 'was not sent as well.',
+        }
+        : {}),
+    }))
+}
+
+/**
+ * Why a step waits for a person, said as the thing they have to do.
+ *
+ * NOT "needs release". The firm's own note on two of these steps is that sending them before they
+ * are true is a misrepresentation and the kind of thing the Council for Debt Collectors acts on,
+ * so the sentence names what has to be true rather than naming a state in a database.
+ */
+export function holdReason(node: WorkflowNode): string {
+  if (node.statutory) {
+    return 'A statutory demand. Check the address, the balance and that no dispute or arrangement '
+      + 'is live, then send it.'
+  }
+  return 'Waits for you: it says something has already happened, so it may not go until it has.'
+}
+
+/**
+ * THE EVENTS THAT TAKE AN ACCOUNT OUT OF A WORKFLOW.
+ *
+ * The firm: "if there is a dispute raised or a PTP put in place, then a new workflow starts. And
+ * then that one ceases." Each of these is its own workflow the day those are built; until then
+ * the account simply stops receiving messages and sits with the collector.
+ *
+ * PART PAYMENT IS NOT ONE OF THEM, at the firm's own instruction — "part payment without a PTP
+ * does not exit the workflow. Flag those to the collector." A debtor who pays R500 off R48,000
+ * and then hears nothing more is a debtor nobody is collecting from.
+ *
+ * NOR IS TRACING, and it used to be. The firm, reading the four back: "the contact details are
+ * wrong and the file went for tracing — no. That can just continue... sometimes we trace and even
+ * though we trace, the email address was right. So it just continues going on to the right email
+ * address. The people just ignore it."
+ *
+ * WHICH IS THE DIFFERENCE BETWEEN UNREACHABLE AND IGNORING. A trace is lodged because a NUMBER or
+ * an ADDRESS is wrong; the email the sequence runs on is usually the one thing still working, and
+ * stopping a statutory sequence because somebody moved house rewards not answering it. The other
+ * three are the debtor or the money doing something — a promise, an objection, payment in full —
+ * and each is a reason to stop saying what the sequence says next.
+ *
+ * AND IF TRACING DOES TURN UP A NEW ADDRESS, the firm's own answer is to start again rather than
+ * resume: "we can just shoot the new section 129 and press the button again." A fresh sequence
+ * from the day the new notice goes is the honest clock; a paused one resumed weeks later quotes
+ * ten business days that ran while nobody could be reached.
+ */
+export type ExitEvent = 'promise' | 'dispute' | 'paid_in_full'
+
+export const EXIT_EVENTS: Record<ExitEvent, string> = {
+  promise: 'A promise to pay was made',
+  dispute: 'A dispute was raised',
+  paid_in_full: 'The account was paid in full',
+}
+
+/**
+ * WHAT ENDS A SEQUENCE, AND WHAT MERELY PAUSES IT — the firm's own split, in the order they put
+ * them in.
+ *
+ * EXIT_EVENTS ABOVE IS NOT THIS LIST. It is the set of names workflow_exit_account ACCEPTS, and
+ * it has to stay that set or check-workflow-send's two-way comparison stops meaning anything.
+ * What changed is which of them anything still calls: the promise and dispute triggers now hold a
+ * run rather than ending it, and the only thing that reaches the exit through a dispute is the
+ * dispute being UPHELD.
+ *
+ * THE FIRM: "the account was paid in full, I agree with that, I think that should be the first
+ * rule... a payment was made, it's not an exit rule, it's kind of a pause rule." And on stopping
+ * for every promise: "if we stop it for all of that time, then that's a problem. Unless we can
+ * stop it only once. Not twice."
+ */
+export const ENDS_IT: string[] = [
+  'The account was paid in full',
+  'A dispute was upheld',
+]
+
+export const PAUSES_IT: string[] = [
+  'A promise to pay — the first one only',
+  'A dispute raised in writing',
+]
+
+export interface Cancellation {
+  /** The steps to cancel: everything not already done. */
+  cancel: string[]
+  /** What goes on the run, in the firm's words. */
+  reason: string
+}
+
+/**
+ * What leaving does to a run in flight.
+ *
+ * ONLY WHAT HAS NOT HAPPENED YET. A step that was sent stays sent — it is a record of a notice
+ * that went to a debtor, and rewriting it would be rewriting the file. A HELD step is cancelled
+ * with everything else: it has not gone, and leaving it sitting on a collector's list is how a
+ * section 129 goes out three weeks after the debtor agreed to pay.
+ *
+ * THE FIRM'S RULE ABOUT WHAT COMES BACK: "a cancelled node must not fire later if the PTP is
+ * broken; the broken-PTP workflow will handle that when we build it." So this cancels and does
+ * not schedule anything to resume.
+ */
+export function cancelRemaining(
+  steps: { id: string; state: RunStepState }[], event: ExitEvent,
+): Cancellation {
+  return {
+    cancel: steps.filter((s) => s.state === 'pending' || s.state === 'held').map((s) => s.id),
+    reason: EXIT_EVENTS[event],
+  }
+}
+
+/**
+ * Is the run over?
+ *
+ * FINISHED MEANS NOTHING IS WAITING, which is not the same as "everything was sent". A run whose
+ * last step failed is not finished — somebody has to look at it — and one whose steps were all
+ * cancelled left rather than finished, which the caller records separately.
+ */
+export function isFinished(steps: { state: RunStepState }[]): boolean {
+  return steps.length > 0 && !steps.some((s) => s.state === 'pending' || s.state === 'held' || s.state === 'failed')
+}
+
+/**
+ * The steps that are due and have nothing left to wait for.
+ *
+ * WHAT THE RUNNER ACTS ON, and the reason it takes `today` rather than reading a clock: a
+ * function that asks the machine what day it is cannot be tested on the day that matters. Held
+ * steps are NOT returned — their day may have come, and what they are waiting for is a person.
+ */
+export function dueNow<T extends { dueOn: string; state: RunStepState }>(
+  steps: T[], today: string,
+): T[] {
+  return steps.filter((s) => s.state === 'pending' && s.dueOn <= today)
+}

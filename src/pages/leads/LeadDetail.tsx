@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail, Trash2, Plus, Handshake } from 'lucide-react'
+import {
+  ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail,
+  MessageSquare, Trash2, Plus, Handshake,
+  FileSignature,
+} from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
@@ -14,24 +18,40 @@ import { StatusBadge, ServiceBadge, StageBadge, ClassificationBadge } from '../.
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { ConfirmDeleteModal } from '../../components/ui/ConfirmDeleteModal'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import { WriteButton } from '../../components/email/MessageActions'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
+import { SendMandateModal } from '../../components/leads/SendMandateModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
+import {
+  ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
+  RecordActionsMore, RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
+  RecordTabs, useRecordLayout,
+} from '../../components/record/RecordShell'
+import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmWhatsAppButton } from '../../components/record/WhatsAppButton'
+import { CrmSmsModal } from '../../components/record/CrmSmsModal'
+import {
+  RecordComment, RecordCommentFact, RecordCommentSummary,
+} from '../../components/record/RecordComment'
 import { PhoneLink } from '../../components/PhoneLink'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
 import { RowLimitSelect, applyRowLimitKeeping, type RowLimit } from '../../components/ui/RowLimitSelect'
 import { useFocusedEmailId } from '../../lib/focusedEmail'
 import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
-import { parseEmailActivity } from '../../lib/emailActivity'
+import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 import { summaryLine } from '../../lib/summaryLine'
-import { hasDealValue } from '../../lib/dealKind'
+import { dealKind, hasDealValue } from '../../lib/dealKind'
+import { clockNow } from '../../lib/clock.ts'
+
+type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
 export function LeadDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -39,6 +59,11 @@ export function LeadDetail() {
   const navigate = useNavigate()
   const { leads, deals, contacts, activities, tasks, users, userById, updateLead, convertLeadToClient, addLeadDeal, rejectLead, deleteLead, addActivity, addContact, updateContact, addTask } = useAppStore()
   const { currentUser } = useAuth()
+  /* Every address that is us — see the same note on the client page. */
+  const mine = useMemo(
+    () => [currentUser?.email].filter((a): a is string => !!a),
+    [currentUser?.email],
+  )
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const lead = leads.find((l) => l.id === id)
   const resultingDeals = useMemo(() => deals.filter((d) => d.leadId === id), [deals, id])
@@ -50,6 +75,28 @@ export function LeadDetail() {
     () => openLeadDeals.filter((d) => hasDealValue(d)).reduce((sum, d) => sum + d.value, 0),
     [openLeadDeals],
   )
+  /*
+   * Every number that could reach this lead, mobile first.
+   *
+   * Mobile before office deliberately: a mobile is answered by the person, a switchboard is
+   * answered by somebody else. The Call button rings the first one when there is only one.
+   */
+  /*
+   * Which tab, and how the Overview is arranged.
+   *
+   * The layout key is per page type rather than per lead: it is a preference about eyes. Separate
+   * from the account page's key because the right arrangement genuinely differs — an account has
+   * a long timeline to give width to, a lead has not.
+   */
+  const [tab, setTab] = useState<LeadTab>('Overview')
+  const [layout, chooseLayout] = useRecordLayout('raptor.lead.layout')
+  const [smsOpen, setSmsOpen] = useState(false)
+
+  const leadNumbers = useMemo(() => [
+    ...(lead?.mobile ? [{ label: 'Mobile', value: lead.mobile }] : []),
+    ...(lead?.phone ? [{ label: 'Office', value: lead.phone }] : []),
+  ], [lead?.mobile, lead?.phone])
+
   const canEdit = canEditOwned(currentUser, lead?.ownerId)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -59,12 +106,14 @@ export function LeadDetail() {
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [convertOpen, setConvertOpen] = useState(false)
+  const [mandateOpen, setMandateOpen] = useState(false)
   const [dealOpen, setDealOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
-  const [replyTarget, setReplyTarget] = useState<{ subject: string } | null>(null)
+  /** One state for reply, reply-all and forward — see the same note on the client page. */
+  const [replyTarget, setReplyTarget] = useState<ComposeOpening | null>(null)
   const [addContactOpen, setAddContactOpen] = useState(false)
   const [editContact, setEditContact] = useState<Contact | null>(null)
   const [contactEmailTarget, setContactEmailTarget] = useState<Contact | null>(null)
@@ -94,6 +143,333 @@ export function LeadDetail() {
   }
 
   const active = isActiveLead(lead)
+  /* A mandate already went out from this lead: its "sent for signing" line is on the timeline. */
+  const mandateSent = activities.some((a) => a.leadId === lead.id && /^Mandate sent for signing/.test(a.subject))
+
+  /*
+   * The panels, built once and placed by whichever layout is chosen.
+   *
+   * Defining them here rather than three times over is the whole reason the layouts can be
+   * trusted to stay the same page: a prop added to one arrangement cannot be forgotten in the
+   * other two, and that bug is invisible until somebody switches layout. The Account page has
+   * worked this way for a while; this is the same shape, from the same components.
+   */
+  /** Who to ring, and the people around them. */
+  const contactPanel = (
+    <Card className="@container">
+      <CardHeader
+        title="Contact Details"
+        action={
+          canEdit ? (
+            <button
+              onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              <Pencil size={12} /> Edit
+            </button>
+          ) : undefined
+        }
+      />
+      {/*
+        Three across when the CARD is wide enough, stacked when it is not.
+
+        This was `sm:grid-cols-3`, which asks about the WINDOW. In the three-column layout the
+        card is about 300px wide inside a 1200px window, so it still laid out three columns —
+        and an email address ran off the right-hand edge of the card with no way to read it.
+        A container query asks the question that actually matters.
+      */}
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
+          {lead.phone ? (
+            <PhoneLink
+              number={lead.phone}
+              className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
+              log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
+              onDialled={() => updateLead(lead.id, { lastContactAt: clockNow().toISOString() })}
+            />
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Mobile</p>
+          {lead.mobile ? (
+            <PhoneLink
+              number={lead.mobile}
+              className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
+              log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
+              onDialled={() => updateLead(lead.id, { lastContactAt: clockNow().toISOString() })}
+            />
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 mb-0.5">Email</p>
+          {lead.email ? (
+            <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
+              <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                <Mail size={13} />
+              </button>
+              {lead.email}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-slate-400">Contact Persons</p>
+        <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+          <Plus size={12} /> Add Contact
+        </button>
+      </div>
+      {leadContacts.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          Just {lead.firstName} so far. Add anyone else you deal with at {lead.companyName}.
+        </p>
+      ) : (
+        // The checking list's shape, which the firm asked for on every list in the app: one
+        // line a person, job title after the name, each number in a column of its own so a
+        // second contact's phone sits under the first's rather than wherever it wrapped to.
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full list-table whitespace-nowrap">
+            <tbody>
+              {leadContacts.map((c) => (
+                <tr key={c.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-2 py-1.5">
+                    <Link to={`/contacts/${c.id}`} className="inline-flex items-center gap-2 max-w-[16rem]" title={`${c.firstName} ${c.lastName}${c.jobTitle ? ` · ${c.jobTitle}` : ''}`}>
+                      <UserAvatar userId={c.ownerId} size={18} />
+                      <span className="truncate">
+                        <span className="font-medium text-slate-700 hover:text-brand-600">
+                          {c.firstName} {c.lastName}
+                        </span>
+                        {c.jobTitle && <span className="text-slate-400"> · {c.jobTitle}</span>}
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.phone && (
+                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.mobile && (
+                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
+                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                      </PhoneLink>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                          <Mail size={11} />
+                        </button>
+                        {c.email}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
+                      <Pencil size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  )
+
+  /** Its own tab, like the Account page: a list that grows without limit does not belong on an overview. */
+  const emailsPanel = (
+    <Card>
+      <CardHeader
+        title="Emails"
+        subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
+        action={
+          <div className="flex items-center gap-2">
+            {lead.email && <WriteButton onClick={() => setEmailOpen(true)} />}
+            <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
+          </div>
+        }
+      />
+      {emailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No emails yet.</p>
+      ) : (
+        <EmailActivityList
+          activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
+          focusId={focusedEmailId}
+          showDeal
+          mine={mine}
+          onAnswer={(a, mode) => setReplyTarget(openingFor(
+            {
+              rawSubject: a.subject,
+              fromName: null,
+              fromAddress: lead.email ?? null,
+              to: a.emailToRecipients ?? [],
+              cc: a.emailCcRecipients ?? [],
+              body: a.notes ?? '',
+              occurredAt: a.activityDate,
+              messageId: a.emailMessageId ?? null,
+            },
+            mode,
+            mine,
+          ))}
+        />
+      )}
+    </Card>
+  )
+
+  /** Everything that is not an email — calls, meetings, notes. */
+  const notesPanel = (
+    <Card>
+      <CardHeader
+        title="Notes"
+        subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
+        action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
+      />
+      {nonEmailActivities.length === 0 ? (
+        <p className="text-sm text-slate-400">No activity recorded yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
+        </div>
+      )}
+    </Card>
+  )
+
+  /** What this lead has actually produced. */
+  const dealsPanel = resultingDeals.length > 0 && (
+      <Card>
+        <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
+        <div className="overflow-x-auto">
+          <table className="w-full list-table whitespace-nowrap">
+            <thead>
+              <tr className="border-b border-slate-100 text-slate-400">
+                <th className="px-3 py-1.5 text-left font-medium">Deal</th>
+                <th className="px-2 py-1.5 text-left font-medium">Service</th>
+                <th className="px-2 py-1.5 text-right font-medium">Value</th>
+                <th className="px-3 py-1.5 text-left font-medium">Stage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resultingDeals.map((d) => (
+                <tr key={d.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-3 py-1.5">
+                    <Link to={`/deals/${d.id}`} title={d.name} className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
+                      {d.name}
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">{d.service || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-700">{formatCurrency(d.value)}</td>
+                  <td className="px-3 py-1.5"><StageBadge stage={d.stage} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+  )
+
+  /** What they say they will hand over, per service. */
+  const opportunityPanel = (
+    <Card className="@container">
+      <CardHeader title="Opportunity Information" />
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+        {leadServiceValueList(lead).map((sv) =>
+          sv.service === 'Debt Collection' ? (
+            <div key={sv.service} className="@sm:col-span-2 grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5">
+              <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
+              <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
+            </div>
+          ) : (
+            <Field
+              key={sv.service}
+              label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
+              value={sv.value != null ? formatCurrency(sv.value) : undefined}
+            />
+          ),
+        )}
+        {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
+      </dl>
+      {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
+        <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
+      )}
+    </Card>
+  )
+
+  /** Where the lead came from and who owns it. */
+  const leadInfoPanel = (
+    <Card className="@container">
+      <CardHeader title="Lead Information" />
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+        <Field label="Lead Source" value={lead.source} />
+        <Field label="Campaign" value={lead.campaign} />
+        <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
+        <Field label="Lead Status" value={lead.status} />
+        <Field label="Lead Score" value={`${lead.score} / 100`} />
+        <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
+        <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
+        <Field label="Date Created" value={formatDate(lead.createdAt)} />
+        <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
+        <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
+        {lead.status === 'Rejected' && <Field label="Rejection Reason" value={lead.rejectionReason} />}
+      </dl>
+      {lead.notes && (
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
+          <p className="text-sm text-slate-600">{lead.notes}</p>
+        </div>
+      )}
+    </Card>
+  )
+
+  /** The firmographics. */
+  const profilePanel = (
+    <Card className="@container">
+      <CardHeader title="Lead Profile" />
+      <dl className="grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+        <Field label="First Name" value={lead.firstName} />
+        <Field label="Last Name" value={lead.lastName} />
+        <Field label="Company" value={lead.companyName} />
+        <Field label="Job Title" value={lead.jobTitle} />
+        <Field label="Industry" value={lead.industry} />
+        <Field label="Country" value={lead.country} />
+        <Field label="Province" value={lead.province} />
+        <Field label="City / Town" value={lead.city} />
+        <Field label="Address" value={lead.address} />
+      </dl>
+    </Card>
+  )
+
+  /** Its own tab as well: a task list is work, not context. */
+  const tasksPanel = (
+    <Card>
+      <CardHeader title="Tasks" />
+      {leadTasks.length === 0 ? (
+        <p className="text-sm text-slate-400">No tasks yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full list-table whitespace-nowrap">
+            <tbody>
+              {leadTasks.map((t) => (
+                <tr key={t.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-3 py-1.5 text-slate-700"><span className="block max-w-[24rem] truncate" title={t.title}>{t.title}</span></td>
+                  <td className="px-3 py-1.5 text-right text-slate-400">Due {formatDate(t.dueDate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  )
 
   return (
     <div className="space-y-5">
@@ -123,386 +499,264 @@ export function LeadDetail() {
         <HeroOwner ownerId={lead.ownerId} label="Owner" />
       </DashboardHero>
 
-      <Card>
-        <div className="flex flex-wrap items-end gap-x-10 gap-y-3">
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Date Added</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatDate(lead.createdAt)}</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">Class</p>
-            <InlineSelect
-              value={lead.classification}
-              options={leadClassifications}
-              disabled={!canEdit}
-              onChange={(classification) => updateLead(lead.id, { classification })}
-            >
-              {lead.classification ? (
-                <ClassificationBadge classification={lead.classification} />
-              ) : (
-                // A lead often hasn't been graded yet; saying so is more useful than an empty gap
-                // that reads as though the field doesn't exist.
-                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
-              )}
-            </InlineSelect>
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Status</p>
-            <div className="mt-1.5">
-              <InlineSelect
-                value={lead.status}
-                options={LEAD_STATUSES}
-                disabled={!canEdit}
-                onChange={(status) => {
-                  // Rejection needs a reason, so route that one through the proper flow rather
-                  // than letting a dropdown close a lead off with nothing recorded.
-                  if (status === 'Rejected') setRejectOpen(true)
-                  else if (status === 'Converted') setConvertOpen(true)
-                  else updateLead(lead.id, { status })
-                }}
-              >
-                <StatusBadge status={lead.status} />
-              </InlineSelect>
-            </div>
-          </div>
-          {estimatedAccounts !== undefined && (
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Accounts</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{estimatedAccounts}</p>
-            </div>
-          )}
-          {estimatedHandover !== undefined && (
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Handover Amount</p>
-              <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(estimatedHandover)}</p>
-            </div>
-          )}
-          {/* Open deal value, not "estimated value". The old figure added the book to the
-              service deals and showed one number, which is the sum this whole model exists to
-              prevent: a book is work to be collected on commission, a service deal is a fee.
-              Adding them describes nothing. The book is the Handover Amount beside this; what
-              belongs here is the money the open service deals are actually worth. */}
-          <Link to={buildDrilldownUrl('/deals', { view: 'table' })} className="hover:opacity-70">
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Open Deal Value</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{formatCurrency(openDealValue)}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              {openLeadDeals.length} open deal{openLeadDeals.length === 1 ? '' : 's'}
-            </p>
-          </Link>
-          <div>
-            <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Lead Score</p>
-            <p className="text-2xl font-bold text-slate-800 mt-0.5">{lead.score}</p>
-          </div>
-        </div>
+      {/*
+        The same row of figures the Account page wears, from the same component.
 
-        {lead.services && lead.services.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-4">
-            {lead.services.map((s) => (
-              <ServiceBadge key={s} service={s} />
-            ))}
-          </div>
+        It used to be six stats strung along one line inside a card, at a different size, in a
+        different order of importance to the debtor page next door. The firm's point was simple
+        and right: moving between a debtor and the client who handed them over should not mean
+        learning the page again.
+
+        Class and Status stay HERE rather than moving into a panel, even though they are controls
+        rather than readings. They are the first two things anybody looks at on a lead, and
+        tidying them away would be neater and worse.
+      */}
+      <RecordFigures count={6}>
+        <RecordFigureShell label="Class">
+          <InlineSelect
+            value={lead.classification}
+            options={leadClassifications}
+            disabled={!canEdit}
+            onChange={(classification) => updateLead(lead.id, { classification })}
+          >
+            {lead.classification ? (
+              <ClassificationBadge classification={lead.classification} />
+            ) : (
+              // A lead often hasn't been graded yet; saying so is more useful than an empty gap
+              // that reads as though the field doesn't exist.
+              <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+            )}
+          </InlineSelect>
+        </RecordFigureShell>
+
+        <RecordFigureShell label="Status">
+          <InlineSelect
+            value={lead.status}
+            options={LEAD_STATUSES}
+            disabled={!canEdit}
+            onChange={(status) => {
+              // Rejection needs a reason, so route that one through the proper flow rather
+              // than letting a dropdown close a lead off with nothing recorded.
+              if (status === 'Rejected') setRejectOpen(true)
+              else if (status === 'Converted') setConvertOpen(true)
+              else updateLead(lead.id, { status })
+            }}
+          >
+            <StatusBadge status={lead.status} />
+          </InlineSelect>
+        </RecordFigureShell>
+
+        <RecordFigure label="Accounts"
+          value={estimatedAccounts !== undefined ? String(estimatedAccounts) : '\u2014'}
+          note={estimatedAccounts === undefined ? 'not estimated yet' : 'on the mandate'} />
+
+        <RecordFigure label="Handover amount"
+          value={estimatedHandover !== undefined ? formatCurrency(estimatedHandover) : '\u2014'}
+          note={estimatedHandover === undefined ? 'not estimated yet' : 'what they say they will hand over'} />
+
+        {/* Open deal value, not "estimated value". The old figure added the book to the service
+            deals and showed one number, which is the sum this whole model exists to prevent: a
+            book is work to be collected on commission, a service deal is a fee. Adding them
+            describes nothing. The book is the Handover amount beside this; what belongs here is
+            the money the open service deals are actually worth. */}
+        <RecordFigure label="Open deal value" value={formatCurrency(openDealValue)}
+          note={`${openLeadDeals.length} open deal${openLeadDeals.length === 1 ? '' : 's'}`}
+          onClick={() => navigate(buildDrilldownUrl('/deals', { view: 'table' }))}
+          title="Open the deals this lead has produced" />
+
+        <RecordFigure label="Lead score" value={String(lead.score)}
+          note={`added ${formatDate(lead.createdAt)}`} />
+      </RecordFigures>
+
+      {/*
+        The two lines the next person needs, and the facts they would otherwise go hunting for.
+
+        Above the actions, exactly where it sits on a debtor's account, because it answers the
+        question somebody opens the page with — what is going on here? — before they decide which
+        button to press. The services and the open deals ride along with it: they lived three
+        panels down, and this puts them where the eye already is.
+      */}
+      <RecordComment
+        text={lead.mainComment}
+        at={lead.mainCommentAt}
+        placeholder="Where does this lead stand? Two lines is plenty."
+        onSave={(text) => updateLead(lead.id, {
+          mainComment: text || undefined,
+          mainCommentAt: clockNow().toISOString(),
+          mainCommentBy: currentUser?.id,
+        })}
+        summary={(
+          <RecordCommentSummary>
+            <RecordCommentFact label="Interested in">
+              {lead.services && lead.services.length > 0
+                ? lead.services.map((sv) => <ServiceBadge key={sv} service={sv} />)
+                : <span className="text-slate-400">Nothing captured yet</span>}
+            </RecordCommentFact>
+            <RecordCommentFact label="Deals">
+              {resultingDeals.length === 0
+                ? <span className="text-slate-400">None yet</span>
+                : (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(openDealValue)}</span>
+                    <span className="text-slate-400">
+                      across {openLeadDeals.length} open of {resultingDeals.length}
+                    </span>
+                  </>
+                )}
+            </RecordCommentFact>
+            <RecordCommentFact label="Handover">
+              {estimatedHandover !== undefined
+                ? (
+                  <>
+                    <span className="font-medium tabular-nums">{formatCurrency(estimatedHandover)}</span>
+                    {estimatedAccounts !== undefined && (
+                      <span className="text-slate-400">over {estimatedAccounts} accounts</span>
+                    )}
+                  </>
+                )
+                : <span className="text-slate-400">Not estimated</span>}
+            </RecordCommentFact>
+          </RecordCommentSummary>
         )}
+      />
 
+      <Card>
+        {/*
+          The service chips used to sit here as well as in the main comment above — the same
+          fact twice, a hand's width apart. The comment keeps them, because that is where
+          somebody is already reading.
+        */}
         {lead.status === 'Rejected' && lead.rejectionReason && (
-          <div className="mt-4 rounded-lg border border-red-100 bg-red-50/60 px-3.5 py-2.5">
+          <div className="mb-4 rounded-lg border border-red-100 bg-red-50/60 px-3.5 py-2.5">
             <p className="text-xs font-medium text-red-700">Rejected — {lead.rejectionReason}</p>
             {lead.rejectionNote && <p className="text-sm text-red-900/70 mt-0.5">{lead.rejectionNote}</p>}
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-100">
-          {canEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => setEditOpen(true)} />}
-          {canEdit && active && (
-            <ActionButton icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)} />
-          )}
-          {canEdit && active && <ActionButton icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
-          <ActionButton icon={Phone} label="Log Call" onClick={() => setCallOpen(true)} />
-          <ActionButton icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
-          <ActionButton icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
-          <ActionButton icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)} />
-          {canEdit && active && <ActionButton icon={XCircle} label="Reject" tone="danger" onClick={() => setRejectOpen(true)} />}
-          {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
-              which would wipe the client's won business and drop them out of Clients entirely. */}
-          {canEdit && (
-            <ActionButton
-              icon={Trash2}
-              label="Delete"
-              tone="danger"
-              onClick={() => setDeleteOpen(true)}
-              disabled={lead.status === 'Converted'}
-              title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
+        <div>
+          {/*
+            The same row of actions the Account page wears, from the same component, in the same
+            order of thought: REACH THEM first, then record what happened, then move the record on.
+            A lead page whose first button was "Edit" put the filing cabinet before the phone.
+
+            Reaching a lead costs nothing and charges nothing. Every comparable action on a debtor
+            raises an Annexure B fee, and none of these do — a lead is not a debtor and the money
+            rules must not follow the furniture. See crmComms, which cannot reach the fee engine.
+          */}
+          <RecordActions>
+            <CrmCallButton
+              numbers={leadNumbers}
+              to={{ leadId: lead.id, companyId: lead.companyId }}
+              subject={`${lead.firstName} ${lead.lastName}`}
+              className={`${ACTION_BASE} ${ACTION_ENABLED}`}
             />
-          )}
+            {/* WhatsApp beside Call (S9): opens WhatsApp itself; nothing is charged on the sales side. */}
+            <CrmWhatsAppButton numbers={leadNumbers} to={{ leadId: lead.id, companyId: lead.companyId }} subject={`${lead.firstName} ${lead.lastName}`} firstName={lead.firstName} />
+            <RecordAction icon={MessageSquare} label="SMS"
+              onClick={leadNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
+              title={leadNumbers.length > 0
+                ? 'Text this lead — nothing is charged'
+                : 'No phone number on this lead yet'} />
+            <RecordAction icon={Mail} label="Email"
+              onClick={lead.email ? () => setEmailOpen(true) : undefined}
+              title={lead.email ? 'Send from your connected mailbox' : 'No email address on this lead yet'} />
+            <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
+              title="Write on the timeline" />
+            {/* SEND THE MANDATE (the firm, 18 Oct): the PDF and a sign-online link in one email. Signing it
+                makes the lead a client by itself (mandate_on_signed), so it sits before Convert, which is
+                now the way for a client who signed on paper. */}
+            {canEdit && active && (
+              /* RESEND, the same button (the firm, 18 Oct: "a month later we make contact again ... he says
+                 send it again"). A fresh link and PDF each time; whichever the client signs, signing
+                 does the same thing. */
+              <RecordAction icon={FileSignature} label={mandateSent ? 'Resend mandate' : 'Send mandate'} onClick={() => setMandateOpen(true)} primary
+                title={mandateSent ? 'Send the debt collection agreement again, with a new sign-online link' : 'Email the debt collection agreement to sign online'} />
+            )}
+            {canEdit && active && (
+              <RecordAction icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)}
+                title="For a client who signed on paper" />
+            )}
+
+            {/*
+              Everything else, folded away. Twelve buttons wrapped to three lines on an iPad and
+              pushed the panels below off the screen; nothing is removed, because the fix for a
+              crowded row is not to take away the button somebody needs twice a month.
+            */}
+            <RecordActionsMore>
+              <RecordMoreAction icon={Phone} label="Log Call" onClick={() => setCallOpen(true)}
+                title="Record a call you made some other way" />
+              <RecordMoreAction icon={CalendarClock} label="Schedule Follow-up" onClick={() => setFollowUpOpen(true)} />
+              <RecordMoreAction icon={Users2} label="Schedule Meeting" onClick={() => setMeetingOpen(true)} />
+              {canEdit && active && <RecordMoreAction icon={Handshake} label="Add Deal" onClick={() => setDealOpen(true)} />}
+              {canEdit && <RecordMoreAction icon={Pencil} label="Edit lead" onClick={() => setEditOpen(true)} />}
+              {canEdit && active && <RecordMoreAction icon={XCircle} label="Reject" danger onClick={() => setRejectOpen(true)} />}
+              {/* Deleting a converted lead takes its deals with it (the DB cascades on lead_id),
+                  which would wipe the client's won business and drop them out of Clients. */}
+              {canEdit && (
+                <RecordMoreAction
+                  icon={Trash2}
+                  label="Delete"
+                  danger
+                  onClick={lead.status === 'Converted' ? undefined : () => setDeleteOpen(true)}
+                  title={lead.status === 'Converted' ? 'Converted leads can\u2019t be deleted \u2014 it would remove the client\u2019s deals too.' : undefined}
+                />
+              )}
+            </RecordActionsMore>
+          </RecordActions>
         </div>
       </Card>
 
-      <div className="space-y-5">
-        <Card>
-          <CardHeader
-            title="Contact Details"
-            action={
-              canEdit ? (
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                >
-                  <Pencil size={12} /> Edit
-                </button>
-              ) : undefined
-            }
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-4 pb-4 border-b border-slate-100">
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Office Number</p>
-              {lead.phone ? (
-                <PhoneLink
-                  number={lead.phone}
-                  className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
-                  log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
-                  onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
-                />
-              ) : (
-                <span className="text-slate-300">—</span>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Mobile</p>
-              {lead.mobile ? (
-                <PhoneLink
-                  number={lead.mobile}
-                  className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
-                  log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
-                  onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
-                />
-              ) : (
-                <span className="text-slate-300">—</span>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 mb-0.5">Email</p>
-              {lead.email ? (
-                <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                  <button onClick={() => setEmailOpen(true)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                    <Mail size={13} />
-                  </button>
-                  {lead.email}
-                </span>
-              ) : (
-                <span className="text-slate-300">—</span>
-              )}
-            </div>
-          </div>
+      {/*
+        Tabs over the detail, like the Account page — and for the same reason. Everything below
+        used to be one scroll: contact details, then every email ever sent, then every note, then
+        the information panels somebody actually came for. The long lists get their own tabs so
+        the Overview stays the thing you can read at a glance.
+      */}
+      <RecordTabs<LeadTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          { id: 'Emails', label: 'Emails', count: emailActivities.length },
+          { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
+          { id: 'Tasks', label: 'Tasks', count: leadTasks.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+        /* Only on Overview, because it is the only tab with more than one panel to arrange. */
+        trailing={tab === 'Overview'
+          ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
+          : undefined}
+      />
 
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-slate-400">Contact Persons</p>
-            <button onClick={() => setAddContactOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
-              <Plus size={12} /> Add Contact
-            </button>
-          </div>
-          {leadContacts.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              Just {lead.firstName} so far. Add anyone else you deal with at {lead.companyName}.
-            </p>
-          ) : (
-            <div className="space-y-1">
-              {leadContacts.map((c) => (
-                <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
-                  <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
-                    <UserAvatar userId={c.ownerId} size={30} />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">
-                        {c.firstName} {c.lastName}
-                      </p>
-                      <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
-                    </div>
-                  </Link>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                    {c.phone && (
-                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
-                    )}
-                    {c.mobile && (
-                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
-                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                      </PhoneLink>
-                    )}
-                    {c.email && (
-                      <span className="inline-flex items-center gap-1">
-                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                          <Mail size={11} />
-                        </button>
-                        {c.email}
-                      </span>
-                    )}
-                    <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
-                      <Pencil size={12} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+      {tab === 'Overview' && (
+        <RecordLayout
+          layout={layout}
+          details={contactPanel}
+          /*
+            Notes in the MIDDLE, and still on their own tab.
+            
+            Both places on purpose, at the firm's asking. On the overview they sit in the column
+            you are working in, capped at five with a "show more"; the tab is where you go when
+            you want the lot. A note behind a tab only is a note nobody reads.
+          */
+          main={<div className="space-y-5">{dealsPanel}{notesPanel}{opportunityPanel}</div>}
+          side={[leadInfoPanel, profilePanel]}
+        />
+      )}
 
-        <Card>
-          <CardHeader
-            title="Emails"
-            subtitle={`${emailActivities.length} message${emailActivities.length === 1 ? '' : 's'}`}
-            action={
-              <div className="flex items-center gap-2">
-                {lead.email && (
-                  <button
-                    onClick={() => setEmailOpen(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  >
-                    <Mail size={12} /> Compose
-                  </button>
-                )}
-                <RowLimitSelect value={emailLimit} onChange={setEmailLimit} />
-              </div>
-            }
-          />
-          {emailActivities.length === 0 ? (
-            <p className="text-sm text-slate-400">No emails yet.</p>
-          ) : (
-            <EmailActivityList
-              activities={applyRowLimitKeeping(emailActivities, emailLimit, focusedEmailId)}
-              focusId={focusedEmailId}
-              showDeal
-              onReply={
-                lead.email
-                  ? (a) => {
-                      const rawSubject = parseEmailActivity(a.subject)?.subject ?? a.subject
-                      setReplyTarget({ subject: rawSubject.toLowerCase().startsWith('re:') ? rawSubject : `Re: ${rawSubject}` })
-                    }
-                  : undefined
-              }
-            />
-          )}
-        </Card>
+      {tab === 'Emails' && emailsPanel}
+      {tab === 'Notes' && notesPanel}
+      {tab === 'Tasks' && tasksPanel}
 
-        <Card>
-          <CardHeader
-            title="Notes"
-            subtitle={`${nonEmailActivities.length} update${nonEmailActivities.length === 1 ? '' : 's'}`}
-            action={<RowLimitSelect value={noteLimit} onChange={setNoteLimit} />}
-          />
-          {nonEmailActivities.length === 0 ? (
-            <p className="text-sm text-slate-400">No activity recorded yet.</p>
-          ) : (
-            <div className="space-y-2.5">
-              <NoteActivityList activities={nonEmailActivities} limit={noteLimit} />
-            </div>
-          )}
-        </Card>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-5">
-
-          {resultingDeals.length > 0 && (
-            <Card>
-              <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
-              <div className="space-y-2">
-                {resultingDeals.map((d) => (
-                  <Link
-                    key={d.id}
-                    to={`/deals/${d.id}`}
-                    className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{d.name}</p>
-                      {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
-                      <StageBadge stage={d.stage} />
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader title="Opportunity Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              {leadServiceValueList(lead).map((sv) =>
-                sv.service === 'Debt Collection' ? (
-                  <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
-                    <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
-                    <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
-                  </div>
-                ) : (
-                  <Field
-                    key={sv.service}
-                    label={lead.services && lead.services.length > 1 ? `${sv.service} — ${serviceValueLabel(sv.service)}` : serviceValueLabel(sv.service)}
-                    value={sv.value != null ? formatCurrency(sv.value) : undefined}
-                  />
-                ),
-              )}
-              {lead.services?.includes('Other') && <Field label="Other Service — Please Specify" value={lead.otherServiceDetail} />}
-            </dl>
-            {(!lead.services || lead.services.length === 0) && !lead.estimatedProjectValue && (
-              <p className="text-xs text-slate-400">No products or services captured yet. Use Edit to add opportunity details.</p>
-            )}
-          </Card>
-          </div>
-          <div className="space-y-5">
-          <Card>
-            <CardHeader title="Lead Information" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label="Lead Source" value={lead.source} />
-              <Field label="Campaign" value={lead.campaign} />
-              <Field label="Assigned Owner" value={userById(lead.ownerId)?.name} />
-              <Field label="Lead Status" value={lead.status} />
-              <Field label="Lead Score" value={`${lead.score} / 100`} />
-              <Field label="Estimated Value" value={formatCurrency(lead.estimatedValue)} />
-              <Field label="Classification" value={lead.classification ? `Class ${lead.classification}` : undefined} />
-              <Field label="Date Created" value={formatDate(lead.createdAt)} />
-              <Field label="Last Contact" value={formatDate(lead.lastContactAt)} />
-              <Field label="Next Follow-up" value={formatDate(lead.nextFollowUpAt)} />
-              {lead.status === 'Rejected' && <Field label="Rejection Reason" value={lead.rejectionReason} />}
-            </dl>
-            {lead.notes && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-xs font-medium text-slate-400 mb-1">Notes</p>
-                <p className="text-sm text-slate-600">{lead.notes}</p>
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title="Lead Profile" />
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
-              <Field label="First Name" value={lead.firstName} />
-              <Field label="Last Name" value={lead.lastName} />
-              <Field label="Company" value={lead.companyName} />
-              <Field label="Job Title" value={lead.jobTitle} />
-              <Field label="Industry" value={lead.industry} />
-              <Field label="Country" value={lead.country} />
-              <Field label="Province" value={lead.province} />
-              <Field label="City / Town" value={lead.city} />
-              <Field label="Address" value={lead.address} />
-            </dl>
-          </Card>
-
-            <Card>
-              <CardHeader title="Tasks" />
-              {leadTasks.length === 0 ? (
-                <p className="text-sm text-slate-400">No tasks yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {leadTasks.map((t) => (
-                    <div key={t.id} className="text-sm">
-                      <p className="text-slate-700">{t.title}</p>
-                      <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </div>
-        </div>
-      </div>
+      {/* Nothing is charged for this — see CrmSmsModal, which says so on screen too. */}
+      {smsOpen && (
+        <CrmSmsModal
+          numbers={leadNumbers}
+          target={{ leadId: lead.id }}
+          who={`${lead.firstName} ${lead.lastName}`}
+          onClose={() => setSmsOpen(false)}
+          onSent={(a) => addActivity({ type: 'SMS', ...a, leadId: lead.id, companyId: lead.companyId })}
+        />
+      )}
 
       {editOpen && (
         <EditLeadModal lead={lead} reps={reps} canReassign={canReassign(currentUser)} onClose={() => setEditOpen(false)} onSave={(patch) => updateLead(lead.id, patch)} />
@@ -581,6 +835,23 @@ export function LeadDetail() {
           }}
         />
       )}
+      {mandateOpen && (
+        <SendMandateModal
+          leadId={lead.id}
+          /* The lead's open mandate deal, if it has one, is the one signing wins; otherwise signing makes it. */
+          dealId={deals.find((d) => d.leadId === lead.id && dealKind(d) === 'Handover' && d.stage !== 'Won' && d.stage !== 'Rejected')?.id ?? null}
+          clientName={lead.companyName || `${lead.firstName} ${lead.lastName}`.trim()}
+          party={lead.party}
+          email={lead.email ?? null}
+          contactName={`${lead.firstName} ${lead.lastName}`.trim() || null}
+          onClose={() => setMandateOpen(false)}
+          onSent={(subject, bodyText, note) => {
+            addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })
+            /* A line in Notes as well as the email in Emails: the firm looks for "mandate sent" there. */
+            addActivity({ type: 'Deal update', subject: note, leadId: lead.id, companyId: lead.companyId })
+          }}
+        />
+      )}
       {emailOpen && lead.email && (
         <ComposeEmailModal
           to={lead.email}
@@ -610,10 +881,19 @@ export function LeadDetail() {
           }
         />
       )}
-      {replyTarget && lead.email && (
+      {/*
+        A FORWARD NEEDS NO LEAD ADDRESS. Reply and reply-all do -- there is nobody to answer
+        without one -- but a forward goes to somebody typed into the box, and gating it on the
+        lead having an email would hide the button on exactly the lead somebody is trying to pass
+        on to a colleague.
+      */}
+      {replyTarget && (lead.email || replyTarget.mode === 'forward') && (
         <ComposeEmailModal
-          to={lead.email}
+          to={replyTarget.to || lead.email || ''}
+          initialCc={replyTarget.cc}
           initialSubject={replyTarget.subject}
+          initialBody={replyTarget.body}
+          inReplyTo={replyTarget.inReplyTo}
           onClose={() => setReplyTarget(null)}
           onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
         />
@@ -623,20 +903,12 @@ export function LeadDetail() {
 }
 
 /** Deliberately identical in weight to the Client page's action row — same size, same padding. */
-function ActionButton({ icon: Icon, label, onClick, tone, disabled, title }: { icon: typeof Pencil; label: string; onClick: () => void; tone?: 'danger'; disabled?: boolean; title?: string }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-        tone === 'danger' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-      }`}
-    >
-      <Icon size={13} /> {label}
-    </button>
-  )
-}
+/*
+ * ActionButton used to live here — its own size, its own colours, its own idea of what a
+ * disabled button looks like. It is now RecordAction in components/record/RecordShell, shared
+ * with the Account and Client pages, because the firm asked for one grammar across the app and
+ * three private copies of a button is how you end up with three.
+ */
 
 function Field({ label, value, icon: Icon, href, onIconClick }: { label: string; value?: string; icon?: typeof Mail; href?: string; onIconClick?: () => void }) {
   return (

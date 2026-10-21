@@ -9,13 +9,16 @@
  */
 import {
   ANNEXURE_B_2015, ANNEXURE_B_2017, ANNEXURE_B_2020, ANNEXURE_B_2026,
-  ENFORCE_ITEM_TOTALS, feeCeiling, itemTotalRemaining, recoverableFee, scheduleFor,
+  ENFORCE_ITEM_TOTALS, ENFORCE_MONTHLY_LIMITS, feeCeiling, itemTotalRemaining, monthlyLimit,
+  monthlyRoom, receiptFeeInclVat, recoverableFee, scheduleFor,
+  receiptFeeCapOn,
 } from '../../src/lib/annexureB.ts'
 
 let failed = 0
+let passed = 0
 const near = (a, b) => Math.abs(a - b) < 0.005
 function check(name, ok, detail) {
-  if (!ok) failed++
+  if (ok) passed++; else failed++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? `\n        ${detail}` : ''}`)
 }
 
@@ -129,5 +132,181 @@ function check(name, ok, detail) {
   check('and R72.45 including VAT', near(lifecycle * 1.15, 72.45))
 }
 
+/* ---------------------------------------------------------------- every gazette, not just this one */
+
+/*
+ * THE OLDER SCHEDULES ARE PRICED HISTORY, AND HISTORY IS BILLED OFF THEM.
+ *
+ * scheduleFor() exists precisely so a 2024 letter keeps its 2024 price. Until this loop, the
+ * SELECTION was tested and the thing selected was not: the 2020 ceiling could be doubled and
+ * every check stayed green. The 2026 column was pinned because somebody was working on 2026.
+ *
+ * Read off each gazette PDF, one row per schedule, so a figure cannot be changed on one of them
+ * quietly.
+ */
+/*
+ * EVERY AMOUNT, READ OFF THE GAZETTE ITSELF.
+ *
+ * The firm supplied the four notices and every figure below was taken from the PDF, item by item,
+ * not copied out of the code. That distinction is the whole point: a check written from the code
+ * pins the code to itself and protects a typo as faithfully as it protects the truth. These four
+ * tables are the gazettes, and the code is now held against them.
+ *
+ *   2026  GN 6435, GG 53683 — ceiling R1225,00
+ *   2020  GN R.580, GG 43343, 22 May 2020 — ceiling R1023,00
+ *   2017  GN R.1141, 27 October 2017 — ceiling R965,00
+ *   2015  GN R.1272, GG 39552, 23 December 2015 — ceiling R870,00
+ *
+ * Items 1(b), 4(a) and 9 carry no amount of their own: 1(b) and 4(a) point at the Magistrates'
+ * Courts rules, and 9 is the percentage below rather than a flat fee. They are null in the code
+ * and absent here for the same reason.
+ */
+const SCHEDULES = [
+  {
+    schedule: ANNEXURE_B_2026, year: '2026', ceiling: 1225, on: '2026-09-09', cap: 610, rate: 0.1,
+    items: { '1a': 25, '1c': 3.5, 2: 25, 3: 25, '4b': 250, '4c': 16, 5: 50, 6: 13, 7: 60, 8: 98 },
+  },
+  {
+    schedule: ANNEXURE_B_2020, year: '2020', ceiling: 1023, on: '2021-06-01', cap: 502, rate: 0.1,
+    items: { '1a': 21, '1c': 3, 2: 21, 3: 21, '4b': 210, '4c': 14, 5: 41, 6: 11, 7: 52, 8: 82 },
+  },
+  {
+    schedule: ANNEXURE_B_2017, year: '2017', ceiling: 965, on: '2018-06-01', cap: 502, rate: 0.1,
+    items: { '1a': 20, '1c': 2.8, 2: 20, 3: 20, '4b': 198, '4c': 13, 5: 39, 6: 10, 7: 49, 8: 78 },
+  },
+  {
+    schedule: ANNEXURE_B_2015, year: '2015', ceiling: 870, on: '2016-06-01', cap: 502, rate: 0.1,
+    items: { '1a': 18, '1c': 2.5, 2: 18, 3: 18, '4b': 178, '4c': 12, 5: 35, 6: 9, 7: 44, 8: 70 },
+  },
+]
+
+/* The monthly allowances are worded identically in all four gazettes: ten electronic
+   communications, four credit bureau searches. */
+const MONTHLY = { '1c': 10, '4c': 4 }
+
+for (const { schedule, year, ceiling, on, cap, rate, items } of SCHEDULES) {
+  check(`the items 1-7 ceiling is R${ceiling} on the ${year} gazette`,
+    schedule.itemsOneToSevenCeiling === ceiling,
+    `got ${schedule.itemsOneToSevenCeiling}`)
+  /*
+   * THE CAP IS NOT ON THE SCHEDULE ANY MORE, AND THAT IS THE FIX. It moves on its own dates -- the
+   * 2026 gazette is dated 6 March and the firm applied the new cap from 7 April -- so one
+   * `effectiveFrom` could not say both, and the one it said put R610 on a month of receipts the
+   * engine capped at R502. RECEIPT_FEE_CAPS mirrors `annexure_b_tariffs` row for row.
+   */
+  check(`the receipt fee is capped at R${cap} in ${year}'s period`,
+    receiptFeeCapOn(on) === cap, `got ${receiptFeeCapOn(on)}`)
+  check(`the receipt fee rate is ${rate * 100}% on the ${year} gazette`,
+    schedule.receiptFeeRate === rate, `got ${schedule.receiptFeeRate}`)
+
+  /*
+   * AND THE RATE IS EXERCISED BELOW THE CAP. Every existing test of the 2020 receipt fee used an
+   * instalment ABOVE the cap, so the ten per cent was never reached on any schedule but the
+   * current one -- the arithmetic could have been any number at all. R1 000 is below every cap
+   * in the table, so this is the multiplication and not the minimum.
+   */
+  const belowCap = receiptFeeInclVat(1000, 0.15, on)
+  check(`10% of R1 000 plus VAT is R115 on the ${year} gazette`,
+    near(belowCap, 115), `got ${belowCap}`)
+  const aboveCap = receiptFeeInclVat(cap * 20, 0.15, on)
+  check(`a large instalment is capped at R${cap} plus VAT in ${year}'s period`,
+    near(aboveCap, cap * 1.15), `got ${aboveCap}`)
+
+  /* EVERY PRICED ITEM, not the two or three that happened to be on somebody's mind. */
+  for (const [id, amount] of Object.entries(items)) {
+    const got = schedule.items.find((i) => i.id === id)?.amount
+    check(`item ${id} is R${amount.toFixed(2)} on the ${year} gazette`, got === amount, `got ${got}`)
+  }
+  /* And nothing has been invented that the gazette does not price. */
+  const priced = schedule.items.filter((i) => i.amount !== null && i.amount !== undefined).map((i) => i.id).sort()
+  check(`the ${year} gazette prices exactly these items`,
+    priced.join(),
+    Object.keys(items).sort().join(),
+    `got ${priced.join()}`)
+
+  for (const [id, cap] of Object.entries(MONTHLY)) {
+    check(`item ${id} is capped at ${cap} a month on the ${year} gazette`,
+      schedule.items.find((i) => i.id === id)?.maxPerMonth === cap)
+  }
+
+  /*
+   * ITEM 1(c), THE SMS, IS PER SEGMENT. A live charging path -- accountSms.ts sets
+   * SMS_ITEM = '1c' and the SMS box shows a collector the cost before they send. A template that
+   * fits 160 characters against a short name and spills at 161 against a long one charges the
+   * second debtor twice for the same words.
+   */
+  check(`...and a second segment of item 1c is charged again on the ${year} gazette`,
+    near(itemTotalRemaining('1c', items['1c'], schedule), items['1c']))
+  check(`...and item 1c counts towards the items 1-7 ceiling on the ${year} gazette`,
+    schedule.items.find((i) => i.id === '1c')?.countsTowardCap === true)
+}
+
+/* ---------------------------------------------------------------- the two flags themselves */
+
+/*
+ * THE FLAGS' VALUES, ASSERTED. This is the one thing the block below cannot do for itself.
+ *
+ * A review of this suite flipped ENFORCE_MONTHLY_LIMITS and found the whole suite still green,
+ * even though the block underneath was written to guard exactly that -- because the block
+ * BRANCHES on the flag. Flip it and you move out of one true branch into another true branch. Its
+ * own comment says the sibling flag's defect was that flipping it "left every check green", and
+ * after the fix, flipping it still did.
+ *
+ * BOTH ARE A RECORDED INSTRUCTION FROM THE FIRM, WITH A DATE, which is what makes the value a
+ * fact worth pinning rather than a preference somebody happened to hold:
+ *
+ *   ENFORCE_ITEM_TOTALS     false -- item 3 charged per occurrence, as Swordfish charged it.
+ *                                    Bredell Ferreira, 9 September 2026.
+ *   ENFORCE_MONTHLY_LIMITS  false -- no refusal at a fifth bureau search in a month, because the
+ *                                    gazette counts per ACCOUNT and the work happens per PERSON.
+ *                                    Bredell Ferreira, 10 September 2026.
+ *
+ * Both are direct revenue decisions. Asserted here so that changing one is a deliberate act with
+ * a failing test in front of it, rather than a one-word edit nothing notices.
+ */
+check('item 3 is charged per occurrence, at the firm\u2019s instruction',
+  ENFORCE_ITEM_TOTALS === false)
+check('the per-month allowances do not bind, at the firm\u2019s instruction',
+  ENFORCE_MONTHLY_LIMITS === false)
+
+/* ---------------------------------------------------------------- the monthly allowances */
+
+/*
+ * AND THE BEHAVIOUR EITHER WAY, which is still worth having: the flag is meant to be flippable
+ * and the comment in annexureB.ts explicitly invites it. What was missing was the line above --
+ * the value itself -- not this.
+ */
+{
+  const s = ANNEXURE_B_2026
+  /* The gazette's own numbers, which are facts about the schedule whatever the flag says. */
+  check('the gazette caps item 4c at four a month',
+    s.items.find((i) => i.id === '4c')?.maxPerMonth === 4)
+  check('...and item 1c at ten a month',
+    s.items.find((i) => i.id === '1c')?.maxPerMonth === 10)
+  check('...and leaves item 3 uncapped',
+    s.items.find((i) => i.id === '3')?.maxPerMonth === undefined)
+
+  if (ENFORCE_MONTHLY_LIMITS) {
+    check('with the flag on, item 4c reports its four-a-month limit', monthlyLimit('4c', s) === 4)
+    check('...and a fifth search in the month has no room', monthlyRoom(monthlyLimit('4c', s), 4) === 0)
+    check('...while a first one has four', monthlyRoom(monthlyLimit('4c', s), 0) === 4)
+  } else {
+    check('with the flag off, item 4c reports no limit at all', monthlyLimit('4c', s) === null)
+    check('...and item 1c none either', monthlyLimit('1c', s) === null)
+    check('...so a fifth search in the month still has room',
+      monthlyRoom(monthlyLimit('4c', s), 4) === Infinity)
+  }
+  /* monthlyRoom's own arithmetic, which is true whichever way the flag is set. */
+  check('room is what is left of a limit', monthlyRoom(4, 1) === 3)
+  check('...never negative', monthlyRoom(4, 9) === 0)
+  check('...and unbounded where there is no limit', monthlyRoom(null, 900) === Infinity)
+}
+
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found 20
+ * files silent that way, about 800 assertion sites reported as nothing.
+ */
+if (failed === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)

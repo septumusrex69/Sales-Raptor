@@ -1,0 +1,364 @@
+/**
+ * THE LIBRARY, REACHED FROM INSIDE AN ACCOUNT.
+ *
+ * At the firm's instruction: "everything that we have in the library, to be in the account as
+ * well as an option." Before this, one of the four kinds could be reached from an account — a
+ * letter, through Attach a letter. The SMS and email wording the firm had written, approved and
+ * priced sat on a screen nobody visits while collecting, and the call scripts were unreachable
+ * from the one place a call is made.
+ *
+ * THE FAULTS THIS GUARDS, none of which announce themselves:
+ *
+ *   - A TEMPLATE PREVIEWED AGAINST SAMPLES AND SENT AGAINST NOTHING. The library previews with
+ *     sampleValues() because it has no debtor in front of it. Merging with those on an account
+ *     would post Mr Van Der Westhuizen's name and R 48,250.00 to somebody else — a fabricated
+ *     figure in a demand, which is the worst thing in this file.
+ *   - A COVERING EMAIL THAT ENCLOSES NOTHING. message_templates.attachment_id is what makes
+ *     "please find the enclosed notice" true. Picking such a template without bringing its letter
+ *     sends a message whose first sentence is a lie.
+ *   - TWO IDEAS OF WHAT THE BALANCE IS. The SMS box, the email box and the letter all merge now,
+ *     and resolved separately they would drift — a debtor told one figure by SMS and another in
+ *     the notice posted the same day.
+ *   - A RETIRED TEMPLATE OFFERED AS CURRENT. The library keeps retired wording so somebody can
+ *     answer "what did we used to send?"; offering it to send is a different thing entirely.
+ *
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-account-templates.mjs
+ */
+import { readFileSync } from 'node:fs'
+import { missingFieldsNote, renderTemplate, mergeValuesFor } from '../../src/lib/messageTemplates.ts'
+import { smsCost } from '../../src/lib/smsSegments.ts'
+
+let pass = 0
+const failures = []
+function check(name, actual, expected) {
+  const a = JSON.stringify(actual)
+  const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
+}
+const ok = (name, actual) => check(name, actual, true)
+
+const read = (p) => readFileSync(new URL(`../../src/${p}`, import.meta.url), 'utf8')
+
+/**
+ * The same file with its comments taken out.
+ *
+ * FOR THE ABSENCE ASSERTIONS ONLY, and it is needed. This file explains in prose why the picker
+ * must never merge against `sampleValues()` -- and the first cut of the assertion below read that
+ * very sentence and reported the fault it was written to prevent. check-silent-triggers records
+ * the same trap in its own words: prose explaining an absence must not be able to satisfy it.
+ */
+const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+const picker = read('components/library/UseTemplate.tsx')
+const compose = read('components/ComposeEmailModal.tsx')
+const sms = read('pages/accounts/SmsModal.tsx')
+const script = read('components/collections/CallScriptPanel.tsx')
+const account = read('pages/accounts/AccountDetail.tsx')
+/* The assembly the page hands its rows to -- see the note on the address below. */
+const merge = read('lib/accountMergeValues.ts')
+
+/* ------------------------------------------------------------------ the warning */
+
+/*
+ * A WARNING THAT FIRES WHEN NOTHING IS WRONG IS WORSE THAN NO WARNING, because people stop
+ * reading it -- CLAUDE.md, and the reason this is the first thing asserted. The note has to be
+ * silent on the ordinary case or it is silent on the day it matters.
+ */
+check('nothing is said when every field was filled', missingFieldsNote([]), null)
+ok('...and the field is NAMED when one was not',
+  (missingFieldsNote(['respond_by']) ?? '').includes('{{respond_by}}'))
+ok('...in the braces the writer will see in the box',
+  (missingFieldsNote(['firm_bank']) ?? '').includes('{{firm_bank}}'))
+/* Singular and plural, because "will send with the braces in it" about three fields reads as a
+   sentence somebody did not finish. */
+ok('...and it reads as English for one field',
+  /braces in it\./.test(missingFieldsNote(['respond_by']) ?? ''))
+ok('...and for several', /braces in them\./.test(missingFieldsNote(['a', 'b']) ?? ''))
+
+/*
+ * THE PLACEHOLDER IS LEFT STANDING, which is what the note is describing. renderTemplate's own
+ * contract, re-asserted here because this warning is a lie if it ever stops being true: it says
+ * the message will send with the braces in it, so the braces have to still be there.
+ */
+const r = renderTemplate('Pay {{balance}} into {{firm_bank}}.', { balance: 'R 1,00' })
+check('an unfillable field survives into the words', r.text, 'Pay R 1,00 into {{firm_bank}}.')
+check('...and is reported by name', r.missing, ['firm_bank'])
+
+/* ------------------------------------------------------------------ what is offered */
+
+/*
+ * MERGED AGAINST THE ACCOUNT, NEVER AGAINST SAMPLES. sampleValues() anywhere in the picker would
+ * put a made-up balance into a real demand.
+ */
+ok('the picker merges against the values it is given', /renderTemplate\(row\.body, values\)/.test(picker))
+check('...and never against the library’s samples',
+  [picker, sms, script].some((f) => /sampleValues/.test(code(f))), false)
+
+/* Retired wording is kept by the library and not offered to send. */
+/*
+ * THE RULE, NOT THE WHOLE EXPRESSION. Written as the exact filter it failed the day an audience
+ * clause was added beside it -- a correct change reported as retired wording being offered. What
+ * matters is that `active` is one of the things the list is filtered on.
+ */
+ok('only live templates are offered', /\.filter\(\(r\) =>[^)]*r\.active/.test(picker))
+ok('...and only the kind that was asked for', /\.filter\(\(r\) =>[^)]*r\.kind === kind/.test(picker))
+
+/*
+ * ONE RESOLUTION FOR ALL THREE. The account page computes the merge values once and hands the
+ * same object to the SMS box, the email box and the letter. Computed twice they drift, and the
+ * drift is a debtor told one balance by SMS and another in the notice posted the same day.
+ */
+ok('the account resolves its merge values once', /const letterContext = useMemo\(/.test(account))
+/*
+ * AND IT ASSEMBLES THEM IN ONE PLACE. This counted `mergeValuesFor(` on the page; the assembly
+ * moved into accountMergeValues when the workflow runner needed the same answer, so the page now
+ * calls that once and nothing calls mergeValuesFor directly. Counted the same way, on whichever
+ * call the page is making -- two would still be two resolutions that can drift.
+ */
+check('...and assembles them exactly once on the page',
+  (account.match(/accountMergeValues\(\{/g) ?? []).length, 1)
+ok('...and no longer assembles its own beside it', !/mergeValuesFor\(\{/.test(account))
+
+/* ------------------------------------------------------------------ what has been paid */
+
+/*
+ * ZERO IS AN ANSWER, AND IT COMES OFF THE LEDGER.
+ *
+ * THE FIRM, LOOKING AT A COMPOSE BOX THAT WOULD NOT FILL {{paid_to_date}}: "so if there's no pay
+ * to date thing, then zero has been paid to date." Right -- and the reason it would not fill was
+ * that the page read `debtor_accounts.payments_to_date`, which is NULL on 20 473 of the 23 782
+ * accounts on the book.
+ *
+ * DEFAULTING THAT NULL TO ZERO WOULD HAVE BEEN THE WORSE BUG. 1 243 of those null rows have
+ * payments against them -- R23,7 million between them, up to R90 530 on one account -- so the
+ * literal fix would have told a debtor who has paid R90 000 that they have paid nothing, in a
+ * statutory demand. And of the 3 309 rows where the column IS set, 2 644 disagree with the ledger
+ * beneath them, so it cannot answer the question in either direction.
+ *
+ * SUMMED FROM THE PAYMENTS LEDGER, zero falls out by itself.
+ */
+const templateAccount = {
+  caseNumber: 'RAP-100735', handoverDate: '2026-01-05', paymentsToDate: 0,
+  listingDate: null, listingReference: null, bureausListed: null,
+  debtorKind: 'individual', debtorTitle: 'Mr', debtorFirstName: 'Ryno', debtorSurname: 'Buitendag',
+  accountNumber: 'Abc1111', clientReference: null,
+  capitalOutstanding: 4000, capitalHandedOver: 4000, preferredLanguage: null,
+}
+/* Enough of a firm for the merge to run. Only {{paid_to_date}} is being asserted, and the firm's
+   own fields are held against schema.sql by check-firm-settings in both directions. */
+const someFirm = {
+  firmName: 'Bredell Ferreira', email: 'info@bredellferreira.co.za', phone: '012 348 2156',
+  website: null, officeHours: null, physicalAddress: null, postalAddress: null,
+  signatoryName: 'Itumeleng', signatoryTitle: 'Collections', paymentInstruction: null,
+  trustBank: 'Nedbank', trustAccountName: 'BF Trust', trustAccountNumber: '1', trustBranchCode: '198765',
+  trustAccountType: 'Cheque',
+  businessBank: null, businessAccountName: null, businessAccountNumber: null, businessBranchCode: null,
+}
+const merged = (paymentsToDate) => mergeValuesFor({
+  account: { ...templateAccount, paymentsToDate },
+  balance: 5408.78, clientName: 'Tjobecom', agentName: 'Itumeleng', agentPhone: '012 348 2156',
+  firm: someFirm, today: '2026-09-28', money: (n) => `R ${n.toFixed(2)}`,
+}).paid_to_date
+
+check('a debtor who has paid nothing has paid R 0.00', merged(0), 'R 0.00')
+/* AND ONE WHO HAS PAID READS WHAT THEY PAID -- the half that the literal fix would have broken. */
+check('...and one who has paid reads it', merged(90529.84), 'R 90529.84')
+/*
+ * NULL STILL MEANS NOBODY KNOWS, which leaves the placeholder standing and the notice unsendable.
+ * That is the right answer for an account whose balance could not be computed at all, and it is
+ * why this is not simply `?? 0` inside the merge.
+ */
+check('...and null is still unanswerable', merged(null), null)
+
+/*
+ * BOTH SENDERS TAKE IT FROM THE SAME PLACE. The runner has always summed the ledger
+ * (`balance.payments`); the page read the stored column, which is how the two disagreed. Written
+ * twice they drift, and the half that drifts is whichever one nobody is looking at.
+ */
+ok('the page takes what was paid off the computed balance',
+  /paymentsToDate: statement\?\.breakdown\?\.payments \?\? null/.test(account))
+ok('...and never off the account row', !/paymentsToDate: account\.paymentsToDate/.test(account))
+const step = read('../api/_lib/workflow/step.ts')
+ok('the runner takes it off the same balance', /paymentsToDate: balance\.payments/.test(step))
+
+/* ------------------------------------------------------------------ the covering email */
+
+/*
+ * THE HALF THAT MATTERS. An email template carrying attachment_id claims an enclosure; picking it
+ * has to make the claim true. The library already marks these on its own list -- that link stops
+ * meaning anything the moment it is used and nothing comes with it.
+ */
+/* The drawn PDF has to be ATTACHED, not merely drawn. Break-testing found the first cut of this
+   satisfied by a call whose result was thrown away -- which draws the letter, charges the wait,
+   and sends the covering email with nothing on it. */
+ok('picking an email template brings the letter it posts',
+  /picked\.template\.attachmentId/.test(compose)
+  && /addAttachment\(await buildLetterAttachment\(\{/.test(compose))
+ok('...looked up as its own template, because attachment_id is an id',
+  /\.find\(\(r\) => r\.id === picked\.template\.attachmentId\)/.test(compose))
+ok('...and says so when that letter is gone from the library',
+  /no longer in the library/.test(compose))
+/*
+ * AND THE WORDS SURVIVE A LETTER THAT WILL NOT DRAW. The subject and body are set BEFORE the
+ * attachment is attempted, so an error over the PDF does not also throw away the wording -- the
+ * writer can attach it by hand.
+ */
+/*
+ * ONE PLACE THE BODY IS SET, and it is before the draw.
+ *
+ * COUNTED BEFORE IT IS ORDERED, for the reason CLAUDE.md gives twice over: indexOf finds the
+ * FIRST occurrence, so duplicating the setter into an early-return branch satisfies an
+ * order-only assertion while the real path still throws the wording away. Break-testing this
+ * line is what found it.
+ */
+check('the words are set in exactly one place', (compose.match(/setBody\(picked\.body\)/g) ?? []).length, 1)
+ok('...and that place is before the letter is drawn',
+  compose.indexOf('setBody(picked.body)') < compose.indexOf('setAttaching(picked.template.id)'))
+
+/*
+ * ONE SIZE GATE. A letter can now arrive two ways -- chosen by hand, or brought by the template
+ * that carries it -- and a second path that forgot the ceiling is a 413 from Vercel arriving as
+ * "Could not reach the server" after the wait.
+ */
+check('every attachment goes through one size gate',
+  (compose.match(/> MAX_ATTACHMENT_BYTES/g) ?? []).length, 2)
+ok('...and both letter paths use it',
+  /onAttached=\{addAttachment\}/.test(compose) && /addAttachment\(await buildLetterAttachment/.test(compose))
+
+/* ------------------------------------------------------------------ what charges and what does not */
+
+/*
+ * READING A SCRIPT IS NOT A CHARGEABLE ACTION. Annexure B prices actions -- an email, an SMS, a
+ * consultation -- and reading is not one of them. Asserted because every other button in that
+ * action row DOES charge, so a fee written into this one would look like it belonged.
+ */
+check('opening a call script raises no fee',
+  /raiseCharge|recordSent|chargeFor|annexureB/.test(code(script)), false)
+ok('...and the screen says so', /charges nothing/i.test(script))
+
+/*
+ * AND THE SMS STILL PRICES ITSELF. Item 1(c) is per SEGMENT, so a template that runs to 161
+ * characters costs twice what the firm thinks it does -- which is the whole reason the cost line
+ * is live while you type, and the reason a template dropped into that box must not bypass it.
+ */
+ok('the SMS box still prices what is in it', /const cost = smsCost\(text\)/.test(sms))
+ok('...including wording that arrived from a template',
+  /onPick=\{\(p\) => \{ setText\(p\.body\); setMissing\(p\.missing\) \}\}/.test(sms))
+
+/* ------------------------------------------------------------------ what an SMS costs */
+
+/*
+ * THE APP'S OWN FORMATTING MUST NOT COST THE FIRM DOUBLE.
+ *
+ * en-ZA groups thousands with a NON-BREAKING space (CLAUDE.md), so formatMoney emits U+00A0 and a
+ * merged {{balance}} carries one. That character is not in the GSM alphabet: ONE of them drops
+ * the whole message to UCS-2 and cuts every segment from 160 characters to 70. Measured on the
+ * real message the e2e sends -- 94 characters -- that is one segment at R3.50 with an ordinary
+ * space and TWO at R7.00 with the non-breaking one. Annexure B item 1(c) is priced per SEGMENT,
+ * so every templated SMS carrying a balance was charged twice.
+ *
+ * Caught by LOOKING AT the screenshot the e2e takes, which is the only reason this is here.
+ *
+ * ONLY THE MERGED VALUES ARE TOUCHED, never what a collector typed: the box deliberately WARNS
+ * about a curly apostrophe rather than silently rewriting somebody's words, and that stays true.
+ */
+/*
+ * ASSERTED AS THE RULE, NOT AS THE LINE. This pinned the inline expression
+ * `.replace(/\u00a0/g, ' ')`, and broke the day the same stripping moved into `smsSafeValues` so
+ * the workflow runner -- which sends these templates with nobody watching -- could not drift from
+ * the screen. What matters is that the values reaching the box have been through it, wherever the
+ * doing lives.
+ */
+ok('the SMS box strips the app\u2019s own non-breaking spaces out of merged values',
+  /smsValues\s*=\s*useMemo\(\s*\(\) => smsSafeValues\(values\)/.test(code(sms))
+  || /\.replace\(\/\\u00a0\/g, ' '\)/.test(code(sms)))
+ok('...and the picker is given those, not the raw ones',
+  /<UseTemplate[\s\S]{0,120}?kind="sms"[\s\S]{0,120}?values=\{smsValues\}/.test(sms))
+/* The writer's own text is NOT rewritten -- the warning is still the mechanism for that. */
+ok('...while what the collector typed is left alone',
+  /const cost = smsCost\(text\)/.test(code(sms)))
+
+const NBSP = '\u00a0'
+check('a non-breaking space is what makes the difference',
+  [smsCost(`R${NBSP}180,000.00`).encoding, smsCost('R 180,000.00').encoding],
+  ['UCS-2', 'GSM-7'])
+
+/* ---------- the two fields that were filled by nothing ---------- */
+
+/*
+ * THE FIRM, naming them: "{{debtor_address}} exists, but Raptor doesn't fill it yet ... and
+ * {{respond_by}} exists, but Raptor doesn't fill it yet. The s129 letters use it."
+ *
+ * Both were written, checked and exported with nothing in the app passing a value, so every
+ * notice using one printed the placeholder. check-message-templates proves mergeValuesFor can
+ * answer them; only the PAGE can prove something passes them, which is what this reads.
+ */
+/*
+ * READ IN TWO FILES, because that is where the answer now lives. The page passes the account's
+ * CONTACTS and the day; accountMergeValues derives the address and the date from them. Before the
+ * workflow runner needed the same assembly both halves were inline on the page.
+ */
+ok('the account hands its own contacts to the merge',
+  /contacts: workspace\?\.contacts/.test(account))
+ok('...and the assembly picks the address off them', /debtorAddress: addressOf\(input\.contacts\)/.test(merge))
+/*
+ * A retired address is one somebody established the debtor has left. Posting a statutory demand
+ * to it is worse than posting none, because it looks served.
+ *
+ * READ OFF contactOf RATHER THAN addressOf, because the rule moved there and widened: the
+ * acknowledgement of debt now asks the debtor to confirm a cellphone, a work number, a home number
+ * and an email address as well, and every one of them wants the primary and never a retired one
+ * for the same reason an address does. addressOf is one call into it.
+ */
+ok('...never a retired one', /c\.kind === kind && !c\.retiredAt/.test(merge))
+ok('...and the address goes through the same rule', /return contactOf\(contacts, 'address'\)/.test(merge))
+ok('...as does every way of reaching them',
+  /debtorMobile: contactOf\(input\.contacts, 'mobile'\)/.test(merge)
+  && /debtorEmail: contactOf\(input\.contacts, 'email'\)/.test(merge))
+ok('...preferring the one marked primary', /live\.find\(\(c\) => c\.isPrimary\)/.test(merge))
+
+/*
+ * TEN WORKING DAYS, NOT TEN CALENDAR DAYS. addWorkingDays knows the public holidays -- Easter
+ * included, and the Monday a holiday moves to when it falls on a Sunday. A demand giving a debtor
+ * less time than the Act does is a demand that can be set aside.
+ */
+ok('the merge works out the date to respond by',
+  /respondBy: input\.respondByOverride \?\? respondBy\(input\.today\)/.test(merge))
+/*
+ * AND A DISPUTE MESSAGE MAY QUOTE A DIFFERENT DATE, which is why the line above is not simply
+ * respondBy(input.today) any more.
+ *
+ * While a section 129 is running the debtor has what is LEFT of ITS period, not a fresh ten days --
+ * disputeWindow works that out, with a floor of five -- and the acknowledgement has to quote the
+ * NOTICE's own date. Two dates days apart, each headed "respond by", is an ambiguity a debtor is
+ * entitled to resolve in their own favour.
+ *
+ * THE OVERRIDE IS FIRST AND THE TEN WORKING DAYS ARE THE FALLBACK, in that order: written the other
+ * way round the ?? never fires, because respondBy() always returns a date. Asserted as one regex
+ * above rather than two, so a rewrite that keeps both names and swaps them cannot pass.
+ */
+ok('...off the notice where the message is about a dispute',
+  /respondByOverride\?: string \| null/.test(merge))
+ok('...and disputeWindow is what decides it',
+  /disputeWindow decides it/.test(merge))
+ok('...counting ten of them', /addWorkingDays\(today, 10\)/.test(merge))
+/* From the library that knows the public holidays, never counted by hand -- and now imported by
+   the assembly rather than by the page, since that is where the counting moved. */
+ok('...from the working-days library rather than by hand',
+  /from '\.\/workingDays\.js'/.test(merge))
+
+/* The merge is a memo; a dependency left off means a letter naming last week's address. */
+ok('the contacts are in the merge\u2019s dependencies', /workspace\?\.contacts,/.test(account))
+
+
+if (failures.length) {
+  console.log(`\n${failures.length} FAILED:\n`)
+  for (const f of failures) console.log('  ✗ ' + f + '\n')
+  process.exit(1)
+}
+console.log(`${pass} passed, 0 failed`)
+console.log(`
+The firm's wording, reachable from the account it is about. Merged against the debtor in front of
+you and never against the library's samples; one resolution shared by the SMS box, the email box
+and the letter, so they cannot disagree about the balance; a covering email that brings the letter
+it claims to enclose; and a call script that charges nothing, said on the screen.`)

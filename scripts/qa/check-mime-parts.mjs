@@ -1,0 +1,375 @@
+/**
+ * Can Raptor take a message apart without downloading all of it?
+ *
+ * WHY THIS MATTERS ENOUGH TO TEST. Reading an email used to mean pulling the whole thing across
+ * from Johannesburg — every attachment included — so that a collector could read three
+ * paragraphs. It now asks the server what the message is MADE of and fetches only the pieces
+ * somebody will look at. That is a large speed win and a new way to be wrong: get a part number
+ * or a content-transfer-encoding wrong and nothing throws, the debtor's email simply renders as
+ * mojibake or as nothing at all.
+ *
+ * THE STRUCTURES ARE REAL. Rather than hand-writing what I think a BODYSTRUCTURE looks like —
+ * which would only test my own assumption twice — these go through imapflow's own response
+ * parser, the same code that runs against the live mail server. If my reading of the format is
+ * wrong, these fail.
+ *
+ *   node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-mime-parts.mjs
+ */
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import {
+  assembleBody, decodeQuotedPrintable, decodeTransfer, describeParts, flattenParts,
+  inlineImagesFromParsed, listedAttachments, partContent, placeholderIndex, placeholderName,
+  plainText, readableParts, toText, attachmentNamesOf, decodeEncodedWords,
+} from '../../api/_lib/mime.ts'
+
+const require = createRequire(import.meta.url)
+const handler = require('imapflow/lib/handler/imap-handler')
+const tools = require('imapflow/lib/tools')
+
+let failures = 0
+let passed = 0
+const check = (name, got, want) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want)
+  if (ok) passed += 1
+  if (!ok) {
+    failures += 1
+    console.error(`FAIL ${name}\n  got  ${JSON.stringify(got)}\n  want ${JSON.stringify(want)}`)
+  } else {
+    console.log(`ok   ${name}`)
+  }
+}
+
+/** A BODYSTRUCTURE as a mail server would send it, parsed by imapflow's own parser. */
+async function structure(bodystructure) {
+  const line = `* 1 FETCH (BODYSTRUCTURE ${bodystructure})`
+  const parsed = await handler.parser(Buffer.from(line), { literals: [] })
+  return tools.parseBodystructure(parsed.attributes[1][1])
+}
+
+/* ---------------------------------------------------------------- *
+ * The message this whole rewrite is about
+ *
+ * A debtor replies, signs off with a picture, and attaches a four-megabyte scan of a mandate.
+ * The old code fetched all four megabytes to show three paragraphs, and threw the signature away.
+ * ---------------------------------------------------------------- */
+
+const TEXT = '("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "QUOTED-PRINTABLE" 120 4 NIL NIL NIL NIL)'
+const HTML = '("TEXT" "HTML" ("CHARSET" "utf-8") NIL NIL "QUOTED-PRINTABLE" 900 12 NIL NIL NIL NIL)'
+const SIG = '("IMAGE" "PNG" ("NAME" "sig.png") "<sig@bredellferreira.co.za>" NIL "BASE64" 41000 NIL ("INLINE" ("FILENAME" "sig.png")) NIL NIL)'
+const PDF = '("APPLICATION" "PDF" ("NAME" "mandate.pdf") NIL NIL "BASE64" 4200000 NIL ("ATTACHMENT" ("FILENAME" "mandate.pdf")) NIL NIL)'
+
+const realMessage = await structure(
+  `(((${TEXT}${HTML} "ALTERNATIVE" ("BOUNDARY" "alt") NIL NIL NIL)${SIG} "RELATED" ("BOUNDARY" "rel") NIL NIL NIL)${PDF} "MIXED" ("BOUNDARY" "mix") NIL NIL NIL)`,
+)
+const real = flattenParts(realMessage)
+
+check('every leaf is found, with the part number BODY[...] takes',
+  real.map((p) => `${p.part}:${p.type}`),
+  ['1.1.1:text/plain', '1.1.2:text/html', '1.2:image/png', '2:application/pdf'])
+
+check('the signature keeps the cid its HTML refers to it by', real[2].cid, 'sig@bredellferreira.co.za')
+check('the attachment keeps its filename, for the download route to match on',
+  real[3].filename, 'mandate.pdf')
+check('the encoding is carried, because we now undo it ourselves', real[0].encoding, 'quoted-printable')
+check('the charset is carried, or every apostrophe becomes a question mark', real[0].charset, 'utf-8')
+
+check('only the parts a person will look at are fetched — NOT the four-megabyte scan',
+  readableParts(real).parts.map((p) => p.part),
+  ['1.1.1', '1.1.2', '1.2'])
+
+/* ---------------------------------------------------------------- *
+ * What it refuses to fetch, which is the half that keeps it fast
+ * ---------------------------------------------------------------- */
+
+const pixel = '("IMAGE" "GIF" NIL "<px@track>" NIL "BASE64" 60 NIL ("INLINE" NIL) NIL NIL)'
+const huge = '("IMAGE" "JPEG" ("NAME" "photo.jpg") "<p@x>" NIL "BASE64" 3000000 NIL ("INLINE" NIL) NIL NIL)'
+const attachedHtml = '("TEXT" "HTML" ("CHARSET" "utf-8") NIL NIL "BASE64" 400 6 NIL ("ATTACHMENT" ("FILENAME" "report.html")) NIL NIL)'
+
+const noisy = flattenParts(await structure(
+  `(${TEXT}${pixel}${huge}${attachedHtml} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`,
+))
+check('a tracking pixel is not a signature', readableParts(noisy).parts.map((p) => p.part), ['1'])
+// A pixel was never going to be looked at, so it is not reported as missing. A three-megabyte
+// photograph WAS, so it is — a blank space with no explanation is how this got reported broken.
+check('the pixel is not counted as something we failed to show', readableParts(noisy).skippedImages, 1)
+
+const plainImage = '("IMAGE" "PNG" ("NAME" "chart.png") NIL NIL "BASE64" 40000 NIL ("ATTACHMENT" ("FILENAME" "chart.png")) NIL NIL)'
+check('an image ATTACHED rather than drawn in stays in the attachment list, not the body',
+  readableParts(flattenParts(await structure(
+    `(${TEXT}${plainImage} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`,
+  ))).parts.map((p) => p.part),
+  ['1'])
+
+check('nothing at all is fetched when there is no text to anchor it',
+  readableParts(flattenParts(await structure(`(${plainImage}${PDF} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))).parts,
+  [])
+
+/*
+ * The case that broke it in the field. A real designed sign-off — photograph, logo, banner, at
+ * the resolution a retina screen wants — is several hundred kilobytes an image. The first caps
+ * threw exactly that away and the message rendered blank, which is indistinguishable from the
+ * feature never having worked.
+ */
+const REAL_SIG_A = '("IMAGE" "JPEG" ("NAME" "banner.jpg") "<a@kestrel.example>" NIL "BASE64" 420000 NIL ("INLINE" ("FILENAME" "banner.jpg")) NIL NIL)'
+const REAL_SIG_B = '("IMAGE" "PNG" ("NAME" "logo.png") "<b@kestrel.example>" NIL "BASE64" 260000 NIL ("INLINE" ("FILENAME" "logo.png")) NIL NIL)'
+const richSig = readableParts(flattenParts(await structure(
+  `(${TEXT}${REAL_SIG_A}${REAL_SIG_B} "RELATED" ("BOUNDARY" "r") NIL NIL NIL)`,
+)))
+check('a real designed signature fits — both pictures, neither dropped',
+  [richSig.parts.map((p) => p.part), richSig.skippedImages],
+  [['1', '2', '3'], 0])
+
+/* ---------------------------------------------------------------- *
+ * Shapes that are easy to get wrong
+ * ---------------------------------------------------------------- */
+
+const single = flattenParts(await structure(TEXT))
+check('a message with no multipart at all is section 1, not section ""',
+  single.map((p) => p.part), ['1'])
+
+// A forwarded .eml. Recursing into it would put the forwarded message's own words into the body
+// a collector reads, where they look as though this sender wrote them.
+const FORWARD = `("MESSAGE" "RFC822" ("NAME" "fw.eml") NIL NIL "7BIT" 5000 (NIL "Fwd" NIL NIL NIL NIL NIL NIL NIL NIL) ${TEXT} 60 NIL ("ATTACHMENT" ("FILENAME" "fw.eml")) NIL NIL)`
+check('a forwarded message stays an attachment rather than becoming part of the text',
+  flattenParts(await structure(`(${TEXT}${FORWARD} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))
+    .map((p) => `${p.part}:${p.type}`),
+  ['1:text/plain', '2:message/rfc822'])
+
+check('rubbish in is not an exception out', flattenParts(null), [])
+
+/* ---------------------------------------------------------------- *
+ * Undoing the encodings, which mailparser used to do for us
+ * ---------------------------------------------------------------- */
+
+check('quoted-printable: =XX back to the character it stands for',
+  decodeQuotedPrintable('Kan ek R600 =E2=82=AC betaal?').toString('utf8'),
+  'Kan ek R600 € betaal?')
+check('quoted-printable: a soft line break is not a line break',
+  decodeQuotedPrintable('my number is 083 555 =\r\n0199').toString('utf8'),
+  'my number is 083 555 0199')
+check('quoted-printable: a lone = that is not an escape survives',
+  decodeQuotedPrintable('total = R1 234').toString('utf8'), 'total = R1 234')
+check('base64 is decoded', decodeTransfer(Buffer.from('R29laWUgZGFn'), 'base64').toString('utf8'), 'Goeie dag')
+check('7bit is already the bytes', decodeTransfer(Buffer.from('Goeie dag'), '7bit').toString('utf8'), 'Goeie dag')
+
+// Still common in South African business mail, and reading it as UTF-8 mangles every apostrophe.
+check('windows-1252 is decoded as windows-1252',
+  toText(Buffer.from([0x64, 0x69, 0x65, 0x20, 0x66, 0x69, 0x72, 0x6d, 0x92, 0x73]), 'windows-1252'),
+  'die firm’s')
+/* THE WHOLE BAND, not one apostrophe: Node 22.22 decoded all of 0x80-0x9F as invisible control
+   characters. Euro, en dash, both double quotes and the trade mark, through a label that resolves to
+   windows-1252 (iso-8859-1 does, by the standard), and a hole in the table left alone. */
+check('...every character of its own band, through any label that means it',
+  toText(Buffer.from([0x80, 0x96, 0x93, 0x94, 0x99, 0x81]), 'iso-8859-1'),
+  '\u20ac\u2013\u201c\u201d\u2122\u0081')
+check('...and real Latin-1 letters are untouched', toText(Buffer.from([0xe9, 0xeb]), 'windows-1252'), 'éë')
+check('an unknown charset label falls back rather than throwing',
+  toText(Buffer.from('Goeie dag'), 'utf-8879'), 'Goeie dag')
+
+/* ---------------------------------------------------------------- *
+ * Putting the fetched parts back together
+ * ---------------------------------------------------------------- */
+
+// A one-pixel PNG, so the assembled data: URI is a real image a browser would render.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+const { parts: wanted } = readableParts(real)
+const fetched = {
+  bodyParts: new Map([
+    ['1.1.1', Buffer.from('Goeie dag. My nuwe nommer is 083 555 =\r\n0199.')],
+    ['1.1.2', Buffer.from('<p>Goeie dag.</p><a href=3D"tel:0835550199">x</a>')],
+    ['1.2', Buffer.from(PNG.toString('base64'))],
+  ]),
+}
+const body = assembleBody(wanted, fetched)
+
+check('the text is decoded and the soft break healed',
+  body.text, 'Goeie dag. My nuwe nommer is 083 555 0199.')
+check('the HTML is kept too, because that is where an image signature hides its tel: link',
+  body.html.includes('href="tel:0835550199"'), true)
+check('the signature comes back as a picture the browser can render without asking anyone',
+  body.images.map((i) => `${i.cid}|${i.dataUri.slice(0, 15)}`),
+  ['sig@bredellferreira.co.za|data:image/png;'])
+check('and it is byte-for-byte the image that was sent',
+  Buffer.from(body.images[0].dataUri.split(',')[1], 'base64').equals(PNG), true)
+
+const missingPicture = assembleBody(wanted, { bodyParts: new Map([['1.1.1', Buffer.from('Goeie dag.')]]) })
+check('a part the server never sent is skipped, not rendered as nothing',
+  missingPicture.text, 'Goeie dag.')
+check('and a picture that did not arrive is reported, not left as a silent gap',
+  missingPicture.imagesSkipped, 1)
+
+// Null is the signal to fall back to fetching the whole message, so it has to be null and not
+// an empty body — an empty body would render as a blank message the agent cannot explain.
+check('nothing usable means null, which is what makes the caller fall back',
+  assembleBody(wanted, { bodyParts: new Map() }), null)
+check('a failed fetch means null too', assembleBody(wanted, false), null)
+
+// One line break per block, which is what plainText has always done — the point here is that
+// HTML-only mail still arrives as words rather than as tags.
+check('HTML-only mail is reduced to something readable',
+  assembleBody(
+    readableParts(flattenParts(await structure(`(${HTML} "MIXED" ("BOUNDARY" "m") NIL NIL NIL)`))).parts,
+    { bodyParts: new Map([['1', Buffer.from('<p>Goeie dag</p><b>Groete</b><br>J M van Wyk')]]) },
+  ).text,
+  'Goeie dag\nGroete\nJ M van Wyk')
+
+/*
+ * A part the server decoded for us via FETCH BINARY. Decoding it a second time would turn a
+ * perfectly good message into rubbish, silently.
+ */
+check('a part that arrived already decoded is not decoded twice',
+  partContent(
+    { bodyParts: new Map([['1', Buffer.from('Goeie dag')]]), binaryParts: new Set(['1']) },
+    { part: '1', type: 'text/plain', encoding: 'base64', size: 9 },
+  ).toString('utf8'),
+  'Goeie dag')
+
+/* ---------------------------------------------------------------- *
+ * The slow fallback path has to reach the same answer
+ * ---------------------------------------------------------------- */
+
+check('mailparser\'s attachments give up the same signature',
+  inlineImagesFromParsed([
+    { contentType: 'image/png', cid: 'sig@bf', filename: 'sig.png', content: Buffer.alloc(9000, 1) },
+    { contentType: 'image/gif', cid: 'px@track', content: Buffer.alloc(60) },
+    { contentType: 'application/pdf', filename: 'mandate.pdf', contentDisposition: 'attachment', content: Buffer.alloc(9000) },
+  ]).images.map((i) => i.cid),
+  ['sig@bf'])
+
+check('and the slow path reports an oversized picture too',
+  inlineImagesFromParsed([
+    { contentType: 'image/jpeg', cid: 'huge@x', content: Buffer.alloc(4 * 1024 * 1024) },
+  ]).skippedImages,
+  1)
+
+check('no attachments is not an error', inlineImagesFromParsed(undefined).images, [])
+check('an empty message is not an error', plainText('', ''), '')
+
+// The log line that explains a missing signature without needing anyone to reproduce it. Types,
+// sizes and dispositions only — a filename or an address in a log is a debtor's data in a log.
+const described = describeParts(real)
+check('the diagnostic describes the shape', described.includes('1.2:image/png/base64/41000b/cid/inline'), true)
+check('and never carries a filename', /mandate\.pdf|sig\.png/.test(described), false)
+
+/* ---------- an attachment that arrived with no name ---------- */
+
+/*
+ * THE BUG THIS CLOSES. A calendar invite's .ics part carries no filename parameter, so the sync
+ * listed it by position as "attachment-1" -- and the download route looked for a part whose
+ * filename EQUALLED "attachment-1", in the structure walk and the mailparser fallback both.
+ * Nothing is ever called that. Every unnamed attachment was listed on the message and 404ed on
+ * every attempt to open it, for ever, silently.
+ *
+ * So the naming and the reading of it are one exported rule now, and these check they are inverse.
+ */
+check('a placeholder is a position, not a name', placeholderIndex('attachment-1'), 0)
+check('...counting from one on screen and from nought in the list', placeholderIndex('attachment-3'), 2)
+check('a real filename is not a position', placeholderIndex('meeting.ics'), null)
+/* A file genuinely CALLED "attachment-1.pdf" must not be read as a position. */
+check('...even one that starts like one', placeholderIndex('attachment-1.pdf'), null)
+check('nought is not a position, because the names start at one', placeholderIndex('attachment-0'), null)
+/* Round trip: what the sync writes is what the route reads back. */
+for (const i of [0, 1, 9]) {
+  check(`naming and reading position ${i} are inverse`, placeholderIndex(placeholderName(i)), i)
+}
+
+{
+  /*
+   * The filter has to be the same on both sides or the positions mean different things. A
+   * signature logo is `related` and a tracking pixel is an unnamed image; neither is a file
+   * somebody attached, and both shift every number after them if only one side drops them.
+   */
+  const attachments = [
+    { filename: 'invoice.pdf', contentType: 'application/pdf' },
+    { related: true, filename: 'logo.png', contentType: 'image/png' },
+    { contentType: 'image/gif' },
+    { contentType: 'text/calendar' },
+  ]
+  const listed = listedAttachments(attachments)
+  check('a signature logo is not an attachment', listed.some((a) => a.filename === 'logo.png'), false)
+  check('...nor is an unnamed image', listed.some((a) => a.contentType === 'image/gif'), false)
+  check('a real file is', listed[0].filename, 'invoice.pdf')
+  check('...and so is an unnamed calendar invite', listed[1].contentType, 'text/calendar')
+  /*
+   * AND THE POSITION SURVIVES THE FILTER. The invite is fourth in the message and second in the
+   * list; numbered before filtering it would be "attachment-4" and resolve to nothing.
+   */
+  const names = listed.map((a, i) => a.filename || placeholderName(i))
+  check('the invite is numbered by its place in the LIST, not the message', names[1], 'attachment-2')
+  check('...and reading that back finds it again',
+    listed[placeholderIndex(names[1])].contentType, 'text/calendar')
+}
+check('nothing in, nothing listed', listedAttachments(undefined).length, 0)
+
+/*
+ * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
+ * headline and is indistinguishable from a healthy one -- a review of this suite found
+ * eighteen files silent that way, about 800 assertion sites reported as nothing.
+ */
+/* ---- WHAT AN UNNAMED ATTACHMENT IS CALLED (the firm, 9 Oct: "it doesn't show me if it's a PDF
+   or an email or what type of file this is") ---- */
+const mail = (subject) => Buffer.from(`From: a@b.co\r\nSubject: ${subject}\r\nTo: c@d.co\r\n\r\nbody`)
+check('a real filename is kept exactly',
+  attachmentNamesOf([{ filename: 'Statement Sept.pdf', contentType: 'application/pdf' }]), ['Statement Sept.pdf'])
+check('an attached email is named by its own subject, as .eml',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: mail('RE: Payment arrangement RAP-124119') }]),
+  ['RE: Payment arrangement RAP-124119.eml'.replace(':', ' ').replace('  ', ' ')])
+check('...two with the same subject stay two names',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: mail('RE: payment') }, { contentType: 'message/rfc822', content: mail('RE: payment') }]),
+  ['RE payment.eml', 'RE payment (2).eml'])
+check('...an encoded subject is decoded',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: mail('=?utf-8?B?' + Buffer.from('Betaling – Oktober').toString('base64') + '?=') }]),
+  ['Betaling – Oktober.eml'])
+check('...a subject folded over two lines is one name',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: Buffer.from('Subject: Email\r\n trails\r\n\r\nx') }]), ['Email trails.eml'])
+check('...and one with no subject is still said to be an email',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: Buffer.from('From: a@b.co\r\n\r\nx') }]), ['attachment-1.eml'])
+check('anything else unnamed carries the extension of its type, at its position',
+  attachmentNamesOf([{ filename: 'a.docx' }, { contentType: 'application/pdf' }, { contentType: 'text/calendar; method=REQUEST' }, { contentType: 'application/x-unknown' }]),
+  ['a.docx', 'attachment-2.pdf', 'attachment-3.ics', 'attachment-4'])
+check('Q-encoded words decode too', decodeEncodedWords('=?iso-8859-1?Q?Caf=E9_bill?='), 'Café bill')
+const syncSrc = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url), 'utf8')
+check('the sync names them with the shared walk', /\(await attachmentTree\(attachments\)\)\.map\(\(n\) => n\.name\)/.test(syncSrc), true)
+check('...and the download finds them by the same walk', /const tree = await attachmentTree\(parsed\.attachments/.test(syncSrc), true)
+check('the cap is no longer ten', /const MAX_ATTACHMENT_NAMES = 60/.test(syncSrc), true)
+
+/* ---- AND WHAT IS INSIDE AN ATTACHED EMAIL (the firm, 9 Oct: Outlook showed 18, Raptor 8) ---- */
+{
+  const inner = [
+    'From: a@b.co', 'Subject: RE: Tender documents', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="in"', '', '--in', 'Content-Type: text/plain', '', 'see attached',
+    '--in', 'Content-Type: application/pdf; name="Cover page.pdf"', 'Content-Disposition: attachment; filename="Cover page.pdf"',
+    'Content-Transfer-Encoding: base64', '', Buffer.from('%PDF-1.4 cover').toString('base64'), '--in--', '',
+  ].join('\r\n')
+  const outer = [
+    'From: camille@x.co', 'Subject: Email trails', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="out"', '', '--out', 'Content-Type: text/plain', '', 'trails',
+    '--out', 'Content-Type: message/rfc822', 'Content-Disposition: attachment', '', inner,
+    '--out', 'Content-Type: application/pdf; name="Bid.pdf"', 'Content-Disposition: attachment; filename="Bid.pdf"',
+    'Content-Transfer-Encoding: base64', '', Buffer.from('%PDF bid').toString('base64'), '--out--', '',
+  ].join('\r\n')
+  const { simpleParser } = await import('mailparser')
+  const { attachmentTree } = await import('../../api/_lib/attachmentTree.ts')
+  const parsed = await simpleParser(Buffer.from(outer))
+  const tree = await attachmentTree(parsed.attachments)
+  check('the attached email, the file inside it, and the file beside it are all listed',
+    tree.map((n) => n.name), ['RE Tender documents.eml', 'RE Tender documents.eml › Cover page.pdf', 'Bid.pdf'])
+  check('...and the file inside is the real file', tree[1]?.att.content?.toString(), '%PDF-1.4 cover')
+}
+const { NESTED_SEPARATOR: apiSep } = await import('../../api/_lib/mime.ts')
+const { NESTED_SEPARATOR: appSep, attachmentParts, attachmentKind } = await import('../../src/lib/attachmentKind.ts')
+check('the server and the screen split a path at the same mark', appSep, apiSep)
+check('the chip shows the file and says where it sits',
+  attachmentParts('RE Tender documents.eml › Cover page.pdf'), { leaf: 'Cover page.pdf', inside: 'RE Tender documents.eml' })
+check('...and its kind is the file\'s, not the email\'s', attachmentKind('RE Tender documents.eml › Cover page.pdf'), 'PDF')
+
+if (failures === 0) console.log(`${passed} passed, 0 failed`)
+console.log(failures === 0
+  ? '\nPASS — a message is taken apart from its structure, only the readable parts are fetched,'
+    + ' both encodings are undone, and an image signature survives to the screen'
+  : `\nFAILED ${failures} check(s)`)
+process.exit(failures === 0 ? 0 : 1)

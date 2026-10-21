@@ -23,6 +23,24 @@ check('Easter 2024', easterSunday(2024), '2024-03-31')
 check('Easter 2025', easterSunday(2025), '2025-04-20')
 check('Easter 2026', easterSunday(2026), '2026-04-05')
 check('Easter 2027', easterSunday(2027), '2027-03-28')
+/*
+ * AND TWO THAT ACTUALLY DISCRIMINATE THE METONIC CONSTANT.
+ *
+ * The computus opens with `year % 19`. A review of this suite changed it to `% 38` and watched
+ * all four years above stay green, and recommended adding a year outside 2014-2032 -- where
+ * `% 19` and `% 38` agree -- on the reasoning that any year outside that range would catch it.
+ *
+ * THAT REASONING IS WRONG AND THE FIX WOULD NOT HAVE WORKED. Where the two differ, `a` moves by
+ * 19, so `19a` moves by 361 and `h` by 361 mod 30 = 1. But `l` is computed as `(... - h ...) % 7`,
+ * so h rising by one drops l by one -- and the date is built from `h + l`, which does not move at
+ * all. The formula absorbs its own error. 2033 was tried first here and stayed green.
+ *
+ * It only shows through when one of those two steps wraps its modulus, which across 2000-2099
+ * happens in seven years: 2000, 2008, 2012, 2038, 2042, 2076 and 2086. Two of them are pinned.
+ * 2038 is worth knowing for its own sake -- 25 April is the latest Easter can ever fall.
+ */
+check('Easter 2012, which the Metonic constant decides', easterSunday(2012), '2012-04-08')
+check('Easter 2038, the latest Easter can fall', easterSunday(2038), '2038-04-25')
 
 const h2026 = publicHolidays(2026)
 check('Good Friday 2026', h2026.get('2026-04-03'), 'Good Friday')
@@ -31,6 +49,59 @@ check('Freedom Day is fixed', h2026.get('2026-04-27'), 'Freedom Day')
 check('Heritage Day is fixed', h2026.get('2026-09-24'), 'Heritage Day')
 
 /* ---- the Sunday rule, and the fact that it does not cascade ---- */
+/*
+ * ---- EVERY HOLIDAY, NOT A HANDFUL ----
+ *
+ * The twelve dates of the Public Holidays Act 36 of 1994, pinned as a whole set for a year.
+ *
+ * WHY A WHOLE SET RATHER THAN MORE SPOT CHECKS. A review of this suite moved Christmas Day, Human
+ * Rights Day, Youth Day, Women's Day and the Day of Reconciliation to any date it liked with the
+ * suite green -- five of the twelve, unguarded, because the assertions here tested the Sunday
+ * rule and the Easter arithmetic and never the plain list they operate on. A working-day count is
+ * what a section 129's ten days and every diary date are measured in.
+ *
+ * NOTE FOR WHOEVER BREAKS THIS ON PURPOSE: moving Christmas to the 27th does NOT prove the check
+ * bites -- the 27th collides with the Goodwill-cascade assertion below and fails for the wrong
+ * reason. The review was caught by exactly that. Move it to the 23rd.
+ *
+ * TWO YEARS, because one cannot show both halves of the Sunday rule: 2026 has Women's Day on a
+ * Sunday and 2027 has two of them, one at either end of the year.
+ */
+check('every public holiday of 2026', [...publicHolidays(2026).entries()].sort(), [
+  ['2026-01-01', "New Year's Day"],
+  ['2026-03-21', 'Human Rights Day'],
+  ['2026-04-03', 'Good Friday'],
+  ['2026-04-06', 'Family Day'],
+  ['2026-04-27', 'Freedom Day'],
+  ['2026-05-01', "Workers' Day"],
+  ['2026-06-16', 'Youth Day'],
+  ['2026-08-09', "National Women's Day"],
+  /* The 9th was a Sunday, so the Monday is a holiday as well -- s2(1) of the Act. */
+  ['2026-08-10', "National Women's Day (observed)"],
+  ['2026-09-24', 'Heritage Day'],
+  ['2026-12-16', 'Day of Reconciliation'],
+  ['2026-12-25', 'Christmas Day'],
+  ['2026-12-26', 'Day of Goodwill'],
+])
+check('every public holiday of 2027', [...publicHolidays(2027).entries()].sort(), [
+  ['2027-01-01', "New Year's Day"],
+  ['2027-03-21', 'Human Rights Day'],
+  ['2027-03-22', 'Human Rights Day (observed)'],
+  ['2027-03-26', 'Good Friday'],
+  ['2027-03-29', 'Family Day'],
+  ['2027-04-27', 'Freedom Day'],
+  ['2027-05-01', "Workers' Day"],
+  ['2027-06-16', 'Youth Day'],
+  ['2027-08-09', "National Women's Day"],
+  ['2027-09-24', 'Heritage Day'],
+  ['2027-12-16', 'Day of Reconciliation'],
+  ['2027-12-25', 'Christmas Day'],
+  ['2027-12-26', 'Day of Goodwill'],
+  /* Boxing Day on a Sunday pushes Goodwill to the 27th -- the case the 2022 assertion below
+     proves does NOT happen when it is Christmas that falls on the Sunday. */
+  ['2027-12-27', 'Day of Goodwill (observed)'],
+])
+
 // 1 Jan 2023 was a Sunday, so the Monday was a public holiday.
 check('New Year 2023 moved to the Monday', publicHolidays(2023).get('2023-01-02'), "New Year's Day (observed)")
 // 25 Dec 2022 was a Sunday and 26 Dec was already the Day of Goodwill, so 27 Dec was NOT a
