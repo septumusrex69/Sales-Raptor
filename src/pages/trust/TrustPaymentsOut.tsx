@@ -7,9 +7,9 @@ import { Card } from '../../components/ui/Card'
 import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { fetchPaymentsOutList, fetchPaymentsOutPaid, markRefundPaid, setPaymentBanking } from '../../lib/bankAllocationApi'
-import { bankFileCsv, canPay, defaultTicked, fileTotal, keyOf, needsBanking, pendingWords, whatIsMissing, type OutgoingPayment } from '../../lib/bankFile'
+import { bankFileCsv, canPay, defaultTicked, fileTotal, fnbOwnAccount, keyOf, needsBanking, pendingWords, whatIsMissing, type OutgoingPayment } from '../../lib/bankFile'
 import { markRunPaid } from '../../lib/payover'
-import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
+import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, fetchTrustOwnAccount, type FirmTrustSplit } from '../../lib/trust'
 import { drawFromTrust } from '../../lib/businessApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
@@ -51,20 +51,23 @@ export function TrustPaymentsOut() {
   const [drawing, setDrawing] = useState(false)
   /* Payments out confirmed from the statement only (Trust settings): then there is no Mark paid. */
   const [statementOnly, setStatementOnly] = useState(false)
+  /* The trust account the bank file pays FROM (Firm settings); undefined while it is being read. */
+  const [own, setOwn] = useState<{ number: string | null; bank: string | null } | null | undefined>(undefined)
 
   const today = clockToday()
   const since = new Date(clockNowMs() - 90 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 
   const load = useCallback(async () => {
     try {
-      const [due, gone, pos, only] = await Promise.all([
+      const [due, gone, pos, only, trust] = await Promise.all([
         fetchPaymentsOutList(), fetchPaymentsOutPaid(since),
         /* The firm's share is shown to say what MAY be drawn -- only what its clients have been paid
            for (the firm, 10 Oct) -- and the list stands without it. */
         fetchFirmTrustSplit().catch(() => null),
         fetchPayoutsStatementOnly().catch(() => false),
+        fetchTrustOwnAccount().catch(() => null),
       ])
-      setRows(due); setPaid(gone); setFirm(pos); setStatementOnly(only)
+      setRows(due); setPaid(gone); setFirm(pos); setStatementOnly(only); setOwn(trust)
       /* Everything payable is ticked; a tick somebody took off stays off across a reload. */
       setTicked((t) => (t.size === 0 ? defaultTicked(due) : new Set([...t].filter((k) => due.some((d) => keyOf(d) === k && canPay(d))))))
     } catch (e: unknown) {
@@ -77,9 +80,13 @@ export function TrustPaymentsOut() {
     if (params.get('draw') === '1' && firm && firm.drawable > 0.004) { setDrawing(true); setParams({}, { replace: true }) }
   }, [params, firm, setParams])
 
+  /* FNB's file names the account it pays from; without a usable trust account number there is no file. */
+  const ownAccount = fnbOwnAccount(own?.number)
+
   function download() {
-    if (!rows) return
-    const csv = bankFileCsv(rows, ticked)
+    if (!rows || !ownAccount) return
+    /* Paid today: everything in the file is due, and FNB reads an action date it cannot parse as today anyway. */
+    const csv = bankFileCsv(rows, ticked, { ownAccount, actionDate: clockToday() })
     /* Saved, not drawn over the page, on an iPad too (fileSave.ts). */
     void saveFile(new Blob([csv], { type: 'text/csv' }), `trust-payments-${clockToday()}.csv`)
   }
@@ -156,13 +163,30 @@ export function TrustPaymentsOut() {
                   {pending.length > 0 && <> · <span className="text-amber-700">{pending.length} pending</span></>}
                 </div>
               </div>
-              <button type="button" onClick={download} disabled={inFile.length === 0} data-testid="download-bank-file"
+              <button type="button" onClick={download} disabled={inFile.length === 0 || !ownAccount} data-testid="download-bank-file"
                 className="inline-flex items-center gap-2 rounded-lg bg-navy-900 px-4 py-2 text-[13px] font-semibold text-white hover:bg-navy-800 disabled:opacity-40">
                 <Download size={15} /> Download bank file
               </button>
             </div>
-            <p className="mt-3 max-w-3xl text-[12.5px] leading-relaxed text-slate-500">
-              Upload it to the bank once and every payment goes on its BF reference. When the statement is imported each one
+            {/*
+              WHAT TO DO WITH IT, IN ONE LINE (FNB's guide, step 6), and which account it pays from --
+              read off the file's own row 3, so the screen cannot name one account and the file another.
+              "As downloaded" because opening it in Excel and saving it again strips the leading zero off
+              a branch code such as 051001.
+            */}
+            {ownAccount ? (
+              <p className="mt-3 max-w-3xl text-[12.5px] leading-relaxed text-slate-600" data-testid="bank-file-how">
+                In FNB: <span className="font-medium">Payments &rarr; Add (+) &rarr; Import</span>, and choose the file as downloaded.
+                It pays from the trust account{own?.bank ? `, ${own.bank}` : ''} <span className="font-medium tabular-nums">{ownAccount}</span>.
+              </p>
+            ) : own !== undefined && (
+              <p className="mt-3 max-w-3xl text-[12.5px] leading-relaxed text-amber-700" data-testid="bank-file-how">
+                The bank file needs the trust account it pays from: add its account number in{' '}
+                <Link to="/library/firm" className="font-medium underline">the firm&rsquo;s details</Link>.
+              </p>
+            )}
+            <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-slate-500">
+              Every payment goes on its BF reference. When the statement is imported each one
               matches itself and moves to Paid{statementOnly ? '' : ' (or mark one paid by hand)'}.
             </p>
           </Card>

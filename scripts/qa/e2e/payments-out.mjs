@@ -41,8 +41,11 @@ const POSITION = { trust_cash: 0, creditors: 0, debtors: 0, net_owed: 0, differe
   owed_to_debtors: 0, owed_to_firm: 24055.36, unidentified: 0, owed_by_clients: 0 }
 let sent = []
 let statementOnly = false
+/* The trust account the file pays FROM (row 3 of FNB's file). Invented; this repository is public. */
+let trust = { trust_account_number: '628 1234 5678', trust_bank: 'FNB' }
 const handlers = [
   [(u) => /\/rest\/v1\/firm_settings\?.*payouts_statement_only/.test(u), () => ({ body: { payouts_statement_only: statementOnly } })],
+  [(u) => /\/rest\/v1\/firm_settings\?.*trust_account_number/.test(u), () => ({ body: trust })],
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rpc\/payments_out_list/.test(u), () => ({ body: answer })],
   [(u) => /\/rpc\/payments_out_paid/.test(u), () => ({ body: PAID })],
@@ -90,9 +93,16 @@ try {
 
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.getByTestId('download-bank-file').click()])
   const csv = await (await import('node:fs/promises')).readFile(await dl.path(), 'utf8')
-  t.check('the bank file carries only what is ticked and payable, on its BF reference', JSON.stringify(csv.trim().split(/\r?\n/)),
-    JSON.stringify(['Beneficiary name,Bank,Branch code,Account number,Amount,Own reference,Beneficiary reference',
-      'Summit Fitness,FNB,250655,62000000001,8426.07,BF PO-SMT-2610,BF PO-SMT-2610']))
+  /* FNB's Payments CSV (Online Banking Enterprise import guide): name, action date, own account. */
+  const lines = csv.split('\r\n').filter((l) => l !== '').map((l) => l.split(','))
+  t.check('the bank file is FNB\'s: template name, today as CCYY/MM/DD, the TRUST account with no hash total, the headings',
+    JSON.stringify(lines.slice(0, 4).map((l) => l.slice(0, 2))),
+    JSON.stringify([['BInSol - U ver 1.00', ''], [/\d{4}\/\d{2}\/\d{2}/.exec(lines[1][0])?.[0] ?? 'no date', ''], ['62812345678', ''], ['RECIPIENT NAME', 'RECIPIENT ACCOUNT']]))
+  t.check('...and carries only what is ticked and payable, on its BF reference', JSON.stringify(lines.slice(4).map((l) => l.slice(0, 7))),
+    JSON.stringify([['Summit Fitness', '62000000001', '1', '250655', '8426.07', 'BF PO-SMT-2610', 'BF PO-SMT-2610']]))
+  t.ok('the screen says what to do with it in FNB, and which account it pays from',
+    /Payments → Add \(\+\) → Import/.test(await page.getByTestId('bank-file-how').innerText())
+    && /62812345678/.test(await page.getByTestId('bank-file-how').innerText()))
 
   /* ---- BANKING DETAILS WHERE THEY ARE MISSING ---- */
   await row('Sizwe Dlamini').getByTestId('add-banking').click()
@@ -148,6 +158,14 @@ try {
   t.ok('...each payable row says it is paid from the statement', (await page.getByText('Paid from the statement').count()) === 2)
   t.ok('...and recording the firm\'s transfer still works', await page.getByRole('button', { name: 'Record a transfer' }).isVisible())
   statementOnly = false
+
+  /* ---- NO TRUST ACCOUNT, NO FILE: FNB's row 3 is the account the batch pays from ---- */
+  trust = { trust_account_number: null, trust_bank: null }
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('bank-file-how').waitFor({ timeout: 15000 }).catch(() => {})
+  t.ok('without the trust account number the file is not offered, and the screen says where to add it',
+    await page.getByTestId('download-bank-file').isDisabled() && /add its account number/.test(await page.getByTestId('bank-file-how').innerText()))
+  trust = { trust_account_number: '628 1234 5678', trust_bank: 'FNB' }
 
   answer = []
   await page.reload({ waitUntil: 'domcontentloaded' })

@@ -77,6 +77,18 @@ export async function fetchPayoutsStatementOnly(): Promise<boolean> {
 }
 
 /**
+ * THE ACCOUNT THE BANK FILE PAYS FROM: the trust account in the firm's details (row 3 of FNB's file).
+ * Never the business account -- every payment in that file is client or debtor money leaving trust.
+ * Null when it is not set or could not be read; the screen then says so rather than offering a file.
+ */
+export async function fetchTrustOwnAccount(): Promise<{ number: string | null; bank: string | null } | null> {
+  const { data, error } = await supabase.from('firm_settings').select('trust_account_number, trust_bank').limit(1).maybeSingle()
+  if (error || !data) return null
+  const d = data as { trust_account_number?: string | null; trust_bank?: string | null }
+  return { number: d.trust_account_number?.trim() || null, bank: d.trust_bank?.trim() || null }
+}
+
+/**
  * WHERE THE BANK FIGURE STARTS (firm_settings.trust_opening_balance / trust_opening_date).
  *
  * trust_position's cash is the opening balance plus every trust statement line AFTER its date. With
