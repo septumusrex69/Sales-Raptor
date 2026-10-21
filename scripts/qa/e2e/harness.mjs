@@ -131,6 +131,16 @@ export async function stubSupabase(page, handlers, seen) {
     const url = req.url()
     seen?.push(`${req.method()} ${url.replace(/^https:\/\/[^/]+/, '')}`)
 
+    /*
+     * EVERY TEST'S BROWSER IS A KNOWN DEVICE unless the test says otherwise (S10), and that is
+     * answered BEFORE the test's own handlers: many files end in a catch-all `/rpc/` -> [] and the
+     * gate reads anything but a plain `true` as unknown, which hid the app from twenty files. A test
+     * that wants the code screen (e2e/device-code) names trusted_device_seen in its own handler.
+     */
+    if (url.includes('/rpc/trusted_device_seen')
+        && !handlers.some(([match]) => String(match).includes('trusted_device_seen'))) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: 'true' })
+    }
     for (const [match, respond] of handlers) {
       if (match(url, req)) {
         const r = await respond(url, req)
