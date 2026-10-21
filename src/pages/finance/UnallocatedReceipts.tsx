@@ -14,7 +14,8 @@ import {
   fetchUnallocatedReceipts, placeBankLine,
   fetchUnreconciledPayouts, reconcileBankDebit,
   fetchSuspendedPayments, releasePaymentFromSuspense, setPaymentAccount,
-  type UnallocatedReceipt, type UnreconciledPayout, type SuspendedPayment,
+  fetchSuspendedBankLines, suspendBankLine, releaseBankLineFromSuspense,
+  type UnallocatedReceipt, type UnreconciledPayout, type SuspendedPayment, type SuspendedBankLine,
 } from '../../lib/payover'
 
 /**
@@ -58,17 +59,23 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
    * look for it in suspense and allocate it later."
    */
   const [parked, setParked] = useState<SuspendedPayment[]>([])
+  /* BANK LINES SOMEBODY LOOKED FOR AND COULD NOT PLACE (S10, prompt 13 item 13), and the line being
+     moved there -- the note is asked for before it goes. */
+  const [suspended, setSuspended] = useState<SuspendedBankLine[]>([])
+  const [suspending, setSuspending] = useState<UnallocatedReceipt | null>(null)
   const [placingParked, setPlacingParked] = useState<SuspendedPayment | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [r, p, sp] = await Promise.all([
-        fetchUnallocatedReceipts(), fetchUnreconciledPayouts(), fetchSuspendedPayments(),
+      const [r, p, sp, sl] = await Promise.all([
+        fetchUnallocatedReceipts(), fetchUnreconciledPayouts(), fetchSuspendedPayments(), fetchSuspendedBankLines(),
       ])
-      setRows(r); setPayouts(p); setParked(sp)
-      /* BOTH HALVES OF SUSPENSE: receipts never attributed, and receipts parked off the queue. */
-      onTotals?.(r.length + sp.length, r.reduce((n, x) => n + x.amount, 0) + sp.reduce((n, x) => n + x.amount, 0))
+      setRows(r); setPayouts(p); setParked(sp); setSuspended(sl)
+      /* EVERY HALF OF SUSPENSE: receipts nobody has looked at, ones looked for and moved to suspense,
+         and receipts parked off the queue. All of it is money in trust that is nobody's yet. */
+      onTotals?.(r.length + sl.length + sp.length,
+        r.reduce((n, x) => n + x.amount, 0) + sl.reduce((n, x) => n + x.amount, 0) + sp.reduce((n, x) => n + x.amount, 0))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the unplaced receipts.')
     } finally { setLoading(false) }
@@ -201,6 +208,13 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                           text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
                         Split it
                       </button>
+                      {/* "I LOOKED AND COULD NOT PLACE IT" (S10, prompt 13 item 13): off this list,
+                          with the note, into In suspense below. */}
+                      <button type="button" onClick={() => setSuspending(r)} data-testid="move-to-suspense"
+                        className="text-xs font-medium px-2.5 py-1 rounded-md text-slate-400
+                          hover:text-slate-700 underline underline-offset-2">
+                        Move to suspense
+                      </button>
                     </span>
                     )}
                   </td>
@@ -210,6 +224,82 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
           </table>
         )}
       </Card>
+
+      {/* ---------------- bank lines somebody looked for and moved to suspense ---------------- */}
+      {/*
+        ITS OWN CARD, FOR THE SAME REASON THE PARKED RECEIPTS HAVE ONE: Needs an account is what
+        nobody has looked at yet; this is what somebody has, and their note is what the next person
+        reads before looking again. Placed or split from here exactly as from above.
+      */}
+      {suspended.length > 0 && (
+        <Card padded={false}>
+          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-5 py-4">
+            <div>
+              <h3 className="text-[16px] font-semibold text-slate-800">In suspense</h3>
+              <p className="text-[12.5px] text-slate-500">
+                Somebody looked for whose these are and could not place them. Still nobody&rsquo;s until placed.
+              </p>
+            </div>
+            <span className="text-[13px] font-semibold tabular-nums text-amber-700">
+              {rand(suspended.reduce((n, x) => n + x.amount, 0))}
+            </span>
+          </div>
+          <table className="w-full list-table whitespace-nowrap" data-testid="suspended-bank-lines">
+            <thead className="text-[11px] uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-slate-100">
+                <th className="px-4 py-2 text-left font-medium">Received</th>
+                <th className="px-3 py-2 text-right font-medium">Amount</th>
+                <th className="px-3 py-2 text-left font-medium">What the bank said</th>
+                <th className="px-3 py-2 text-left font-medium">What was tried</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {suspended.map((r) => (
+                <tr key={r.id} className="border-b border-slate-50">
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.txnDate)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
+                  <td className="px-3 py-2 text-slate-600"><span className="wrap-anywhere">{r.description}</span></td>
+                  <td className="px-3 py-2 text-slate-600">
+                    <span className="wrap-anywhere">{r.note}</span>
+                    <span className="block text-[11px] text-slate-400 mt-0.5">
+                      {r.suspendedByName ?? 'Somebody'}, {formatDate(r.suspendedAt)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <span className="inline-flex gap-1.5">
+                      <button type="button" onClick={() => setPlacing(r)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                        Place it
+                      </button>
+                      <button type="button" onClick={() => setSplitting(r)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                        Split it
+                      </button>
+                      <button type="button"
+                        onClick={async () => {
+                          try { await releaseBankLineFromSuspense(r.id); await load(); onPlaced() }
+                          catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+                        }}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md text-slate-400
+                          hover:text-slate-700 underline underline-offset-2">
+                        Back to Needs an account
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {suspending && (
+        <SuspendLineModal line={suspending} onClose={() => setSuspending(null)}
+          onDone={async () => { setSuspending(null); await load(); onPlaced() }} />
+      )}
 
       {/* ---------------- receipts somebody parked off the approval queue ---------------- */}
       {/*
@@ -520,6 +610,56 @@ function PlaceModal({ title, summary, onPlace, onClose, onDone }: {
             Cancel
           </button>
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * MOVE A BANK LINE TO SUSPENSE, WITH WHAT WAS TRIED (S10, prompt 13 item 13).
+ *
+ * The note is REQUIRED, here and in suspend_bank_line: the firm's own example is the sentence --
+ * "I looked for this payment and couldn't place it" -- and a receipt in suspense with no words is
+ * one the next person has to search for from the beginning.
+ */
+function SuspendLineModal({ line, onClose, onDone }: {
+  line: UnallocatedReceipt
+  onClose: () => void
+  onDone: () => void | Promise<void>
+}) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  async function go() {
+    if (!note.trim()) { setErr('Say what you looked for.'); return }
+    setBusy(true); setErr(null)
+    try { await suspendBankLine(line.id, note.trim()); await onDone() }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false) }
+  }
+  return (
+    <Modal title="Move this receipt to suspense" onClose={onClose} width={480}>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+        <p className="text-sm font-medium text-slate-800 tabular-nums">{rand(line.amount)} &middot; {formatDate(line.txnDate)}</p>
+        <p className="text-xs text-slate-500 mt-0.5 wrap-anywhere">{line.description}</p>
+      </div>
+      <label htmlFor="bank-line-suspense-note" className="block mt-3 text-sm font-medium text-slate-700">
+        What did you look for?
+      </label>
+      <textarea id="bank-line-suspense-note" className={`${inputClass} mt-1`} rows={3} value={note} autoFocus
+        data-testid="suspense-note"
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="I looked for this payment and couldn't place it: no Solomons in the book, nobody owes R500" />
+      <p className="text-[12px] text-slate-500 mt-1">
+        It stays unplaced money in the trust account, under In suspense, and can be placed from there.
+      </p>
+      {err && <p className="text-sm text-negative-700 mt-2">{err}</p>}
+      <div className="flex justify-end gap-2 mt-4">
+        <button type="button" onClick={onClose} disabled={busy}
+          className="text-sm px-3 py-2 rounded-lg text-slate-500 hover:bg-slate-100">Cancel</button>
+        <button type="button" onClick={() => void go()} disabled={busy || !note.trim()}
+          className="text-sm font-semibold px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 disabled:opacity-50">
+          {busy ? 'Moving\u2026' : 'Move to suspense'}
+        </button>
       </div>
     </Modal>
   )

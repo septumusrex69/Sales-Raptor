@@ -1662,6 +1662,48 @@ export async function suspendPayment(paymentId: string, reason: string): Promise
  * the account it belongs to IS taking it out of suspense, and a second button to say so is a
  * second chance to leave it there.
  */
+/* ---------------- suspense, the half that is a BANK LINE (S10, prompt 13 item 13) ---------------- */
+
+/**
+ * A receipt nobody could place, moved off Needs an account with what was tried. Still unallocated:
+ * suspense is the state of the search, not of the money. See suspend_bank_line in schema.sql.
+ */
+export interface SuspendedBankLine extends UnallocatedReceipt {
+  suspendedAt: string
+  suspendedByName: string | null
+  note: string
+}
+
+export async function fetchSuspendedBankLines(): Promise<SuspendedBankLine[]> {
+  const { data, error } = await supabase.rpc('suspended_bank_lines')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    txnDate: String(r.txn_date),
+    amount: Number(r.amount),
+    description: String(r.description),
+    reference: s(r.reference),
+    bankAccount: String(r.bank_account),
+    importedAt: String(r.imported_at),
+    hadReference: !!r.had_reference,
+    suspendedAt: String(r.suspended_at),
+    suspendedByName: s(r.suspended_by_name),
+    note: String(r.suspense_note ?? ''),
+  }))
+}
+
+/** The note is required by the function, not only by the box -- see suspend_bank_line. */
+export async function suspendBankLine(lineId: string, note: string): Promise<void> {
+  const { error } = await supabase.rpc('suspend_bank_line', { p_line: lineId, p_note: note })
+  if (error) throw new Error(error.message)
+}
+
+/** Back onto Needs an account, for one moved by mistake. */
+export async function releaseBankLineFromSuspense(lineId: string): Promise<void> {
+  const { error } = await supabase.rpc('release_bank_line_from_suspense', { p_line: lineId })
+  if (error) throw new Error(error.message)
+}
+
 export async function releasePaymentFromSuspense(paymentId: string): Promise<void> {
   const { error } = await supabase.rpc('release_payment_from_suspense', { p_payment: paymentId })
   if (error) throw new Error(error.message)

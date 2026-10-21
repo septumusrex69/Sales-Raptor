@@ -44533,3 +44533,111 @@ begin
   end if;
   return new;
 end $$;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 13: SUSPENSE FROM "NEEDS AN ACCOUNT".
+-- The firm: on the bank lines under Needs an account, "Move to suspense" with a required note ("I
+-- looked for this payment and couldn't place it"), allocatable out of suspense later. Suspense for a
+-- RECEIPT PARKED OFF THE QUEUE already exists (suspend_payment); this is the bank-line half. The line
+-- stays `unallocated` -- the money is exactly as unplaced as it was, so every trust total that counts
+-- unplaced money is unchanged -- and gains who, when and the note. Needs an account is then the list
+-- nobody has looked at yet; In suspense is the list somebody has, with what they tried. Placing or
+-- splitting it later is the same allocation as from Needs an account; the stamp stays as history.
+-- Same people as the queue (may_approve_payment). Business clock (raptor_now).
+-- ============================================================================================
+alter table public.bank_statement_lines
+  add column if not exists suspended_at timestamptz,
+  add column if not exists suspended_by uuid,
+  add column if not exists suspended_by_name text,
+  add column if not exists suspense_note text;
+
+comment on column public.bank_statement_lines.suspended_at is
+  'When somebody looked for whose this receipt is, could not place it, and moved it to suspense (S10). '
+  'It stays unallocated -- suspense is a state of the search, not of the money -- and keeps the stamp '
+  'once it is placed, as the record that it was.';
+
+create or replace function public.suspend_bank_line(p_line uuid, p_note text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+  v_line public.bank_statement_lines%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to move a receipt to suspense.' using errcode = '42501';
+  end if;
+  if v_note is null then
+    raise exception 'Say what you looked for before it goes to suspense.' using errcode = '22023';
+  end if;
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if not found then
+    raise exception 'That bank line no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_line.direction <> 'credit' or v_line.status <> 'unallocated' then
+    raise exception 'Only a receipt nobody has placed can go to suspense.' using errcode = '22023';
+  end if;
+  if v_line.suspended_at is not null then return; end if;
+  update public.bank_statement_lines
+     set suspended_at = public.raptor_now(), suspended_by = auth.uid(),
+         suspended_by_name = (select name from public.profiles where id = auth.uid()),
+         suspense_note = v_note
+   where id = p_line;
+end $$;
+
+create or replace function public.release_bank_line_from_suspense(p_line uuid)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to move a receipt out of suspense.' using errcode = '42501';
+  end if;
+  update public.bank_statement_lines
+     set suspended_at = null, suspended_by = null, suspended_by_name = null, suspense_note = null
+   where id = p_line and status = 'unallocated';
+end $$;
+
+create or replace function public.unallocated_receipts()
+returns table (
+  id uuid, txn_date date, amount numeric, description text,
+  reference text, bank_account text, imported_at timestamptz,
+  had_reference boolean
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description, l.reference, l.bank_account,
+         l.imported_at, l.reference is not null
+    from public.bank_statement_lines l
+   where public.current_user_role() = 'Administrator'
+     and l.status = 'unallocated'
+     and l.direction = 'credit'
+     and l.suspended_at is null
+   order by l.txn_date desc, l.amount desc
+$$;
+
+create or replace function public.suspended_bank_lines()
+returns table (
+  id uuid, txn_date date, amount numeric, description text,
+  reference text, bank_account text, imported_at timestamptz, had_reference boolean,
+  suspended_at timestamptz, suspended_by_name text, suspense_note text
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description, l.reference, l.bank_account,
+         l.imported_at, l.reference is not null, l.suspended_at, l.suspended_by_name, l.suspense_note
+    from public.bank_statement_lines l
+   where public.current_user_role() = 'Administrator'
+     and l.status = 'unallocated'
+     and l.direction = 'credit'
+     and l.suspended_at is not null
+   order by l.suspended_at desc
+$$;
+
+revoke all on function public.suspend_bank_line(uuid, text) from public, anon;
+revoke all on function public.release_bank_line_from_suspense(uuid) from public, anon;
+revoke all on function public.suspended_bank_lines() from public, anon;
+grant execute on function public.suspend_bank_line(uuid, text) to authenticated;
+grant execute on function public.release_bank_line_from_suspense(uuid) to authenticated;
+grant execute on function public.suspended_bank_lines() to authenticated;
