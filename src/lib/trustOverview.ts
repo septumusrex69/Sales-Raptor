@@ -23,6 +23,7 @@
  * Pure, so a check can hold it.
  */
 import type { TrustCashCycle } from './trust'
+import { holdingSentence, swordfishLeft, type SwordfishHolding } from './swordfishHolding.ts'
 
 export interface Holding {
   key: string
@@ -41,8 +42,24 @@ export function currentHoldings(input: {
   kept: number
   label: (c: TrustCashCycle) => string
   payDay: (iso: string) => string
+  /** Held for Swordfish payovers (S10). Its line is what is LEFT, so the lines still add up to accountedFromCash. */
+  swordfish?: SwordfishHolding | null
 }): Holding[] {
   const out: Holding[] = []
+  /*
+   * THE SWORDFISH BUCKET FIRST: the oldest money in the account, and its own line rather than part of
+   * any client's, because Swordfish cannot say whose it is. Drawn while anything is left -- what is left
+   * after the last Swordfish run is the one-off difference the firm has to decide about, so it stays in
+   * sight until they do.
+   */
+  const sf = input.swordfish
+  if (sf && swordfishLeft(sf) !== 0) {
+    out.push({
+      key: 'swordfish', who: 'Held for Swordfish payovers',
+      what: holdingSentence(sf, input.payDay),
+      amount: swordfishLeft(sf), to: '/trust/settings',
+    })
+  }
   for (const c of input.cash) {
     if (r2(c.forClients) === 0) continue
     out.push({

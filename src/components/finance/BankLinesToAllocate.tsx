@@ -12,8 +12,12 @@ import {
   type AllocationKind, type Candidate, type StatementLine,
 } from '../../lib/bankLineAllocation'
 import {
-  allocateBankLine, fetchAllocationCandidates, fetchLinesToAllocate, matchPayoversByReference,
+  allocateBankLine, allocateSwordfishLine, fetchAllocationCandidates, fetchLinesToAllocate, matchPayoversByReference,
 } from '../../lib/bankAllocationApi'
+import { fetchSwordfishHolding } from '../../lib/trust'
+import {
+  SWORDFISH_KIND_LABEL, SWORDFISH_KIND_NOTE, mayTakeOff, type SwordfishHolding, type SwordfishKind,
+} from '../../lib/swordfishHolding'
 
 /**
  * EVERY LINE ON THE TRUST STATEMENT THAT IS NOT YET ACCOUNTED FOR (prompt 12).
@@ -40,14 +44,17 @@ export function BankLinesToAllocate() {
   const [error, setError] = useState<string | null>(null)
   const [matching, setMatching] = useState(false)
   const [matchNote, setMatchNote] = useState<string | null>(null)
+  const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      const [l, c, firm] = await Promise.all([
+      const [l, c, firm, sf] = await Promise.all([
         fetchLinesToAllocate(), fetchAllocationCandidates(), fetchFirmSettings().catch(() => null),
+        /* Unread, the two Swordfish choices are simply not offered; nothing else depends on it. */
+        fetchSwordfishHolding().catch(() => null),
       ])
-      setLines(l); setCandidates(c); setBusiness(firm?.businessAccountNumber ?? null)
+      setLines(l); setCandidates(c); setBusiness(firm?.businessAccountNumber ?? null); setSwordfish(sf)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read the statement.')
       setLines([])
@@ -113,31 +120,51 @@ export function BankLinesToAllocate() {
       {error && <p className="px-4 py-3 text-sm text-negative-700">{error}</p>}
       <div className="divide-y divide-slate-100">
         {lines.map((l) => (
-          <LineRow key={l.id} line={l} candidates={candidates} business={business} onDone={load} />
+          <LineRow key={l.id} line={l} candidates={candidates} business={business} swordfish={swordfish} onDone={load} />
         ))}
       </div>
     </Card>
   )
 }
 
-function LineRow({ line, candidates, business, onDone }: {
-  line: StatementLine; candidates: Candidate[]; business: string | null; onDone: () => void
+/*
+ * HELD FOR SWORDFISH PAYOVERS (S10): two more answers for a debit, offered only where the holding can
+ * take it -- after the trust opening and no more than is left (mayTakeOff, the database's own three
+ * refusals asked first). Not allocation kinds: allocate_swordfish_line closes the line as 'other' with
+ * no ledger entry, because the money leaves the bucket, not anybody's ledger. Like every allocation it
+ * cannot be taken back from here (protect_bank_statement_line), so the note says so before the press.
+ */
+type SwordfishChoice = 'sf_payover' | 'sf_drawing'
+const SF_KIND: Record<SwordfishChoice, SwordfishKind> = { sf_payover: 'payover', sf_drawing: 'drawing' }
+
+function LineRow({ line, candidates, business, swordfish, onDone }: {
+  line: StatementLine; candidates: Candidate[]; business: string | null; swordfish: SwordfishHolding | null; onDone: () => void
 }) {
   const suggestion = useMemo(() => suggestAllocation(line, candidates, business), [line, candidates, business])
   /* 'returned' is not an allocation kind in the database: it is a receipt coming back unpaid, done by
      return_bounced_receipt (prompt 12). Chosen for the line when the bank's own words say so. */
-  const [kind, setKind] = useState<AllocationKind | 'returned' | ''>(
+  const [kind, setKind] = useState<AllocationKind | 'returned' | SwordfishChoice | ''>(
     lineNature(line.description, line.direction) === 'returned_debit' ? 'returned' : suggestion?.kind ?? '')
   const [target, setTarget] = useState<string>(suggestion?.targetId ?? '')
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const realKind = kind === 'returned' ? '' : kind
+  const sfKind = kind === 'sf_payover' || kind === 'sf_drawing' ? SF_KIND[kind] : null
+  const offerSwordfish = mayTakeOff(line, swordfish)
+  const realKind: AllocationKind | '' = kind === 'returned' || kind === 'sf_payover' || kind === 'sf_drawing' ? '' : kind
   const options = realKind ? candidatesFor(line, realKind, candidates) : []
-  const ready = !!realKind && (!needsTarget(realKind) || !!target) && (!needsReason(realKind) || reason.trim().length > 0)
+  const ready = !!sfKind
+    || (!!realKind && (!needsTarget(realKind) || !!target) && (!needsReason(realKind) || reason.trim().length > 0))
 
   async function go() {
+    if (sfKind) {
+      setBusy(true); setError(null)
+      try { await allocateSwordfishLine(line.id, sfKind, reason.trim() || null); onDone() }
+      catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+      finally { setBusy(false) }
+      return
+    }
     if (!realKind) return
     setBusy(true); setError(null)
     try { await allocateBankLine(line.id, realKind, reason.trim() || null, target || null); onDone() }
@@ -162,12 +189,18 @@ function LineRow({ line, candidates, business, onDone }: {
 
       <div className="flex flex-wrap items-center gap-2">
         <select aria-label="What this line was" value={kind}
-          onChange={(e) => { const k = e.target.value as AllocationKind | 'returned' | ''; setKind(k); setTarget(k && k === suggestion?.kind ? suggestion.targetId ?? '' : '') }}
+          onChange={(e) => { const k = e.target.value as AllocationKind | 'returned' | SwordfishChoice | ''; setKind(k); setTarget(k && k === suggestion?.kind ? suggestion.targetId ?? '' : '') }}
           className="text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
           <option value="">{line.direction === 'credit' ? 'Not a debtor’s payment? Choose…' : 'Choose what it was…'}</option>
           {kindsFor(line.direction).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
           {line.direction === 'debit' && <option value="returned">Returned / unpaid receipt</option>}
+          {offerSwordfish && <option value="sf_payover">{SWORDFISH_KIND_LABEL.payover}</option>}
+          {offerSwordfish && <option value="sf_drawing">{SWORDFISH_KIND_LABEL.drawing}</option>}
         </select>
+        {sfKind && (
+          <input className={`${controlClass} w-64`} value={reason} onChange={(e) => setReason(e.target.value)}
+            aria-label="Note" placeholder="Which run, or a note (optional)" data-testid="swordfish-note" />
+        )}
         {kind === 'returned' && <ReturnedReceiptPicker lineId={line.id} onDone={onDone} />}
         {realKind && needsTarget(realKind) && (
           <select aria-label="Which one it settles" value={target} onChange={(e) => setTarget(e.target.value)}
@@ -191,7 +224,7 @@ function LineRow({ line, candidates, business, onDone }: {
           className="px-3 py-1.5 rounded-lg text-sm font-medium bg-navy-950 text-white disabled:opacity-50 inline-flex items-center gap-1.5">
           {busy && <Loader2 size={13} className="animate-spin" />}
           {/* Says what it will do: a new drawing is a record of the firm's money leaving, not a tick. */}
-          {realKind === 'business_transfer' && !target ? 'Record it as BF’s drawing' : 'Allocate'}
+          {sfKind ? 'Take off the Swordfish holding' : realKind === 'business_transfer' && !target ? 'Record it as BF’s drawing' : 'Allocate'}
         </button>}
         {/* PLACE IT ON AN ACCOUNT -- the way back for a receipt rejected off a closed file (prompt
             11). Placed on SBB/2006 and approved, it is held whole as the debtor's credit and refunded
@@ -206,6 +239,11 @@ function LineRow({ line, candidates, business, onDone }: {
         )}
       </div>
       {realKind && <p className="text-[11px] text-slate-400">{KIND_NOTE[realKind]}</p>}
+      {sfKind && swordfish && (
+        <p className="text-[11px] text-slate-400" data-testid="swordfish-left">
+          {SWORDFISH_KIND_NOTE[sfKind]} {rand(swordfish.left)} is left; after this, {rand(swordfish.left - Math.abs(line.amount))}. It cannot be undone from here.
+        </p>
+      )}
       {kind === 'returned' && (
         <p className="text-[11px] text-slate-400">A debtor&rsquo;s payment the bank took back. The receipt is reversed (no receipt fee, the capital goes back on the account) and both statement lines close against each other.</p>
       )}

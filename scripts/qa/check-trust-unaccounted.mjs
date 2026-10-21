@@ -84,7 +84,7 @@ check('of two debits of the amount, the one quoting the reference is the pair', 
 
 const ov = readFileSync(new URL('../../src/pages/trust/TrustOverview.tsx', import.meta.url), 'utf8')
 check('the overview\'s figure opens the list', /to="\/trust\/unaccounted" data-testid="open-unaccounted"/.test(ov), true)
-check('...and reads accounted for from the same function', /const accounted = accountedFromCash\(cash\)/.test(ov), true)
+check('...and reads accounted for from the same function', /const accounted = accountedFromCash\(cash(, swordfishLeft\(swordfish\))?\)/.test(ov), true)
 check('...and no longer calls marked-paid money "in the bank, not yet in the books"', /'In the bank, not yet in the books'/.test(ov), false)
 const app = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8')
 check('the list has its address under Trust', /path="unaccounted" element=\{<TrustUnaccounted \/>\}/.test(app), true)

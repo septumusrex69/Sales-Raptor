@@ -174,7 +174,15 @@ export function unaccountedItems(input: {
  * firm's interest and charges, plus the debtors' -- trust_cash_by_cycle, PTCs left out (they never
  * came in). The overview and this list both take it from here, so the two cannot disagree about
  * the figure the list is meant to add up to.
+ *
+ * PLUS WHAT IS LEFT HELD FOR SWORDFISH PAYOVERS (S10, swordfishHolding.ts). That money is on no
+ * ledger -- Swordfish cannot say whose it is -- so the cycles cannot see it; it is still owned, by the
+ * payovers Swordfish has yet to make, and trust_position's owed_out counts it the same way. Without
+ * it here the overview and Not accounted for would read the bucket as money nobody owns.
  */
-export function accountedFromCash(cash: Pick<TrustCashCycle, 'forClients' | 'forFirm' | 'firmOther' | 'forDebtors'>[]): number {
-  return r2(cash.reduce((t, c) => t + c.forClients + c.forFirm + c.firmOther + c.forDebtors, 0))
+export function accountedFromCash(
+  cash: Pick<TrustCashCycle, 'forClients' | 'forFirm' | 'firmOther' | 'forDebtors'>[],
+  swordfishLeft = 0,
+): number {
+  return r2(cash.reduce((t, c) => t + c.forClients + c.forFirm + c.firmOther + c.forDebtors, 0) + swordfishLeft)
 }

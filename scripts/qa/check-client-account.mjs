@@ -366,8 +366,9 @@ ok('trust cash is read off the bank statement, from the opening balance on',
   /(from|left join) public\.bank_statement_lines l/.test(cashCte) && /trust_opening_balance/.test(cashCte))
 ok('...on the trust account, not any account',
   /l\.bank_account = f\.trust_account_number/.test(cashCte))
+/* S10: owed_out now also carries what is left Held for Swordfish payovers (s.bal). */
 ok('...and the difference is named rather than hidden',
-  /c\.bal - \(\(h\.owed_out \+ u\.bal\) - h\.owed_in\)/.test(position ?? ''))
+  /c\.bal - \(\(h\.owed_out \+ u\.bal( \+ s\.bal)?\) - h\.owed_in\)/.test(position ?? ''))
 
 /*
  * AND THE TWO SIDES ARE REPORTED APART. Summing a receivable into a smaller payable hides it, and

@@ -9,7 +9,9 @@ import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { SplitReceiptModal } from './SplitReceiptModal'
 import { lineNature } from '../../lib/bankLineAllocation.ts'
 import { ReturnedReceiptPicker } from '../../components/finance/ReturnedReceiptPicker'
-import { allocateBankLine } from '../../lib/bankAllocationApi'
+import { allocateBankLine, allocateSwordfishLine } from '../../lib/bankAllocationApi'
+import { fetchSwordfishHolding } from '../../lib/trust'
+import { SWORDFISH_KIND_LABEL, mayTakeOff, type SwordfishHolding, type SwordfishKind } from '../../lib/swordfishHolding'
 import {
   fetchUnallocatedReceipts, placeBankLine,
   fetchUnreconciledPayouts, reconcileBankDebit,
@@ -64,6 +66,8 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   const [suspended, setSuspended] = useState<SuspendedBankLine[]>([])
   const [suspending, setSuspending] = useState<UnallocatedReceipt | null>(null)
   const [placingParked, setPlacingParked] = useState<SuspendedPayment | null>(null)
+  /* Held for Swordfish payovers (S10): which payments out may come off it, asked of the same rule the database refuses on. */
+  const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -72,6 +76,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
         fetchUnallocatedReceipts(), fetchUnreconciledPayouts(), fetchSuspendedPayments(), fetchSuspendedBankLines(),
       ])
       setRows(r); setPayouts(p); setParked(sp); setSuspended(sl)
+      setSwordfish(await fetchSwordfishHolding().catch(() => null))
       /* EVERY HALF OF SUSPENSE: receipts nobody has looked at, ones looked for and moved to suspense,
          and receipts parked off the queue. All of it is money in trust that is nobody's yet. */
       onTotals?.(r.length + sl.length + sp.length,
@@ -105,6 +110,21 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
       await load(); onPlaced()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That line could not be booked.')
+    } finally { setTying(null) }
+  }
+
+  /*
+   * OFF THE SWORDFISH HOLDING IN ONE PRESS (S10): Swordfish paying a client, or a Swordfish-era drawing,
+   * from the money it received before the cut-over. No ledger entry -- the money leaves the bucket, not
+   * anybody's ledger -- and, like every allocation, it stays said.
+   */
+  async function swordfishOff(lineId: string, kind: SwordfishKind) {
+    setTying(lineId); setError(null)
+    try {
+      await allocateSwordfishLine(lineId, kind, null)
+      await load(); onPlaced()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That line could not be taken off the Swordfish holding.')
     } finally { setTying(null) }
   }
 
@@ -426,9 +446,21 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                          close against each other. */
                       <span data-testid="returned-debit"><ReturnedReceiptPicker lineId={p.id} compact onDone={() => { void load(); onPlaced() }} /></span>
                     ) : (
-                      <Link to="/trust/exceptions" className="text-xs font-medium text-gold-700 hover:text-gold-800">
-                        Allocate it on Exceptions
-                      </Link>
+                      <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                        {mayTakeOff({ direction: 'debit', txnDate: p.txnDate, amount: p.amount }, swordfish)
+                          && (['payover', 'drawing'] as SwordfishKind[]).map((k) => (
+                          <button key={k} type="button" disabled={tying === p.id} onClick={() => void swordfishOff(p.id, k)}
+                            data-testid={`swordfish-${k}`}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md
+                              border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
+                            {tying === p.id ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            {SWORDFISH_KIND_LABEL[k]}
+                          </button>
+                        ))}
+                        <Link to="/trust/exceptions" className="text-xs font-medium text-gold-700 hover:text-gold-800">
+                          Allocate it on Exceptions
+                        </Link>
+                      </span>
                     )}
                   </td>
                 </tr>

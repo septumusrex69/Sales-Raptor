@@ -304,10 +304,11 @@ for (const line of ['Total accounted for', 'Total not accounted for', 'label="In
  * 10 Oct), so it is no longer in the sum. A client in debit is subtracted once.
  */
 /* Since 10 Oct: the money in the bank with an owner -- each cycle's clients and firm, the firm's
-   interest and charges, the debtors -- read from trust_cash_by_cycle; no PTC, no unplaced receipts. */
+   interest and charges, the debtors -- read from trust_cash_by_cycle; no PTC, no unplaced receipts.
+   S10: plus what is left Held for Swordfish payovers (swordfishHolding.ts). */
 ok('accounted for is summed from the bank money by cycle, without the unplaced receipts',
-  (/const accounted = accountedFromCash\(cash\)/.test(page)
-    && /return r2\(cash\.reduce\(\(t, c\) => t \+ c\.forClients \+ c\.forFirm \+ c\.firmOther \+ c\.forDebtors, 0\)\)/.test(
+  (/const accounted = accountedFromCash\(cash(, swordfishLeft\(swordfish\))?\)/.test(page)
+    && /return r2\(cash\.reduce\(\(t, c\) => t \+ c\.forClients \+ c\.forFirm \+ c\.firmOther \+ c\.forDebtors, 0\)( \+ swordfishLeft)?\)/.test(
       readFileSync(new URL('../../src/lib/trustUnaccounted.ts', import.meta.url), 'utf8')))
   && !/const accounted = [^\n]*unidentified/.test(page))
 ok('...and what is not accounted for is the BANK less that sum, through trustHeadline',

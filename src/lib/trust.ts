@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import type { TrustCycle } from './trustCycles.ts'
 import { toFirmHeld, type FirmHeld } from './firmHeld.ts'
+import { toSwordfishHolding, type SwordfishHolding } from './swordfishHolding.ts'
 
 export type { TrustCycle } from './trustCycles.ts'
 
@@ -107,6 +108,23 @@ export async function fetchTrustOpening(): Promise<TrustOpening> {
  */
 export async function setTrustOpening(amount: number, asAt: string, reason: string): Promise<void> {
   const { error } = await supabase.rpc('set_trust_opening_balance', { p_amount: amount, p_as_at: asAt, p_reason: reason })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * HELD FOR SWORDFISH PAYOVERS (S10, swordfishHolding.ts). Null where nothing is held -- or where the
+ * function refused, which is a where clause as trust_position's is; either way there is no line to draw.
+ */
+export async function fetchSwordfishHolding(): Promise<SwordfishHolding | null> {
+  const { data, error } = await supabase.rpc('swordfish_holding_position')
+  if (error) throw new Error(error.message)
+  const row = (data as Record<string, unknown>[] | null)?.[0]
+  return row ? toSwordfishHolding(row) : null
+}
+
+/** Set it, with where the figure comes from. Administrator with the trust tick, refused in the database. */
+export async function setSwordfishHolding(amount: number, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('set_swordfish_holding', { p_amount: amount, p_reason: reason })
   if (error) throw new Error(error.message)
 }
 

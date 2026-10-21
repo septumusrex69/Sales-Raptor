@@ -4,7 +4,8 @@ import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
-import { fetchTrustAwaiting, fetchTrustCashByCycle, fetchTrustOpening, fetchTrustPosition } from '../../lib/trust'
+import { fetchSwordfishHolding, fetchTrustAwaiting, fetchTrustCashByCycle, fetchTrustOpening, fetchTrustPosition } from '../../lib/trust'
+import { swordfishLeft } from '../../lib/swordfishHolding'
 import { fetchLinesToAllocate, fetchPaymentsOutPaid } from '../../lib/bankAllocationApi'
 import { firmDay } from '../../lib/dateLabels'
 import {
@@ -32,12 +33,14 @@ export function TrustUnaccounted() {
          its age; confirmed ones are not wanted here at all. */
       fetchPaymentsOutPaid('2000-01-01'),
       fetchTrustAwaiting().catch(() => null), fetchTrustOpening().catch(() => null),
+      /* Held for Swordfish payovers (S10): owned, so accounted for -- the overview adds it the same way. */
+      fetchSwordfishHolding(),
     ])
-      .then(([position, cash, lines, paidOut, awaiting, opening]) => {
+      .then(([position, cash, lines, paidOut, awaiting, opening, swordfish]) => {
         if (!live) return
         /* No row is "not yours to see", never an empty account (as on the overview). */
         if (!position) { setAllowed(false); return }
-        const accounted = accountedFromCash(cash)
+        const accounted = accountedFromCash(cash, swordfishLeft(swordfish))
         const notAccounted = Math.round((position.trustCash - accounted) * 100) / 100
         setData({
           inTrust: position.trustCash, accounted,
