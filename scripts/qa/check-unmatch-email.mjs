@@ -49,4 +49,4 @@ if (failures.length) {
   console.error(`check-unmatch-email: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)
   process.exit(1)
 }
-console.log(`check-unmatch-email: all ${pass} passed`)
+console.log(`check-unmatch-email: ${pass} passed, 0 failed`)

@@ -959,11 +959,16 @@ export function EscalateModal({
               have expected a free second escalation and charged the debtor R25.
               check-dispute-stage holds this sentence against DAILY_LIMIT, so raising the limit
               fails there rather than leaving the screen quietly wrong again.
+
+              NO LONGER MENTIONS A PERUSAL. The one a day used to be shared with the perusal of
+              documents, so "if something has already been perused here today" was true. The firm
+              removed the perusal fee (S10, 21 Oct) and disputes kept the one a day under their own
+              `dispute` code, so the only thing that can make this free is an earlier dispute.
             */}
             <span className="block text-[11px] text-slate-500 mt-0.5">
               Annexure B item 3, &ldquo;other necessary expenses not specifically provided for&rdquo;.
-              R25 excluding VAT each time the work is done, but only once a day on an account &mdash;
-              so if something has already been perused here today, this charges nothing.
+              R25 excluding VAT each time, but only once a day on an account &mdash;
+              so if a dispute has already been charged on this account today, this charges nothing.
               {assigned
                 ? ' Ticked because somebody is being put to work on this dispute.'
                 : ' Unticked because it is unassigned — nobody is spending time on it yet.'}

@@ -74,4 +74,4 @@ if (failures.length) {
   console.error(`check-client-terms: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)
   process.exit(1)
 }
-console.log(`check-client-terms: all ${pass} passed`)
+console.log(`check-client-terms: ${pass} passed, 0 failed`)

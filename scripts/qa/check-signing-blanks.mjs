@@ -362,11 +362,13 @@ ok('...before storage is asked for a file that is not there yet',
    request somebody can read, and "could not open that document" on an agreement that plainly
    exists is the worse answer. */
 ok('...and a copy that will not draw still opens as the page it was signed on',
-  /url: signingPath\(token\),/.test(store))
-/* THE PERUSAL FEE IS RAISED EITHER WAY: item 6 is for reading a document on the account, and where
-   it is kept is not the debtor's business. */
-const opens = (store.match(/charge: await chargePerusal\(/g) ?? [])
-check('both ways out of openDocument raise the perusal fee', opens.length, 2)
+  /url: signingPath\(token\)/.test(store))
+/* AND NEITHER WAY OUT CHARGES. Both used to raise the perusal of documents fee; the firm removed
+   it (S10, 21 Oct: "Remove the perusal of documents fee completely"). check-perusal holds that
+   across the whole source; this keeps the opener from growing one back. Comments stripped. */
+const opener = store.slice(store.indexOf('export async function openDocument('))
+  .split('\nexport ')[0].replace(/\/\*[\s\S]*?\*\//g, '')
+check('neither way out of openDocument raises a fee', (opener.match(/\bcharge\w*\(/g) ?? []).length, 0)
 
 /*
  * AND THE UPDATE THAT REPOINTS THE ROW IS THE ONLY ONE THIS TABLE ALLOWS.

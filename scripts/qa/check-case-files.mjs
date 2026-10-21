@@ -11,9 +11,9 @@
  *
  * WHAT IS GUARDED HERE:
  *
- *   - THEY GO THROUGH uploadDocument, not a second upload path. The storage path, the row, the
- *     orphan cleanup and the perusal fee all live there, and a file arriving this way has to be
- *     the same kind of thing as one uploaded on the account page.
+ *   - THEY GO THROUGH uploadDocument, not a second upload path. The storage path, the row and the
+ *     orphan cleanup all live there, and a file arriving this way has to be the same kind of thing
+ *     as one uploaded on the account page. (It charges nothing: the perusal fee went in S10.)
  *   - AFTER THE ACCOUNT EXISTS, because they are filed against its id.
  *   - AND A FAILURE IS SAID. The account IS open; this cannot undo that and must not pretend to.
  *
@@ -72,9 +72,9 @@ ok('...with nothing uploading from the box itself', !/uploadDocument/.test(modal
 /* ---------------- and the page files them ---------------- */
 
 /*
- * THROUGH THE ONE UPLOAD PATH. uploadDocument is where the storage path, the row, the cleanup of
- * an orphaned file when the row fails, and the perusal fee all live. A second path here would be a
- * second place that decides what a document is and what it costs.
+ * THROUGH THE ONE UPLOAD PATH. uploadDocument is where the storage path, the row and the cleanup
+ * of an orphaned file when the row fails all live. A second path here would be a second place that
+ * decides what a document is -- and, if a fee ever came back, what it costs.
  */
 ok('the case files go through the one upload path', /await uploadDocument\(\{/.test(page))
 ok('...onto the account that was just opened', /accountId: account\.id,\s*\n\s*file,/.test(page))

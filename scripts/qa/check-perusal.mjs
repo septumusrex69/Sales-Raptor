@@ -1,34 +1,39 @@
 /**
- * A PERUSAL OF DOCUMENTS, ONCE A DAY.
+ * NO PERUSAL OF DOCUMENTS FEE. IT WAS REMOVED, AND THIS HOLDS THE REMOVAL.
  *
- * THE FIRM: "we should add a fee perusal of documents. This is any time anybody saves a document
- * or opens a document, but limited to one a day. So one charge a day. Can't be more than one
- * perusal of documents in a day. This includes a trace and everything else."
+ * THE FIRM (S10, 21 Oct, prompt 13 item 11): "Remove the perusal of documents fee completely: no
+ * new charges, the setting and code gone, and existing perusal fees removed too (not credited)."
  *
- * A NARROWING, NOT A NEW FEE, AND THAT IS WHY IT IS SAFE TO BUILD WITHOUT ASKING. `perusal` has
- * been Annexure B item 3 since the import, with four schedules of rates and its mapping recorded
- * with the evidence in actionTariff.ts, and raising a dispute has charged exactly that pair all
- * along. What it never had was a limit: the gazette words item 3 as "a total amount of R25,00" for
- * the whole account, the firm instructed on 9 September that it is charged per occurrence instead
- * (ENFORCE_ITEM_TOTALS), and that left nothing between a collector and a fee every time they
- * opened a PDF. One a day is the boundary put back where the firm wants it.
+ * What it used to be: Annexure B item 3, once a day per account, raised whenever a document on a
+ * debtor's account was saved, opened or downloaded, or a trace report read (`chargePerusal`, with a
+ * `chargePerusalFee` opt-out on uploads and `DAILY_LIMIT.perusal = 1`). The existing fee rows are
+ * removed in SQL, separately; this file is about the code never raising another.
  *
  * WHAT IS GUARDED HERE:
  *
- *   - THE LIMIT IS ON THE ACTION, NOT THE ITEM, which is what makes "and everything else" true: a
- *     document opened, one saved, a trace report read and a dispute handed to a liaison are all
- *     `perusal` and share the day.
- *   - IT IS ENFORCED IN THE ENGINE. A cap at the call site is a cap the next call site forgets.
- *   - ONLY CHARGES THAT EARNED SOMETHING COUNT AGAINST IT, exactly as the monthly allowance works.
- *   - THE FEE NEVER BLOCKS THE WORK. A document has to save and a document has to open.
- *   - AND THE CHARGE COMES AFTER, so nobody pays for a file that never landed.
+ *   - THE CODE IS GONE, not switched off. No `chargePerusal`, `PERUSAL_DESCRIPTION`,
+ *     `PERUSAL_ITEM_ID` or `chargePerusalFee` anywhere in src/ or api/, and nothing there raises a
+ *     fee under `actionCode: 'perusal'`. Searched with COMMENTS STRIPPED, so the notes explaining
+ *     why it went cannot fail this, and a comment cannot hide a live call either.
+ *   - SAVING, OPENING AND READING CHARGE NOTHING. uploadDocument, openDocument and traceReportUrl
+ *     call no charge at all, and the documents panel shows no "charged" line.
+ *   - THE SETTING IS GONE. DAILY_LIMIT is exactly { dispute: 1 }.
+ *   - DISPUTES ARE NOT A PERUSAL AND ARE STILL CHARGED. They used to be raised under `perusal`
+ *     and shared its one a day; they now have their own `dispute` code with the same one a day, so
+ *     dispute billing is unchanged. Exercised against the engine, not just read.
+ *   - IMPORTED HISTORY STILL READS. The `perusal` code, its label, its four schedules of rates and
+ *     the legacy-name mapping stay, because Swordfish's imported history carries them and
+ *     CLAUDE.md says imported history is frozen at what was imported.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-perusal.mjs
  */
-import { readFileSync } from 'node:fs'
-import { DAILY_LIMIT, TARIFF_HISTORY } from '../../src/lib/actionTariff.ts'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  ACTION_BY_CODE, DAILY_LIMIT, TARIFF_HISTORY, codeForLegacyName,
+} from '../../src/lib/actionTariff.ts'
 import { chargeItemWith, chargeMessage } from '../../src/lib/chargeEngine.ts'
-import { ANNEXURE_B_2026 } from '../../src/lib/annexureB.ts'
 
 let pass = 0
 const failures = []
@@ -39,57 +44,91 @@ const check = (name, actual, expected) => {
 }
 const ok = (name, actual) => check(name, actual, true)
 
-const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
-const charges = read('src/lib/accountCharges.ts')
-const workspace = read('src/lib/accountWorkspace.ts')
-const traceData = read('src/lib/traceStoreData.ts')
-const panels = read('src/pages/accounts/AccountWorkspacePanels.tsx')
-const engine = read('src/lib/chargeEngine.ts')
+const root = fileURLToPath(new URL('../../', import.meta.url))
+const read = (p) => readFileSync(join(root, p), 'utf8')
+/* Block comments (which covers JSX `{/* *\/}`) and line comments. The `[^:]` keeps a URL's `//`. */
+const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1')
 
-/* ---------------- the rule ---------------- */
+/* EVERY SOURCE FILE THE APP AND THE API ARE BUILT FROM, not a list of the ones that used to call
+   it -- the regression this guards is somebody adding a perusal back in a file nobody listed. */
+const walk = (dir) => readdirSync(join(root, dir)).flatMap((name) => {
+  const p = join(dir, name)
+  if (name === 'node_modules' || name.startsWith('.')) return []
+  if (statSync(join(root, p)).isDirectory()) return walk(p)
+  return /\.(ts|tsx|js|mjs|cjs)$/.test(name) ? [p] : []
+})
+const sources = [...walk('src'), ...walk('api')].map((p) => ({ path: relative(root, join(root, p)), code: strip(read(p)) }))
+ok(`the search found the source (${sources.length} files)`, sources.length > 50)
 
-check('a perusal may be charged once a day', DAILY_LIMIT.perusal, 1)
+/* ---------------- the code is gone ---------------- */
+
+for (const name of ['chargePerusal', 'PERUSAL_DESCRIPTION', 'PERUSAL_ITEM_ID', 'chargePerusalFee']) {
+  const hits = sources.filter((f) => new RegExp(`\\b${name}\\b`).test(f.code)).map((f) => f.path)
+  check(`nothing in src/ or api/ mentions ${name} outside a comment`, hits, [])
+}
+/* AND NOTHING RAISES ONE BY HAND. A chargeItem written out at some call site with the old code is
+   the same fee by another road; reading `action_code` = 'perusal' (imported history) is fine. */
+const raisers = sources.filter((f) => /actionCode\s*:\s*['"`]perusal['"`]/.test(f.code)
+  || /action_code\s*:\s*['"`]perusal['"`]/.test(f.code)).map((f) => f.path)
+check('nothing in src/ or api/ raises a fee under the perusal code', raisers, [])
+
+/* ---------------- saving, opening and reading charge nothing ---------------- */
+
+const fnBody = (src, sig) => {
+  const at = src.indexOf(sig)
+  if (at < 0) return null
+  const next = src.indexOf('\nexport ', at + sig.length)
+  return src.slice(at, next < 0 ? undefined : next)
+}
+const workspace = strip(read('src/lib/accountWorkspace.ts'))
+const traceData = strip(read('src/lib/traceStoreData.ts'))
+const panels = strip(read('src/pages/accounts/AccountWorkspacePanels.tsx'))
+/* Each body asserted to EXIST before it is searched, or renaming the function would leave the
+   search reading nothing and passing. */
+for (const [label, src, sig] of [
+  ['saving a document', workspace, 'export async function uploadDocument('],
+  ['opening a document', workspace, 'export async function openDocument('],
+  ['reading a trace report', traceData, 'export async function traceReportUrl('],
+]) {
+  const body = fnBody(src, sig)
+  ok(`${label} is still there to check`, body !== null)
+  ok(`${label} charges nothing`, body !== null && !/\bcharge[A-Z]\w*\(|chargeItem/.test(body))
+  ok(`...and hands back no charge`, body !== null && !/ChargeResult|\bcharge\s*:/.test(body))
+}
+ok('the workspace no longer reaches for the fee code at all', !/accountCharges/.test(workspace))
+ok('...nor does reading a trace', !/accountCharges/.test(traceData))
+ok('the documents panel shows no "charged" line', !/setCharged|chargeMessage/.test(panels))
+
+/* ---------------- the setting is gone ---------------- */
+
 /*
- * AND NOTHING ELSE HAS ONE. Every other action the firm charges happens as often as the work
- * happens -- a call is a call -- and a daily cap quietly added to one of them would be the firm
- * under-recovering with nobody able to see why.
+ * EXACTLY ONE DAILY LIMIT, AND IT IS THE DISPUTE'S. `perusal: 1` left in place would be a setting
+ * for a fee that does not exist -- "the setting and code gone" -- and any other entry would be a
+ * daily cap quietly added to work the firm charges as often as it happens.
  */
-check('...and it is the only action with a daily limit', Object.keys(DAILY_LIMIT), ['perusal'])
-/* ITEM 3, WHICH IS NOT A GUESS: the mapping and its evidence predate this by months. */
-check('a perusal is item 3', /export const PERUSAL_ITEM_ID = '3'/.test(charges), true)
-ok('...which the gazette calls an expense not otherwise provided for',
-  /not specifically provided for/.test(ANNEXURE_B_2026.items.find((i) => i.id === '3').description))
-/* THE FIRM'S OWN WORDS ON THE STATEMENT, and one description so three call sites cannot write
-   three. */
-ok('...described to the debtor in the firm’s words',
-  /export const PERUSAL_DESCRIPTION = 'Perusal of documents'/.test(charges))
-/* AND PRICED ON EVERY SCHEDULE, because a fee is priced on the day of the ACTION -- a perusal
-   re-read today that happened in 2019 is still a 2019 fee. */
-check('the firm has always charged a perusal at its schedule’s rate',
-  TARIFF_HISTORY.map((t) => t.rates.perusal), [25, 21, 20, 18])
+check('DAILY_LIMIT is exactly { dispute: 1 }', DAILY_LIMIT, { dispute: 1 })
 
-/* ---------------- the engine enforces it ---------------- */
+/* ---------------- disputes are still charged, once a day ---------------- */
+
+const disputeRaise = /itemId:\s*'3',\s*actionCode:\s*'dispute',\s*description:\s*'ONE'/
+ok('raising a dispute charges item 3 under `dispute` (accountQueries.ts)',
+  disputeRaise.test(strip(read('src/lib/accountQueries.ts'))))
+ok('...and the same from a ticket raised off an email (api ticket.ts)',
+  disputeRaise.test(strip(read('api/_lib/email/ticket.ts'))))
+ok('the dispute code has a label', ACTION_BY_CODE.dispute?.label === 'Dispute (other necessary expenses)')
+/* NO RATES OF ITS OWN: the price comes from the item via chargeItem, not the action rates, and an
+   entry here would be a second figure for the same R25 that could drift. */
+ok('...and no action rates of its own', TARIFF_HISTORY.every((t) => t.rates.dispute === undefined))
 
 /*
- * A FAKE DATABASE, so the rule is exercised rather than read. It answers the basis RPC, the
- * account's status, and counts the fees already raised -- which is the only thing the daily cap
- * turns on.
- */
-/*
- * A FAKE DATABASE, so the rule is exercised rather than read.
+ * A FAKE DATABASE, so the dispute's one a day is exercised rather than read.
  *
  * CHAINABLE AND TOLERANT, which is not laziness: a fake that only answers the exact chain the code
- * writes today crashes with a TypeError the moment somebody removes a filter -- which is CLAUDE.md's
- * own second trap, an exception two lines below the check that should have REPORTED the change. It
- * records every filter instead, so "the day is counted on the action code" is a thing this file can
- * assert about behaviour rather than about the text of the source.
+ * writes today crashes with a TypeError the moment somebody removes a filter -- CLAUDE.md's own
+ * second trap. It records every filter instead.
  */
 const db = (billedToday) => {
   const inserted = []
-  /* ONE RECORD PER QUERY, NOT ONE FLAT LIST OF FILTERS. The engine reads account_fees TWICE -- once
-     for the item's monthly allowance and once for the day -- and both narrow by account, so a flat
-     list cannot say which of them carried what and every assertion below would pass on the wrong
-     one. */
   const queries = []
   const chain = (result, table) => {
     const q = { table, eq: [] }
@@ -119,141 +158,50 @@ const db = (billedToday) => {
     },
   }
 }
-const perusal = (billedToday) => {
+const dispute = (billedToday) => {
   const d = db(billedToday)
   return chargeItemWith(d, {
-    accountId: 'a', itemId: '3', actionCode: 'perusal', description: 'Perusal of documents',
+    accountId: 'a', itemId: '3', actionCode: 'dispute', description: 'ONE',
   }).then((r) => ({ result: r, rows: d.inserted, queries: d.queries }))
 }
 
-const first = await perusal(0)
-check('the first perusal of the day is charged', first.result.reason, 'charged')
-check('...at the current schedule’s rate', first.result.exclVat, 25)
-const second = await perusal(1)
-check('the second is not', second.result.reason, 'daily-limit')
+const first = await dispute(0)
+check('the first dispute of the day is charged', first.result.reason, 'charged')
+check('...at R25, as before', first.result.exclVat, 25)
+const second = await dispute(1)
+check('a second the same day is not', second.result.reason, 'daily-limit')
 check('...and earns nothing', second.result.exclVat, 0)
-/*
- * BUT IT IS STILL WRITTEN DOWN. The work happened; it simply earned nothing. Exactly what a
- * refused monthly allowance does, and what keeps "how many documents were opened on this account"
- * answerable from the ledger.
- */
-check('...while the action is still recorded', second.rows.length, 1)
+check('...while it is still recorded', second.rows.length, 1)
 check('...as an unbilled row', second.rows[0]?.billed, false)
-/* AND THE SENTENCE SAYS WHOSE RULE IT IS. This is the firm's, not the gazette's, so it does not
-   read like a statutory cap the debtor could look up. */
 ok('the refusal says it can be charged again tomorrow',
   /already been charged once today/.test(chargeMessage(second.result, '3'))
   && /again tomorrow/.test(chargeMessage(second.result, '3')))
-
-/*
- * COUNTED ON THE ACTION CODE, NOT THE ITEM, which is the whole of "this includes a trace and
- * everything else". Asserted as source, because the fake above cannot tell which column was
- * filtered on.
- */
-/* THE QUERY THAT COUNTS THE DAY, picked out by the column that makes it the day's rather than the
-   item's -- and its existence asserted before anything is read off it, or removing the count
-   entirely would leave every assertion below reading an empty list and passing. */
+/* COUNTED ON THE DISPUTE CODE, so a PTC confirmation or a deeds search -- item 3 as well -- cannot
+   use up a dispute's day, and a dispute cannot use up theirs. The query is asserted to exist
+   before anything is read off it. */
 const dayQueries = second.queries.filter((q) => q.table === 'account_fees'
   && q.eq.some(([c]) => c === 'action_code'))
 check('one query counts the day', dayQueries.length, 1)
 const asked = (dayQueries[0]?.eq ?? []).map(([c, v]) => `${c}=${v}`)
-ok(`the day is counted on the action (${asked.join(', ')})`,
-  asked.includes('action_code=perusal'))
-/* AND NOT ON THE ITEM. Counted there, a dispute handed to a liaison and a document opened would
-   still share the day -- but so would anything else the firm ever prices under item 3, and the
-   limit would drift away from the action the firm actually named. */
+ok(`the day is counted on the dispute code (${asked.join(', ')})`, asked.includes('action_code=dispute'))
 ok('...rather than on the Annexure B item', !asked.includes('annexure_item=3'))
-/* ONLY CHARGES THAT EARNED SOMETHING, as the monthly allowance works: a perusal recorded at nought
-   took nothing from the debtor and cannot be the reason the next one goes unrecovered. */
-ok('...and only the ones that earned something', asked.includes('billed=true'))
-/*
- * PER ACCOUNT PER DAY, which is the firm's answer when asked which it was: "one charge per account
- * per day". The debtor pays it, so the day belongs to the FILE.
- */
-ok('...on this account', asked.includes('account_id=a'))
-/*
- * AND NOT PER PERSON. `created_by` is written on every fee row, so counting the day there was one
- * filter away -- and a collector, their team leader and the client liaison all reading the same
- * trace report on the same afternoon would then be three charges for one set of documents, which is
- * the firm billing a debtor for its own internal handover.
- */
-ok('...and not once for each person who reads it',
+ok('...only the ones that earned something', asked.includes('billed=true'))
+ok('...per account (the firm: "one charge per account per day")', asked.includes('account_id=a'))
+ok('...and not per person',
   !asked.some((f) => f.startsWith('created_by=') || f.startsWith('raised_by=') || f.startsWith('user_id=')))
-const dayBlock = engine.slice(engine.indexOf('const perDay = DAILY_LIMIT'))
-/* THE DAY IS THE PERSON'S OWN, built from the same clock the rest of the app calls today rather
-   than from a timezone written out here. */
-ok('...over the person’s own day', /dayStart\.setHours\(0, 0, 0, 0\)/.test(dayBlock))
 
-/* ---------------- and the three places that raise it ---------------- */
+/* ---------------- imported history still reads ---------------- */
 
-ok('there is one function for it', /export async function chargePerusal\(/.test(charges))
 /*
- * NEVER THROWS. A document has to save and a document has to open; a fee that will not write is
- * something to report afterwards, not a reason to refuse somebody the file they asked for.
+ * THE `perusal` CODE STAYS, FOR SWORDFISH'S HISTORY ONLY. Imported fee rows carry it, and a code
+ * removed from the union and the tariff would leave those rows unlabelled and unpriceable -- which
+ * is rewriting history CLAUDE.md says is frozen.
  */
-const fn = charges.slice(charges.indexOf('export async function chargePerusal('))
-ok('...which cannot stop the work', /catch \(e\) \{[\s\S]{0,200}?return null/.test(fn))
-/* THE CAP IS NOT IN IT. A limit enforced at the call site is a limit the next call site forgets. */
-ok('...and does not enforce the cap itself', !/DAILY_LIMIT/.test(fn))
-
-/* SAVING ONE. */
-const upload = workspace.slice(workspace.indexOf('export async function uploadDocument('))
-ok('saving a document raises it', /chargePerusal\(\{ accountId: input\.accountId/.test(upload))
-/* AFTER THE ROW LANDS: a document that would not save has not been perused, and charging first is
-   how a debtor pays for a file nobody has. */
-const atInsert = upload.indexOf("from('account_documents')")
-const atCharge = upload.indexOf('chargePerusal(')
-ok('...after it has actually saved', atInsert > 0 && atCharge > atInsert)
-ok('...and hands the charge back to be shown', /charge: ChargeResult \| null/.test(upload))
-
-/* OPENING ONE. */
-ok('opening a document raises it', /export async function openDocument\(/.test(workspace))
-const open = workspace.slice(workspace.indexOf('export async function openDocument('))
-/*
- * THE URL FIRST, for the same reason: a document that cannot be opened has not been perused.
- *
- * MEASURED INSIDE THE FILE BRANCH, which is the only one that can fail. A signed document is not
- * in the bucket -- it IS the signing request, and the row points at it -- so its address is built
- * rather than fetched and there is nothing to go wrong before the fee. Measured across the whole
- * function, that branch's charge sits above `documentUrl` and this read as a regression on code
- * that is right.
- */
-const fileBranch = open.slice(open.indexOf('const url = await documentUrl('))
-const atUrl = fileBranch.indexOf('await documentUrl(')
-const atOpenCharge = fileBranch.indexOf('chargePerusal(')
-ok('...after the address is signed', atUrl >= 0 && atOpenCharge > atUrl)
-/*
- * AND THE SIGNED ONE IS CHARGED TOO, ON BOTH OF ITS ROADS.
- *
- * Item 6 is for reading a document on the account; where it is kept is not the debtor's business,
- * and a fee that depends on storage is a fee nobody can explain.
- *
- * A SIGNED DOCUMENT NOW HAS TWO WAYS OUT of this function and the regression is forgetting one of
- * them. The firm's instruction -- "it should save a PDF" -- means the first open DRAWS it and
- * repoints the row, after which it is an ordinary file and falls through to the branch above. The
- * other way is the fallback: a request that will not draw still opens as the signing page, because
- * "could not open that document" on an agreement that plainly exists is the worse answer. Both
- * charge, so neither is a free read.
- */
-ok('...a signed copy that will not draw still opens, and is still perused',
-  /url: signingPath\(token\),[\s\S]{0,400}?charge: await chargePerusal\(/.test(open))
-ok('...and the drawn one falls through to the file branch, which charges',
-  /path = filed/.test(open)
-  && /const url = await documentUrl\(path, doc\.name, \{ inline: opts\.inline \}\)[\s\S]{0,120}chargePerusal\(/.test(open))
-/* AND THE DRAWING HAPPENS BEFORE EITHER FEE. A PDF that failed to draw has not been perused --
-   the same rule as the signed address above, applied to the thing that replaced it. */
-const atFile = open.indexOf('fileSignedCopy(')
-ok('...with the PDF drawn before anything is charged',
-  atFile >= 0 && atFile < open.indexOf('chargePerusal('))
-/* Open (inline, a tab) and Download (the file) both go through it, 19 Oct: both are reading it. */
-ok('the documents panel opens through it', /await openDocument\(doc, userId, \{ inline \}\)/.test(panels))
-/* AND SAYS WHAT IT EARNED, where it earned anything -- and only then: "no charge, already charged
-   today" on every document anybody opens is a line people stop reading. */
-ok('...and says what was charged', /charge\.reason === 'charged' \? chargeMessage\(charge, PERUSAL_ITEM_ID\)/.test(panels))
-
-/* AND A TRACE, WHICH THE FIRM NAMED. */
-ok('reading a trace report raises it', /if \(accountId\) await chargePerusal\(\{ accountId \}\)/.test(traceData))
-ok('...on the account the trace is of', /traceReportUrl\(trace\.documentId!?, trace\.accountId/.test(read('src/pages/accounts/TraceWorkspaceModal.tsx')))
+ok('the perusal code still exists for imported history', ACTION_BY_CODE.perusal?.label === 'Perusal of Documents')
+check('...priced on every schedule exactly as before',
+  TARIFF_HISTORY.map((t) => t.rates.perusal), [25, 21, 20, 18])
+check('...and imported names still map to it', codeForLegacyName('Perusal of documents'), 'perusal')
+check('...including the evidenced "Necessary Costs"', codeForLegacyName('Necessary Costs'), 'perusal')
 
 console.log(`\ncheck-perusal: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

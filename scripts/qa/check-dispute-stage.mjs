@@ -436,14 +436,26 @@ ok('...and it is the one the Escalate button opens', /onRaise=\{\(\) => setDispu
 check('item 3 is charged per occurrence, not as a total', ENFORCE_ITEM_TOTALS, false)
 ok('...so the box no longer calls it a total for the account',
   !/total for the account/.test(modal))
-ok('...and says it is charged each time', /each time the work is done/.test(modal))
+ok('...and says it is charged each time', /R25 excluding VAT each time,/.test(modal))
 /*
  * WHAT STOPS A SECOND ONE IS THE FIRM'S DAILY LIMIT, a different rule with a different answer.
  * HELD AGAINST THE NUMBER ITSELF: raising the limit without rewriting this sentence fails here
  * rather than leaving the screen quietly wrong for another year.
  */
-check('a perusal may be charged once a day', DAILY_LIMIT.perusal, 1)
+check('a dispute may be charged once a day', DAILY_LIMIT.dispute, 1)
 ok('...which is what the box tells the collector', /only once a day on an account/.test(modal))
+/*
+ * AND IT IS AN EARLIER DISPUTE THAT MAKES IT FREE, NOT A PERUSAL. The one a day used to be shared
+ * with the perusal of documents, and the box said "if something has already been perused here
+ * today". The firm removed the perusal fee (S10, 21 Oct); disputes kept the one a day under their
+ * own code, so a sentence still promising a free dispute after a perusal would be promising
+ * something that cannot happen.
+ */
+ok('...and names an earlier dispute as the thing that makes it free',
+  /if a dispute has already been charged on this account today, this charges nothing/.test(modal))
+/* Comments stripped: the note beside the sentence quotes the old wording to say why it went. */
+ok('...and no longer talks about a perusal',
+  !/perus/i.test(modal.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')))
 
 console.log(`\ncheck-dispute-stage: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

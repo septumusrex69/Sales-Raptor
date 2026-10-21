@@ -102,7 +102,7 @@ ok('...and reads both sides of the dispute', !/\.(eq|neq|or|not)\([^)]*correspon
 /* CLAUDE.md: a column in the select and the type but not the mapper reads as undefined for ever. */
 ok('the column reaches the screen through the mapper',
   /correspondent: r\.correspondent === 'client' \? 'client' : 'debtor'/.test(lib))
-ok('...and both lists select it', (lib.match(/occurred_at, query_id, correspondent'/g) ?? []).length === 2)
+ok('...and both lists select it', (lib.match(/received_by, occurred_at, query_id, correspondent[,']/g) ?? []).length === 2)
 
 /* ---------- 4. the Messages menu ---------- */
 

@@ -28,7 +28,21 @@ export type ActionCode =
   | 'email_in'
   | 'letter'
   | 'consultation'
+  /*
+   * THE PERUSAL OF DOCUMENTS, WHICH RAPTOR NO LONGER RAISES. The firm (S10, 21 Oct): "Remove the
+   * perusal of documents fee completely". The code stays only because Swordfish's imported history
+   * carries it, and imported history is frozen at what was imported -- removing it would leave
+   * those rows unreadable and unpriceable. Nothing in src/ or api/ charges under it any more;
+   * check-perusal holds that.
+   */
   | 'perusal'
+  /*
+   * A DISPUTE HANDED TO A LIAISON, item 3 at R25. It used to be raised under `perusal`, which is how
+   * it came to share the perusal's one-a-day allowance. A dispute is not a perusal, and when the
+   * firm removed the perusal fee (S10) disputes had to keep being charged, so they have their own
+   * code now -- and their own one-a-day, see DAILY_LIMIT.
+   */
+  | 'dispute'
   | 'acknowledgement_of_debt'
   /* S9: a document the debtor signed or accepted online -- the payment arrangement. Item 4(b). */
   | 'document_signed'
@@ -49,9 +63,10 @@ export type ActionCode =
    * confirmation, read it, and satisfy itself the money is real before it touches a balance.
    * Item 3 is "other necessary expenses not specifically provided for", and that is what this is.
    *
-   * ITS OWN CODE RATHER THAN `perusal`, because the two are limited differently. A perusal is
-   * capped per period however many documents are read; a PTC confirmation is one verification of
-   * one payment, and two PTCs in a month are two pieces of work.
+   * ITS OWN CODE RATHER THAN `perusal` (and now rather than `dispute`), because they are limited
+   * differently. The perusal was capped at one a day however many documents were read, and a
+   * dispute still is; a PTC confirmation is one verification of one payment, and two PTCs in a
+   * month are two pieces of work.
    */
   | 'ptc_confirmation'
 
@@ -77,7 +92,9 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   { code: 'email_in', label: 'Email (Incoming)' },
   { code: 'letter', label: 'Letter' },
   { code: 'consultation', label: 'Consultation' },
+  /* Imported history only -- Raptor raises no perusal since S10. See the union above. */
   { code: 'perusal', label: 'Perusal of Documents' },
+  { code: 'dispute', label: 'Dispute (other necessary expenses)' },
   { code: 'acknowledgement_of_debt', label: 'Acknowledgement of Debt' },
   { code: 'document_signed', label: 'Document Signed' },
   { code: 'promise_to_pay', label: 'Promise to Pay' },
@@ -143,36 +160,28 @@ export interface TariffSchedule {
 /**
  * HOW OFTEN AN ACTION MAY BE CHARGED IN ONE DAY, or absent where nothing limits it.
  *
- * ONE ENTRY, AND IT IS THE FIRM'S OWN RULE: "we should add a fee perusal of documents. This is any
- * time anybody saves a document or opens a document, but limited to one a day. So one charge a
- * day. Can't be more than one perusal of documents in a day. This includes a trace and everything
- * else."
+ * ONE ENTRY: A DISPUTE, ONCE A DAY ON AN ACCOUNT. This was the perusal's limit. The firm's rule had
+ * been "one charge a day. Can't be more than one perusal of documents in a day. This includes a
+ * trace and everything else", and raising a dispute was charged under `perusal`, so a dispute
+ * shared that one-a-day. The firm then removed the perusal fee entirely (S10, 21 Oct: "no new
+ * charges, the setting and code gone"). Disputes are NOT a perusal and are still charged, so they
+ * moved to their own `dispute` code -- and keeping ONE A DAY for it preserves today's dispute
+ * billing exactly: a second dispute on the same account on the same day was free before and is
+ * free now. Dropping the limit would have been a quiet price rise nobody asked for.
  *
- * A NARROWING, NOT A NEW FEE. `perusal` has been item 3 with four schedules of rates since the
- * import, and raising a dispute has charged it all along. What it never had was a limit -- item 3
- * is gazetted as "a total amount of R25,00" for the whole account and the firm instructed on 9
- * September that it is charged per occurrence instead (ENFORCE_ITEM_TOTALS), which left nothing at
- * all between a collector and a fee every time they opened a PDF. One a day is the firm putting
- * that boundary back where they want it.
+ * `perusal` IS NOT HERE ANY MORE because nothing raises it. Leaving its entry would be a setting
+ * for a fee that does not exist -- "the setting and code gone".
  *
- * COUNTED ON THE ACTION, NOT ON THE ITEM, and that is the whole of "this includes a trace and
- * everything else": a document opened, a document saved, a trace report read and a dispute handed
- * to a liaison are one kind of work to the gazette and one kind of work to the firm, so they share
- * the day's allowance rather than each having their own.
- *
- * PER ACCOUNT, NOT PER PERSON -- the firm, asked directly which it was: "one charge per account per
- * day". It is the DEBTOR who pays it, so the day belongs to the file rather than to whoever opened
- * it. A collector, their team leader and the client liaison all reading the same trace report on
- * the same afternoon read ONE set of documents; three charges for it would be the firm billing a
- * debtor for its own internal handover. `created_by` sits on every fee row, so counting the day
- * there was one filter away, and it would have read "one each".
+ * PER ACCOUNT, NOT PER PERSON -- the firm, asked directly (of the perusal) which it was: "one
+ * charge per account per day". It is the DEBTOR who pays, so the day belongs to the file rather
+ * than to whoever raised it. `created_by` sits on every fee row, so counting the day there was one
+ * filter away, and it would have read "one each".
  *
  * PER CALENDAR DAY IN THE FIRM'S OWN TIMEZONE. An action at one in the morning in Johannesburg is
- * eleven the previous night in UTC, and a day boundary read in the wrong zone is a second charge
- * on a debtor who was only ever perused once.
+ * eleven the previous night in UTC, and a day boundary read in the wrong zone is a second charge.
  */
 export const DAILY_LIMIT: Partial<Record<ActionCode, number>> = {
-  perusal: 1,
+  dispute: 1,
 }
 
 /**
@@ -200,9 +209,9 @@ export const TRACING_ACTION_CODE = 'TRC'
  * ONE ALLOWANCE ACROSS BOTH ITEMS, WHICH IS WHY IT IS KEYED ON THE ACTION. A bureau search is item
  * 4(c) and a SASSA or deeds search is item 3, and the firm's instruction is that four is the total
  * of BOTH -- "whether or not it's a trace or the other necessary expense". Keyed on the item it
- * would be two separate fours, which is twice what they asked for; and item 3 also carries the
- * perusal of documents and the PTC confirmation, so an item-3 cap would stop a collector opening a
- * PDF because somebody had searched the deeds office.
+ * would be two separate fours, which is twice what they asked for; and item 3 also carries
+ * disputes and the PTC confirmation, so an item-3 cap would stop a dispute being charged because
+ * somebody had searched the deeds office.
  *
  * SEPARATE FROM ENFORCE_MONTHLY_LIMITS, which stays off. That flag is the GAZETTE's per-item
  * allowances, which the firm switched off on 10 September for a reason that is still true -- the

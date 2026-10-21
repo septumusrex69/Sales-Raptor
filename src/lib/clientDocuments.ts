@@ -12,8 +12,9 @@
  * signed mandate itself had nowhere to live at all: the date was on record, the paper was not.
  *
  * WHY THIS IS NOT accountWorkspace.uploadDocument WITH A `companyId` BRANCH, which is the shorter
- * version of the same code. That function raises Annexure B item 3 — perusal of documents, once a
- * day — on the account it is given. CLAUDE.md states the rule as law: fees are charged on ACCOUNTS
+ * version of the same code. That function is the DEBTOR's file, and it raised Annexure B item 3 —
+ * perusal of documents, once a day — on the account it was given until the firm removed that fee
+ * (S10); account-side code is where fees live. CLAUDE.md states the rule as law: fees are charged on ACCOUNTS
  * ONLY, never on leads or deals, and the sales side raises nothing. A client's own mandate is the
  * firm's file, not a debtor's, and a branch inside a function whose whole purpose is to charge is
  * one careless edit away from putting a client's paperwork on a debtor's bill.
@@ -123,7 +124,7 @@ export async function uploadClientDocument(input: {
     throw new Error(error.message)
   }
   /* AND NO FEE. See the note at the top: this is the client's own paper, and the sales side
-     raises nothing. There is deliberately no chargePerusal call here to forget to remove. */
+     raises nothing. There is deliberately no fee call here to forget to remove. */
   return toDocument(data)
 }
 

@@ -55,4 +55,4 @@ if (failures.length) {
   console.error(`check-contact-search: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)
   process.exit(1)
 }
-console.log(`check-contact-search: all ${pass} passed`)
+console.log(`check-contact-search: ${pass} passed, 0 failed`)

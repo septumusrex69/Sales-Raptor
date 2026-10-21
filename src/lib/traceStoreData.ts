@@ -5,7 +5,6 @@
  */
 import { supabase } from './supabase'
 import { addContact, addNote, documentUrl } from './accountWorkspace'
-import { chargePerusal } from './accountCharges.ts'
 import {
   contactKindFor, linkedHow, linkedNumber, promotedNote, savesAs,
   type FiledTrace, type TraceItem, type TraceItemKind, type TraceOutcome,
@@ -257,9 +256,13 @@ export async function promoteTraceItem(input: {
  *
  * Signed for sixty seconds, like every other document in the app, because the bucket is private
  * and a permanent address to somebody's bureau profile is not a thing to hand out.
+ *
+ * IT CHARGES NOTHING, and so it no longer takes the account. Reading a trace report used to be a
+ * perusal of documents ("this includes a trace and everything else"); the firm removed that fee
+ * outright (S10, 21 Oct: "Remove the perusal of documents fee completely").
  */
 export async function traceReportUrl(
-  documentId: string, accountId?: string | null,
+  documentId: string,
   /* `inline` for Open (a tab), without it the address saves as a file -- see documentUrl. */
   opts: { inline?: boolean } = {},
 ): Promise<string> {
@@ -267,15 +270,5 @@ export async function traceReportUrl(
     .select('storage_path').eq('id', documentId).maybeSingle()
   if (error) throw new Error(error.message)
   if (!data?.storage_path) throw new Error('That report is no longer on the account.')
-  const url = await documentUrl(data.storage_path, null, { inline: opts.inline })
-  /*
-   * AND READING IT IS A PERUSAL OF DOCUMENTS, once a day. The firm named this one: "limited to one
-   * a day... this includes a trace and everything else." It is the same action code the documents
-   * panel raises, so a collector who opened a statement this morning and the trace report this
-   * afternoon is charged once -- which is the whole of "and everything else".
-   *
-   * AFTER THE URL, as everywhere: a report that cannot be opened has not been perused.
-   */
-  if (accountId) await chargePerusal({ accountId })
-  return url
+  return documentUrl(data.storage_path, null, { inline: opts.inline })
 }

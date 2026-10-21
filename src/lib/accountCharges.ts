@@ -23,56 +23,20 @@ export function chargeItem(input: ChargeInput): Promise<ChargeResult> {
 }
 
 /**
- * A PERUSAL OF DOCUMENTS, ONCE A DAY.
+ * NO PERUSAL OF DOCUMENTS, ANY MORE.
  *
- * THE FIRM: "we should add a fee perusal of documents. This is any time anybody saves a document
- * or opens a document, but limited to one a day. So one charge a day. Can't be more than one
- * perusal of documents in a day. This includes a trace and everything else."
+ * THE FIRM (S10, 21 Oct): "Remove the perusal of documents fee completely: no new charges, the
+ * setting and code gone, and existing perusal fees removed too (not credited)."
  *
- * ONE FUNCTION SO THE THREE PLACES CANNOT NAME IT THREE WAYS. Saving a document, opening one and
- * reading a trace report are the same fee, and a description written out at each call site is how
- * one statement comes to carry "Perusal", "Perusal of documents" and "Document opened" for one
- * kind of work.
+ * There used to be a `chargePerusal` here, raising item 3 once a day whenever a document on an
+ * account was saved, opened or downloaded, or a trace report read. It is gone rather than switched
+ * off, because a fee behind a flag is a fee the next person turns back on. Saving, opening and
+ * reading now charge nothing at all. `check-perusal` holds the absence, comments stripped first.
  *
- * THE ONCE-A-DAY IS NOT HERE. It is DAILY_LIMIT, read by the engine, for the same reason the
- * monthly allowances are: a cap enforced at the call site is a cap the next call site forgets.
- * Every one of these calls goes out expecting to be refused most days, and `reason` says which.
- *
- * NEVER THROWS. A document has to save and a document has to open; a fee that will not write is
- * something to report afterwards, not a reason to refuse somebody the file they asked for. Null
- * is what the caller gets, and the caller says so.
+ * The `perusal` ACTION CODE survives in actionTariff.ts for one reason only: Swordfish's imported
+ * history carries it, and imported history is frozen at what was imported (CLAUDE.md). Raptor
+ * raises none.
  */
-export async function chargePerusal(input: {
-  accountId: string
-  createdBy?: string | null
-  at?: Date
-}): Promise<ChargeResult | null> {
-  try {
-    return await chargeItem({
-      accountId: input.accountId,
-      itemId: PERUSAL_ITEM_ID,
-      actionCode: 'perusal',
-      description: PERUSAL_DESCRIPTION,
-      createdBy: input.createdBy ?? null,
-      at: input.at,
-    })
-  } catch (e) {
-    console.error('[perusal] the document was handled but the fee was not raised:', e)
-    return null
-  }
-}
-
-/**
- * Item 3, "other necessary expenses not specifically provided for".
- *
- * NOT A GUESS. `perusal` has been mapped to item 3 since the import, with four schedules of rates
- * behind it -- see actionTariff.ts, where the mapping is recorded with its evidence -- and raising
- * a dispute has charged exactly this pair all along.
- */
-export const PERUSAL_ITEM_ID = '3'
-
-/** What the debtor reads on the statement. The firm's own words for it. */
-export const PERUSAL_DESCRIPTION = 'Perusal of documents'
 
 /**
  * CONFIRMING A PTC — a debtor who paid the client direct.
@@ -87,16 +51,16 @@ export const PERUSAL_DESCRIPTION = 'Perusal of documents'
  * the confirmation, read it, and satisfy itself the money is real before it moves a balance. That
  * is item 3 -- "other necessary expenses not specifically provided for".
  *
- * NOT SUBJECT TO THE PERUSAL LIMIT, which is why it has its own action code. A perusal is capped
- * per period however many documents are read that period; a PTC confirmation is one verification
- * of one payment, and two PTCs are two pieces of work. Sharing `perusal`'s code would have made
- * the second PTC of a period free.
+ * NOT SUBJECT TO ANY DAILY LIMIT, which is why it has its own action code. When this was written
+ * the perusal of documents was capped at one a day; a PTC confirmation is one verification of one
+ * payment, and two PTCs are two pieces of work. Sharing a capped code (today that is `dispute`)
+ * would make the second PTC of a day free.
  *
  * RAISED AFTER THE PAYMENT IS RECORDED, never before: a PTC that would not save has not been
  * confirmed, and charging for it first is how a debtor pays for work nobody did.
  *
- * NEVER THROWS, for the reason chargePerusal does not -- the payment is the thing that matters and
- * a fee that will not write is something to report afterwards.
+ * NEVER THROWS: the payment is the thing that matters and a fee that will not write is something to
+ * report afterwards.
  */
 export async function chargePtcConfirmation(input: {
   accountId: string
@@ -121,10 +85,10 @@ export async function chargePtcConfirmation(input: {
 /**
  * Item 3 again, under its own name.
  *
- * `PERUSAL_ITEM_ID` was the only name this number had, which read as though item 3 WERE the
- * perusal item. It is "other necessary expenses not specifically provided for" and it now carries
- * two different kinds of work, so the constant says what the ITEM is rather than what the first
- * caller used it for. PERUSAL_ITEM_ID stays as it is, so nothing that reads well today changes.
+ * THE ONLY NAME IT HAS NOW. It used to be `PERUSAL_ITEM_ID` too, which read as though item 3 WERE
+ * the perusal item. It is "other necessary expenses not specifically provided for" -- a dispute
+ * and a PTC confirmation both land on it -- and since the firm removed the perusal fee (S10) the
+ * old name went with it, so the constant says what the ITEM is.
  */
 export const OTHER_EXPENSES_ITEM_ID = '3'
 
@@ -152,7 +116,7 @@ export const PTC_CONFIRMATION_DESCRIPTION = 'PTC confirmation'
  * BANDED ON THE CLAIM, which the caller passes -- see ChargeInput.debtAmount for why it is not
  * read off the account here.
  *
- * NEVER THROWS, for the reason chargePerusal does not: the document has been issued and the link
+ * NEVER THROWS, for the reason chargePtcConfirmation does not: the document has been issued and the link
  * is in somebody's hands. A fee that would not write is something to report afterwards, never a
  * reason to pretend the acknowledgement was not sent.
  */

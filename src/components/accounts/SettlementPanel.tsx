@@ -374,9 +374,10 @@ function ApproveModal({ settlement, onClose, onDone, userId, userName }: {
           onGo={() => run(async () => {
             let documentId: string | null = null
             if (how === 'upload' && file) {
-              /* THE CLIENT'S PAPER, NOT THE DEBTOR'S: no perusal fee, the PTC-confirmation rule. */
+              /* No fee: saving a document charges nothing since the firm removed the perusal of
+                 documents fee (S10, 21 Oct) -- and this is the client's paper, not the debtor's. */
               const up = await uploadDocument({
-                accountId: settlement.accountId, file, kind: 'Correspondence', chargePerusalFee: false,
+                accountId: settlement.accountId, file, kind: 'Correspondence',
                 uploadedBy: userId, uploadedByName: userName,
               })
               documentId = up.document.id

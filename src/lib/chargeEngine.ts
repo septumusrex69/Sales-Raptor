@@ -205,23 +205,23 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
   /*
    * AND THE DAY'S ALLOWANCE, FOR THE ONE ACTION THAT HAS ONE.
    *
-   * THE FIRM, OF A PERUSAL OF DOCUMENTS: "limited to one a day. So one charge a day. Can't be more
-   * than one perusal of documents in a day. This includes a trace and everything else."
+   * TODAY THAT IS A DISPUTE, once a day on an account (DAILY_LIMIT). It was the perusal of
+   * documents' rule -- "one charge a day. Can't be more than one perusal of documents in a day" --
+   * and disputes were charged under `perusal`, so they shared it. The firm removed the perusal fee
+   * (S10, 21 Oct); disputes moved to their own `dispute` code and kept the one a day, so dispute
+   * billing is exactly what it was.
    *
-   * COUNTED ON THE ACTION CODE, which is what makes "and everything else" true: opening a
-   * document, saving one, reading a trace report and handing a dispute to a liaison are all
-   * `perusal`, so they share the day rather than each having one.
+   * COUNTED ON THE ACTION CODE, not on the item: item 3 also carries the PTC confirmation and the
+   * wider trace searches, and neither is limited to one a day.
    *
-   * ONLY CHARGES THAT EARNED SOMETHING COUNT, exactly as the monthly allowance works: a perusal
+   * ONLY CHARGES THAT EARNED SOMETHING COUNT, exactly as the monthly allowance works: a dispute
    * recorded at nought took nothing from the debtor, so it cannot be the reason the next one goes
    * unrecovered.
    *
-   * THE DAY IS THE ONE THE PERSON IS IN, NOT THE SERVER'S. The window runs from local midnight to
-   * local midnight, which for everybody who raises a perusal is Johannesburg -- the charge is made
-   * from the browser, by somebody who has just opened a document. Built from the same clock the
-   * rest of the app calls `today`, rather than from a timezone written out here, so the two cannot
-   * disagree about which day a fee belongs to. A boundary read in the wrong zone is a second
-   * charge on a debtor who was perused once.
+   * THE DAY IS THE ONE THE CALLER IS IN. The window runs from local midnight to local midnight,
+   * which in the browser is Johannesburg. Built from the same clock the rest of the app calls
+   * `today`, rather than from a timezone written out here, so the two cannot disagree about which
+   * day a fee belongs to. A boundary read in the wrong zone is a second charge.
    */
   /*
    * AND THE FIRM'S OWN MONTHLY CAP ON TRACING, WHICH IS NOT THE GAZETTE'S.
@@ -232,8 +232,8 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
    * COUNTED ON THE ACTION, NOT THE ITEM, and that is the whole of "whether or not": a bureau
    * search is item 4(c) and a SASSA, deeds or web search is item 3, and four is the total of both.
    * Counted on the item it would be two separate fours -- twice what they asked for -- and item 3
-   * also carries the perusal of documents, so an item-3 cap would stop a collector opening a PDF
-   * because somebody had searched the deeds office that month.
+   * also carries disputes and the PTC confirmation, so an item-3 cap would stop a dispute being
+   * charged because somebody had searched the deeds office that month.
    *
    * SEPARATE FROM THE GAZETTE'S ALLOWANCE ABOVE, which stays switched off. That one is per item
    * and the firm turned it off in September; this is the firm's own rule about their own activity
@@ -380,8 +380,8 @@ export function chargeMessage(r: ChargeResult, itemId: string): string {
       + 'counting bureau searches and other searches together. The search is recorded, and the '
       + 'allowance resets next month.'
   }
-  /* THE FIRM'S OWN RULE RATHER THAN THE GAZETTE'S, so the sentence says so: a perusal is charged
-     once a day however many documents are opened, and the work is still written down. */
+  /* THE FIRM'S OWN RULE RATHER THAN THE GAZETTE'S, so the sentence says so: a dispute is charged
+     once a day on an account however many are raised, and the work is still written down. */
   if (r.reason === 'daily-limit') {
     return 'No charge: this has already been charged once today. It is recorded, and it can be charged again tomorrow.'
   }

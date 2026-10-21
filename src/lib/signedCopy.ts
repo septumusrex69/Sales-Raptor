@@ -23,8 +23,9 @@
  * the document that was signed, and "we regenerate it on demand" is the whole of a defence.
  *
  * NOTHING IS CHARGED HERE. Item 4(a) was raised the moment the acknowledgement was ISSUED -- see
- * chargeAcknowledgementOfDebt -- and item 6 is raised by openDocument for the reading. Filing the
- * bytes is neither; it is the same document arriving in a form that can be kept.
+ * chargeAcknowledgementOfDebt -- and reading it charges nothing since the firm removed the perusal
+ * of documents fee (S10). Filing the bytes is neither; it is the same document arriving in a form
+ * that can be kept.
  */
 import { supabase } from './supabase'
 import { A4_LETTERHEAD, blankLetter, type LetterDocument } from './letterDocument.ts'

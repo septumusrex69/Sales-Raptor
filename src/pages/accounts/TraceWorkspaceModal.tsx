@@ -250,9 +250,10 @@ export function TraceWorkspaceModal({
     } finally { setBusy(null) }
   }
 
-  /* THE ACCOUNT, so the perusal lands on it. The firm: "this includes a trace." Open and Download
-     are both reading it, and FileActions opens the tab on the press (fileSave.ts). */
-  const reportUrl = (inline: boolean) => traceReportUrl(trace.documentId!, trace.accountId, { inline })
+  /* Open and Download both read the report, and FileActions opens the tab on the press
+     (fileSave.ts). NEITHER IS CHARGED: reading a trace report was a perusal of documents until the
+     firm removed that fee (S10, 21 Oct). */
+  const reportUrl = (inline: boolean) => traceReportUrl(trace.documentId!, { inline })
 
   const subjectRole = trace.subjectKind === 'director'
     ? `Director of ${traces.find((t) => t.subjectKind === 'debtor')?.subjectName ?? 'the debtor'}`

@@ -92,4 +92,4 @@ if (failures.length) {
   console.error(`check-clear-staging: ${failures.length} failed, ${pass} passed\n  ${failures.join('\n  ')}`)
   process.exit(1)
 }
-console.log(`check-clear-staging: all ${pass} passed`)
+console.log(`check-clear-staging: ${pass} passed, 0 failed`)

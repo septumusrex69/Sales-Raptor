@@ -154,9 +154,12 @@ const base = { accountId: 'acc-1', actionCode: 'consultation', description: 'Con
    * So this asserts whichever behaviour the flag currently selects. Written the other way it
    * would be a test of what I happened to believe on the day, and flipping the flag back — which
    * the comment in annexureB.ts explicitly invites — would fail a test that was never wrong.
+   *
+   * MODELLED AS A DISPUTE, which is what an item-3 'ONE' is: it was raised under `perusal` until
+   * the firm removed the perusal fee (S10, 21 Oct) and disputes got their own `dispute` code.
    */
   const db = fakeDb({ spentOnItem: 25 })
-  const r = await chargeItemWith(db, { ...base, itemId: '3', actionCode: 'perusal', description: 'ONE' })
+  const r = await chargeItemWith(db, { ...base, itemId: '3', actionCode: 'dispute', description: 'ONE' })
   if (ENFORCE_ITEM_TOTALS) {
     check('with totals enforced, a second sundry expense earns nothing', r.exclVat, 0)
     check('...and says which rule stopped it', r.reason, 'item-total-spent')
@@ -166,7 +169,7 @@ const base = { accountId: 'acc-1', actionCode: 'consultation', description: 'Con
   }
   // True either way, and the half of regulation 11 that is NOT flagged off.
   const capped = fakeDb({ spentOnItem: 25, capital: 100000, towardsCeiling: 1225 })
-  const atCeiling = await chargeItemWith(capped, { ...base, itemId: '3', actionCode: 'perusal', description: 'ONE' })
+  const atCeiling = await chargeItemWith(capped, { ...base, itemId: '3', actionCode: 'dispute', description: 'ONE' })
   check('the items 1-7 ceiling still binds item 3 whatever the flag says', atCeiling.exclVat, 0)
 }
 

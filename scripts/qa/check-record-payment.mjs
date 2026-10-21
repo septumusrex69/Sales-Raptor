@@ -190,13 +190,15 @@ ok('...with the account fixed where it was opened on one', /fixedAccount/.test(m
 /* ---------------- and the debtor does not pay for the firm's evidence ---------------- */
 
 /*
- * ITEM 3 RECOVERS TIME THE DEBTOR CAUSED. A PTC confirmation is the CLIENT's letter, uploaded so
- * the firm can invoice the CLIENT. Charging the debtor a perusal for it would not survive being
- * asked about -- and the default stays true, so every other upload is unchanged.
+ * NO FEE ON THE UPLOAD ITSELF. This used to be an opt-out (`chargePerusalFee: false`) from the
+ * perusal of documents fee every other upload raised. The firm removed that fee outright (S10, 21
+ * Oct: "Remove the perusal of documents fee completely"), so no upload charges and there is no
+ * flag left to pass. check-perusal holds the removal everywhere; this holds it on the two files
+ * this screen depends on, comments stripped so the note explaining it cannot trip it.
  */
-ok('an upload can opt out of the perusal fee', /chargePerusalFee\?: boolean/.test(workspace))
-ok('...and the default is still to charge', /input\.chargePerusalFee === false/.test(workspace))
-ok('...and the PTC confirmation opts out', /chargePerusalFee: false/.test(modal))
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+ok('an upload raises no perusal fee and has no flag for one', !/chargePerusal/.test(stripComments(workspace)))
+ok('...and the PTC confirmation passes none', !/chargePerusalFee/.test(stripComments(modal)))
 
 /* ---------------- and the debtor pays for the verification ---------------- */
 
@@ -216,28 +218,33 @@ ok('...as item 3, other necessary expenses', /itemId: OTHER_EXPENSES_ITEM_ID/.te
 ok('...named the way the firm names it', /PTC_CONFIRMATION_DESCRIPTION = 'PTC confirmation'/.test(charges))
 
 /*
- * ITS OWN ACTION CODE, NOT `perusal`, AND THAT IS THE LOAD-BEARING PART. A perusal is capped per
- * period however many documents are read; a PTC confirmation is one verification of one payment.
- * Sharing the code would make the second PTC of a period free.
+ * ITS OWN ACTION CODE, AND THAT IS THE LOAD-BEARING PART. The perusal was capped at one a day, and
+ * a dispute (the other item-3 work, under `dispute`) still is; a PTC confirmation is one
+ * verification of one payment. Sharing a capped code would make the second PTC of a day free.
  */
 ok('...under an action code of its own', /'ptc_confirmation'/.test(read('src/lib/actionTariff.ts')))
 ok('...which the charge uses', /actionCode: 'ptc_confirmation'/.test(charges))
 const limits = read('src/lib/actionTariff.ts')
-const limitBlock = limits.slice(limits.indexOf('DAILY_LIMIT'), limits.indexOf('TARIFF_HISTORY'))
-ok('...and is not capped alongside perusals', !/ptc_confirmation/.test(limitBlock))
+/* FROM THE DECLARATION, not the first mention: comments elsewhere name DAILY_LIMIT, and a slice
+   starting at one of those would sweep in the union above and fail on correct code. */
+const limitStart = limits.indexOf('export const DAILY_LIMIT')
+const limitBlock = limits.slice(limitStart, limits.indexOf('}', limitStart))
+ok('...and is not capped alongside disputes', limitStart > 0 && !/ptc_confirmation/.test(limitBlock))
 
 /* ONLY ON A PTC. A trust receipt is witnessed by the firm's own bank statement and costs nobody
    any verifying. */
 ok('only a PTC raises it', /if \(paidToClient && paymentId\)/.test(modal))
 /*
  * AFTER THE PAYMENT, NEVER BEFORE. A PTC that would not save has not been confirmed, and charging
- * first is how a debtor pays for work nobody did -- the same ordering chargePerusal uses.
+ * first is how a debtor pays for work nobody did.
  */
 const payAt = modal.indexOf('await recordManualPayment')
 const feeAt = modal.indexOf('chargePtcConfirmation(')
 ok('...raised after the payment lands', payAt > 0 && feeAt > payAt)
-/* AND NOT TWICE. The upload no longer charges a perusal, so one verification is one fee. */
-ok('...and the upload does not charge as well', /chargePerusalFee: false/.test(modal))
+/* AND NOT TWICE. The upload charges nothing (no upload does, since S10), so one verification is
+   one fee: the only charge this modal raises is the confirmation. */
+ok('...and the upload does not charge as well',
+  (stripComments(modal).match(/\bcharge[A-Z]\w*\(/g) ?? []).filter((c) => c !== 'chargeMessage(').every((c) => c === 'chargePtcConfirmation('))
 
 /* ---------------- one receipt, several debtors ---------------- */
 

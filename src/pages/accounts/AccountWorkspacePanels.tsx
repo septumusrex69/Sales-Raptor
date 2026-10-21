@@ -17,7 +17,6 @@ import {
   dialableNumber,
   type AccountContact, type AccountDocument, type ContactKind, type Workspace,
 } from '../../lib/accountWorkspace'
-import { chargeMessage, PERUSAL_ITEM_ID } from '../../lib/accountCharges.ts'
 import { DictateButton } from '../../components/ui/Dictate'
 import { contactWhat, contactsByPerson, otherPeople } from '../../lib/contactPeople.ts'
 import { debtorSlots, ringsOnCall } from '../../lib/debtorSlots.ts'
@@ -1088,10 +1087,6 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
   const [kind, setKind] = useState<string>(DOCUMENT_KINDS[0])
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  /* WHAT THE LAST PERUSAL EARNED, or null. Shown only where something was actually charged: "no
-     charge, it has already been charged once today" is the ordinary case and a line saying so on
-     every document anybody opens is a line people stop reading. */
-  const [charged, setCharged] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<AccountDocument | null>(null)
 
   async function onPick(files: FileList | null) {
@@ -1100,12 +1095,11 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
     try {
       // One at a time, in order, so a failure names the file that failed.
       for (const file of Array.from(files)) {
-        const { charge } = await uploadDocument({
+        /* NO FEE. Saving a document was a perusal of documents until the firm removed that fee
+           (S10, 21 Oct), so there is nothing to report back here any more. */
+        await uploadDocument({
           accountId, file, kind, uploadedBy: userId, uploadedByName: userName,
         })
-        /* THE LAST ONE WINS, which on a multi-file pick is the honest answer: the perusal is once
-           a day, so the first file earns it and the rest are recorded free. */
-        setCharged(charge && charge.reason === 'charged' ? chargeMessage(charge, PERUSAL_ITEM_ID) : null)
       }
       await onChange()
     } catch (e) {
@@ -1117,15 +1111,14 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
   }
 
   /*
-   * OPENING A DOCUMENT IS A PERUSAL OF DOCUMENTS, once a day -- the firm's rule, and the same fee
-   * saving one raises. openDocument signs the address and charges it; the cap is in the engine, so
-   * this press is refused most days and says so rather than going quiet. OPEN (a tab, `inline`) and
-   * DOWNLOAD (the file, `attachment`) are both reading it, so both go through here.
+   * OPEN (a tab, `inline`) and DOWNLOAD (the file, `attachment`) both go through openDocument,
+   * which signs the address and draws a signed copy first where one is still a placeholder.
+   * NEITHER IS CHARGED: both used to be a perusal of documents, and the firm removed that fee
+   * (S10, 21 Oct: "Remove the perusal of documents fee completely").
    */
-  async function perused(doc: AccountDocument, inline: boolean): Promise<string> {
+  async function documentAddress(doc: AccountDocument, inline: boolean): Promise<string> {
     /* Errors go to FileActions, which shows them on the row they belong to. */
-    const { url, charge } = await openDocument(doc, userId, { inline })
-    setCharged(charge && charge.reason === 'charged' ? chargeMessage(charge, PERUSAL_ITEM_ID) : null)
+    const { url } = await openDocument(doc, { inline })
     return url
   }
 
@@ -1157,13 +1150,6 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
       </div>
 
       {err && <p className="text-sm text-negative-700 mb-3">{err}</p>}
-      {/*
-        WHAT THE PERUSAL EARNED, where it earned anything. The firm's rule is one a day, so most
-        presses are refused and say nothing -- a line reading "no charge, already charged today" on
-        every document anybody opens is a line people stop reading, and the transaction list is
-        where the whole day's fees are answerable anyway.
-      */}
-      {charged && <p className="text-xs text-[var(--c-green)] mb-3">{charged}</p>}
 
       {documents.length === 0 ? (
         <p className="text-sm text-slate-400 py-8 text-center">
@@ -1184,9 +1170,9 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
                   {' · '}{[d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName].filter(Boolean).join(' · ')}
                 </span>
               </div>
-              {/* Open or Download, each its own press (the firm, 19 Oct). Both are a perusal. */}
+              {/* Open or Download, each its own press (the firm, 19 Oct). Neither is charged. */}
               <FileActions name={d.name} buttonsOnly testId="account-document"
-                openUrl={() => perused(d, true)} fetchFile={async () => blobFromUrl(await perused(d, false))} />
+                openUrl={() => documentAddress(d, true)} fetchFile={async () => blobFromUrl(await documentAddress(d, false))} />
               {canDelete && (
                 // Always visible. This was hidden until hover, which on a tablet means hidden
                 // for ever — there is no hover on a touch screen, so the control did not exist

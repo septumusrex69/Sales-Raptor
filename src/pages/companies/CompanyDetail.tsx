@@ -1210,11 +1210,10 @@ export function CompanyDetail() {
                * by hand was the one way in with no way to bring the paperwork with it.
                *
                * THROUGH uploadDocument, NOT A SECOND UPLOAD PATH. That is where the storage path,
-               * the row, the orphan cleanup when the row fails, and the perusal fee all live -- so
-               * a file arriving this way is the same kind of thing as one uploaded on the account
-               * page, and the fee rule is not written twice. Item 3 is raised once for the lot,
-               * because the firm's limit is one perusal a day per account however many files it
-               * was.
+               * the row and the orphan cleanup when the row fails all live -- so a file arriving
+               * this way is the same kind of thing as one uploaded on the account page. (It used
+               * to raise the perusal of documents fee too; the firm removed that fee in S10, so
+               * saving these charges nothing.)
                *
                * ONE AT A TIME, DELIBERATELY. In parallel the first failure would leave the rest
                * mid-flight with nothing able to say which landed, and the report below would be a

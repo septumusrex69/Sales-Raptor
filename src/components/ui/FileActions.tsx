@@ -13,8 +13,8 @@ import { openPending, saveFile } from '../../lib/fileSave'
  *
  * `fetchFile` gets the bytes. `openUrl`, where given, is used for Open instead -- a signed storage
  * address the tab can load itself, so opening a large scan does not first pull it into the page.
- * `onOpen` / `onSave` run after a press succeeds, for what a screen records about it (a perusal fee,
- * a logged download).
+ * `onOpen` / `onSave` run after a press succeeds, for what a screen records about it (a logged
+ * download, say). Opening a file charges nothing: the perusal of documents fee was removed (S10).
  *
  * BOTH WORDS ALWAYS SHOWN, never on hover: the firm works on an iPad, where there is no hover, so a
  * hidden control does not exist for them.

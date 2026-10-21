@@ -448,9 +448,9 @@ check('the cap is four', MONTHLY_LIMIT[TRACING_ACTION_CODE], 4)
 /*
  * KEYED ON THE ACTION, NOT THE ITEM, and that is the whole of "whether or not". A bureau search is
  * item 4(c) and a SASSA or deeds search is item 3; four is the total of BOTH. Keyed on the item it
- * would be two separate fours -- twice what was asked for -- and item 3 also carries the perusal of
- * documents, so an item-3 cap would stop a collector opening a PDF because somebody had searched
- * the deeds office that month.
+ * would be two separate fours -- twice what was asked for -- and item 3 also carries disputes and
+ * the PTC confirmation (and, on imported history, the perusal of documents), so an item-3 cap would
+ * stop a dispute being charged because somebody had searched the deeds office that month.
  */
 check('...and it is the code the fees actually carry', TRACING_ACTION_CODE, 'TRC')
 /* NOT 'trace', WHICH IS IN THE ActionCode UNION AND NOTHING WRITES. A cap on the tidier spelling
@@ -507,9 +507,12 @@ check('...nor one from last month',
   tracingThisMonth([fee({ incurredAt: '2026-09-30T09:00:00Z' })], '2026-10-15', 4).used, 0)
 check('...nor one from next month',
   tracingThisMonth([fee({ incurredAt: '2026-11-01T09:00:00Z' })], '2026-10-15', 4).used, 0)
-/* AND A PERUSAL IS NOT A TRACE, which is the item-3 confusion this is keyed on the action to
-   avoid: opening a PDF must not spend a tracing charge. */
-check('a perusal is not a tracing charge',
+/* AND A DISPUTE IS NOT A TRACE, which is the item-3 confusion this is keyed on the action to
+   avoid: raising a dispute must not spend a tracing charge. Nor is an imported perusal -- Raptor
+   raises none since S10, but Swordfish's history still carries them. */
+check('a dispute is not a tracing charge',
+  tracingThisMonth([fee({ actionCode: 'dispute', description: 'ONE' })], '2026-10-15', 4).used, 0)
+check('...nor an imported perusal',
   tracingThisMonth([fee({ actionCode: 'perusal', description: 'Perusal of documents' })], '2026-10-15', 4).used, 0)
 /* LEFT NEVER GOES NEGATIVE: five charged in a month -- possible on history, or if the cap is ever
    lowered -- must read as none left rather than as minus one. */

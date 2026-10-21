@@ -153,7 +153,8 @@ for (const [what, file] of [
 /* OPEN SHOWS IT, DOWNLOAD SAVES IT: a signed address is inline only when Open asked for it. */
 const ws = strip(read('src/lib/accountWorkspace.ts'))
 ok('a document’s address is inline only for Open', /opts\.inline \? undefined : \{ download: filename \|\| true \}/.test(ws))
-ok('...and opening and downloading one are both a perusal', /openDocument\(doc, userId, \{ inline \}\)/.test(read('src/pages/accounts/AccountWorkspacePanels.tsx')))
+/* Both through openDocument, which charges nothing since the firm removed the perusal fee (S10). */
+ok('...and opening and downloading one both go through openDocument', /openDocument\(doc, \{ inline \}\)/.test(read('src/pages/accounts/AccountWorkspacePanels.tsx')))
 
 if (failures.length) {
   console.log(`check-file-actions: ${pass} passed, ${failures.length} failed`)

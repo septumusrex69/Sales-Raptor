@@ -108,16 +108,15 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
         uploadedBy: currentUser?.id ?? null,
         uploadedByName: currentUser?.name ?? null,
         /*
-          NO PERUSAL FEE ON THE UPLOAD ITSELF -- but not because a PTC is free. The firm corrected
-          that: "you can charge a perusal fee for a PTC because the debtor has paid into the
-          client's account and it cost us administration to verify this."
-          
-          The charge is `ptc_confirmation`, raised ONCE AFTER THE PAYMENT LANDS (see save below).
-          Charging here as well would bill the debtor twice for one verification -- and would
-          charge them even when the payment is then refused, which is the case where no
-          confirmation happened at all.
+          NO FEE ON THE UPLOAD ITSELF -- but not because a PTC is free. The firm: "you can charge
+          a perusal fee for a PTC because the debtor has paid into the client's account and it
+          cost us administration to verify this... handle it as other necessary expenses and call
+          it a PTC confirmation."
+
+          The charge is `ptc_confirmation`, raised ONCE AFTER THE PAYMENT LANDS (see save below),
+          so a refused payment costs the debtor nothing. Uploads charge nothing anywhere since the
+          firm removed the perusal of documents fee (S10, 21 Oct), so there is no flag to pass.
         */
-        chargePerusalFee: false,
       })
       setProof({ id: document.id, name: document.name })
     } catch (e) {

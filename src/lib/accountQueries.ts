@@ -629,7 +629,11 @@ export async function raiseQuery(input: {
   const charge = (!mayCharge || input.charge === false) ? null : await chargeItem({
     accountId: input.accountId!,
     itemId: '3',
-    actionCode: 'perusal',
+    /* `dispute`, NOT `perusal`. It used to be raised under `perusal` and so shared the perusal's
+       one-a-day; the firm then removed the perusal fee outright (S10, 21 Oct), and a dispute is
+       not a perusal and is still charged. Its own code keeps the same one a day (DAILY_LIMIT), so
+       dispute billing is exactly what it was. ticket.ts raises it the same way. */
+    actionCode: 'dispute',
     // "ONE" is what the firm calls item 3 -- Other Necessary Expenses. Their own shorthand,
     // on their own statements.
     description: 'ONE',

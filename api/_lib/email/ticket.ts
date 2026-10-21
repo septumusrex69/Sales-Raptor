@@ -433,7 +433,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const result = await chargeItemWith(admin, {
         accountId,
         itemId: '3',
-        actionCode: 'perusal',
+        /* `dispute`, not `perusal`: the firm removed the perusal fee (S10, 21 Oct) and a dispute
+           is not one. Same code and same one-a-day as accountQueries.raiseEscalation. */
+        actionCode: 'dispute',
         /* "ONE" is what the firm calls item 3 on their own statements. */
         description: 'ONE',
         createdBy: caller.id,

@@ -11,7 +11,6 @@
  */
 import { supabase } from './supabase'
 import { fileSignedCopy, tokenOfPlaceholder } from './signedCopy.ts'
-import { chargePerusal, type ChargeResult } from './accountCharges.ts'
 import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
 import { parseWindows, type ContactWindow } from './contactWindows.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
@@ -667,18 +666,14 @@ export async function uploadDocument(input: {
   kind?: string | null
   uploadedBy?: string | null
   uploadedByName?: string | null
-  /**
-   * WHETHER THE DEBTOR PAYS FOR THIS ONE. Defaults true, which is the firm's rule: saving a
-   * document is a perusal, once a day.
-   *
-   * FALSE FOR A PTC CONFIRMATION, and the reason is the same one that keeps a client's own
-   * paperwork off a debtor's bill. Item 3 recovers time the DEBTOR caused somebody to spend. A
-   * PTC confirmation is the CLIENT's letter, uploaded so the firm can invoice the CLIENT for
-   * commission on money it never handled -- billing the debtor for the firm's own evidence
-   * would not survive being asked about.
+  /*
+   * NO FEE, AND NO OPTION FOR ONE. Saving a document used to be a perusal of documents, item 3
+   * once a day, with a flag to opt out. The firm removed that fee outright (S10, 21 Oct: "Remove
+   * the perusal of documents fee completely: no new charges, the setting and code gone"), so
+   * saving a document charges nothing and there is no flag left to remember. check-perusal holds
+   * it.
    */
-  chargePerusalFee?: boolean
-}): Promise<{ document: AccountDocument; charge: ChargeResult | null }> {
+}): Promise<{ document: AccountDocument }> {
   const safe = input.file.name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
   const path = `${input.accountId}/${crypto.randomUUID()}-${safe}`
 
@@ -708,38 +703,27 @@ export async function uploadDocument(input: {
     await supabase.storage.from(BUCKET).remove([path])
     throw new Error(error.message)
   }
-  /*
-   * AND SAVING IT IS A PERUSAL OF DOCUMENTS, once a day. The firm's rule, and the fee is raised
-   * AFTER the row lands: a document that would not save has not been perused, and charging for it
-   * first is how a debtor pays for a file nobody has.
-   */
-  const charge = input.chargePerusalFee === false
-    ? null
-    : await chargePerusal({ accountId: input.accountId, createdBy: input.uploadedBy })
-  return { document: toDocument(data), charge }
+  return { document: toDocument(data) }
 }
 
 /**
- * OPENING ONE, WHICH IS THE SAME FEE AS SAVING ONE.
+ * OPENING ONE: a signed address for a document on the account, drawing a signed copy first where
+ * the row is still a placeholder.
  *
- * THE FIRM: "any time anybody saves a document or opens a document, but limited to one a day."
- *
- * ITS OWN FUNCTION RATHER THAN A FLAG ON documentUrl, because documentUrl is also how a signed
- * address is got for something that is not a perusal at all -- and a charge that depends on a
- * caller remembering to pass `true` is a charge that is raised inconsistently.
- *
- * THE URL FIRST. A document that cannot be opened has not been perused.
+ * IT CHARGES NOTHING. Opening or downloading a document used to be a perusal of documents, item 3
+ * once a day. The firm removed that fee (S10, 21 Oct: "Remove the perusal of documents fee
+ * completely"), so this is now only about getting the file to the person who asked for it.
  */
 export async function openDocument(
   doc: { id: string; accountId: string; storagePath: string; name?: string | null },
-  by: string | null,
+  /* No `by` any more: the only thing it was for was the perusal fee's created_by. */
   /**
    * `inline` for OPEN, which shows the document in a tab; without it the address carries
    * `attachment` and is what DOWNLOAD fetches (the firm, 19 Oct: "an option to open it or download
-   * it"). The fee is the same either way: both are reading the document.
+   * it"). Neither is charged.
    */
   opts: { inline?: boolean } = {},
-): Promise<{ url: string; charge: ChargeResult | null }> {
+): Promise<{ url: string }> {
   /*
    * A SIGNED DOCUMENT IS DRAWN THE FIRST TIME SOMEBODY OPENS IT, and is a file from then on.
    *
@@ -765,17 +749,12 @@ export async function openDocument(
       documentId: doc.id, accountId: doc.accountId, storagePath: doc.storagePath,
     }).catch(() => null)
     if (!filed || filed.startsWith('signing/')) {
-      return {
-        url: signingPath(token),
-        /* THE PERUSAL FEE IS RAISED EITHER WAY. Item 6 is for reading a document on the account,
-           and where it is kept is not the debtor's business. */
-        charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }),
-      }
+      return { url: signingPath(token) }
     }
     path = filed
   }
   const url = await documentUrl(path, doc.name, { inline: opts.inline })
-  return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
+  return { url }
 }
 
 /** Where the signing page for a token lives. One place, so the link and the opener agree. */

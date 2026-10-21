@@ -16,8 +16,9 @@
  * The second is a money rule, and it is why this file exists rather than an e2e assertion that a
  * date input is on the page. The obvious way to take a client's mandate is to reuse
  * `accountWorkspace.uploadDocument`, which already has the bucket, the signed URLs and the
- * deletion rule. That function also raises Annexure B item 3 — perusal of documents, once a day —
- * against the ACCOUNT it is handed. CLAUDE.md states the rule as law: fees are charged on
+ * deletion rule. That function raised Annexure B item 3 — perusal of documents, once a day —
+ * against the ACCOUNT it was handed, until the firm removed that fee (S10, 21 Oct); it is still
+ * the debtor's file, where fees live. CLAUDE.md states the rule as law: fees are charged on
  * ACCOUNTS ONLY, never on leads or deals, and the sales side raises nothing. A client's own
  * mandate billed to a debtor is a charge that would not survive being asked about, and it would
  * be invisible: the fee lands on an account nobody was looking at.
@@ -75,7 +76,9 @@ ok('the library is readable at all', lib.length > 2000)
  * THE ASSERTION THIS FILE EXISTS FOR, and it is written as an absence on purpose. Every one of
  * these names is a route to a debtor's bill; a client's mandate must reach none of them.
  */
-for (const forbidden of ['chargePerusal', 'accountCharges', 'PERUSAL_ITEM_ID', 'annexureB', 'account_charges']) {
+/* chargePerusal and PERUSAL_ITEM_ID used to head this list; both are gone from the code (S10), so
+   the list names the routes that still exist. */
+for (const forbidden of ['chargeItem', 'accountCharges', 'OTHER_EXPENSES_ITEM_ID', 'annexureB', 'account_charges']) {
   ok(`the client document library never touches ${forbidden}`, !libCode.includes(forbidden))
   ok(`...and neither does the mandate card`, !card.includes(forbidden))
 }
