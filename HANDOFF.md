@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **19 October 2026**, S9 · Balance Sort, on `claude/s09-balance-sort` (branched from
+Last updated: **21 October 2026**, S9 · Balance Sort, on `claude/s09-balance-sort` (branched from
 `claude/s08-cut-over` at `5f4d67e`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -144,10 +144,22 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      `clientReportPdf.ts`, `clientReportData.ts` (the client page's own four reads),
      `ClientReportButton`. `check-client-report` (24, break-tested), e2e client-handovers +3.
      Not done: sending it by email from Raptor (today it is downloaded and attached); a date range.
-   **Open, in order:** 1. code by email for an Administrator on a new device; 2. "Held for
-   Swordfish payovers"; 3. the FNB template (waits on FNB: the firm has the CSV template, the
-   import GUIDE is still needed for line 3's second number, the date, account-type codes and NOTIFY);
-   4. production has none of S8's or S9's migrations.
+   **Open, in order (as at 21 Oct):**
+   1. **Production has none of S8's or S9's migrations** -- the S8 and S9 lists in §5, plus the
+      `account_documents_source_check` widening (production has no such constraint yet).
+   2. Code by email for an Administrator on a new device (agreed, not started).
+   3. "Held for Swordfish payovers".
+   4. The FNB bulk-payment file: the firm sent FNB's CSV TEMPLATE ("BInSol - U ver 1.00"); still
+      needed, from FNB's import GUIDE: line 3's 12-digit second number, line 2's date meaning and
+      format, the account-type codes, and what switches NOTIFY on. Offered: build it on best
+      reading and let a one-payment test import in FNB say what is wrong.
+   5. **Waiting on the firm:** the "Handover docs" request on Palesa Radebe (Aapcom) still reads
+      Awaiting liaison -- move it to `agent` only if they say they kept it; whether collectors
+      should also get the staging date bar (Administrator-only today, because it moves everybody's
+      day); the WhatsApp one-press download is not yet seen working on a real iPad.
+   6. Administration (AdminOverview) is the one dashboard without the three pane arrangements.
+   7. **The test clock stays on every staging account until the firm says they are live**
+      (CLAUDE.md, Environments).
 
 00. **S8 · Cut-over, end of 18 Oct.** The afternoon was the firm testing on the preview and asking,
    one screenshot at a time. All of it is built, checked and pushed (each item is in §2 under S8):
