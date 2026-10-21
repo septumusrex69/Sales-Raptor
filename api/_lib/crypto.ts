@@ -62,3 +62,20 @@ export function decrypt(encoded: string): string {
   decipher.setAuthTag(Buffer.from(tagPart, 'base64url'))
   return Buffer.concat([decipher.update(Buffer.from(dataPart, 'base64url')), decipher.final()]).toString('utf8')
 }
+
+/**
+ * A KEYED HASH, for a secret too small to hash bare -- a six-digit sign-in code is a million
+ * guesses, so sha256(code) in a leaked table is read back in a second. HMAC under the same server
+ * key the mailbox passwords use; the purpose is mixed in so a value hashed for one job never
+ * matches the same value hashed for another. Lower-case hex.
+ */
+export function keyedHash(purpose: string, value: string): string {
+  return crypto.createHmac('sha256', getKey()).update(`${purpose}:${value}`).digest('hex')
+}
+
+/** Equal hex strings, in constant time, so a wrong code is not refused faster than a near one. */
+export function sameHex(a: string, b: string): boolean {
+  const x = Buffer.from(a, 'hex')
+  const y = Buffer.from(b, 'hex')
+  return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y)
+}

@@ -9,6 +9,7 @@ import status from '../_lib/email/status.js'
 import sync from '../_lib/email/sync.js'
 import syncAll from '../_lib/email/sync-all.js'
 import welcome from '../_lib/email/welcome.js'
+import loginCode from '../_lib/email/loginCode.js'
 
 /**
  * One serverless function for every /api/email/* route.
@@ -39,6 +40,9 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   'signed-copy': signedCopy,
   /* Assign a new client's liaison and send the welcome from her (S8). */
   welcome,
+  /* An Administrator's code on a new device (S10). Here because it is an email the server sends,
+     and api/ has no function to spare. */
+  'login-code': loginCode,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

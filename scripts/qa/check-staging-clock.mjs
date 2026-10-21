@@ -87,11 +87,17 @@ for (const n of names) {
  * reads now() for a business date fails here -- write raptor_now() / raptor_today() instead.
  */
 check('only the named audit and real-world functions read the real clock', stillReal.sort(), [
-  'clear_staging', 'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
+  'clear_staging',
+  /* login_code_waive and trusted_device_seen (S10): a sign-in waiver's thirty minutes and a
+     device's last use are about a person at a door, not a business date -- staging's clock set to
+     next month must not make a waiver last a month. */
+  'login_code_waive',
+  'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
   'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',
   /* signing_accept (S9): the moment the debtor accepted, a real-world stamp like signing_sign's. */
   'signing_accept', 'signing_document',
-  'signing_open', 'signing_sign', 'step_staging_clock', 'touch_message_template', 'workflow_publish',
+  'signing_open', 'signing_sign', 'step_staging_clock', 'touch_message_template', 'trusted_device_seen',
+  'workflow_publish',
 ])
 ok('...and set_trust_opening_balance only for its updated_at',
   !/(?<![\w.])now\(\)/.test(lastFn('set_trust_opening_balance').body.replace(/updated_at = now\(\)/, '')))

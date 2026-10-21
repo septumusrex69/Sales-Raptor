@@ -45207,8 +45207,7 @@ create or replace trigger workflow_hold_after_first_notice
   for each row execute function public.workflow_hold_after_first_notice();
 
 
--- ============================================================================================
--- S10 / HELD FOR SWORDFISH PAYOVERS (HANDOFF 3a item 2; the design agreed under S8).
+-- =====================================================================================-- S10 / HELD FOR SWORDFISH PAYOVERS (HANDOFF 3a item 2; the design agreed under S8).
 --
 -- The cut-over is the end of 10 December 2026, and Swordfish still pays clients on 11 Dec and 11 Jan
 -- out of the trust account, from money it received BEFORE the cut-over. Swordfish cannot say what it
@@ -45686,3 +45685,187 @@ begin
     end;
   end loop;
 end $$;
+=======
+-- ==========================================================================================
+-- S10 / A LOGIN CODE BY EMAIL WHEN AN ADMINISTRATOR SIGNS IN FROM A NEW DEVICE (21 Oct)
+-- ==========================================================================================
+--
+-- Agreed with the firm after the authenticator-app version was taken out at their word ("just
+-- remove the two-factor sign-in ... I don't want to scan anything"). Nothing is scanned: an
+-- Administrator signing in on a browser Raptor has not seen for them is emailed a six-digit code
+-- and types it once. Every other role is unaffected.
+--
+-- THREE TABLES, AND THE BROWSER WRITES NONE OF THEM.
+--   trusted_devices    a HASH of each browser's random device id, per person. The id itself
+--                      stays in that browser's localStorage; a copy of this table is not a key.
+--   login_codes        the one live code per person, HMAC'd with a server secret, ten minutes,
+--                      five tries, single use. Only the server (service role) reads or writes it.
+--   login_code_waivers the way out when the mail does not arrive: another Administrator lets
+--                      the person in once, for thirty minutes, from Settings -> Users.
+--
+-- WHAT THIS DOES AND DOES NOT STOP. It is a gate in the app and on the server that issues the
+-- code; it is NOT consulted by has_capability or any RLS policy. Somebody holding an
+-- Administrator's password on a new device cannot get past the code screen in the app -- but a
+-- determined person with that password could still sign in against the API directly and use the
+-- session token without ever opening the app. Wiring a device check into has_capability was
+-- weighed and left out on purpose: the database cannot see which browser a request came from,
+-- has_capability sits under hundreds of policies and functions, and a guard that misfires there
+-- locks every Administrator out of the book at once. See src/lib/loginCode.ts.
+
+create table if not exists public.trusted_devices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  -- sha256 of the device id, lower-case hex. Never the id itself.
+  device_hash text not null check (device_hash ~ '^[0-9a-f]{64}$'),
+  -- "Safari on iPad" and the like, so a person can tell their devices apart when removing one.
+  label text,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  unique (user_id, device_hash)
+);
+
+alter table public.trusted_devices enable row level security;
+revoke all on public.trusted_devices from public, anon, authenticated;
+grant select on public.trusted_devices to authenticated;
+
+-- A person reads their own; an Administrator reads everybody's, to clear them from Settings.
+create policy trusted_devices_read on public.trusted_devices
+  for select to authenticated
+  using (user_id = auth.uid() or public.current_user_role() = 'Administrator');
+
+comment on table public.trusted_devices is
+  'Browsers an Administrator has confirmed with an emailed code. A hash of a random id kept in the '
+  'browser, never the id. No write policy: the server records a device, and trusted_devices_remove '
+  'is the only way to take one away.';
+
+create table if not exists public.login_codes (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  -- The code is for THIS browser only; typed into another it is refused.
+  device_hash text not null check (device_hash ~ '^[0-9a-f]{64}$'),
+  -- HMAC-SHA256 under a server secret. A six-digit code is a million guesses; a bare hash of it
+  -- would be read back in a second by anybody holding a copy of this table.
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts integer not null default 0 check (attempts >= 0),
+  sent_at timestamptz not null default now(),
+  -- The resend throttle: so many sends in a rolling hour.
+  window_started_at timestamptz not null default now(),
+  sends_in_window integer not null default 1 check (sends_in_window >= 0),
+  -- Which mailbox it went from, for the person asking "why did it come from Stephan?".
+  sent_from text
+);
+
+alter table public.login_codes enable row level security;
+revoke all on public.login_codes from public, anon, authenticated;
+
+comment on table public.login_codes is
+  'The live sign-in code per person, HMAC''d. Server only: RLS on, no policy, no grant.';
+
+create table if not exists public.login_code_waivers (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  granted_by uuid not null references public.profiles(id) on delete cascade,
+  expires_at timestamptz not null
+);
+
+alter table public.login_code_waivers enable row level security;
+revoke all on public.login_code_waivers from public, anon, authenticated;
+
+comment on table public.login_code_waivers is
+  'Another Administrator let this person in without a code, once, until expires_at. Written only '
+  'by login_code_waive; spent by the server on the next code request.';
+
+-- ---------- is THIS browser one of mine? ----------
+--
+-- TAKES THE DEVICE ID ITSELF AND HASHES IT HERE. Taking the hash would make the stored column the
+-- key: anybody who ever read a copy of trusted_devices could present it. The id lives only in the
+-- browser, so this is the one place the two meet.
+--
+-- SECURITY DEFINER because it also stamps last_seen_at, and there is deliberately no update
+-- policy. Answers only about auth.uid().
+create or replace function public.trusted_device_seen(p_device_id text)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if auth.uid() is null or p_device_id is null or p_device_id !~ '^[0-9a-f]{64}$' then
+    return false;
+  end if;
+  update public.trusted_devices
+     set last_seen_at = now()
+   where user_id = auth.uid()
+     and device_hash = encode(sha256(convert_to(p_device_id, 'UTF8')), 'hex');
+  return found;
+end
+$$;
+
+revoke all on function public.trusted_device_seen(text) from public, anon;
+grant execute on function public.trusted_device_seen(text) to authenticated;
+
+-- ---------- forget a device, or all of somebody's ----------
+--
+-- A person may forget their own; an Administrator may forget anybody's -- the firm's way out when
+-- an iPad is lost. p_device_id null means every device of p_user_id.
+create or replace function public.trusted_devices_remove(p_user_id uuid, p_device_id uuid default null)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  n integer;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in first.';
+  end if;
+  if p_user_id is distinct from auth.uid()
+     and public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator can remove somebody else''s devices.';
+  end if;
+  delete from public.trusted_devices d
+   where d.user_id = p_user_id
+     and (p_device_id is null or d.id = p_device_id);
+  get diagnostics n = row_count;
+  return n;
+end
+$$;
+
+revoke all on function public.trusted_devices_remove(uuid, uuid) from public, anon;
+grant execute on function public.trusted_devices_remove(uuid, uuid) to authenticated;
+
+-- ---------- let a colleague in without a code ----------
+--
+-- For the day the mail does not come. Another Administrator -- never the person themselves, or it
+-- is a button that switches the code off -- and only for an Administrator, the only role asked.
+-- Thirty minutes, spent on the next sign-in. Real time (now()), not the staging clock: this is
+-- about a person at a door, not a business date.
+create or replace function public.login_code_waive(p_user_id uuid)
+returns timestamptz
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_until timestamptz := now() + interval '30 minutes';
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator can let somebody in without a code.';
+  end if;
+  if p_user_id = auth.uid() then
+    raise exception 'Another Administrator has to do this for you.';
+  end if;
+  if not exists (select 1 from public.profiles p
+                  where p.id = p_user_id and p.role = 'Administrator' and p.status = 'Active') then
+    raise exception 'Only an active Administrator is asked for a code.';
+  end if;
+  insert into public.login_code_waivers (user_id, granted_by, expires_at)
+  values (p_user_id, auth.uid(), v_until)
+  on conflict (user_id) do update
+    set granted_by = excluded.granted_by, expires_at = excluded.expires_at;
+  return v_until;
+end
+$$;
+
+revoke all on function public.login_code_waive(uuid) from public, anon;
+grant execute on function public.login_code_waive(uuid) to authenticated;

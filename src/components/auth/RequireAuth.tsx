@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/AuthContext'
 import { SetPasswordPage } from '../../pages/auth/SetPasswordPage'
 import { IdleTimeout } from './IdleTimeout'
+import { AdminDeviceCode } from './AdminDeviceCode'
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading, currentUser, signOut, passwordSetupRequired, profileError, reloadProfile } = useAuth()
@@ -51,10 +52,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     )
   }
+  /* An Administrator on a new device types the emailed code before anything of the app draws
+     (S10). Keyed on the person so a different sign-in in the same tab is asked afresh. */
   return (
-    <>
+    <AdminDeviceCode key={currentUser?.id ?? 'nobody'} userId={currentUser?.id ?? ''} role={currentUser?.role ?? ''} onSignOut={() => void signOut()}>
       <IdleTimeout />
       {children}
-    </>
+    </AdminDeviceCode>
   )
 }
