@@ -18,6 +18,10 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+000000. **Staging has one client, at the user's request (21 Oct): "Stephan's Test Client" (STC)** --
+   25% flat, mandate dated, 24% interest, ten debtors in one batch (STC0001-STC0010, RAP-125252 to
+   RAP-125261, R171 256.50 capital), each with an @example.com email only, all UNASSIGNED so no
+   workflow has started. Made with SQL, not through the import. Everything else was cleared.
 00000. **S10, later on 21 Oct: the open list built** (the user: "you can proceed with building
    everything"), each in its own worktree and merged (§2 under S10, "The open list"):
    - **Login code by email for an Administrator on a new device** -- BEFORE THE PREVIEW IS OPENED
