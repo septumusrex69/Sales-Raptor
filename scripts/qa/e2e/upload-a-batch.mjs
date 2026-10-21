@@ -40,6 +40,9 @@ const CLIENT = {
   /* Whom the liaison forwards it to, so the greeting has somebody to name. */
   contact_person: 'Thandi Nkosi',
   mandate_signed_at: '2026-02-01',
+  /* AND A COMMISSION (S10, prompt 13 item 3): no mandate or no commission is no work, so a client
+     without one would not be offered Upload a batch at all. */
+  commission_rate: 0.25,
   created_at: '2026-01-01T00:00:00Z',
 }
 

@@ -338,6 +338,11 @@ probed on staging inside a rolled-back transaction before it was written into sc
    (`scripts/qa/schemaForeignKeys.mjs`, matched against staging's pg_constraint: all 207 pairs;
    `scripts/qa/live/foreign-keys.sql` re-prints them). Probed: the clear runs and keeps the 915 mails.
 
+**Tests at the end of S10:** fast suite all green (18 688 checks, 304 files). Full `npm run qa`: 357 of
+361 green. `e2e/upload-a-batch` was red because its client had no commission (the new rule, item 3);
+the fixture now has one and it is green (145). `e2e/library` failed under load and passed alone. The
+other two are the old reds, `e2e/account-templates` and `e2e/excess-credit`, both older than S7.
+
 ### S9 · Balance Sort (19 Oct)
 
 **The firm (18 Oct): "sort ... highest number to lowest number, collected or outstanding balance."**
