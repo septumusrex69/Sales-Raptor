@@ -714,6 +714,10 @@ export interface LedgerPayment {
 
 export interface LedgerFee {
   id: string
+  /** A credit note's target fee (S10, prompt 13 item 8) -- see credit_fee in schema.sql. */
+  creditsFeeId?: string | null
+  creditReason?: string | null
+  creditedByName?: string | null
   incurredAt: string
   description: string
   amountExclVat: number
@@ -838,7 +842,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       .eq('account_id', accountId).order('received_at', { ascending: false }).order('id'),
       { table: 'payments' }),
     fetchAllRows(() => supabase.from('account_fees')
-      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id,legacy_name,source')
+      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id,legacy_name,source,credits_fee_id,credit_reason,credited_by_name')
       .eq('account_id', accountId).order('incurred_at', { ascending: false }).order('id'),
       { table: 'fees' }),
     fetchAllRows(() => supabase.from('account_interest_accruals')
@@ -891,6 +895,10 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       /* AND WHO RAISED IT. Missing from this mapper it reads as undefined, the health report's
          `imported()` says false for everything, and 26 028 inherited findings are filed as ours. */
       source: r.source ?? null,
+      /* A CREDIT NOTE (S10): the fee it credits, why, and who. Null on every ordinary fee. */
+      creditsFeeId: r.credits_fee_id ?? null,
+      creditReason: r.credit_reason ?? null,
+      creditedByName: r.credited_by_name ?? null,
     })),
     accruals: (accruals ?? []).map((r: any) => ({
       id: r.id,

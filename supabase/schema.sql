@@ -44641,3 +44641,422 @@ revoke all on function public.suspended_bank_lines() from public, anon;
 grant execute on function public.suspend_bank_line(uuid, text) to authenticated;
 grant execute on function public.release_bank_line_from_suspense(uuid) to authenticated;
 grant execute on function public.suspended_bank_lines() to authenticated;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 8: NO DELETING FEES -- A CREDIT NOTE.
+--
+-- The firm: "For an Annexure B fee raised in error: a credit note against the account with a required
+-- reason, logged with who and when, shown on the statement. The fee stays on record; the balance and
+-- the firm's fee income both drop. Administrator only. The same credit note is how a discount on fees
+-- is given: credit one or more specific fees, in full or in part (up to what is left of that fee). It
+-- never credits capital or interest, and never more than the fee."
+--
+-- A CREDIT NOTE IS A NEGATIVE FEE ROW THAT NAMES THE FEE IT CREDITS (credits_fee_id). Insert-only, like
+-- every fee: the ledger still has no update or delete policy, and the original fee is untouched.
+--
+-- WHY A ROW AND NOT A TABLE: every reader that ADDS UP fees -- engine_balances, in_duplum_reached,
+-- account_ledger, account_movements, payments_posted, the browser's computeBalance -- nets it without
+-- being touched, so the balance, the in duplum test and every future allocation drop together. The two
+-- readers that walk fees ONE AT A TIME (fee_split, which splits each payment's to_costs across the fees,
+-- and account_money_position) read account_fees_net instead: each fee with its credits netted into it
+-- and the credit rows themselves left out, so a negative row never takes a turn of its own.
+--
+-- THE FIRM'S FEE INCOME DROPS THROUGH THE SAME DOOR: it is to_costs on allocations, and the credited
+-- part is never allocated. Which is why only what is STILL OWING on the fee can be credited -- what the
+-- debtor already paid towards it is in the trust ledger as the firm's, and crediting it here would leave
+-- the debtor's statement in credit with nothing in the trust account behind it. That is corrected by
+-- reversing the payment, as it always has been, and credit_fee says so.
+--
+-- SPLIT EXCL/VAT IN THE FEE'S OWN PROPORTION, so a fee credited in full comes back to exactly nought on
+-- both columns. Its own action code ('credit_note') and source, so no daily or monthly charge count reads
+-- it as a charge and reallocate_account (which rebuilds raptor item 9 rows) never touches it. A receipt
+-- fee is refused: it comes off by reversing its payment, and it is rebuilt on every reallocation.
+-- Administrator only, by role, in the function and in a trigger on the ledger itself, since the insert
+-- policy lets anybody signed in write a fee row.
+-- ============================================================================================
+alter table public.account_fees
+  add column if not exists credits_fee_id uuid references public.account_fees (id),
+  add column if not exists credit_reason text,
+  add column if not exists credited_by_name text;
+
+create index if not exists account_fees_credits_idx on public.account_fees (credits_fee_id) where credits_fee_id is not null;
+
+create or replace view public.account_fees_net with (security_invoker = true) as
+select f.id, f.account_id, f.incurred_at, f.counts_toward_fee_cap, f.annexure_item,
+       f.cancelled_at, f.legacy_name, f.billed, f.payment_id, f.description,
+       f.amount_excl_vat + coalesce(c.excl, 0) as amount_excl_vat,
+       coalesce(f.vat_amount, 0) + coalesce(c.vat, 0) as vat_amount
+  from public.account_fees f
+  left join lateral (
+    select sum(x.amount_excl_vat) as excl, sum(coalesce(x.vat_amount, 0)) as vat
+      from public.account_fees x where x.credits_fee_id = f.id
+  ) c on true
+ where f.credits_fee_id is null;
+
+revoke all on public.account_fees_net from anon;
+
+-- fee_split: credits netted into their fee (account_fees_net), credit rows taking no turn of their own.
+create or replace function public.fee_split(
+  p_account uuid,
+  /* The payment whose own fee row must be left out -- see the header. */
+  p_exclude_payment uuid,
+  /* The item 9 fee this payment raises, INCLUDING VAT, and the day it is raised on. */
+  p_new_fee_incl numeric,
+  p_new_fee_day date,
+  /* What earlier payments have already taken out of the pool, and what this one takes. */
+  p_taken_before numeric,
+  p_to_costs numeric,
+  /* Interest that has not been posted yet and is about to be. The dry run has some; the posting
+     has none, because it writes the accrual before it asks. Without it the preview and the ledger
+     disagreed about what the ceiling refuses -- R57,01 against R62,63 on RRC00005, the difference
+     being exactly the R5,62 of interest the approval was about to post. */
+  p_interest_pending numeric default 0
+)
+returns table (
+  rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with room as (select public.in_duplum_cost_room(p_account, p_interest_pending) as mm),
+  fee_rows as (
+    select 0 as sk, f.id, f.incurred_at,
+           (f.counts_toward_fee_cap is not true) as is_receipt,
+           f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+           /* RECOVERABLE BY THE ENGINE'S OWN RULE, not the money position view's plainer one:
+              engine_balances gathers the pool with fee_stands() and `billed is not false`, and it
+              is that pool to_costs came out of. The view's reading would make the two buckets fail
+              to add back on an account carrying an imported Promise to Pay. */
+           (public.fee_stands(f.cancelled_at, f.legacy_name) and f.billed is not false) as stands
+      from public.account_fees_net f
+     where f.account_id = p_account
+       and (p_exclude_payment is null
+            or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid)
+               is distinct from p_exclude_payment)
+    union all
+    select 1, '00000000-0000-0000-0000-000000000000'::uuid,
+           coalesce(p_new_fee_day, public.raptor_today())::timestamptz,
+           true, greatest(coalesce(p_new_fee_incl, 0), 0), true
+  ),
+  /* What the ceiling had already been spent on by the time this fee's turn came, oldest first. */
+  roomed as (
+    select r.*,
+           coalesce(sum(case when r.stands then r.incl else 0 end)
+             over (order by date(r.incurred_at), r.sk, r.incurred_at, r.id
+                   rows between unbounded preceding and 1 preceding), 0) as raised_before
+      from fee_rows r
+  ),
+  payable as (
+    select r.sk, r.id, r.incurred_at, r.is_receipt, r.incl,
+           case when not r.stands then 0
+                /* The new receipt fee is outside the clip -- see the header. */
+                when r.sk = 1 then r.incl
+                else least(greatest((select mm from room) - r.raised_before, 0), r.incl) end as can
+      from roomed r
+  ),
+  /* And what earlier payments had settled by the time this fee's turn came -- over `can`, not
+     `incl`, because a payment can only ever have settled what was within the ceiling. */
+  ordered as (
+    select p.*,
+           coalesce(sum(p.can) over (order by date(p.incurred_at), p.sk, p.incurred_at, p.id
+                                     rows between unbounded preceding and 1 preceding), 0)
+             as settled_before
+      from payable p
+  ),
+  split as (
+    select o.is_receipt, o.incl, o.can,
+           least(greatest(coalesce(p_taken_before, 0) - o.settled_before, 0), o.can) as was,
+           least(greatest(coalesce(p_taken_before, 0) + coalesce(p_to_costs, 0)
+                          - o.settled_before, 0), o.can) as now_
+      from ordered o
+  )
+  select
+    coalesce(sum(incl) filter (where is_receipt), 0),
+    coalesce(sum(incl - can) filter (where is_receipt), 0),
+    coalesce(sum(was) filter (where is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where is_receipt), 0),
+    coalesce(sum(incl) filter (where not is_receipt), 0),
+    coalesce(sum(incl - can) filter (where not is_receipt), 0),
+    coalesce(sum(was) filter (where not is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where not is_receipt), 0)
+  from split
+$$;
+
+-- account_money_position: the same netting, for the same reason.
+create or replace view public.account_money_position as
+with fee_rows as (
+  select f.account_id,
+         f.id,
+         f.incurred_at,
+         f.counts_toward_fee_cap,
+         f.annexure_item,
+         f.amount_excl_vat,
+         f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+         (f.cancelled_at is not null or f.billed is false) as unrecoverable
+    from public.account_fees_net f
+),
+/* What was already settled by the time this fee's turn came, oldest first. */
+ordered as (
+  select r.*,
+         coalesce(sum(case when r.unrecoverable then 0 else r.incl end)
+           over (partition by r.account_id order by r.incurred_at, r.id
+                 rows between unbounded preceding and 1 preceding), 0) as settled_before
+    from fee_rows r
+),
+pool as (
+  select a.account_id, coalesce(sum(a.to_costs), 0) as taken
+    from public.payment_allocations a where a.status <> 'reversed' group by a.account_id
+),
+fees as (
+  select o.account_id,
+         o.counts_toward_fee_cap,
+         o.annexure_item,
+         o.unrecoverable,
+         o.incl,
+         o.amount_excl_vat,
+         case when o.unrecoverable then 0
+              else least(greatest(coalesce(p.taken, 0) - o.settled_before, 0), o.incl) end as taken
+    from ordered o left join pool p on p.account_id = o.account_id
+),
+cost_buckets as (
+  select account_id,
+         sum(incl) filter (where counts_toward_fee_cap)                   as c17_charged,
+         sum(incl) filter (where counts_toward_fee_cap and unrecoverable) as c17_cant,
+         sum(taken) filter (where counts_toward_fee_cap)                  as c17_taken,
+         sum(amount_excl_vat) filter (where counts_toward_fee_cap and not unrecoverable) as c17_excl_recoverable,
+         sum(incl) filter (where not counts_toward_fee_cap)                   as i9_charged,
+         sum(incl) filter (where not counts_toward_fee_cap and unrecoverable) as i9_cant,
+         sum(taken) filter (where not counts_toward_fee_cap)                  as i9_taken
+    from fees group by account_id
+),
+interest as (
+  select account_id,
+         coalesce(sum(amount_accrued), 0) as accrued,
+         coalesce(sum(amount_recoverable), 0) as recoverable
+    from public.account_interest_accruals group by account_id
+),
+allocated as (
+  select account_id,
+         coalesce(sum(to_interest), 0) as interest_taken,
+         coalesce(sum(to_capital), 0) as capital_taken,
+         coalesce(sum(commission), 0) as commission_earned,
+         coalesce(sum(commission_vat), 0) as commission_vat_earned,
+         coalesce(sum(payment_amount), 0) as payments_allocated,
+         coalesce(sum(excess_credit), 0) as excess_credit
+    from public.payment_allocations where status <> 'reversed' group by account_id
+)
+select d.id as account_id,
+       d.company_id,
+       d.case_number,
+       d.account_number,
+       d.assigned_to,
+       d.status,
+       d.capital_handed_over,
+       coalesce(d.capital_outstanding, 0) as capital_outstanding,
+       coalesce(al.capital_taken, 0) as capital_taken,
+
+       coalesce(i.accrued, 0) as interest_charged,
+       coalesce(al.interest_taken, 0) as interest_taken,
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0) as interest_left,
+       greatest(coalesce(i.accrued, 0) - coalesce(i.recoverable, 0), 0) as interest_cant_take,
+
+       coalesce(cb.c17_charged, 0) as costs_charged,
+       coalesce(cb.c17_taken, 0) as costs_taken,
+       greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0) as costs_left,
+       coalesce(cb.c17_cant, 0) as costs_cant_take,
+
+       coalesce(cb.i9_charged, 0) as receipt_fees_charged,
+       coalesce(cb.i9_taken, 0) as receipt_fees_taken,
+       greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0) as receipt_fees_left,
+       coalesce(cb.i9_cant, 0) as receipt_fees_cant_take,
+
+       /* COMMISSION: earned when capital comes in, so it has no "left" -- only a potential. */
+       coalesce(al.commission_earned, 0) + coalesce(al.commission_vat_earned, 0) as commission_earned,
+       round(coalesce(d.capital_outstanding, 0)
+             * coalesce(d.commission_rate, c.commission_rate, 0)
+             * (1 + coalesce(fs.vat_rate, 0.15)), 2) as commission_potential,
+       coalesce(d.commission_rate, c.commission_rate) as commission_rate,
+
+       /* THE ITEMS 1-7 CEILING: the capital handed over or R1 225, whichever is the lesser, and
+          measured EXCLUDING VAT -- which is the unit annexureB.ts's feeCeiling already works in
+          and the unit the gazette sets the figure in. */
+       least(coalesce(d.capital_handed_over, 0), 1225.00) as cost_cap,
+       coalesce(cb.c17_excl_recoverable, 0) as cost_cap_used,
+       greatest(least(coalesce(d.capital_handed_over, 0), 1225.00) - coalesce(cb.c17_excl_recoverable, 0), 0) as cost_cap_headroom,
+
+       /* IN DUPLUM (NCA s103(5)): interest + costs still to take may not pass the ceiling.
+          DERIVED, NOT ECHOED. This read `coalesce(d.in_duplum, false)` -- Swordfish's own "In
+          Duplum" column, which is false on everything Raptor ever created -- while the chip it
+          draws says "non-capital has reached the capital handed over". So the panel said "In
+          duplum ceiling R380,00" on an account whose non-capital was R441,91. The rule itself is
+          in open_interest and applies to every account; this is only the reading of it, and
+          in_duplum_reached is the one place it is worked out. */
+       public.in_duplum_reached(d.id) as in_duplum,
+       coalesce(d.in_duplum_ceiling, 0) as in_duplum_ceiling,
+
+       coalesce(al.excess_credit, 0) as excess_credit,
+       coalesce(al.payments_allocated, 0) as payments_allocated,
+
+       /* WHAT BF STILL HAS TO COME. Commission is not in it: it is not a debt the debtor owes. */
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0)
+         + greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0)
+         + greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0)
+         as bf_left_to_take
+  from public.debtor_accounts d
+  join public.companies c on c.id = d.company_id
+  cross join (select vat_rate from public.firm_settings limit 1) fs
+  left join cost_buckets cb on cb.account_id = d.id
+  left join interest i on i.account_id = d.id
+  left join allocated al on al.account_id = d.id;
+
+
+create or replace function public.credit_fee(p_fee uuid, p_amount numeric, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_fee public.account_fees%rowtype;
+  v_net numeric;
+  v_settled_before numeric;
+  v_taken numeric;
+  v_unpaid numeric;
+  v_excl numeric;
+  v_id uuid;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator can credit a fee.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why the fee is being credited.' using errcode = '22023';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Give the amount to credit.' using errcode = '22023';
+  end if;
+  select * into v_fee from public.account_fees where id = p_fee for update;
+  if not found then
+    raise exception 'That fee no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_fee.credits_fee_id is not null then
+    raise exception 'That is a credit note itself.' using errcode = '22023';
+  end if;
+  if not public.fee_stands(v_fee.cancelled_at, v_fee.legacy_name) or v_fee.billed is false then
+    raise exception 'That fee was never charged to the debtor, so there is nothing to credit.' using errcode = '22023';
+  end if;
+  if v_fee.payment_id is not null and v_fee.annexure_item = '9' then
+    raise exception 'A receipt fee comes off by reversing its payment, not by a credit note.' using errcode = '22023';
+  end if;
+
+  select n.amount_excl_vat + n.vat_amount into v_net from public.account_fees_net n where n.id = p_fee;
+  select coalesce(sum(n.amount_excl_vat + n.vat_amount), 0) into v_settled_before
+    from public.account_fees_net n
+   where n.account_id = v_fee.account_id
+     and public.fee_stands(n.cancelled_at, n.legacy_name) and n.billed is not false
+     and (n.incurred_at, n.id) < (v_fee.incurred_at, v_fee.id);
+  select coalesce(sum(a.to_costs), 0) into v_taken
+    from public.payment_allocations a where a.account_id = v_fee.account_id and a.status <> 'reversed';
+  v_unpaid := v_net - least(greatest(v_taken - v_settled_before, 0), v_net);
+
+  if round(p_amount, 2) > round(v_unpaid, 2) then
+    raise exception 'Only R% of that fee is still owing and can be credited. What the debtor has already paid towards it is corrected by reversing the payment.',
+      to_char(greatest(v_unpaid, 0), 'FM999999990.00') using errcode = '22023';
+  end if;
+
+  v_excl := case when (v_fee.amount_excl_vat + coalesce(v_fee.vat_amount, 0)) = 0 then p_amount
+                 else round(p_amount * v_fee.amount_excl_vat / (v_fee.amount_excl_vat + coalesce(v_fee.vat_amount, 0)), 2) end;
+
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description, amount_excl_vat, vat_rate, vat_amount,
+    counts_toward_fee_cap, incurred_at, source, action_code, billed, created_by,
+    credits_fee_id, credit_reason, credited_by_name)
+  values (
+    v_fee.account_id, v_fee.annexure_item, v_fee.tariff_effective_from,
+    'Credit note: ' || v_fee.description, -v_excl, v_fee.vat_rate, -(round(p_amount, 2) - v_excl),
+    v_fee.counts_toward_fee_cap, public.raptor_now(), 'credit_note', 'credit_note', true, auth.uid(),
+    p_fee, v_reason, (select name from public.profiles where id = auth.uid()))
+  returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function public.refuse_credit_note_by_hand()
+returns trigger
+language plpgsql security definer set search_path to 'public'
+as $$
+begin
+  if (new.credits_fee_id is not null or new.source = 'credit_note')
+     and auth.uid() is not null
+     and public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator can credit a fee.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+create or replace trigger account_fees_credit_notes_are_administrators
+  before insert on public.account_fees
+  for each row execute function public.refuse_credit_note_by_hand();
+
+revoke all on function public.credit_fee(uuid, numeric, text) from public, anon;
+grant execute on function public.credit_fee(uuid, numeric, text) to authenticated;
+revoke all on function public.refuse_credit_note_by_hand() from public, anon;
+
+
+-- S10: THE FINANCE REVOKE LIST, with this session's trust functions on it (check-finance-is-administrator-only
+-- reads the last copy of the loop).
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)',
+    /* THE PAYOUT DAY GATE AND ITS OVERRIDE (11 Oct). */
+    'assert_payover_run_due(uuid)', 'release_payover_run_early(uuid, text)',
+    'payover_run_due(uuid)',
+    /* S10: suspense from Needs an account, and the fee credit note. */
+    'suspend_bank_line(uuid, text)', 'release_bank_line_from_suspense(uuid)', 'suspended_bank_lines()',
+    'credit_fee(uuid, numeric, text)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

@@ -606,6 +606,12 @@ function receiptFeeOn(
 
 export type StatementKind =
   | 'handover'
+  /**
+   * A CREDIT NOTE AGAINST A FEE (S10, prompt 13 item 8): a fee raised in error, or a discount on
+   * fees, credited by an Administrator. The fee it credits stays on the statement as it was; this is
+   * the line beside it that takes it off, so the lines still add up to the figure at the foot.
+   */
+  | 'fee-credit'
   | 'interest'
   /** Interest since the last posting, computed to today and not yet charged. */
   | 'interest-accruing'
@@ -751,6 +757,12 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
      * FOUND BY WRITING THE OPPOSITE and watching "debits less credits equal the balance" fail.
      */
     const charged = roundToCents(f.exclVat + f.vat)
+    /* A NEGATIVE ROW IS A CREDIT NOTE (S10), and is drawn as the credit it is -- left as a fee it
+       would read "no charge" while the balance moved by it. */
+    if (charged < 0) {
+      pending.push({ date: f.date, kind: 'fee-credit', at: f.at, description: f.description, debit: 0, credit: -charged })
+      continue
+    }
     pending.push({
       date: f.date,
       kind: charged > 0 ? 'fee' : 'fee-no-charge',
@@ -769,6 +781,11 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
   for (const f of receiptRows) {
     if (stopAt && f.date > stopAt) continue
     const charged = roundToCents(f.exclVat + f.vat)
+    /* A credit against an imported receipt fee: counted by the balance, so drawn as a credit too. */
+    if (charged < 0) {
+      pending.push({ date: f.date, kind: 'fee-credit', at: f.at, description: f.description, debit: 0, credit: -charged })
+      continue
+    }
     if (charged <= 0) continue
     pending.push({
       date: f.date,
@@ -823,7 +840,7 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
    */
   const rank: Record<StatementKind, number> = {
     /* A no-charge action sits with the fees, because that is what it would have been. */
-    handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, 'fee-no-charge': 2, payment: 3, 'receipt-fee': 4,
+    handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, 'fee-no-charge': 2, 'fee-credit': 2, payment: 3, 'receipt-fee': 4,
     /* Last on its day: it is whatever the day's other lines left owing. */
     'settlement-discount': 5,
   }

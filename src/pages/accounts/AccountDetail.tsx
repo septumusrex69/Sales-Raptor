@@ -37,6 +37,7 @@ import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
 import { canApproveSettlement, canRecordPayment, canReversePayment } from '../../lib/permissions'
+import { FeeCreditPanel } from '../../components/accounts/FeeCreditPanel'
 import { AccountPaymentsList } from '../../components/accounts/AccountPaymentsList'
 import { isQuotable, type Settlement } from '../../lib/settlement'
 import { fetchSettlement } from '../../lib/settlementApi'
@@ -1981,6 +1982,10 @@ export function AccountDetail() {
               payment isn't mine" lands, and it was the one place a payment could not be undone. */}
           <AccountPaymentsList accountId={account.id} mayReverse={canReversePayment(currentUser)}
             onReversed={reload} />
+          {/* CREDIT NOTES ON FEES (S10, prompt 13 item 8): Administrator only -- the database says so too. */}
+          {currentUser?.role === 'Administrator' && (
+            <FeeCreditPanel fees={ledgers?.fees ?? []} onDone={reload} />
+          )}
           <StatementTable statement={statement?.lines ?? []} account={account} breakdown={b}
             handedOver={account.capitalHandedOver}
             /* The day the figures were struck, printed on the page. The same one the statement
@@ -2370,7 +2375,7 @@ export function AccountDetail() {
           /* WHAT THE ACCOUNT HAS ACTUALLY BEEN CHARGED FOR, off the fee ledger the page already
              holds -- never a count of reports, because a report somebody uploaded twice is one
              search and the client is quoted what they paid for. */
-          searches={(ledgers?.fees ?? []).filter((f) => f.annexureItem === '4c' && f.billed).length}
+          searches={(ledgers?.fees ?? []).filter((f) => f.annexureItem === '4c' && f.billed && !f.creditsFeeId).length}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setParking(null)}
           onDone={reload} />
