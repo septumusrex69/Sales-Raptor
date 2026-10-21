@@ -160,3 +160,29 @@ export function clientReportFilename(clientName: string, today: string): string 
   const clean = clientName.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim()
   return `${clean} collection report ${d} ${MON[m - 1]} ${y}.pdf`
 }
+
+/**
+ * THE COVERING EMAIL, WHEN THE REPORT GOES OUT FROM RAPTOR (S10). HANDOFF had it as not done: the
+ * report was downloaded and attached by hand in somebody's own mail program, which left no trace
+ * of it on the client's timeline.
+ *
+ * SHORT, AND A DRAFT, not a template in the Library: it opens in the ordinary compose box, so the
+ * liaison reads it and can rewrite it before Send. The date is the day it was DRAWN, written out
+ * the way the PDF writes it ("19 Oct 2026"), never en-ZA's "Sept" -- the email and its attachment
+ * must not quote one day two ways.
+ *
+ * Blank lines between paragraphs, because a blank line is what emailBodyHtml reads as a paragraph.
+ */
+export function clientReportEmail(clientName: string, today: string): { subject: string; body: string } {
+  const [y, m, d] = today.split('-').map(Number)
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const day = `${d} ${MON[m - 1]} ${y}`
+  const name = clientName.replace(/\s+/g, ' ').trim()
+  return {
+    subject: `Collection report - ${name} - ${day}`,
+    body: 'Good day\n\n'
+      + `Please find attached your collection report for ${name} as at ${day}: your book at a glance, `
+      + 'then your collections and handovers month by month for the last twelve months.\n\n'
+      + 'Kind regards',
+  }
+}

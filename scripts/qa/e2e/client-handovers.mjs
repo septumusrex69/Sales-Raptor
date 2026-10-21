@@ -10,8 +10,9 @@ import { readFileSync } from 'node:fs'
 
 const t = makeRunner('client-handovers')
 const ADMIN = { ...PROFILE, role: 'Administrator', name: 'Stephan' }
-const COMPANY = { id: COMPANY_ID, name: 'Rinda Roo Company', code: 'RRC', account_owner_id: ADMIN.id, created_at: '2025-10-01T07:27:05Z', commission_rate: 0.25 }
+const COMPANY = { id: COMPANY_ID, name: 'Rinda Roo Company', code: 'RRC', account_owner_id: ADMIN.id, created_at: '2025-10-01T07:27:05Z', commission_rate: 0.25, email: 'accounts@rindaroo.co.za' }
 const asked = []
+const seen = []
 
 const server = await startServer()
 const browser = await chromium.launch()
@@ -51,7 +52,7 @@ try {
         { day: '2026-10-12', accounts: 7, capital: 120000 },
       ] }
     }],
-  ], [], { now: '2026-10-18T10:00:00+02:00' })
+  ], seen, { now: '2026-10-18T10:00:00+02:00' })
   await page.setViewportSize({ width: 1180, height: 900 })
   for (let i = 0; i < 60; i += 1) {
     try { await page.goto(`http://localhost:${PORT}/companies/${COMPANY_ID}`, { timeout: 2000 }); break }
@@ -145,6 +146,31 @@ try {
   t.ok(`...named for the client (${report?.suggestedFilename()})`, /^Rinda Roo Company collection report \d+ \w{3} 2026\.pdf$/.test(report?.suggestedFilename() ?? ''))
   const { PDFDocument } = await import('pdf-lib')
   t.check('...two pages: the book at a glance, then month by month', reportBytes.length ? (await PDFDocument.load(reportBytes)).getPageCount() : 0, 2)
+
+  /* ---------- EMAIL IT (S10): out from Raptor, through the client page's own compose box ---------- */
+  const sends = []
+  await page.route('**/api/email/send*', (route) => {
+    sends.push(route.request().postDataJSON())
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, messageId: '<report@raptor>', from: ADMIN.email }) })
+  })
+  await reportBox.getByTestId('client-report-email').click()
+  const modal = page.locator('[data-modal-open]')
+  const send = page.getByRole('button', { name: /^Send$/ })
+  await send.waitFor({ timeout: 20000 }).catch(() => {})
+  t.ok('Email it opens the compose box, with the report already attached', await send.isVisible()
+    && await modal.getByText(/^Rinda Roo Company collection report \d+ \w{3} 2026\.pdf$/).first().isVisible())
+  t.ok('...a covering note that says what it is', /Please find attached your collection report for Rinda Roo Company as at 18 Oct 2026/.test(await modal.locator('textarea').first().inputValue()))
+  t.ok('...and says nothing is charged', /Nothing is charged/.test(await modal.innerText()))
+  await t.shot(page, 'client-report-email')
+  const before = seen.filter((r) => /^POST .*\/rest\/v1\/activities/.test(r)).length
+  await send.click()
+  await page.waitForTimeout(1500)
+  const sent = sends[0] ?? {}
+  t.check('Send posts once, to the client\'s address', `${sends.length} ${sent.to}`, '1 accounts@rindaroo.co.za')
+  t.ok('...with the PDF on it', sent.attachments?.length === 1 && sent.attachments[0].contentType === 'application/pdf'
+    && Buffer.from(sent.attachments[0].content ?? '', 'base64').subarray(0, 5).toString('latin1') === '%PDF-')
+  t.ok('...about no account, so nothing is charged', !('accountId' in sent) && !('account_id' in sent))
+  t.check('...and it is logged on the client\'s timeline', seen.filter((r) => /^POST .*\/rest\/v1\/activities/.test(r)).length - before, 1)
 } finally {
   await browser.close()
   await stopServer(server)
