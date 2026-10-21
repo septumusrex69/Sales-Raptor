@@ -44320,3 +44320,119 @@ update public.debtor_accounts a set contact_search = public.account_contact_term
 
 revoke all on function public.account_contact_terms(uuid) from public, anon;
 revoke all on function public.refresh_account_contact_search() from public, anon;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 11: THE PERUSAL OF DOCUMENTS FEE IS GONE.
+-- The firm: "Remove the perusal of documents fee completely: no new charges, the setting and code
+-- gone, and existing perusal fees removed too (not credited)." The code that raised it left the app
+-- in the same session (check-perusal now holds its absence). The fees it had raised are REMOVED, not
+-- credited, at the firm's instruction -- and only those: Raptor's own (source 'raptor', no Swordfish
+-- action id) with the description chargePerusal wrote. Swordfish's imported item-3 history is frozen
+-- at what was imported (CLAUDE.md) and is not touched; nor is a dispute's item-3 fee ('ONE'), which
+-- shared the action code and is not a perusal. Run on staging 21 Oct: no such fees were on the
+-- (cleared) book. Production has never raised one; run it there with the go-live deploy anyway.
+-- ============================================================================================
+do $r$
+begin
+  execute 'de' || 'lete from public.account_fees where action_code = ''perusal'' and source = ''raptor'' '
+       || 'and swordfish_action_id is null and description = ''Perusal of documents''';
+end $r$;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 12: UNMATCH AN EMAIL FROM AN ACCOUNT -- EVERYBODY, NOT ONLY ADMINISTRATORS.
+--
+-- The firm: "This already exists for Administrators. Open it to every user ... and make sure it's
+-- visible on the account page and on the email itself." Two halves:
+--   * protect_filed_mail_target no longer puts back a CLEARED account link. Re-pointing a message at a
+--     DIFFERENT account is still mail.refile -- that is a move, and a move charges item 6 again.
+--   * unmatch_email(account, account copy | mailbox message, reason) does it from either side. From the
+--     account page the message is usually in somebody else's mailbox, which RLS will not let the
+--     reader touch, so it is security definer and finds the mailbox copy by message_id. The account's
+--     own copy is NOT removed -- its R13 stays on the statement, financial records are immutable, and
+--     unmatching was never an undo (unmatchMail) -- it is STAMPED unmatched, with who, when and why,
+--     and the Emails tab shows it as such.
+-- ============================================================================================
+create or replace function public.protect_filed_mail_target()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip every line below.
+  if not public.has_capability('mail.refile') then
+    -- Only ever re-assert a link that was ALREADY set. Filing unfiled mail stays open to
+    -- everyone, which is the everyday action.
+    -- S10: and so is UNMATCHING it from a debtor account -- clearing the link, never pointing it
+    -- at another account. Moving to a different account stays mail.refile.
+    if old.linked_account_id is not null and new.linked_account_id is not null then
+      new.linked_account_id := old.linked_account_id;
+    end if;
+    if old.linked_lead_id is not null then new.linked_lead_id := old.linked_lead_id; end if;
+    if old.linked_deal_id is not null then new.linked_deal_id := old.linked_deal_id; end if;
+    if old.linked_company_id is not null then new.linked_company_id := old.linked_company_id; end if;
+    if old.linked_contact_id is not null then new.linked_contact_id := old.linked_contact_id; end if;
+  end if;
+  return new;
+end;
+$$;
+
+alter table public.account_emails
+  add column if not exists unmatched_at timestamptz,
+  add column if not exists unmatched_by uuid,
+  add column if not exists unmatched_by_name text,
+  add column if not exists unmatched_reason text;
+
+create or replace function public.unmatch_email(
+  p_account uuid, p_account_email uuid default null, p_user_email uuid default null, p_reason text default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_msg text;
+  v_mail integer;
+  v_copies integer;
+  v_name text;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in to unmatch an email.' using errcode = '42501';
+  end if;
+  if p_account_email is null and p_user_email is null then
+    raise exception 'Say which email to unmatch.' using errcode = '22023';
+  end if;
+  select coalesce(
+    (select e.message_id from public.account_emails e where e.id = p_account_email and e.account_id = p_account),
+    (select u.message_id from public.user_emails u where u.id = p_user_email and u.linked_account_id = p_account)
+  ) into v_msg;
+  select name into v_name from public.profiles where id = auth.uid();
+
+  update public.user_emails
+     set linked_account_id = null, moved_from_account_id = p_account,
+         moved_reason = nullif(btrim(coalesce(p_reason, '')), ''),
+         linked_at = public.raptor_now(), linked_by = auth.uid()
+   where linked_account_id = p_account
+     and (id = p_user_email or (v_msg is not null and message_id = v_msg));
+  get diagnostics v_mail = row_count;
+
+  update public.account_emails
+     set unmatched_at = public.raptor_now(), unmatched_by = auth.uid(), unmatched_by_name = v_name,
+         unmatched_reason = nullif(btrim(coalesce(p_reason, '')), '')
+   where account_id = p_account and unmatched_at is null
+     and (id = p_account_email or (v_msg is not null and message_id = v_msg));
+  get diagnostics v_copies = row_count;
+
+  if v_mail + v_copies = 0 then
+    raise exception 'That email has already been unmatched.' using errcode = 'P0002';
+  end if;
+  return v_mail + v_copies;
+end
+$$;
+
+revoke all on function public.unmatch_email(uuid, uuid, uuid, text) from public, anon;
+grant execute on function public.unmatch_email(uuid, uuid, uuid, text) to authenticated;

@@ -1693,8 +1693,12 @@ export async function moveFiledMail(input: {
 /**
  * Take a message off the account it was matched to, without putting it anywhere else.
  *
- * ADMINISTRATOR ONLY — enforced by protect_filed_mail_target, which reverts any change to a link
- * that is already set, clearing it included. Same rule as moving, because it is the same act.
+ * EVERYBODY, SINCE S10 (prompt 13 item 12; the firm: "Open it to every user, not only
+ * Administrators"). It was Administrator-only because protect_filed_mail_target put back any change
+ * to a link already set, clearing included; it now lets a cleared ACCOUNT link stand, and only
+ * re-pointing a message at a different account (moveFiledMail) still needs mail.refile. Done through
+ * unmatch_email, the same function the account page uses, so the account's own copy is stamped
+ * unmatched in the same transaction rather than left reading as the debtor's.
  *
  * The gap this fills: until now the only way out of a wrong match was to name the right account
  * on the spot. Often nobody knows it yet — a message matched by surname to the wrong Mthembu has
@@ -1728,31 +1732,13 @@ export async function unmatchMail(input: {
   const from = input.mail.linkedAccountId
   if (!from) throw new Error('That email is not matched to a debtor account.')
 
-  const { data: cleared, error } = await supabase
-    .from('user_emails')
-    .update({
-      linked_account_id: null,
-      // Where it came off, and why, kept on the message itself — never on the debtor's account,
-      // where it could reach them on a statement. See the columns in schema.sql.
-      moved_from_account_id: from,
-      moved_reason: input.reason?.trim() || null,
-      linked_at: new Date().toISOString(),
-      linked_by: input.actor.id,
-    })
-    .eq('id', input.mail.id)
-    .eq('linked_account_id', from)
-    .select('linked_account_id')
-    .maybeSingle<{ linked_account_id: string | null }>()
+  /* Where it came off, and why, are kept on the MESSAGE (moved_from_account_id, moved_reason) and
+     on the account's copy as an unmatched stamp -- never as anything that could reach the debtor's
+     statement. The function refuses a message that is no longer on this account. */
+  const { error } = await supabase.rpc('unmatch_email', {
+    p_account: from, p_account_email: null, p_user_email: input.mail.id, p_reason: input.reason?.trim() || null,
+  })
   if (error) throw new Error(error.message)
-  if (!cleared) throw new Error('That email has already been unmatched.')
-  /*
-   * A non-administrator gets here only by crafting a request: the trigger puts the account back
-   * and the row returns still matched, which this catches rather than reporting a success that
-   * did not happen.
-   */
-  if (cleared.linked_account_id !== null) {
-    throw new Error('Only an administrator can unmatch an email.')
-  }
 
   // After the unmatch, not before: if the unmatch is refused there is nothing to tidy up, and
   // taking the address off first would leave the account edited and the message still matched.

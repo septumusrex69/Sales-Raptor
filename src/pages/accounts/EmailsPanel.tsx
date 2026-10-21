@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   ChevronDown, ChevronRight, Mail, MailOpen, MessageCircleQuestion, Paperclip,
-  ShieldAlert,
+  ShieldAlert, Undo2,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { MessageActions, WriteButton } from '../../components/email/MessageActions'
@@ -28,7 +28,7 @@ import { AttachmentLabel } from '../../components/AttachmentKindTag'
  * subject lines makes a person open ten things to find the one that matters.
  */
 export function EmailsPanel({
-  emails, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread, onClassify,
+  emails, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread, onClassify, onUnmatch,
 }: {
   emails: AccountEmail[]
   /** False when the agent has no mailbox connected — the buttons say so rather than failing. */
@@ -58,6 +58,11 @@ export function EmailsPanel({
    * to the dispute already open on the account are the box's to ask.
    */
   onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
+  /**
+   * TAKE IT OFF THIS ACCOUNT (S10, prompt 13 item 12): anybody may, from here as well as from the
+   * mailbox. Rejects with the database's words when it cannot.
+   */
+  onUnmatch: (email: AccountEmail, reason: string) => Promise<void>
 }) {
   /*
    * Nothing opens on its own.
@@ -160,7 +165,7 @@ export function EmailsPanel({
                   )}
                 </p>
               </div>
-              <EmailBody email={e} canSend={canSend} onClassify={onClassify}
+              <EmailBody email={e} canSend={canSend} onClassify={onClassify} onUnmatch={onUnmatch}
                 onReply={() => onReply(e)} onReplyAll={() => onReplyAll(e)}
                 onForward={() => onForward(e)} onUnread={() => onUnread(e)} />
             </div>
@@ -171,7 +176,7 @@ export function EmailsPanel({
           {emails.map((e) => (
             <EmailRow key={e.id} email={e} expanded={open === e.id}
               onToggle={() => toggle(e)}
-              canSend={canSend} onClassify={onClassify}
+              canSend={canSend} onClassify={onClassify} onUnmatch={onUnmatch}
               onReply={() => onReply(e)} onReplyAll={() => onReplyAll(e)}
               onForward={() => onForward(e)} onUnread={() => onUnread(e)} />
           ))}
@@ -281,9 +286,10 @@ export function othersOn(email: AccountEmail): boolean {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
-function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, onClassify }: {
+function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, onClassify, onUnmatch }: {
   email: AccountEmail
   canSend: boolean
+  onUnmatch: (email: AccountEmail, reason: string) => Promise<void>
   /** Open the Escalate box on this message — see EmailsPanel. */
   onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
   onReply: () => void
@@ -302,6 +308,17 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
   }
 
   const inbound = email.direction === 'in'
+  /* The unmatch box: closed, open with a reason being typed, or working. */
+  const [unmatching, setUnmatching] = useState(false)
+  const [unmatchReason, setUnmatchReason] = useState('')
+  const [unmatchBusy, setUnmatchBusy] = useState(false)
+  const [unmatchError, setUnmatchError] = useState<string | null>(null)
+  async function unmatch() {
+    setUnmatchBusy(true); setUnmatchError(null)
+    try { await onUnmatch(email, unmatchReason); setUnmatching(false) }
+    catch (e) { setUnmatchError(e instanceof Error ? e.message : String(e)) }
+    finally { setUnmatchBusy(false) }
+  }
 
   /*
    * CLASSIFY THIS EMAIL.
@@ -353,22 +370,61 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
           They open the Escalate box rather than raising anything: see the note above.
         */
         extra={inbound ? (
-          email.queryId
-            ? <span className="text-[11px] text-slate-400 self-center">Already on a ticket</span>
-            : (
-              <>
-                <ClassifyButton icon={<ShieldAlert size={13} />} tone="dispute"
-                  onClick={() => onClassify(email, 'dispute')}>
-                  This is a dispute
-                </ClassifyButton>
-                <ClassifyButton icon={<MessageCircleQuestion size={13} />} tone="request"
-                  onClick={() => onClassify(email, 'request')}>
-                  This is a request
-                </ClassifyButton>
-              </>
-            )
+          <>
+            {email.queryId
+              ? <span className="text-[11px] text-slate-400 self-center">Already on a ticket</span>
+              : !email.unmatchedAt && (
+                <>
+                  <ClassifyButton icon={<ShieldAlert size={13} />} tone="dispute"
+                    onClick={() => onClassify(email, 'dispute')}>
+                    This is a dispute
+                  </ClassifyButton>
+                  <ClassifyButton icon={<MessageCircleQuestion size={13} />} tone="request"
+                    onClick={() => onClassify(email, 'request')}>
+                    This is a request
+                  </ClassifyButton>
+                </>
+              )}
+            {/* UNMATCH, FOR EVERYBODY (S10, prompt 13 item 12): a message matched to the wrong
+                debtor comes off here as well as from the mailbox. Inbound only -- what the firm
+                SENT from this account was never matched to it. */}
+            {!email.unmatchedAt && (
+              <button type="button" onClick={() => setUnmatching(true)} data-testid="account-email-unmatch"
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
+                <Undo2 size={13} /> Unmatch
+              </button>
+            )}
+          </>
         ) : null}
       />
+      {email.unmatchedAt && (
+        <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12.5px] text-slate-600" data-testid="account-email-unmatched">
+          <span className="font-medium">Unmatched from this account</span>
+          {email.unmatchedByName && <> by {email.unmatchedByName}</>} {relativeDayLabel(email.unmatchedAt)}
+          {email.unmatchedReason && <>: {email.unmatchedReason}</>}.
+          {' '}It is kept here because its fee is on the statement; it is back in the mailbox it arrived in, unmatched.
+        </p>
+      )}
+      {unmatching && (
+        <div className="mb-3 rounded-lg border border-gold-200 bg-gold-50/60 p-3">
+          <p className="text-sm font-medium text-navy-950">Take this email off the account?</p>
+          <p className="text-[12px] text-slate-500 mt-0.5">
+            It goes back to the mailbox it arrived in, on nobody&rsquo;s file. Its R13 stays on this statement.
+          </p>
+          <input value={unmatchReason} onChange={(e) => setUnmatchReason(e.target.value)} autoFocus
+            placeholder="Why? Optional — e.g. wrong Mthembu" aria-label="Why it is being unmatched"
+            className="mt-2 w-full text-sm rounded-lg border border-slate-200 bg-white px-3 py-2" />
+          {unmatchError && <p className="mt-2 text-sm text-negative-700">{unmatchError}</p>}
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={() => void unmatch()} disabled={unmatchBusy}
+              className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 disabled:opacity-50">
+              {unmatchBusy ? 'Unmatching\u2026' : 'Unmatch'}
+            </button>
+            <button type="button" onClick={() => setUnmatching(false)} disabled={unmatchBusy}
+              className="text-sm px-3 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100">Cancel</button>
+          </div>
+        </div>
+      )}
       {/* `whitespace-pre-wrap` because an email's own line breaks are part of what it said —
           collapsing them turns a numbered arrangement into a paragraph. */}
       <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
@@ -425,13 +481,14 @@ function ClassifyButton({ tone, icon, onClick, children }: {
 }
 
 function EmailRow({
-  email, expanded, onToggle, canSend, onReply, onReplyAll, onForward, onUnread, onClassify,
+  email, expanded, onToggle, canSend, onReply, onReplyAll, onForward, onUnread, onClassify, onUnmatch,
 }: {
   email: AccountEmail
   expanded: boolean
   onToggle: () => void
   canSend: boolean
   onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
+  onUnmatch: (email: AccountEmail, reason: string) => Promise<void>
   onReply: () => void
   onReplyAll: () => void
   onForward: () => void
@@ -439,7 +496,7 @@ function EmailRow({
 }) {
   const unread = email.direction === 'in' && !email.readAt
   return (
-    <li className={unread ? 'bg-positive-50/40' : undefined}>
+    <li className={email.unmatchedAt ? 'opacity-60' : unread ? 'bg-positive-50/40' : undefined}>
       <button onClick={onToggle} aria-expanded={expanded}
         className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50">
         <span className="min-w-0 flex-1"><EmailSummary email={email} /></span>
@@ -450,7 +507,7 @@ function EmailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-10">
-          <EmailBody email={email} canSend={canSend} onClassify={onClassify}
+          <EmailBody email={email} canSend={canSend} onClassify={onClassify} onUnmatch={onUnmatch}
             onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onUnread={onUnread} />
         </div>

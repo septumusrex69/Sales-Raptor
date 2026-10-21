@@ -89,7 +89,7 @@ import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
 import { fetchQueries, openDisputeOn, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
 import {
-  fetchAccountEmails, markRepliesRead, markRepliesUnread, recordSentEmail, replySubject,
+  fetchAccountEmails, markRepliesRead, markRepliesUnread, recordSentEmail, replySubject, unmatchAccountEmail,
   type AccountEmail,
 } from '../../lib/accountEmails'
 import { EmailsPanel } from './EmailsPanel'
@@ -2056,6 +2056,13 @@ export function AccountDetail() {
            * one is: reloading the account here would close the message somebody just decided to
            * come back to.
            */
+          /* Anybody may (S10, prompt 13 item 12). The row stays, stamped -- its fee is on the statement. */
+          onUnmatch={async (e, reason) => {
+            await unmatchAccountEmail(account.id, e.id, reason)
+            setEmails((list) => list.map((x) => (x.id === e.id
+              ? { ...x, unmatchedAt: new Date().toISOString(), unmatchedByName: currentUser?.name ?? null, unmatchedReason: reason.trim() || null }
+              : x)))
+          }}
           onUnread={(e) => {
             setEmails((list) => list.map((x) => (x.id === e.id ? { ...x, readAt: null } : x)))
             void markRepliesUnread([e.id])

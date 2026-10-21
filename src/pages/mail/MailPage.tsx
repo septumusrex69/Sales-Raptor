@@ -1600,7 +1600,7 @@ export function MailPage() {
                   bodyError={readError[m.id]} onBlock={() => setBlocking(m)}
                   onReply={() => startReply(m)} onReplyAll={() => startReply(m, true)}
                   onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onMove={() => setMoving(m)}
                   onUnread={() => void unreadOne(m)}
                   onLink={() => startLink(m)}
                   onCreateLead={() => setCreatingLead(m)}
@@ -1651,7 +1651,7 @@ export function MailPage() {
                   onReplyAll={() => startReply(m, true)}
                   onForward={() => startForward(m)}
                   onJunk={(j) => void junkOne(m, j)}
-                  onMove={mayRefile ? () => setMoving(m) : null}
+                  onMove={() => setMoving(m)}
                   onUnread={() => void unreadOne(m)}
                   onCreateLead={() => setCreatingLead(m)}
                   fetchAttachment={(f) => attachmentOf(m, f)} />
@@ -1807,6 +1807,7 @@ export function MailPage() {
       {moving && (
         <MoveModal
           mail={moving}
+          mayRematch={mayRefile}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setMoving(null)}
           onDone={(message) => { setMoving(null); setStatus(message); void load(page) }}
@@ -2570,7 +2571,7 @@ function MailBody({
   onForward: () => void
   /** Shelve it, or rescue it. Absent on filed mail, which is a record either way. */
   onJunk: (junk: boolean) => void
-  /** Unmatch it, or rematch it from the same box. Null for anyone who is not an administrator. */
+  /** Unmatch it -- anybody, since S10 -- or rematch it from the same box (mail.refile only). */
   onMove: (() => void) | null
   /** Put it back on the pile, and close it. */
   onUnread: () => void
@@ -2614,8 +2615,9 @@ function MailBody({
    * - MATCH is first and is offered on everything, matched or not. On a message already on a
    *   record it says "Match to another record", because that is what pressing it does -- the
    *   picker refiles rather than adding a second home.
-   * - UNMATCH is only on mail filed on a DEBTOR account, and only where the caller may refile it --
-   *   the database refuses it for anybody else, so offering the button would be a lie. It is ONE
+   * - UNMATCH is only on mail filed on a DEBTOR account, and is offered to EVERYBODY since S10 (the
+   *   firm: "Open it to every user, not only Administrators"); rematching to another account inside
+   *   the same box stays with whoever may refile, and is not offered to anybody else. It is ONE
    *   item and it says Unmatch, because two items made the agent choose between "rematch" and
    *   "unmatch" before knowing which they could do, and the answer to "which account should this
    *   be on?" is frequently "I do not know yet". The box behind it offers rematching underneath.
@@ -4351,8 +4353,10 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
  * thing that does NOT happen ahead of the thing somebody came here to do. It still has to be
  * said — the R13 stays, this is not an undo — but it is a footnote, not the headline.
  */
-function MoveModal({ mail, actor, onClose, onDone }: {
+function MoveModal({ mail, mayRematch, actor, onClose, onDone }: {
   mail: MailItem
+  /** Re-pointing it at another account is still mail.refile; unmatching is everybody's. */
+  mayRematch: boolean
   actor: { id: string | null; name: string | null }
   onClose: () => void
   onDone: (message: string) => void
@@ -4517,8 +4521,8 @@ function MoveModal({ mail, actor, onClose, onDone }: {
         </button>
       </div>
 
-      {/* The second answer, for when somebody does know where it belongs. */}
-      {!rematching ? (
+      {/* The second answer, for when somebody does know where it belongs -- for whoever may refile. */}
+      {!mayRematch ? null : !rematching ? (
         <button onClick={() => setRematching(true)} disabled={busy}
           className="mt-3 w-full text-left text-[13px] font-medium text-slate-600 hover:text-navy-950 px-1 py-1.5 disabled:opacity-50">
           <span className="inline-flex items-center gap-1.5">

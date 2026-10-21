@@ -80,6 +80,14 @@ export interface AccountEmail {
   /** Whose inbox it arrived in. No longer who may read it — see markRepliesRead. */
   receivedBy: string | null
   occurredAt: string
+  /**
+   * UNMATCHED FROM THIS ACCOUNT (S10, prompt 13 item 12): when, by whom and why. The row stays --
+   * its fee is on the statement and financial records are immutable -- but it is no longer this
+   * debtor's correspondence, and the Emails tab says so rather than presenting it as theirs.
+   */
+  unmatchedAt: string | null
+  unmatchedByName: string | null
+  unmatchedReason: string | null
 }
 
 interface EmailRow {
@@ -102,6 +110,9 @@ interface EmailRow {
   read_by: string | null
   received_by: string | null
   occurred_at: string
+  unmatched_at?: string | null
+  unmatched_by_name?: string | null
+  unmatched_reason?: string | null
 }
 
 function toEmail(r: EmailRow): AccountEmail {
@@ -130,7 +141,25 @@ function toEmail(r: EmailRow): AccountEmail {
     readBy: r.read_by ?? null,
     receivedBy: r.received_by,
     occurredAt: r.occurred_at,
+    unmatchedAt: r.unmatched_at ?? null,
+    unmatchedByName: r.unmatched_by_name ?? null,
+    unmatchedReason: r.unmatched_reason ?? null,
   }
+}
+
+/**
+ * TAKE AN EMAIL OFF THIS ACCOUNT, from the account page (S10, prompt 13 item 12) -- anybody may.
+ *
+ * Through unmatch_email, because the message is usually in somebody else's mailbox and RLS lets a
+ * person touch only their own: the database finds the mailbox copy by message id, puts it back in
+ * that mailbox unmatched, and stamps this account's copy unmatched rather than removing it (its fee
+ * stays on the statement). The mailbox's own Unmatch goes through the same function (unmatchMail).
+ */
+export async function unmatchAccountEmail(accountId: string, emailId: string, reason?: string): Promise<void> {
+  const { error } = await supabase.rpc('unmatch_email', {
+    p_account: accountId, p_account_email: emailId, p_user_email: null, p_reason: reason?.trim() || null,
+  })
+  if (error) throw new Error(error.message)
 }
 
 /**
@@ -144,7 +173,7 @@ function toEmail(r: EmailRow): AccountEmail {
 export async function fetchAccountEmails(accountId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id, correspondent')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id, correspondent, unmatched_at, unmatched_by_name, unmatched_reason')
     .eq('account_id', accountId)
     .eq('correspondent', 'debtor')
     .order('occurred_at', { ascending: false })
@@ -171,7 +200,7 @@ export async function fetchAccountEmails(accountId: string): Promise<AccountEmai
 export async function fetchQueryEmails(queryId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id, correspondent')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id, correspondent, unmatched_at, unmatched_by_name, unmatched_reason')
     .eq('query_id', queryId)
     .order('occurred_at', { ascending: true })
   if (error) throw new Error(error.message)

@@ -5,7 +5,8 @@
  *
  *   - `protect_closed_diary_entries` SILENTLY REVERTS edits to done/moved entries. It does not
  *     raise.
- *   - `protect_filed_mail_target` reverts link changes on `user_emails` for non-Administrators.
+ *   - `protect_filed_mail_target` reverts link changes on `user_emails` for non-Administrators --
+ *     except clearing an account link, which is an unmatch and everybody's since S10.
  *   - `protect_profile_privileged_fields` freezes `role`, `status` and `team_id` on `profiles`
  *     for anybody who is not an Administrator. It is not in CLAUDE.md, which is part of how it
  *     came to have no check at all.
@@ -185,6 +186,14 @@ function triggerStatement(name, table) {
     const notGuarded = links.filter((f) =>
       !new RegExp(`old\\.${f}\\s+is\\s+not\\s+null`, 'i').test(body))
     check('...and only where it was already filed', notGuarded, [])
+    /*
+     * S10 (prompt 13 item 12): UNMATCHING FROM AN ACCOUNT IS EVERYBODY'S. The account link is put
+     * back only where the new value is ALSO a link -- a move to another account -- and a cleared
+     * link stands. Asserted in that exact shape: dropping the second half freezes unmatching again,
+     * and dropping the whole guard lets anybody re-point a debtor's mail.
+     */
+    ok('...but lets anybody CLEAR an account link (unmatch), never re-point it',
+      /if old\.linked_account_id is not null and new\.linked_account_id is not null then\s+new\.linked_account_id := old\.linked_account_id;/.test(body))
   }
 }
 
