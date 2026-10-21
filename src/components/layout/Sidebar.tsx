@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, Megaphone, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
-import { canViewClients, canViewLibrary, canViewFinance, canViewBusiness } from '../../lib/permissions'
+import { canViewClients, canViewLibrary, canViewFinance, canViewBusiness, canSendMarketing } from '../../lib/permissions'
 import { useSidebarCollapsed } from '../../lib/sidebarCollapsed'
 
 /**
@@ -29,6 +29,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   { to: '/deals', label: 'Deals', icon: Handshake },
   { to: '/contacts', label: 'Contacts', icon: Users },
   { to: '/companies', label: 'Clients', icon: Building2 },
+  // News for clients and leads (S10), under Clients because that is who it is mostly to. Shown only
+  // to those holding marketing.send.
+  { to: '/news', label: 'News & campaigns', icon: Megaphone },
   // The collections book: the debtor accounts a client hands over, which is a different thing
   // from the client record and much larger than it.
   { to: '/accounts', label: 'Accounts', icon: BookOpen },
@@ -134,6 +137,7 @@ export function Sidebar() {
           .filter((n) => n.to !== '/library' || canViewLibrary(currentUser))
           .filter((n) => n.to !== '/trust' || canViewFinance(currentUser))
           .filter((n) => n.to !== '/business' || canViewBusiness(currentUser))
+          .filter((n) => n.to !== '/news' || canSendMarketing(currentUser))
           .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0
           return (

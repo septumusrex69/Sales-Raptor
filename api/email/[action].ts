@@ -10,6 +10,9 @@ import sync from '../_lib/email/sync.js'
 import syncAll from '../_lib/email/sync-all.js'
 import welcome from '../_lib/email/welcome.js'
 import loginCode from '../_lib/email/loginCode.js'
+import marketing from '../_lib/email/marketing.js'
+import unsubscribe from '../_lib/email/unsubscribe.js'
+import resendWebhook from '../_lib/email/resendWebhook.js'
 
 /**
  * One serverless function for every /api/email/* route.
@@ -43,6 +46,14 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* An Administrator's code on a new device (S10). Here because it is an email the server sends,
      and api/ has no function to spare. */
   'login-code': loginCode,
+  /* NEWS & CAMPAIGNS (S10): the sender, for somebody holding marketing.send. */
+  marketing,
+  /* ANONYMOUS, like signed-copy: the signed token in the link is the authority. The unsubscribe
+     link in every newsletter and the List-Unsubscribe one-click header both land here. */
+  unsubscribe,
+  /* ANONYMOUS, and Resend's signature (RESEND_WEBHOOK_SECRET) is the authority: bounces and
+     complaints on a newsletter. */
+  'resend-webhook': resendWebhook,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

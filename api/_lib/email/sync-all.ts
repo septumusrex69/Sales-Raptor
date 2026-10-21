@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../emailSync.js'
 import { inPool } from '../../../src/lib/pool.js'
+import { drainMarketing } from '../marketing.js'
 
 /*
  * NOTHING IS PRUNED. Mail stays until somebody deals with it.
@@ -170,6 +171,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const started = Date.now()
+  /*
+   * AND ANY NEWSLETTER STILL GOING OUT (S10). A campaign is sent in chunks while its screen is open;
+   * an iPad closed halfway would strand the rest, so the sweep that already runs every few minutes
+   * carries on with it -- beside the mail rather than after it, and within its own budget, so a
+   * long send never costs a mailbox its turn. The cron only: a person pressing "sync the company"
+   * did not ask to send anybody's newsletter. It cannot fail the sync; a failure is reported.
+   */
+  const news = fromCron
+    ? drainMarketing(admin, { budgetMs: 120_000 }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
+    : Promise.resolve(null)
   const results: { userId: string; email?: string; logged?: number; error?: string; skipped?: boolean }[] = []
   /*
    * WHICH MAILBOXES THE BUDGET DID NOT REACH, BY ADDRESS.
@@ -274,8 +285,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const logged = results.reduce((t, r) => t + (r.logged ?? 0), 0)
   const failed = results.filter((r) => r.error).length
   const skipped = results.filter((r) => r.skipped).length
+  const marketing = await news
   res.status(200).json({
     ok: true,
+    marketing,
     syncedMailboxes: results.length,
     mailboxes: all.length,
     logged,

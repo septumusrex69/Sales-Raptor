@@ -46420,3 +46420,363 @@ begin
     end;
   end loop;
 end $$;
+
+-- ==========================================================================================
+-- S10 / NEWS & CAMPAIGNS: A CLIENT NEWSLETTER AND LEAD RE-ENGAGEMENT, SENT THROUGH RESEND (21 Oct)
+-- ==========================================================================================
+--
+-- The firm: "bulk communication to our clients ... if we send out a blog or a new blog or a
+-- newsletter, we should be able to send it out from the system to all of their email addresses.
+-- It should be able to unsubscribe or subscribe ... only for specific news ... not for reports.
+-- Then as well for leads ... email marketing for leads, keeping in touch with them ...
+-- specifically ... to try to reactivate them, leads that are dormant."
+--
+-- THE SALES SIDE ONLY. Nothing here touches a debtor account, account_emails or Annexure B: the
+-- firm charges fees on ACCOUNTS only, and a newsletter to a client or a lead raises nothing.
+-- Reports-type mail -- statements, client reports, remittance advices -- does NOT go through this
+-- and an unsubscribe here does not stop it: the firm, "only for specific news ... not for reports".
+--
+-- POPIA s69 (direct marketing by electronic communication) is the rule the tables carry:
+--   * an existing CUSTOMER may be sent news about the firm's own similar services, provided every
+--     message offers a way out -- so clients are in by default and opt out;
+--   * anybody else needs CONSENT, and may be approached for it ONCE -- so a lead needs
+--     marketing_consent_at, or this is the single "first approach" s69(2) allows;
+--   * an objection is final until the person says otherwise -- marketing_preferences, per ADDRESS,
+--     consulted again at the moment of sending, not only when the list was drawn.
+
+-- "MAY WE SEND YOU NEWS", ON THE LEAD. Default no: a lead is not a customer, so s69 needs a yes.
+alter table public.leads
+  add column if not exists marketing_consent_at timestamptz,
+  add column if not exists marketing_consent_note text,
+  add column if not exists marketing_consent_by uuid references public.profiles(id) on delete set null;
+
+-- A CAMPAIGN: what was written, to whom (as a RULE over Raptor's records, never a typed list), and
+-- where it stands. The audience is resolved on the server at the moment of sending.
+create table if not exists public.marketing_campaigns (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  subject text not null default '',
+  preheader text not null default '',
+  body text not null default '',
+  image_url text,
+  audience jsonb not null default '{"kind":"all_clients"}'::jsonb,
+  -- s69(2)'s once-only approach to a lead with no consent recorded. Off unless somebody says so.
+  first_approach boolean not null default false,
+  status text not null default 'draft' check (status in ('draft', 'sending', 'sent', 'cancelled')),
+  recipient_count integer,
+  created_by uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  queued_at timestamptz,
+  queued_by uuid references public.profiles(id) on delete set null,
+  finished_at timestamptz,
+  -- An image is a link to somewhere else; an http one is refused by half the mail clients.
+  constraint marketing_campaigns_image_is_https check (image_url is null or image_url ~ '^https://')
+);
+
+-- ONE ROW PER ADDRESS PER CAMPAIGN, which is what makes "de-duplicated by address" a constraint
+-- rather than a hope, and what the nightly sweep and the open screen both drain.
+create table if not exists public.marketing_sends (
+  id uuid primary key default gen_random_uuid(),
+  campaign_id uuid not null references public.marketing_campaigns(id) on delete cascade,
+  email text not null check (email = lower(btrim(email))),
+  first_name text,
+  company_name text,
+  company_id uuid references public.companies(id) on delete set null,
+  contact_id uuid references public.contacts(id) on delete set null,
+  lead_id uuid references public.leads(id) on delete set null,
+  first_approach boolean not null default false,
+  state text not null default 'queued'
+    check (state in ('queued', 'sending', 'sent', 'failed', 'skipped', 'bounced', 'complained')),
+  attempts integer not null default 0,
+  claimed_at timestamptz,
+  resend_id text,
+  error text,
+  created_at timestamptz not null default now(),
+  sent_at timestamptz,
+  updated_at timestamptz not null default now(),
+  unique (campaign_id, email)
+);
+create index if not exists marketing_sends_state_idx on public.marketing_sends (state, campaign_id);
+create index if not exists marketing_sends_approach_idx on public.marketing_sends (lead_id) where first_approach;
+create index if not exists marketing_sends_resend_idx on public.marketing_sends (resend_id);
+
+-- PER ADDRESS, NOT PER RECORD. The same person is a contact on a client and a lead from two years
+-- ago; an objection made through one must hold through the other. campaign_id carries NO foreign
+-- key on purpose: Clear staging empties campaigns, and an unsubscribe is the person's record, kept.
+create table if not exists public.marketing_preferences (
+  email text primary key check (email = lower(btrim(email)) and position('@' in email) > 1),
+  status text not null check (status in ('subscribed', 'unsubscribed', 'undeliverable')),
+  how text not null check (how in ('unsubscribe link', 'one-click header', 'recorded by staff',
+                                   'complaint', 'hard bounce', 're-subscribed from the link')),
+  reason text,
+  campaign_id uuid,
+  changed_at timestamptz not null default now(),
+  changed_by uuid references public.profiles(id) on delete set null,
+  -- A RE-SUBSCRIPTION A PERSON RECORDS SAYS WHY. Overriding somebody's objection is the one write
+  -- here that needs a reason on the record, because it is the one POPIA would ask about.
+  constraint marketing_preferences_resubscribe_says_why
+    check (status <> 'subscribed' or how <> 'recorded by staff' or length(btrim(coalesce(reason, ''))) > 0)
+);
+
+-- EVERY CHANGE, KEPT. Written only by the trigger below.
+create table if not exists public.marketing_preference_history (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  status text not null,
+  how text not null,
+  reason text,
+  campaign_id uuid,
+  changed_at timestamptz not null,
+  changed_by uuid references public.profiles(id) on delete set null
+);
+create index if not exists marketing_preference_history_email_idx on public.marketing_preference_history (email, changed_at);
+
+-- WHEN AND WHO ARE STAMPED, NOT TYPED, and every change lands in the history.
+-- SECURITY DEFINER for a stated reason: the history has no write policy at all, so that nobody can
+-- write it except this trigger.
+create or replace function public.marketing_preferences_stamp()
+returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  new.changed_at := now();
+  new.changed_by := auth.uid();
+  insert into public.marketing_preference_history (email, status, how, reason, campaign_id, changed_at, changed_by)
+  values (new.email, new.status, new.how, new.reason, new.campaign_id, new.changed_at, new.changed_by);
+  return new;
+end $$;
+create or replace trigger marketing_preferences_stamp
+  before insert or update on public.marketing_preferences
+  for each row execute function public.marketing_preferences_stamp();
+revoke all on function public.marketing_preferences_stamp() from public, anon;
+
+alter table public.marketing_campaigns enable row level security;
+alter table public.marketing_sends enable row level security;
+alter table public.marketing_preferences enable row level security;
+alter table public.marketing_preference_history enable row level security;
+
+-- marketing.send gates the campaigns and what was sent. The server sends with the service key,
+-- after checking the same capability itself.
+create policy marketing_campaigns_select on public.marketing_campaigns for select to authenticated
+  using (public.has_capability('marketing.send'));
+create policy marketing_campaigns_insert on public.marketing_campaigns for insert to authenticated
+  with check (public.has_capability('marketing.send') and status = 'draft');
+-- A DRAFT IS EDITABLE, A SENT CAMPAIGN IS A RECORD of what went to whom.
+create policy marketing_campaigns_update on public.marketing_campaigns for update to authenticated
+  using (public.has_capability('marketing.send') and status = 'draft')
+  with check (public.has_capability('marketing.send') and status = 'draft');
+create policy marketing_sends_select on public.marketing_sends for select to authenticated
+  using (public.has_capability('marketing.send'));
+
+-- WHO HAS SAID STOP is shown on every client, contact and lead, so anybody signed in may read it,
+-- and anybody may record what a person said on the telephone -- as staff, never as the link.
+create policy marketing_preferences_select on public.marketing_preferences for select to authenticated
+  using (auth.uid() is not null);
+create policy marketing_preferences_insert on public.marketing_preferences for insert to authenticated
+  with check (how = 'recorded by staff');
+create policy marketing_preferences_update on public.marketing_preferences for update to authenticated
+  using (auth.uid() is not null) with check (how = 'recorded by staff');
+create policy marketing_preference_history_select on public.marketing_preference_history for select to authenticated
+  using (auth.uid() is not null);
+
+-- THE NEXT CHUNK, CLAIMED SO THAT TWO DRAINS NEVER SEND ONE ROW TWICE: the open screen and the
+-- five-minute sweep can run at the same moment, and skip locked hands each a different chunk. A row
+-- left 'sending' by a run that died is taken again after fifteen minutes; Resend's idempotency key
+-- (the server's) is what stops that retry becoming a second email.
+create or replace function public.marketing_claim_sends(p_limit integer, p_campaign uuid default null)
+returns setof public.marketing_sends
+language sql security invoker set search_path to 'public' as $$
+  update public.marketing_sends s
+     set state = 'sending', claimed_at = now(), attempts = s.attempts + 1, updated_at = now()
+   where s.id in (
+     select x.id from public.marketing_sends x
+       join public.marketing_campaigns c on c.id = x.campaign_id and c.status = 'sending'
+      where (p_campaign is null or x.campaign_id = p_campaign)
+        and (x.state = 'queued' or (x.state = 'sending' and x.claimed_at < now() - interval '15 minutes'))
+      order by x.created_at, x.id
+      limit greatest(1, least(coalesce(p_limit, 100), 100))
+      for update of x skip locked)
+  returning s.*;
+$$;
+
+-- WHAT HAPPENED TO A CHUNK, in one statement rather than a hundred.
+create or replace function public.marketing_record_results(p_results jsonb)
+returns integer
+language plpgsql security invoker set search_path to 'public' as $$
+declare v integer;
+begin
+  update public.marketing_sends s
+     set state = r.state,
+         resend_id = coalesce(r.resend_id, s.resend_id),
+         error = r.error,
+         sent_at = case when r.state = 'sent' then now() else s.sent_at end,
+         claimed_at = case when r.state = 'queued' then null else s.claimed_at end,
+         updated_at = now()
+    from jsonb_to_recordset(p_results) as r(id uuid, state text, resend_id text, error text)
+   where s.id = r.id;
+  get diagnostics v = row_count;
+  -- A campaign with nothing left to send is finished.
+  update public.marketing_campaigns c
+     set status = 'sent', finished_at = now(), updated_at = now()
+   where c.status = 'sending'
+     and not exists (select 1 from public.marketing_sends x
+                      where x.campaign_id = c.id and x.state in ('queued', 'sending'));
+  return v;
+end $$;
+
+-- THE COUNTS ON THE SCREEN, per campaign. Invoker: RLS on the sends decides who sees them.
+create or replace function public.marketing_campaign_counts()
+returns table (campaign_id uuid, total integer, queued integer, sent integer, failed integer,
+               skipped integer, bounced integer, complained integer)
+language sql stable security invoker set search_path to 'public' as $$
+  select s.campaign_id, count(*)::int,
+         count(*) filter (where s.state in ('queued', 'sending'))::int,
+         count(*) filter (where s.state = 'sent')::int,
+         count(*) filter (where s.state = 'failed')::int,
+         count(*) filter (where s.state = 'skipped')::int,
+         count(*) filter (where s.state = 'bounced')::int,
+         count(*) filter (where s.state = 'complained')::int
+    from public.marketing_sends s
+   group by s.campaign_id
+$$;
+
+revoke all on function public.marketing_claim_sends(integer, uuid) from public, anon, authenticated;
+revoke all on function public.marketing_record_results(jsonb) from public, anon, authenticated;
+grant execute on function public.marketing_claim_sends(integer, uuid) to service_role;
+grant execute on function public.marketing_record_results(jsonb) to service_role;
+revoke all on function public.marketing_campaign_counts() from public, anon;
+grant execute on function public.marketing_campaign_counts() to authenticated, service_role;
+
+-- marketing.send: Administrator, Sales Manager and Liaison Manager. The sales side writes to leads;
+-- the liaison manager holds the client relationship the newsletter speaks into.
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+-- S10 / NEWS & CAMPAIGNS: CLEAR STAGING EMPTIES THE CAMPAIGNS AND WHAT WAS SENT. The preferences stay:
+-- an unsubscribe is a person's objection under POPIA s69, kept like the mail blocks, not test data.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_sends, public.marketing_campaigns';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+
+-- S10 / NEWS & CAMPAIGNS: WHEN A LEAD'S STATUS LAST MOVED, kept by the database.
+--
+-- "Dormant" is no activity AND no status change for N days. Activities are dated, but a status
+-- changed on the edit form wrote nothing but updated_at -- and updated_at moves on EVERY edit,
+-- recording a lead's consent to news included, so reading it as "the lead moved" would make the
+-- very act of getting a dormant lead's yes take it off the dormant list. So the status keeps its
+-- own date, stamped here and never by the browser: an update that does not change the status puts
+-- the old date back, whatever the form sent. An imported lead starts at its own created_at. On the
+-- FIRM'S clock (raptor_now), because dormancy is a business date: staging moved a month on must see
+-- a lead go quiet a month on.
+alter table public.leads add column if not exists status_changed_at timestamptz;
+create or replace function public.leads_stamp_status_change()
+returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if tg_op = 'INSERT' then
+    new.status_changed_at := coalesce(new.created_at, public.raptor_now());
+  elsif new.status is distinct from old.status then
+    new.status_changed_at := public.raptor_now();
+  else
+    new.status_changed_at := old.status_changed_at;
+  end if;
+  return new;
+end $$;
+create or replace trigger leads_stamp_status_change
+  before insert or update on public.leads
+  for each row execute function public.leads_stamp_status_change();
+revoke all on function public.leads_stamp_status_change() from public, anon;
+-- The leads already there: updated_at is the best date history left. Around the trigger, which
+-- would otherwise put the null straight back.
+begin;
+set local session_replication_role = replica;
+update public.leads set status_changed_at = coalesce(updated_at, created_at) where status_changed_at is null;
+commit;
+
+-- S10 / NEWS & CAMPAIGNS: THE FIRST APPROACH IS ONCE PER LEAD, EVER -- held by the database. POPIA
+-- s69(2) allows one approach for consent to somebody who is not a customer; two campaigns queued at
+-- the same moment must not both make it. A send that failed or was skipped never reached them, so it
+-- does not use the allowance up.
+create unique index if not exists marketing_sends_one_first_approach on public.marketing_sends (lead_id)
+  where first_approach and lead_id is not null and state not in ('failed', 'skipped');

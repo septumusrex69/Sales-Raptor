@@ -71,6 +71,7 @@ import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
 import { clockNow } from '../../lib/clock.ts'
+import { NewsPreferenceCard } from '../../components/record/NewsPreferenceCard'
 
 /*
  * ACCOUNT IS A TAB, NOT A PANEL ON THE OVERVIEW, and it is gated separately from the rest of the
@@ -1031,6 +1032,8 @@ export function CompanyDetail() {
             /* Who they are first: the summary card of the side column (S9). */
             companyInfoPanel,
             <ClientBookCard key="book" companyId={company.id} />,
+            /* News (S10): whether the client's own address has unsubscribed. Its people show theirs on their own records. */
+            <NewsPreferenceCard key="news" emails={[company.email]} />,
             /*
               TWO SECTIONS, at the firm's instruction: "queries are for clients and disputes are
               for debtors ... there should be two different sections on the client portal about

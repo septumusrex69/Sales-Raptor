@@ -50,6 +50,7 @@ import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPat
 import { summaryLine } from '../../lib/summaryLine'
 import { dealKind, hasDealValue } from '../../lib/dealKind'
 import { clockNow } from '../../lib/clock.ts'
+import { NewsPreferenceCard } from '../../components/record/NewsPreferenceCard'
 
 type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
@@ -739,7 +740,7 @@ export function LeadDetail() {
             you want the lot. A note behind a tab only is a note nobody reads.
           */
           main={<div className="space-y-5">{dealsPanel}{notesPanel}{opportunityPanel}</div>}
-          side={[leadInfoPanel, profilePanel]}
+          side={[leadInfoPanel, profilePanel, <NewsPreferenceCard key="news" emails={[lead.email]} lead={lead} />]}
         />
       )}
 

@@ -10,6 +10,7 @@ import { LoginPage } from './pages/auth/LoginPage'
 /* LAZY, because it is the one page nobody signed in ever opens: a debtor's chunk has no business
    in the bundle a collector downloads every morning. */
 const SignPage = lazy(() => import('./pages/sign/SignPage'))
+const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -89,6 +90,7 @@ const MailPage = lazy(() => import('./pages/mail/MailPage').then((m) => ({ defau
 const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ default: m.TasksPage })))
 const CalendarPage = lazy(() => import('./pages/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const ActivitiesPage = lazy(() => import('./pages/activities/ActivitiesPage').then((m) => ({ default: m.ActivitiesPage })))
+const NewsPage = lazy(() => import('./pages/news/NewsPage').then((m) => ({ default: m.NewsPage })))
 const RepDetailPage = lazy(() => import('./pages/reps/RepDetailPage').then((m) => ({ default: m.RepDetailPage })))
 
 /**
@@ -128,6 +130,9 @@ function App() {
               opens, and it reaches exactly one row. See src/lib/signing.ts.
             */}
             <Route path="/sign/:token" element={<SignPage />} />
+            {/* THE SECOND ROUTE OUTSIDE THE FIRM (S10): the unsubscribe link in every newsletter.
+                Whoever clicks it has no login; the signed token in the path is the authority. */}
+            <Route path="/unsubscribe/:token" element={<UnsubscribePage />} />
             <Route
               element={
                 <RequireAuth>
@@ -160,6 +165,9 @@ function App() {
                   on the book they are meant to be working. */}
               <Route path="/companies" element={<RequireClientAccess><CompaniesList /></RequireClientAccess>} handle={{ title: 'Clients' }} />
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
+              {/* News & campaigns (S10). The page guards itself on marketing.send. */}
+              <Route path="/news" element={<NewsPage />} handle={{ title: 'News & campaigns' }} />
+              <Route path="/news/:id" element={<NewsPage />} handle={{ title: 'Campaign' }} />
               <Route path="/mail" element={<MailPage />} handle={{ title: 'Mail' }} />
               {/*
                 TWO WORKSPACES, BECAUSE THEY ARE TWO BOOKS.
