@@ -36,7 +36,7 @@ import {
   type UnallocatedBatch,
 } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
-import { needsMandate } from '../../lib/mandateRule'
+import { clientTermsLink, needsMandate, workBlock } from '../../lib/mandateRule'
 import { firmToday } from '../../lib/dateLabels'
 
 /* THE FIRM'S DAY, IN SAST -- it becomes every new account's handover date (prompt 11), and the UTC
@@ -351,9 +351,12 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   /* A CLIENT BROUGHT ACROSS FROM SWORDFISH IS EXEMPT (prompt 10) -- needsMandate decides it, and
      the database's handovers_need_a_mandate trigger holds the same rule underneath. */
   const noMandate = needsMandate(client)
+  /* AND NO COMMISSION, NO WORK EITHER (S10, prompt 13 item 3): one sentence for whichever is missing,
+     the same one the database's client_work_refusal raises underneath. */
+  const termsBlock = workBlock(client)
 
   async function hold() {
-    if (!plan || !sheet || !companyId || noMandate) return
+    if (!plan || !sheet || !companyId || noMandate || termsBlock) return
     setBusy({ job: 'hold', message: 'Holding it in Raptor' }); setError(null)
     try {
       const documentFor = new Map((docs?.matched ?? []).map((m) => [m.reference, m.filename]))
@@ -716,7 +719,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
           {labelFor('read', 'Read the sheet')}
         </button>
         {plan && (
-          <button type="button" onClick={() => void hold()} disabled={!companyId || !!busy || noMandate}
+          <button type="button" onClick={() => void hold()} disabled={!companyId || !!busy || noMandate || !!termsBlock}
             title={companyId ? undefined : 'Choose which client this handover is from first'}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
               bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
@@ -730,18 +733,16 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
 
       {/* Said the moment the client is chosen, not after the sheet has been read: somebody who
           has to go and find a mandate should not first spend ten minutes on the file. */}
-      {noMandate && (
-        <p className="text-sm text-negative-700 mt-3">
-          {client?.name} has no signed mandate on record, so no handover can be imported for them.{' '}
+      {termsBlock && (
+        <p className="text-sm text-negative-700 mt-3" data-testid="client-terms-block">
+          {termsBlock}{' '}
           {/*
-            AND A WAY TO GO AND DO IT. THE FIRM, on this exact refusal: "there was no option where
-            I can upload a contract." There genuinely was not -- the mandate date could only ever
-            be set on the form that creates the client -- so this sentence named a thing that
-            could not be done. The link lands on the client's mandate card, which sets the date
-            and takes the signed mandate itself.
+            AND A WAY TO GO AND DO IT. THE FIRM, on the mandate half of this refusal: "there was no
+            option where I can upload a contract." The link lands on the client's own commission and
+            mandate card, which sets the date, takes the signed mandate and sets the rate.
           */}
-          <Link to={`/companies/${client?.id}`} className="font-medium underline">
-            Open {client?.name} and record the mandate
+          <Link to={clientTermsLink(client!.id)} className="font-medium underline">
+            Open {client?.name}'s commission and mandate
           </Link>, then come back.
         </p>
       )}

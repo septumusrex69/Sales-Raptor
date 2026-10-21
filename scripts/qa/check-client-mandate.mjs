@@ -174,9 +174,9 @@ ok('the date is stamped at midday so no timezone moves it',
 ok('the import still refuses without a mandate',
   /const noMandate = needsMandate\(client\)/.test(importCard))
 ok('...and the refusal still stops the import rather than warning about it',
-  /if \(!plan \|\| !sheet \|\| !companyId \|\| noMandate\) return/.test(importCard))
+  /if \(!plan \|\| !sheet \|\| !companyId \|\| noMandate \|\| termsBlock\) return/.test(importCard))
 ok('...and now links to the client it is talking about',
-  /to=\{`\/companies\/\$\{client\?\.id\}`\}/.test(importCard))
+  /to=\{clientTermsLink\(client!\.id\)\}/.test(importCard))
 
 /*
  * THE GATE IS THE DATE, NOT THE DOCUMENT, and that is a decision worth pinning so nobody

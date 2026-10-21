@@ -1,6 +1,6 @@
 import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
@@ -126,9 +126,26 @@ export function SettingsPage() {
         {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
         {tab === 'Notifications' && <NotificationsTab />}
         {tab === 'Integrations' && <IntegrationsTab />}
+        {tab === 'Data Import' && params.get('client') && <BackToClient id={params.get('client')!} />}
         {tab === 'Data Import' && <DataImportTab forCompanyId={params.get('client')} />}
       </div>
     </div>
+  )
+}
+
+/**
+ * BACK TO THE CLIENT THE BATCH WAS OPENED FROM (S10, prompt 13 item 4). "Upload a batch" on the client
+ * page lands here with ?client=, and the only way back was the browser's own -- which on an iPad in
+ * the home-screen app is not there at all. Named, so it says where it goes.
+ */
+function BackToClient({ id }: { id: string }) {
+  const { companies } = useAppStore()
+  const client = companies.find((c) => c.id === id)
+  return (
+    <Link to={`/companies/${id}`} data-testid="back-to-client"
+      className="inline-flex items-center gap-1.5 mb-3 text-sm font-medium text-slate-500 hover:text-slate-800">
+      <ArrowLeft size={15} /> Back to {client?.name ?? 'the client'}
+    </Link>
   )
 }
 

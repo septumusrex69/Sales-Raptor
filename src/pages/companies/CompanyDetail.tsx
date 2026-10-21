@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { clientTermsLink, workBlock } from '../../lib/mandateRule'
 import {
   UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
   CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy,
@@ -57,7 +58,6 @@ import { ClientBookRings } from '../../components/companies/ClientBookRings'
 import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
 import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
 import { ClientUpcomingPayover } from '../../components/companies/ClientUpcomingPayover'
-import { ClientRecentActivity } from '../../components/companies/ClientRecentActivity'
 import { outcomeRing, type OutcomeRow } from '../../lib/clientOutcomes'
 import { ruleKind } from '../../lib/commissionRule'
 import { HandOutModal } from '../accounts/HandOutModal'
@@ -183,6 +183,18 @@ export function CompanyDetail() {
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
   /* The same rule as the Clients list (isClientCompany), signed mandate included. */
   const isClient = !!company && isClientCompany(company, wonDeals.length > 0)
+  /* NO MANDATE OR NO COMMISSION, NO WORK (S10, prompt 13 item 3): the two ways onto this book are
+     offered greyed, with the reason and the way to fix it under the row. The database refuses the
+     same (client_work_refusal), so this is the explanation, not the guard. */
+  const termsBlock = isClient ? workBlock(company) : null
+  /* The link from a refusal lands on the commission and mandate card. React Router does not scroll
+     to a hash on its own, so this does, once the card is drawn. */
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (hash !== '#commission-mandate' || !company) return
+    const t = window.setTimeout(() => document.getElementById('commission-mandate')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
+    return () => window.clearTimeout(t)
+  }, [hash, company])
   /*
    * Every number that could reach this client.
    *
@@ -864,17 +876,17 @@ export function CompanyDetail() {
             */}
             {isClient && (
               <RecordAction icon={Upload} label="Upload a batch" primary
-                onClick={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)}
-                title="Read a handover sheet and its PDFs, and check it before anything is written" />
+                onClick={termsBlock ? undefined : () => navigate(`/settings?tab=Data+Import&client=${company.id}`)}
+                title={termsBlock ?? 'Read a handover sheet and its PDFs, and check it before anything is written'} />
             )}
             {isClient && (
               <RecordAction icon={UserPlus} label="Add debtor"
-                onClick={async () => {
+                title={termsBlock ?? 'The single account a client phones in'}
+                onClick={termsBlock ? undefined : async () => {
                   setDebtorError(null)
                   setDebtorRefs(await fetchAccountReferences(company.id).catch(() => []))
                   setDebtorOpen(true)
-                }}
-                title="The single account a client phones in" />
+                }} />
             )}
             {/* The client's collection report (S9): the firm's Excel dashboard, remade as a PDF. */}
             {isClient && (
@@ -906,6 +918,12 @@ export function CompanyDetail() {
               {isAdmin && <RecordMoreAction icon={Trash2} label="Delete" danger onClick={() => setDeleteOpen(true)} />}
             </RecordActionsMore>
           </RecordActions>
+          {termsBlock && (
+            <p className="mt-3 text-sm text-negative-700" data-testid="client-terms-block">
+              {termsBlock}{' '}
+              <Link to={clientTermsLink(company.id)} className="font-medium underline">Set the commission and mandate</Link>
+            </p>
+          )}
         </div>
       </Card>
 
@@ -983,7 +1001,9 @@ export function CompanyDetail() {
               {canViewTrust(currentUser) && (
                 <ClientUpcomingPayover companyId={company.id} onOpen={() => setTab('Payovers')} />
               )}
-              <ClientRecentActivity activities={companyActivities} users={users} onViewAll={() => setTab('Notes')} />
+              {/* NO "RECENT ACTIVITY" CARD (S10, prompt 13 item 6). It was the last three entries of the
+                  same timeline the Notes card below draws in full, newest first -- the same lines
+                  twice on one page. Notes stays. */}
             </div>
           </div>
         <RecordLayout
@@ -995,9 +1015,6 @@ export function CompanyDetail() {
               <WelcomeCard company={company} />
               <HandoverBook company={company}
                 onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
-              {/* Notes in the middle, and still on their own tab — both places, at the firm's
-                  asking. Here they are capped at five with a "show more"; the tab is where you
-                  go for the lot. */}
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
                   asking. Here they are capped at five with a "show more"; the tab is where you
                   go for the lot. */}
@@ -1029,7 +1046,7 @@ export function CompanyDetail() {
               also in the figures row.
             */
             <Card key="commission-mandate">
-              <div data-testid="commission-mandate">
+              <div data-testid="commission-mandate" id="commission-mandate" className="scroll-mt-4">
                 <CommissionCard company={company} bare />
                 <MandateCard key={mandateKey} company={company} bare
                   canEdit={canEditOwned(currentUser, company.accountOwnerId)}

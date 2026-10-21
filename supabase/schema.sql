@@ -44157,3 +44157,89 @@ begin
 
   return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 3: NO MANDATE OR NO COMMISSION, NO WORK.
+--
+-- The firm: "No mandate or no commission set = no work. Debtors and handover files can't be
+-- uploaded." The mandate half was already the rule for a batch (handovers_need_a_mandate, prompt 10);
+-- the commission half is new, and so is holding the single debtor added by hand to the same rule --
+-- "Add debtor" wrote a debtor_accounts row with no batch, so it went round the batch trigger.
+--
+-- client_work_refusal says why in the sentence the screen shows, or null. The mandate half keeps the
+-- Swordfish exemption (a client the import brought across is not refused for a missing sign date);
+-- the commission half has NONE: an account opened for a client with no rate and no scale is an
+-- account nobody can invoice, whoever the client came from. Commission is a rate or a scale with at
+-- least one band -- the register's tiers alone price nothing (commissionRule.ts, handoverRateBlock).
+--
+-- Nothing the Swordfish import writes is refused: its batches and its accounts carry import_batch_id.
+-- A probe that inserts an account on staging now needs a client with a mandate date and a rate.
+create or replace function public.client_work_refusal(p_company uuid)
+returns text
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select case
+    when no_mandate and no_commission then
+      c.name || ' has no signed mandate and no commission on record, so no debtors or handovers can be loaded for them. Set both on the client first.'
+    when no_mandate then
+      c.name || ' has no signed mandate on record, so no debtors or handovers can be loaded for them. Set it on the client first.'
+    when no_commission then
+      c.name || ' has no commission on record, so no debtors or handovers can be loaded for them. Set it on the client first.'
+  end
+  from (
+    select co.name,
+           co.import_batch_id is null and co.mandate_signed_at is null as no_mandate,
+           co.commission_rate is null
+             and coalesce(jsonb_array_length(case when jsonb_typeof(co.commission_bands) = 'array' then co.commission_bands end), 0) = 0
+             as no_commission
+      from public.companies co where co.id = p_company
+  ) c
+$$;
+
+create or replace function public.refuse_handover_without_mandate()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_why text;
+begin
+  if new.import_batch_id is null then
+    v_why := public.client_work_refusal(new.company_id);
+    if v_why is not null then
+      raise exception '%', v_why using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+create or replace function public.refuse_account_without_terms()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_why text;
+begin
+  if new.import_batch_id is null then
+    v_why := public.client_work_refusal(new.company_id);
+    if v_why is not null then
+      raise exception '%', v_why using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+create or replace trigger debtor_accounts_need_terms
+  before insert on public.debtor_accounts
+  for each row execute function public.refuse_account_without_terms();
+
+revoke all on function public.client_work_refusal(uuid) from public, anon;
+revoke all on function public.refuse_account_without_terms() from public, anon;
+grant execute on function public.client_work_refusal(uuid) to authenticated;

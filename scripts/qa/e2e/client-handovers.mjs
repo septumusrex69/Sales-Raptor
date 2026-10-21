@@ -72,7 +72,9 @@ try {
   const attention = (await page.getByTestId('client-attention').innerText()).replace(/\s+/g, ' ')
   t.ok('attention required names the missing mandate', /No mandate on record/.test(attention))
   t.ok('...and says the disputes in one line', /No disputes escalated/.test(attention))
-  t.ok('recent activity sits beside the handovers', await page.getByTestId('client-recent-activity').isVisible())
+  /* S10: the Recent activity card is gone -- it was the first three lines of the Notes card. */
+  t.ok('no recent activity card; Notes carries the timeline', (await page.getByTestId('client-recent-activity').count()) === 0
+    && (await page.getByText('Notes', { exact: true }).count()) > 0)
   /* Tall enough to hold the whole overview: the page scrolls inside its own panel, so a full-page
      shot of a 1024-high window is the top of it only. */
   await page.setViewportSize({ width: 1366, height: 3200 })

@@ -143,15 +143,15 @@ ok('the import knows whether the client has a mandate',
 ok('...and refuses to hold a handover without one',
   /noMandate = needsMandate\(client\)/.test(importCard))
 ok('...by disabling the button, not by warning beside it',
-  /disabled=\{!companyId \|\| !!busy \|\| noMandate\}/.test(importCard))
+  /disabled=\{!companyId \|\| !!busy \|\| noMandate \|\| !!termsBlock\}/.test(importCard))
 /* Said when the client is chosen, not after the sheet is read: somebody who has to go and find a
    mandate should not first spend ten minutes on the file. */
 ok('...and says so as soon as the client is picked',
-  /has no signed mandate on record/.test(importCard))
+  /\{termsBlock && \(/.test(importCard) && /has no signed mandate on record/.test(mandateRule))
 /* Belt and braces: the function itself returns early, so a button re-enabled in a dev console
    still writes nothing. */
 ok('...with the save itself refusing too',
-  /if \(!plan \|\| !sheet \|\| !companyId \|\| noMandate\) return/.test(importCard))
+  /if \(!plan \|\| !sheet \|\| !companyId \|\| noMandate \|\| termsBlock\) return/.test(importCard))
 
 /*
  * AND IT IS NOT REFUSED ON THE FORM THAT CREATES THE CLIENT. A client is often loaded while the
