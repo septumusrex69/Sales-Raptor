@@ -403,7 +403,7 @@ probed on staging inside a rolled-back transaction before it was written into sc
 - **Client report: Email it** (compose box, PDF attached, nothing charged, logged on the timeline);
   date range still not built. **Administration** saves its own pane arrangement
   (`raptor.dashboard.admin.layout`) instead of rearranging Sales/Communications. check-dashboard-panes.
-- **Full `npm run qa` after the merge: 363 of 365 green** -- only the two old reds (account-templates,
+- **Full `npm run qa` after the evening merges: 369 of 371 green** (earlier: 363 of 365) -- only the two old reds (account-templates,
   excess-credit). The merge first turned twenty browser files red: their catch-all `/rpc/` handler
   answered the new device check with `[]`; the harness now answers it first (5d01351).
 - **e2e on a shared machine: set `RAPTOR_E2E_PORT`** to a private port when another session may be
