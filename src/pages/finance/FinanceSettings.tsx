@@ -8,7 +8,8 @@ import { bandWords, ruleKind, tierWords } from '../../lib/commissionRule'
 import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
 import { fetchSettingChanges, logSettingChange, type SettingChange } from '../../lib/payover'
-import { fetchTrustOpening, setTrustOpening, type TrustOpening } from '../../lib/trust'
+import { fetchSwordfishHolding, fetchTrustOpening, setSwordfishHolding, setTrustOpening, type TrustOpening } from '../../lib/trust'
+import type { SwordfishHolding } from '../../lib/swordfishHolding'
 import { clockToday, firmClockState } from '../../lib/clock.ts'
 
 /**
@@ -58,6 +59,8 @@ export function FinanceSettings() {
   const [vatModal, setVatModal] = useState(false)
   const [opening, setOpening] = useState<TrustOpening | null>(null)
   const [openingModal, setOpeningModal] = useState(false)
+  const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
+  const [swordfishModal, setSwordfishModal] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -100,6 +103,7 @@ export function FinanceSettings() {
         .filter((x) => x.accounts > 0 || ruleKind({ commissionRate: x.rate, commissionBands: x.bands, commissionTiers: x.tiers }) !== 'none')
         .sort((a2, b2) => b2.accounts - a2.accounts))
       setOpening(await fetchTrustOpening())
+      setSwordfish(await fetchSwordfishHolding().catch(() => null))
       setChanges(await fetchSettingChanges())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the finance settings.')
@@ -277,6 +281,36 @@ export function FinanceSettings() {
                   : 'The bank\u2019s balance on the day before the first statement you import. Until it is captured, the trust overview counts imported statement lines only.'}
               </p>
             </Card>
+            {/*
+              HELD FOR SWORDFISH PAYOVERS (S10), BESIDE THE OPENING BECAUSE IT IS PART OF IT: the money in
+              the account at the cut-over that Swordfish, not Raptor, still pays out (11 Dec and 11 Jan).
+              Swordfish cannot say whose it is, so it is one figure, set once with where it comes from.
+              What is left after the last Swordfish run is the firm's to decide; nothing here closes it.
+            */}
+            <Card>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
+                Held for Swordfish payovers
+              </div>
+              <div className="mt-1 flex items-baseline gap-3">
+                <span className={clsx('text-[22px] font-medium tabular-nums', swordfish ? 'text-slate-800' : 'text-slate-400')}
+                  data-testid="swordfish-holding">
+                  {swordfish ? rand(swordfish.amount) : 'Not set'}
+                </span>
+                <button type="button" onClick={() => setSwordfishModal(true)} disabled={!opening?.asAt}
+                  data-testid="swordfish-holding-set"
+                  title={opening?.asAt ? undefined : 'Capture the opening balance first: the holding is part of it.'}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+                  {swordfish ? 'Change' : 'Set'}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-slate-400" data-testid="swordfish-holding-note">
+                {swordfish
+                  ? `Set at the opening (${swordfish.asAt ? openingDay(swordfish.asAt) : 'no opening'})${swordfish.setBy ? ` by ${swordfish.setBy}` : ''}: ${swordfish.reason}. `
+                    + `${rand(swordfish.paidOut)} paid out (${swordfish.lines} ${swordfish.lines === 1 ? 'line' : 'lines'}), ${rand(swordfish.left)} left. `
+                    + 'Its payouts are taken off it under To sort, Statement lines.'
+                  : 'The trust money at the cut-over that Swordfish still pays out. Part of the opening balance, so it is set after it.'}
+              </p>
+            </Card>
           </div>
 
           <Card padded={false}>
@@ -421,6 +455,15 @@ export function FinanceSettings() {
           onSave={async (amount, asAt, reason) => {
             await setTrustOpening(amount, asAt, reason)
             setOpeningModal(false)
+            await load()
+          }} />
+      )}
+
+      {swordfishModal && opening?.asAt && (
+        <SwordfishModal current={swordfish} opening={opening} onClose={() => setSwordfishModal(false)}
+          onSave={async (amount, reason) => {
+            await setSwordfishHolding(amount, reason)
+            setSwordfishModal(false)
             await load()
           }} />
       )}
@@ -617,6 +660,70 @@ function OpeningModal({ current, onClose, onSave }: {
             onClick={() => {
               setBusy(true); setError(null)
               void onSave(value, asAt, reason.trim())
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : 'That did not save.'))
+                .finally(() => setBusy(false))
+            }}
+            className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * WHAT IS HELD FOR SWORDFISH, AND WHERE THE FIGURE COMES FROM (S10). The database refuses more than the
+ * opening balance, less than has already been paid out of it, and a reason shorter than a sentence; the
+ * screen asks for the same so the refusal is never the first thing somebody sees.
+ */
+function SwordfishModal({ current, opening, onClose, onSave }: {
+  current: SwordfishHolding | null
+  opening: TrustOpening
+  onClose: () => void
+  onSave: (amount: number, reason: string) => Promise<void>
+}) {
+  const [amount, setAmount] = useState(current ? current.amount.toFixed(2) : '')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const value = Number(amount.replace(/[\s,]/g, ''))
+  const ceiling = opening.amount ?? 0
+  const floor = current?.paidOut ?? 0
+  const valid = amount.trim() !== '' && Number.isFinite(value) && value >= 0 && value <= ceiling && value >= floor
+    && reason.trim().length >= 10
+
+  return (
+    <Modal title="Held for Swordfish payovers" onClose={onClose} width={460}>
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Amount (R)</label>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
+            className={inputClass} placeholder="0.00" data-testid="swordfish-amount" />
+          <p className="mt-1 text-xs text-slate-400">
+            Part of the opening of {rand(ceiling)} at the end of {opening.asAt ? openingDay(opening.asAt) : '—'}
+            {floor > 0 ? `; ${rand(floor)} has already been paid out of it, so not less than that` : ''}.
+          </p>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Where it comes from</label>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}
+            placeholder="e.g. opening balance less Raptor's receipts after the cut-over" data-testid="swordfish-reason" />
+          <p className="mt-1 text-xs text-slate-400">Required, at least ten characters. It is kept with the change.</p>
+        </div>
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          The money in the trust account at the cut-over that Swordfish will still pay out, on 11 December and
+          11 January. Swordfish cannot say what it owes each client, so it is held as one figure; its payouts
+          and drawings come off it under To sort. What is left after the last Swordfish run is the firm&rsquo;s
+          to decide &mdash; firm fees can be written off, client money cannot.
+        </p>
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" disabled={!valid || busy} data-testid="swordfish-save"
+            onClick={() => {
+              setBusy(true); setError(null)
+              void onSave(value, reason.trim())
                 .catch((e: unknown) => setError(e instanceof Error ? e.message : 'That did not save.'))
                 .finally(() => setBusy(false))
             }}

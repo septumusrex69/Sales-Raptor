@@ -45205,3 +45205,484 @@ revoke all on function public.workflow_hold_after_first_notice() from public, an
 create or replace trigger workflow_hold_after_first_notice
   after update of state on public.workflow_run_steps
   for each row execute function public.workflow_hold_after_first_notice();
+
+
+-- ============================================================================================
+-- S10 / HELD FOR SWORDFISH PAYOVERS (HANDOFF 3a item 2; the design agreed under S8).
+--
+-- The cut-over is the end of 10 December 2026, and Swordfish still pays clients on 11 Dec and 11 Jan
+-- out of the trust account, from money it received BEFORE the cut-over. Swordfish cannot say what it
+-- owes each client ("Swordfish can do nothing"), so that money cannot be put on anybody's ledger --
+-- and without a name on it the Trust overview read it as "not accounted for", then read every
+-- Swordfish payout as a shortfall. So it is ONE BUCKET: set once at the cut-over out of the bank's
+-- opening balance, its own line on the overview, and its debits taken off it from To sort.
+--
+-- A ONE-ROW TABLE, NOT firm_settings COLUMNS: firmSettings.ts keeps five hand-written lists of that
+-- row (CLAUDE.md), and a holding is not a setting -- it has its own reason, who and when.
+--
+-- DATED BY THE TRUST OPENING, NOT BY ITSELF: the holding is PART of the opening balance -- money that
+-- was in the account at that day's close and that Swordfish, not Raptor, will pay out. So it cannot
+-- be set before the opening is captured, cannot exceed it, and only lines AFTER the opening come off
+-- it (a line on or before it is inside the opening already, and taking it off the bucket as well
+-- would count it twice).
+--
+-- NO LEDGER ENTRY. The money leaves the bucket, not anybody's ledger: nobody's balance on the trust
+-- ledger ever carried it. allocation_kind stays 'other' -- its check constraint cannot be widened
+-- from the tools this repo is worked with -- and `swordfish_kind` says which of the two it was, as
+-- return_bounced_receipt already closes a debit as 'other' with no entry behind it.
+--
+-- WHAT IS LEFT AFTER THE LAST SWORDFISH RUN IS THE ONE-OFF SWORDFISH DIFFERENCE, and closing it is
+-- the FIRM's decision (firm fees may be written off; client money may not). Nothing here closes it.
+-- ============================================================================================
+create table if not exists public.swordfish_holding (
+  id boolean primary key default true check (id),
+  amount numeric(14,2) not null check (amount >= 0),
+  reason text not null,
+  set_by uuid references public.profiles(id),
+  set_at timestamptz not null
+);
+comment on table public.swordfish_holding is
+  'One row: the trust money held at the cut-over for the payovers Swordfish still makes (S10). Set by '
+  'set_swordfish_holding only; its debits are bank_statement_lines.swordfish_kind. Part of the trust '
+  'opening, so Clear staging empties it with the opening.';
+alter table public.swordfish_holding enable row level security;
+-- READ BY THE TRUST TICK; NO WRITE POLICY AT ALL -- set_swordfish_holding is the only writer, so the
+-- amount and its audit line cannot part company.
+create policy swordfish_holding_read on public.swordfish_holding
+  for select to authenticated using (public.has_capability('finance.view'));
+
+alter table public.bank_statement_lines
+  add column if not exists swordfish_kind text
+    check (swordfish_kind is null or swordfish_kind in ('payover', 'drawing'));
+comment on column public.bank_statement_lines.swordfish_kind is
+  'A debit taken off Held for Swordfish payovers (S10): payover (Swordfish paying a client) or drawing '
+  '(a Swordfish-era drawing). allocation_kind is ''other'' with no ledger entry. Written only by '
+  'allocate_swordfish_line, and frozen once written.';
+
+-- THE ARITHMETIC, ONCE. trust_position, the screen's reader and the allocation all ask this, so the
+-- overview's "left" and the refusal "only R x is left" cannot disagree. No row where nothing is held.
+-- Invoker and not granted: only the definer functions below call it.
+create or replace function public.swordfish_holding_figures()
+returns table(amount numeric, as_at date, paid_out numeric, payovers numeric, drawings numeric,
+              lines integer, left_over numeric)
+language sql stable security invoker set search_path to 'public'
+as $$
+  with h as (select s.amount from public.swordfish_holding s where s.id),
+  f as (select trust_account_number, trust_opening_date from public.firm_settings where id = true),
+  gone as (
+    select coalesce(sum(-l.amount), 0) as paid,
+           coalesce(sum(-l.amount) filter (where l.swordfish_kind = 'payover'), 0) as payovers,
+           coalesce(sum(-l.amount) filter (where l.swordfish_kind = 'drawing'), 0) as drawings,
+           count(l.id)::integer as n
+      from f join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+     where l.swordfish_kind is not null and l.allocation_kind = 'other'
+  )
+  select h.amount, f.trust_opening_date, g.paid, g.payovers, g.drawings, g.n, round(h.amount - g.paid, 2)
+    from h cross join f cross join gone g
+$$;
+revoke all on function public.swordfish_holding_figures() from public, anon, authenticated;
+
+create or replace function public.swordfish_holding_position()
+returns table(amount numeric, reason text, set_at timestamptz, set_by_name text, as_at date,
+              paid_out numeric, payovers numeric, drawings numeric, lines integer, left_over numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  select x.amount, s.reason, s.set_at, p.name, x.as_at, x.paid_out, x.payovers, x.drawings, x.lines, x.left_over
+    from public.swordfish_holding_figures() x
+    join public.swordfish_holding s on s.id
+    left join public.profiles p on p.id = s.set_by
+   where public.has_capability('finance.view')
+$$;
+revoke all on function public.swordfish_holding_position() from public, anon;
+grant execute on function public.swordfish_holding_position() to authenticated;
+
+create or replace function public.set_swordfish_holding(p_amount numeric, p_reason text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_open_amount numeric;
+  v_open date;
+  v_paid numeric;
+  v_old numeric;
+begin
+  if not public.has_capability('finance.view') or public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator with the trust account may set what is held for Swordfish.' using errcode = '42501';
+  end if;
+  if p_amount is null or p_amount < 0 then
+    raise exception 'The holding is an amount of nought or more.' using errcode = '22023';
+  end if;
+  if v_reason is null or length(v_reason) < 10 then
+    raise exception 'Say where the figure comes from (for example, the bank balance less what Raptor holds).' using errcode = '22023';
+  end if;
+  select trust_opening_balance, trust_opening_date into v_open_amount, v_open
+    from public.firm_settings where id = true;
+  if v_open is null then
+    raise exception 'Capture the trust account opening balance first: the holding is part of the opening, and is dated by it.'
+      using errcode = '22023';
+  end if;
+  if round(p_amount, 2) > coalesce(v_open_amount, 0) then
+    raise exception 'The trust account held R % at the opening; no more than that can be held for Swordfish.',
+      to_char(coalesce(v_open_amount, 0), 'FM999999999990.00') using errcode = '22023';
+  end if;
+  select s.amount into v_old from public.swordfish_holding s where s.id for update;
+  select x.paid_out into v_paid from public.swordfish_holding_figures() x;
+  if round(p_amount, 2) < coalesce(v_paid, 0) then
+    raise exception 'R % has already been paid out of the holding, so it cannot be set below that.',
+      to_char(v_paid, 'FM999999999990.00') using errcode = '22023';
+  end if;
+
+  insert into public.swordfish_holding (id, amount, reason, set_by, set_at)
+  values (true, round(p_amount, 2), v_reason, auth.uid(), public.raptor_now())
+  on conflict (id) do update
+     set amount = excluded.amount, reason = excluded.reason, set_by = excluded.set_by, set_at = excluded.set_at;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('swordfish_holding',
+          case when v_old is null then 'Not set' else to_char(v_old, 'FM999999999990.00') end,
+          to_char(round(p_amount, 2), 'FM999999999990.00') || ' at the end of ' || v_open,
+          v_reason, auth.uid());
+end $$;
+revoke all on function public.set_swordfish_holding(numeric, text) from public, anon;
+grant execute on function public.set_swordfish_holding(numeric, text) to authenticated;
+
+-- A DEBIT OFF THE BUCKET. The holding row is locked first, so two people taking two lines off the
+-- last R10 000 at once cannot both succeed. Returns what is left.
+create or replace function public.allocate_swordfish_line(p_line uuid, p_kind text, p_note text default null)
+returns numeric
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_l public.bank_statement_lines%rowtype;
+  v_account text;
+  v_open date;
+  v_left numeric;
+  v_amt numeric;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to allocate.' using errcode = '42501';
+  end if;
+  if p_kind is null or p_kind not in ('payover', 'drawing') then
+    raise exception 'A line off the holding is a Swordfish payover or a Swordfish-era drawing.' using errcode = '22023';
+  end if;
+  perform 1 from public.swordfish_holding s where s.id for update;
+  if not found then
+    raise exception 'Nothing is held for Swordfish payovers yet. Set the holding in Trust settings first.' using errcode = '22023';
+  end if;
+  select * into v_l from public.bank_statement_lines where id = p_line for update;
+  if not found then raise exception 'That statement line no longer exists.' using errcode = 'P0002'; end if;
+  if v_l.direction is distinct from 'debit' then
+    raise exception 'Only money paid OUT comes off the Swordfish holding; money in is placed or allocated as before.'
+      using errcode = '22023';
+  end if;
+  if v_l.allocation_kind is not null or v_l.status in ('allocated', 'reconciled') then
+    raise exception 'That line is already allocated.' using errcode = '22023';
+  end if;
+  select trust_account_number, trust_opening_date into v_account, v_open from public.firm_settings where id = true;
+  if v_l.bank_account is distinct from v_account then
+    raise exception 'That line is not on the trust account.' using errcode = '22023';
+  end if;
+  if v_open is null or v_l.txn_date <= v_open then
+    raise exception 'That line is dated on or before the trust opening (%), so it is inside the opening balance already and cannot come off the holding.',
+      coalesce(to_char(v_open, 'DD Mon YYYY'), 'not captured') using errcode = '22023';
+  end if;
+  v_amt := abs(v_l.amount);
+  select x.left_over into v_left from public.swordfish_holding_figures() x;
+  if round(v_amt, 2) > round(coalesce(v_left, 0), 2) then
+    raise exception 'That line is R % and only R % is left held for Swordfish payovers.',
+      to_char(v_amt, 'FM999999999990.00'), to_char(coalesce(v_left, 0), 'FM999999999990.00') using errcode = '22023';
+  end if;
+
+  perform set_config('raptor.swordfish_line', 'on', true);
+  update public.bank_statement_lines
+     set status = 'allocated', allocation_kind = 'other', swordfish_kind = p_kind,
+         allocation_reason = case p_kind when 'payover' then 'Swordfish payover' else 'Swordfish-era drawing' end
+                             || coalesce(' - ' || v_note, ''),
+         allocated_at = public.raptor_now(), allocated_by = auth.uid()
+   where id = p_line;
+  perform set_config('raptor.swordfish_line', '', true);
+  return round(v_left - v_amt, 2);
+end $$;
+revoke all on function public.allocate_swordfish_line(uuid, text, text) from public, anon;
+grant execute on function public.allocate_swordfish_line(uuid, text, text) to authenticated;
+
+-- S10 / HELD FOR SWORDFISH PAYOVERS: WHAT IS LEFT IS STILL OWED OUT OF THE TRUST. trust_position's
+-- creditors (owed_out) add what is left of the holding, so the money Swordfish has still to pay is not
+-- read as a surplus while it sits there, nor its payouts as a shortfall once they are taken off it.
+-- Applied on staging by replace() over the live definition; the file and the database match by md5.
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(max(f.trust_opening_balance), 0) + coalesce(sum(l.amount), 0) as bal
+      from public.firm_settings f
+      left join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+  ),
+  /*
+   * THE FIRM'S PTC SHARE NOT YET RECOVERED IS THE FIRM'S, WAITING (the firm, 13 Oct, choosing it over
+   * a difference that clears only on approval). A PTC debits the client its fees the day it is
+   * recorded; the firm was credited only when a run approved the set-off ("PTC share recovered") or
+   * the client paid the business account -- so in between the money sat in the bank with nobody's
+   * name on it (staging: R1 287.50, Marula, PO-MPG-2609). DERIVED, NOT WRITTEN: the ledger is
+   * immutable, and a credit written now would be credited again at approval. Per client: fees debited,
+   * less recovered, less paid to the business account; never below nil. Not drawable --
+   * firm_trust_split reads only real entries.
+   */
+  ptc_pending as (
+    select coalesce(sum(greatest(owed, 0)), 0) as bal from (
+      select company_id,
+             sum(case when party = 'client' and reason like '%Paid straight to the client%' then -amount
+                      when party = 'firm' and reason like 'PTC share recovered%' then -amount
+                      when party = 'client' and reason like 'Paid to the business account against PO-%' then -amount
+                      else 0 end) as owed
+        from public.trust_creditor_entries
+       where company_id is not null
+       group by company_id) x
+  ),
+  by_party as (
+    select party, who, sum(bal) as bal from (
+    select party,
+           -- THE FIRM IS ONE PARTY, as trust_balances already has it. Grouped per account, its
+           -- earnings sat in one bucket per account and every drawing and bank charge in a separate
+           -- "firm" bucket of -R39 877.68, which this card then listed as "Owed back to the trust"
+           -- beside a firm line that was already net of it -- the same money twice (the firm, 13 Oct:
+           -- "something here doesn't make sense to me"). The difference does not move: both sides
+           -- of the card fall by the same amount.
+           case party when 'client' then company_id::text
+                      when 'debtor' then coalesce(account_id::text, party)
+                      else party end as who,
+           amount as bal
+      from public.trust_creditor_entries
+    union all
+    select 'firm', 'firm', bal from ptc_pending
+    ) e group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  swordfish as (
+    select coalesce((select x.left_over from public.swordfish_holding_figures() x), 0) as bal
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal + s.bal,
+         h.owed_in,
+         (h.owed_out + u.bal + s.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal + s.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u, swordfish s
+   where public.has_capability('finance.view')
+$$;
+
+-- S10 / HELD FOR SWORDFISH PAYOVERS: swordfish_kind is written by allocate_swordfish_line alone (the
+-- transaction-local raptor.swordfish_line, the pattern set_trust_opening_balance uses), so an
+-- Administrator's direct update cannot take money off the bucket without the checks behind it -- and,
+-- as with every allocation, once said it stays said. There is no undo: the existing model has none for
+-- 'other' either (prompt 12: "a wrong allocation is answered with a counter-entry, not a rewrite").
+create or replace function public.protect_bank_statement_line()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  new.bank_account := old.bank_account;
+  new.line_key := old.line_key;
+  new.txn_date := old.txn_date;
+  new.amount := old.amount;
+  new.balance := old.balance;
+  new.description := old.description;
+  new.direction := old.direction;
+  new.imported_at := old.imported_at;
+  new.imported_by := old.imported_by;
+  -- A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is what FinancePayments
+  -- does, through the ledger, with a reason written on it.
+  --
+  -- EXCEPT WHERE THE PAYMENT WAS REJECTED, which is the one case where nothing was ever made.
+  -- The firm: "there are no way to reject payments that are imported... I do not want to approve
+  -- them." A rejected receipt never reached allocate_payment, never moved a balance and never
+  -- reached a payover run -- so there is no ledger to reverse it through, and leaving the line
+  -- pointing at it would keep the money claimed by a payment nobody is going to make. The line
+  -- has to go back on the unallocated list to be placed properly, and it cannot while it is held.
+  --
+  -- NARROW ON PURPOSE, AND IT ASKS THE PAYMENT RATHER THAN TRUSTING THE CALLER: only a clearing
+  -- (new.payment_id is null), and only where that payment really carries a rejection. Anything
+  -- else -- a different payment, a half-written one, an approved one -- is refused exactly as
+  -- before.
+  --
+  -- AND WHERE IT WAS REVERSED AND NOTHING LIVE HOLDS THE LINE (10 Oct): reverse_payment_to_unplaced
+  -- reverses the approved receipt (its ledger answered by counter-entries) and rejects the copy,
+  -- and the line still names the ORIGINAL. Cleared only when no payment on the line is neither
+  -- reversed nor rejected -- otherwise the money is still claimed.
+  if old.payment_id is not null
+     and not (new.payment_id is null
+              and (exists (select 1 from public.account_payments p
+                            where p.id = old.payment_id and p.rejected_at is not null)
+                   or (exists (select 1 from public.account_payments p
+                                where p.id = old.payment_id and p.reversed_at is not null)
+                       and not exists (select 1 from public.account_payments s
+                                        where s.bank_line_id = old.id
+                                          and s.reversed_at is null and s.rejected_at is null))))
+  then
+    new.payment_id := old.payment_id;
+    new.account_id := old.account_id;
+  end if;
+  -- PROMPT 12: WHAT A LINE WAS SAID TO BE, ONCE SAID, STAYS SAID. It wrote a ledger entry, and the
+  -- ledger is append-only; a wrong allocation is answered with a counter-entry, not a rewrite.
+  if old.allocation_kind is not null then
+    new.allocation_kind := old.allocation_kind;
+    new.allocation_reason := old.allocation_reason;
+    new.trust_entry_id := old.trust_entry_id;
+    new.allocated_at := old.allocated_at;
+    new.allocated_by := old.allocated_by;
+  end if;
+  -- S10: WHICH SWORDFISH DEBIT A LINE WAS is written by allocate_swordfish_line alone, and then stays said.
+  if new.swordfish_kind is distinct from old.swordfish_kind
+     and coalesce(current_setting('raptor.swordfish_line', true), '') <> 'on' then
+    new.swordfish_kind := old.swordfish_kind;
+  end if;
+  return new;
+end
+$$;
+
+-- S10 / HELD FOR SWORDFISH PAYOVERS: CLEAR STAGING EMPTIES THE HOLDING WITH THE OPENING. The holding is
+-- part of the trust opening, which this already resets; left behind, a cleared staging would carry a
+-- bucket dated by an opening that no longer exists. Its debits go with bank_statement_lines.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+
+-- S10 / HELD FOR SWORDFISH PAYOVERS: THE FINANCE REVOKE LIST, with the holding's functions on it
+-- (check-finance-is-administrator-only reads the last copy of the loop).
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)',
+    /* THE PAYOUT DAY GATE AND ITS OVERRIDE (11 Oct). */
+    'assert_payover_run_due(uuid)', 'release_payover_run_early(uuid, text)',
+    'payover_run_due(uuid)',
+    /* S10: suspense from Needs an account, and the fee credit note. */
+    'suspend_bank_line(uuid, text)', 'release_bank_line_from_suspense(uuid)', 'suspended_bank_lines()',
+    'credit_fee(uuid, numeric, text)',
+    /* S10: HELD FOR SWORDFISH PAYOVERS. */
+    'swordfish_holding_figures()', 'swordfish_holding_position()',
+    'set_swordfish_holding(numeric, text)', 'allocate_swordfish_line(uuid, text, text)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

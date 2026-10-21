@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { referenceIn, toPaidOut, toPaymentToMake, type PaidOut, type PaymentToMake } from './paymentsOut.ts'
 import { lineNature, toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
+import type { SwordfishKind } from './swordfishHolding.ts'
 
 /**
  * ALLOCATING TRUST STATEMENT LINES, THE CALLS (prompt 12). The rules are in bankLineAllocation.ts
@@ -41,6 +42,17 @@ export async function allocateBankLine(
     p_line: lineId, p_kind: kind, p_reason: reason || null, p_target: targetId,
   })
   if (error) throw new Error(error.message)
+}
+
+/**
+ * A DEBIT OFF HELD FOR SWORDFISH PAYOVERS (S10). No ledger entry: the money leaves the bucket, not
+ * anybody's ledger. Refused in the database for a credit, a line on or before the trust opening, or more
+ * than is left. Returns what is left.
+ */
+export async function allocateSwordfishLine(lineId: string, kind: SwordfishKind, note: string | null): Promise<number> {
+  const { data, error } = await supabase.rpc('allocate_swordfish_line', { p_line: lineId, p_kind: kind, p_note: note || null })
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
 }
 
 /** What has gone out of trust: everything not yet on the statement, and what was confirmed since `since`. */

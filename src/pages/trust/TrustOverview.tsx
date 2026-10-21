@@ -6,7 +6,7 @@ import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import {
   fetchClientsOwing, fetchFirmTrustSplit, fetchOverpaymentsKept, fetchTrustCashByCycle, fetchTrustCycles,
-  fetchTrustOpening, fetchTrustPosition,
+  fetchSwordfishHolding, fetchTrustOpening, fetchTrustPosition,
   type ClientOwing, type FirmTrustSplit, type TrustCashCycle, type TrustCycle, type TrustOpening, type TrustPosition,
 } from '../../lib/trust'
 import { fetchLinesToAllocate, fetchPaymentsOutList } from '../../lib/bankAllocationApi'
@@ -18,6 +18,7 @@ import { trustHeadline } from '../../lib/trustBalance'
 import { clockToday } from '../../lib/clock.ts'
 import { accountedFromCash } from '../../lib/trustUnaccounted'
 import { currentHoldings, todoItems } from '../../lib/trustOverview'
+import { swordfishLeft, type SwordfishHolding } from '../../lib/swordfishHolding'
 
 /**
  * IS THE TRUST ACCOUNT RIGHT, AND WHOSE PAYOVER IS EACH PART OF IT WAITING FOR?
@@ -65,6 +66,7 @@ export function TrustOverview() {
   const [overpaid, setOverpaid] = useState(0)
   const [outList, setOutList] = useState<OutgoingPayment[]>([])
   const [owing, setOwing] = useState<ClientOwing[]>([])
+  const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -77,11 +79,13 @@ export function TrustOverview() {
       fetchFirmTrustSplit().catch(() => null), fetchLinesToAllocate().catch(() => [] as StatementLine[]),
       fetchExceptions().then((j) => j.filter((x) => x.kind === 'excess_credit').length).catch(() => 0),
       fetchPaymentsOutList().catch(() => [] as OutgoingPayment[]), fetchClientsOwing().catch(() => [] as ClientOwing[]),
+      /* NOT optional like the rest: unread, the bucket would be counted as nobody's money. */
+      fetchSwordfishHolding(),
     ])
-      .then(([p, c, cc, k, o, f, l, ov, po, ow]) => {
+      .then(([p, c, cc, k, o, f, l, ov, po, ow, sf]) => {
         if (!live) return
         setPosition(p); setCycles(c); setCash(cc); setKept(k); setOpening(o); setFirm(f); setLines(l)
-        setOverpaid(ov); setOutList(po); setOwing(ow)
+        setOverpaid(ov); setOutList(po); setOwing(ow); setSwordfish(sf)
       })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
@@ -114,14 +118,14 @@ export function TrustOverview() {
   const today = clockToday()
   /* ACCOUNTED FOR IS THE MONEY IN THE BANK WITH AN OWNER (10 Oct), one function shared with the
      Not accounted for list so the two can never disagree. */
-  const accounted = accountedFromCash(cash)
+  const accounted = accountedFromCash(cash, swordfishLeft(swordfish))
   const head = trustHeadline({
     trustCash: position.trustCash, owners: accounted, unidentified: position.unidentified,
     difference: r2(position.trustCash - accounted - position.unidentified),
   })
   const openingSet = Boolean(opening?.asAt)
   const holdings = currentHoldings({
-    cash, firm, kept: kept?.amount ?? 0,
+    cash, firm, kept: kept?.amount ?? 0, swordfish,
     label: (c) => cycleLabel(c.periodStart, c.periodEnd), payDay: longDate,
   })
   const credits = lines.filter((l) => l.direction === 'credit')
@@ -165,7 +169,7 @@ export function TrustOverview() {
         </div>
         <div>
           <Figure label="Accounted for" value={rand(head.accounted)} />
-          <div className="mt-2 text-xs text-slate-300">Clients, Bredell Ferreira and debtors</div>
+          <div className="mt-2 text-xs text-slate-300">Clients, Bredell Ferreira and debtors{swordfishLeft(swordfish) !== 0 ? ', and what Swordfish still pays' : ''}</div>
         </div>
         {/* THE FIGURE OPENS EVERY ITEM BEHIND IT (S7). */}
         <Link to="/trust/unaccounted" data-testid="open-unaccounted" className="block rounded-xl -m-2 p-2 hover:bg-white/5 transition-colors">

@@ -119,8 +119,9 @@ ok('...and draws them as their own line, among the owners (before the total acco
   /who: 'Debtors · overpayments kept'/.test(ov) && page.indexOf('holdings.map') > 0 && page.indexOf('holdings.map') < page.indexOf('label="Total accounted for"'))
 ok('...while the total accounted for is still the debtors\' whole balance',
   /* S7: read through accountedFromCash, shared with the Not accounted for list. */
-  (/const accounted = accountedFromCash\(cash\)/.test(page)
-    && /return r2\(cash\.reduce\(\(t, c\) => t \+ c\.forClients \+ c\.forFirm \+ c\.firmOther \+ c\.forDebtors, 0\)\)/.test(
+  /* S10: plus what is left Held for Swordfish payovers, owned by the payovers Swordfish still makes. */
+  (/const accounted = accountedFromCash\(cash(, swordfishLeft\(swordfish\))?\)/.test(page)
+    && /return r2\(cash\.reduce\(\(t, c\) => t \+ c\.forClients \+ c\.forFirm \+ c\.firmOther \+ c\.forDebtors, 0\)( \+ swordfishLeft)?\)/.test(
       readFileSync(new URL('../../src/lib/trustUnaccounted.ts', import.meta.url), 'utf8'))))
 
 /* ---- a client in debit is subtracted ONCE ----

@@ -7,6 +7,10 @@
  * figure opens the list, the list adds up to the figure with nothing left over, each item says what
  * to do, and a receipt nobody placed is listed with "Place it".
  *
+ * AND HELD FOR SWORDFISH PAYOVERS (S10): the same book with R4 000 more in the bank, all of it what is
+ * left of the Swordfish holding. The overview draws the bucket as its own line ("R 6 000.00 set on ...,
+ * R 2 000.00 paid out, R 4 000.00 left"), and Not accounted for does not move -- the bucket is owned.
+ *
  * Run: node scripts/qa/e2e/trust-unaccounted.mjs
  */
 import { OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
@@ -52,6 +56,15 @@ const handlers = [
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
 
+/* THE SAME BOOK, PLUS THE SWORDFISH HOLDING: R4 000 more in the bank and R4 000 left in the bucket. */
+const HOLDING = { amount: 6000, reason: 'Bank opening less Raptor receipts', set_at: '2026-06-11T08:00:00Z', set_by_name: 'Stephan',
+  as_at: '2026-06-10', paid_out: 2000, payovers: 1500, drawings: 500, lines: 2, left_over: 4000 }
+const withHolding = [
+  [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [{ ...POSITION, trust_cash: POSITION.trust_cash + 4000, creditors: POSITION.creditors + 4000 }] })],
+  [(u) => /\/rpc\/swordfish_holding_position/.test(u), () => ({ body: [HOLDING] })],
+  ...handlers,
+]
+
 const server = await startServer()
 const browser = await chromium.launch()
 try {
@@ -82,6 +95,22 @@ try {
   await page.waitForURL(/\/trust\/runs\/r-hth/, { timeout: 10000 }).catch(() => {})
   t.ok('an item opens where its job is done', /\/trust\/runs\/r-hth/.test(page.url()))
   await context.close()
+
+  const held = await signedInPage(browser, ADMIN, withHolding, [])
+  await held.page.goto(`http://127.0.0.1:${PORT}/trust`, { waitUntil: 'domcontentloaded' })
+  const card = held.page.getByTestId('holdings')
+  await card.waitFor({ timeout: 20000 })
+  await held.page.getByText('Held for Swordfish payovers').first().waitFor({ timeout: 10000 })
+  t.ok('the overview draws the Swordfish holding as its own line, set, paid out and left',
+    /Held for Swordfish payovers[\s\S]*R 6 000\.00 set on 10 June 2026, R 2 000\.00 paid out, R 4 000\.00 left[\s\S]*R 4 000\.00/.test(flat(await card.innerText())))
+  t.ok('...and Not accounted for does not move: the bucket is owned',
+    /R 14 758\.64/.test(flat(await held.page.getByTestId('open-unaccounted').innerText())))
+  await t.shot(held.page, 'trust-swordfish-holding')
+  await held.page.getByTestId('open-unaccounted').click()
+  await held.page.getByTestId('unaccounted-item').first().waitFor({ timeout: 15000 })
+  t.ok('...and the list behind it still adds up with nothing over',
+    /Not accounted for[\s\S]*R 14 758\.64[\s\S]*Fully explained by the 6 items below/i.test(flat(await held.page.getByTestId('unaccounted-sum').innerText())))
+  await held.context.close()
 } catch (e) {
   try { const pg = browser.contexts().flatMap((c) => c.pages())[0]; if (pg) { await t.shot(pg, 'trust-unaccounted-where-it-stopped'); console.log('URL', pg.url()) } } catch { /* */ }
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message.split('\n')[0] : e})`, false)
