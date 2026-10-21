@@ -295,6 +295,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * response and never fails the sync that already happened.
    */
   let campaigns: unknown = null
+  /* CALL CAMPAIGNS PAST THEIR LAST DAY end here: their unworked calls come off the diaries, the
+     days they were due kept. Cheap, and safe to run every time -- it touches only what has ended. */
+  let callsEnded: unknown = null
+  if (fromCron) {
+    const { data, error } = await admin.rpc('call_campaigns_expire', {})
+    callsEnded = error ? { error: error.message } : data
+  }
   if (fromCron) {
     const left = Math.min(60_000, 240_000 - (Date.now() - started))
     if (left > 5_000) {
@@ -313,6 +320,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.status(200).json({
     ok: true,
     marketing,
+    callsEnded,
     syncedMailboxes: results.length,
     mailboxes: all.length,
     logged,

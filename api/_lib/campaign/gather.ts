@@ -42,6 +42,8 @@ export function pickContact(contacts: ContactRow[], kind: string): string | null
 export interface AccountFacts extends CampaignFacts {
   id: string
   assignedTo: string | null
+  /** The client's liaison (companies.account_owner_id) -- a liaison may campaign on their own clients. */
+  liaisonId: string | null
 }
 
 /**
@@ -55,7 +57,7 @@ export async function factsFor(
   for (const part of chunks([...new Set(ids)])) {
     const [accounts, contacts, disputes, steps] = await Promise.all([
       admin.from('debtor_accounts')
-        .select('id, book, hold_reason, prescribed, debtor_kind, assigned_to')
+        .select('id, book, hold_reason, prescribed, debtor_kind, assigned_to, companies(account_owner_id)')
         .in('id', part),
       fetchAllRows<ContactRow>(() => admin.from('account_contacts')
         .select('account_id, kind, value, is_primary, retired_at')
@@ -94,6 +96,7 @@ export async function factsFor(
       out.set(a.id as string, {
         id: a.id as string,
         assignedTo: (a.assigned_to as string) ?? null,
+        liaisonId: ((Array.isArray(a.companies) ? a.companies[0] : a.companies) as { account_owner_id?: string } | null)?.account_owner_id ?? null,
         book: (a.book as string) ?? null,
         holdReason: (a.hold_reason as string) ?? null,
         prescribed: Boolean(a.prescribed),

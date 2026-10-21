@@ -103,6 +103,11 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
           {debtorName(entry)} — {DIARY_KINDS[entry.kind].label.toLowerCase()}
           {entry.reason && <span className="text-slate-400"> · {entry.reason}</span>}
         </p>
+        {entry.campaign && (
+          <p className="rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-[13px] text-slate-700 whitespace-pre-wrap">
+            {entry.campaign.script}
+          </p>
+        )}
 
         <FormField label="What came of it">
           <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2} autoFocus

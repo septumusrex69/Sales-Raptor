@@ -156,10 +156,10 @@ ok('a revoke takes it from an Administrator too', !mayCampaignOn({ ...admin, rev
 ok('a leader may stop their team’s campaign', mayManageCampaign(leader, { createdBy: 'other', teamId: 'T1' }))
 ok('...not another team’s', !mayManageCampaign(leader, { createdBy: 'other', teamId: 'T2' }))
 
-ok('the route asks the rule for EVERY account', /for \(const id of input\.accountIds\)[\s\S]{0,300}mayCampaignOn\(caller, holder\)/.test(routeSrc))
+ok('the route asks the rule for EVERY account', /for \(const id of input\.accountIds\)[\s\S]{0,300}mayCampaignOn\(caller, holder, liaison\)/.test(routeSrc))
 ok('...and refuses the whole selection when one is outside it', /if \(a\.outOfScope > 0\)[\s\S]{0,400}status: 403/.test(routeSrc))
 ok('...needing the tick before anything', /!can\(caller, 'campaign\.run'\)/.test(routeSrc))
-ok('the sender asks again before each message', /if \(!mayCampaignOn\(creator, holder\)\) return skip\('out_of_scope'\)/.test(sendSrc))
+ok('the sender asks again before each message', /if \(!mayCampaignOn\(creator, holder, liaison\)\) return skip\('out_of_scope'\)/.test(sendSrc))
 ok('...and the skip rule again', /const reason = campaignSkip\(facts, campaign\.channel, audience\)/.test(sendSrc))
 ok('an email campaign refuses to start without the creator’s mailbox',
   /input\.channel === 'email' && !a\.mailbox/.test(routeSrc))

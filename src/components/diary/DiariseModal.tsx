@@ -5,7 +5,7 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { DiaryDatePicker, longDate } from './DiaryDatePicker'
 import {
-  DEFAULT_DIARY_CAPACITY, DIARY_KINDS, DIARY_KIND_ORDER, atCapacity, daysBetween, shiftDate,
+  BOOKABLE_KINDS, DEFAULT_DIARY_CAPACITY, DIARY_KINDS, atCapacity, daysBetween, shiftDate,
   type DayLoad, type DiaryKind,
 } from '../../lib/diaryPriority.ts'
 import { diaryReserveOf, selfBookingLimit } from '../../lib/collectorGrade.ts'
@@ -341,7 +341,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
 
         <FormField label="What kind of work">
           <select value={kind} onChange={(e) => setKind(e.target.value as DiaryKind)} className={inputClass}>
-            {DIARY_KIND_ORDER.map((k) => (
+            {BOOKABLE_KINDS.map((k) => (
               <option key={k} value={k}>{DIARY_KINDS[k].label}</option>
             ))}
           </select>

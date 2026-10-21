@@ -87,6 +87,9 @@ for (const n of names) {
  * reads now() for a business date fails here -- write raptor_now() / raptor_today() instead.
  */
 check('only the named audit and real-world functions read the real clock', stillReal.sort(), [
+  /* call_campaigns_expire (S10): finished_at is an audit stamp of when the cron closed it. WHICH
+     campaigns end is decided on raptor_today(), so a jumped staging clock ends them on its day. */
+  'call_campaigns_expire',
   /* campaign_claim (S10): a claim older than ten minutes is a sender that died mid-send -- elapsed
      WALL time, which a staging clock jumped a week ahead must not turn into every claim at once. */
   'campaign_claim',

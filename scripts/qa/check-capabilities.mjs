@@ -135,7 +135,8 @@ const EXPECTED = {
   canLeadCollections: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader'],
   /* S10: CAMPAIGNS. The firm: an Administrator, or a team leader on their own team's desks. The
      desks are the server's question (mayCampaignOn); who may run one at all is this. */
-  canRunCampaigns: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader'],
+  // The liaisons since 21 Oct: "even liaisons can run campaigns over their own clients".
+  canRunCampaigns: ['Administrator', 'Liaison Manager', 'Liaison', 'Call Centre Manager', 'Pre-legal Team Leader'],
   canRefileMail: ['Administrator'],
   canEditLibrary: ['Administrator'],
   mayPoolDisputes: ['Administrator'],

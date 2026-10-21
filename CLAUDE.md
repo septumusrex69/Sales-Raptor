@@ -25,7 +25,7 @@ debtor. Four vocabularies exist and they are not interchangeable:
 | **Client position** | `src/lib/clientPosition.ts` | The 13 rungs a client is reported on: Paying, Arranged, Broken arrangement, Refusing to pay, Cannot pay, Negotiating, In progress, Tracing, Disputed, Legal, Under administration, Frozen, Closed. **Derived**, never stored. |
 | **Account band** | `src/lib/collectorGrade.ts` | Generic / High value (R25 000) / Major (R50 000). Decides who may be given the account. Derived from balance, lifted by a hard position. |
 | **Collector grade** | `src/lib/collectorGrade.ts` | Junior → Skilled → Senior → Elite. Set by a team leader, **never computed**. |
-| **Diary kind** | `src/lib/diaryPriority.ts` | The work ladder: Broken PTP → New account → PTP due → Callback → Dispute chase → No contact → Trace → Review. Mirrored in SQL by `diary_priority()`. |
+| **Diary kind** | `src/lib/diaryPriority.ts` | The work ladder: Broken PTP → New account → PTP due → Callback → Dispute chase → No contact → Trace → Review. Mirrored in SQL by `diary_priority()`. A **campaign call** sits wherever its campaign put it — worked now, above everything — beside the account's own diary date, never instead of it (`callCampaign.ts`). |
 
 **Grade decides WHICH accounts, never HOW MANY.** Company standard is 500 on the book and 50 a
 day for everybody; a junior and an elite carry the same volume. Per-person overrides live on

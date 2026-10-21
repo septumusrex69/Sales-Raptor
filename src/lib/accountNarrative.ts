@@ -478,6 +478,7 @@ const NEXT_BY_KIND: Record<DiaryKind, (on: string) => string> = {
   no_contact: (on) => `We will try to reach the debtor again on ${on}.`,
   trace: (on) => `We will follow up the trace on ${on}.`,
   review: (on) => `We will follow the account up on ${on}.`,
+  campaign: (on) => `We will call the debtor on ${on}.`,
 }
 
 /*

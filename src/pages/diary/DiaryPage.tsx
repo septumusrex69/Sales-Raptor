@@ -748,7 +748,7 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
             title={[
               row.createdBy && row.ownerId && row.createdBy !== row.ownerId && row.createdByName
                 ? `Referred by ${row.createdByName}.` : null,
-              row.reason || row.account.mainComment || 'No note about why',
+              (row.campaign ? `${row.campaign.name}: ${row.campaign.script}` : row.reason) || row.account.mainComment || 'No note about why',
             ].filter(Boolean).join(' ')}>
             <span className="text-slate-300">· </span>
             {/*
@@ -763,7 +763,9 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
             {row.createdBy && row.ownerId && row.createdBy !== row.ownerId && row.createdByName && (
               <span className="text-brand-700">Referred by {row.createdByName}. </span>
             )}
-            {row.reason || row.account.mainComment || <span className="text-slate-300">No note about why</span>}
+            {/* A CAMPAIGN CALL SAYS WHAT TO SAY: its campaign and script, where a booking says why. */}
+            {row.campaign && <span className="font-medium text-brand-700">{row.campaign.name}: </span>}
+            {(row.campaign ? row.campaign.script : row.reason) || row.account.mainComment || <span className="text-slate-300">No note about why</span>}
           </span>
         </div>
 

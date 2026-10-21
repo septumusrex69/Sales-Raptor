@@ -41,7 +41,9 @@ function ok(name, condition) {
 /* ---------- 1. the ladder agrees with the database ---------- */
 
 const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
-const fn = schema.match(/create or replace function public\.diary_priority[\s\S]*?\$\$;/)
+// schema.sql is append-only: the LAST definition is the live one (CLAUDE.md), so read that.
+const lastOf = (re) => { const all = [...schema.matchAll(re)]; return all.length ? all[all.length - 1] : null }
+const fn = lastOf(/create or replace function public\.diary_priority\(kind text\)[\s\S]*?\$\$;/g)
 ok('diary_priority() is in schema.sql', !!fn)
 if (fn) {
   const fromSql = {}
@@ -55,7 +57,7 @@ if (fn) {
 }
 
 // Every kind the database will accept must have a label, or the day list renders a blank chip.
-const kindsInCheck = schema.match(/kind text not null default 'review' check \(kind in \(([\s\S]*?)\)\)/)
+const kindsInCheck = lastOf(/(?:kind text not null default 'review' check|add constraint diary_entries_kind_check check) \(kind in \(([\s\S]*?)\)\)/g)
 ok('the kind CHECK is in schema.sql', !!kindsInCheck)
 if (kindsInCheck) {
   const allowed = [...kindsInCheck[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()
@@ -76,6 +78,7 @@ if (kindsInCheck) {
     Object.entries(DIARY_KINDS).map(([k, v]) => [k, v.label]),
   )
   check('the firm\'s own words', labels, {
+    campaign: 'Campaign call',
     promise_broken: 'Broken PTP',
     new_account: 'New account',
     promise_due: 'PTP due',
@@ -360,8 +363,9 @@ check('floatedKind refuses a kind that does not exist', floatedKind('first:nonse
 // Every order offered in the UI must be one orderDiary actually understands.
 ok('every offered order is handled', DIARY_ORDER_LABELS.every(
   (o) => ['urgent', 'amount', 'oldest'].includes(o.id) || floatedKind(o.id) !== null))
-check('there is one option per kind plus the three general ones',
-  DIARY_ORDER_LABELS.length, Object.keys(DIARY_PRIORITY).length + 3)
+// A campaign call is not floated: nobody books one, so nobody sorts their day by it (BOOKABLE_KINDS).
+check('there is one option per bookable kind plus the three general ones',
+  DIARY_ORDER_LABELS.length, Object.keys(DIARY_PRIORITY).length - 1 + 3)
 
 // Ordering must never lose or duplicate a row.
 for (const order of DIARY_ORDER_LABELS.map((o) => o.id)) {

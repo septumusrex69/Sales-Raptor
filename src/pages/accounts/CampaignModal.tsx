@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Loader2, Mail, MessageSquare } from 'lucide-react'
+import { AlertTriangle, Loader2, Mail, MessageSquare, Phone } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary'
 import { groupedFields } from '../../lib/messageTemplates.ts'
@@ -13,6 +13,7 @@ import { emailBodyCss } from '../../lib/emailStyle.ts'
 import { fetchFirmSettings } from '../../lib/firmSettings'
 import { rand } from '../../lib/money'
 import type { Selection } from '../../lib/accountAllocation'
+import { CallCampaignModal } from './CallCampaignModal'
 
 /**
  * THE CAMPAIGN BOX: one SMS or one email to the accounts ticked on the list, or to everything the
@@ -46,6 +47,8 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [emailCss, setEmailCss] = useState<Record<string, string> | undefined>(undefined)
+  /* A CALL CAMPAIGN is a different box: the accounts go onto the diaries, nothing is sent. */
+  const [calling, setCalling] = useState(false)
 
   /* THE ACCOUNTS, ONCE, as the list's own clauses resolve them. A failure here is the hand-out's
      own refusal ("N match but the database returned M") and is shown rather than worked round. */
@@ -131,6 +134,13 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
 
   const what = channel === 'sms' ? 'SMS' : 'email'
   const subtitle = `${selectedCount.toLocaleString('en-ZA')} ${selectedCount === 1 ? 'account' : 'accounts'} selected`
+
+  if (calling) {
+    return (
+      <CallCampaignModal selection={selection} selectedCount={selectedCount} ids={ids}
+        onClose={onClose} onBack={() => setCalling(false)} onStarted={onStarted} />
+    )
+  }
 
   /* ------------------------------------------------------------------ confirm */
   if (step === 'confirm' && preview) {
@@ -281,6 +291,10 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
               {c === 'sms' ? <MessageSquare size={14} /> : <Mail size={14} />} {c === 'sms' ? 'SMS' : 'Email'}
             </button>
           ))}
+          <button type="button" onClick={() => setCalling(true)} data-testid="campaign-channel-call"
+            className="inline-flex items-center gap-1.5 text-sm font-medium rounded-lg border px-3 py-1.5 border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+            <Phone size={14} /> Call
+          </button>
         </div>
 
         <FormField label="From the library">

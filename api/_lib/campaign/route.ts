@@ -12,6 +12,7 @@ import {
 import { callHoursProblem, johannesburgMinute } from '../../../src/lib/contactHours.js'
 import { callerFor, factsFor, holdersFor, valuesFor, type AccountFacts } from './gather.js'
 import { sendCampaignChunk, stopCampaign } from './send.js'
+import { callAssess, callCreate, readCallInput } from './call.js'
 
 /**
  * POST /api/workflow/campaign -- a campaign from the Accounts list, four operations on one route.
@@ -48,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const caller = await callerFor(admin, user.id)
   if (!caller || !can(caller, 'campaign.run')) {
-    res.status(403).json({ error: 'Campaigns are run by an Administrator or a team leader.' })
+    res.status(403).json({ error: 'Campaigns are run by an Administrator, a team leader or a liaison.' })
     return
   }
 
@@ -65,6 +66,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const input = readInput(body)
         if ('error' in input) { res.status(400).json({ error: input.error }); return }
         const made = await create(admin, caller, input, body)
+        if ('error' in made) { res.status(made.status).json({ error: made.error }); return }
+        res.status(200).json({ ok: true, ...made })
+        return
+      }
+      /* A CALL CAMPAIGN: accounts onto the collectors' diaries rather than a message out (call.ts). */
+      case 'call-preview':
+      case 'call-create': {
+        const input = readCallInput(body)
+        if ('error' in input) { res.status(400).json({ error: input.error }); return }
+        if (body.op === 'call-preview') {
+          const a = await callAssess(admin, caller, input)
+          res.status(200).json({ ok: true, ...a.forBrowser })
+          return
+        }
+        const made = await callCreate(admin, caller, input, body)
         if ('error' in made) { res.status(made.status).json({ error: made.error }); return }
         res.status(200).json({ ok: true, ...made })
         return
@@ -144,7 +160,7 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
   const audience = (template?.audience as 'individual' | 'company' | null) ?? null
 
   const facts = await factsFor(admin, input.accountIds, clock.today)
-  const holders = await holdersFor(admin, [...facts.values()].map((f) => f.assignedTo))
+  const holders = await holdersFor(admin, [...facts.values()].flatMap((f) => [f.assignedTo, f.liaisonId]))
   const outOfScope: string[] = []
   const sendable: AccountFacts[] = []
   const skipped: { id: string; reason: SkipReason; holdReason: string | null }[] = []
@@ -152,7 +168,8 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
     const f = facts.get(id)
     if (!f) continue
     const holder = f.assignedTo ? holders.get(f.assignedTo) ?? null : null
-    if (!mayCampaignOn(caller, holder)) { outOfScope.push(id); continue }
+    const liaison = f.liaisonId ? holders.get(f.liaisonId) ?? null : null
+    if (!mayCampaignOn(caller, holder, liaison)) { outOfScope.push(id); continue }
     const reason = campaignSkip(f, input.channel, audience)
     if (reason) skipped.push({ id, reason, holdReason: f.holdReason })
     else sendable.push(f)

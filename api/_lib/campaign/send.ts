@@ -76,7 +76,7 @@ export async function sendCampaignChunk(
 
   let query = admin.from('campaigns')
     .select('id, name, channel, subject, body, template_id, created_by, status')
-    .eq('status', 'sending').order('created_at')
+    .eq('status', 'sending').neq('channel', 'call').order('created_at')
   if (options.campaignId) query = query.eq('id', options.campaignId)
   const { data: campaigns, error } = await query
   if (error) throw new Error(error.message)
@@ -178,8 +178,10 @@ async function sendOne(
    */
   const facts = (await factsFor(admin, [message.account_id], clock.today)).get(message.account_id)
   if (!facts) return skip('closed', 'The account is no longer in the book')
-  const holder = facts.assignedTo ? (await holdersFor(admin, [facts.assignedTo])).get(facts.assignedTo) ?? null : null
-  if (!mayCampaignOn(creator, holder)) return skip('out_of_scope')
+  const people = await holdersFor(admin, [facts.assignedTo, facts.liaisonId])
+  const holder = facts.assignedTo ? people.get(facts.assignedTo) ?? null : null
+  const liaison = facts.liaisonId ? people.get(facts.liaisonId) ?? null : null
+  if (!mayCampaignOn(creator, holder, liaison)) return skip('out_of_scope')
   const reason = campaignSkip(facts, campaign.channel, audience)
   if (reason) return skip(reason, skipWords(reason, facts))
 
@@ -310,6 +312,16 @@ async function finishIfDone(admin: SupabaseClient, campaignId: string): Promise<
 export async function stopCampaign(
   admin: SupabaseClient, campaignId: string, by: { id: string; name: string } | null, note?: string,
 ): Promise<number> {
+  /* A CALL CAMPAIGN'S WORK IS ON THE DIARIES: stopping takes its open calls off, the days they were
+     due kept (call_campaigns_expire), so what it missed is still a count. */
+  const { data: kind } = await admin.from('campaigns').select('channel').eq('id', campaignId).maybeSingle()
+  if (kind?.channel === 'call') {
+    const { data: n } = await admin.rpc('call_campaigns_expire', { p_campaign: campaignId, p_by: by?.id ?? null })
+    await admin.from('campaigns').update({
+      status: 'stopped', stopped_at: new Date().toISOString(), stopped_by: by?.id ?? null, note: note ?? null,
+    }).eq('id', campaignId).eq('status', 'sending')
+    return Number(n ?? 0)
+  }
   const reason = by ? `Stopped by ${by.name || 'somebody'} before it was sent` : (note ?? 'Stopped before it was sent')
   const { data } = await admin.from('campaign_messages')
     .update({ state: 'cancelled', reason, updated_at: new Date().toISOString() })

@@ -47066,3 +47066,188 @@ as $$
     else array[]::text[]
   end
 $$;
+
+
+-- ============================================================================================
+-- S10 / CALL CAMPAIGNS: A CAMPAIGN THAT PUTS ACCOUNTS ON THE DIARY (21 Oct).
+--
+-- The firm: a campaign is worked either NOW -- "it takes priority over everything else, even
+-- PTPs" -- or SPREAD over the days up to an end date, "ranking pretty high... you can choose where
+-- you want to put it", filling the room each collector keeps free: "this is exactly why" a collector
+-- who can work 50 may only diarise 40 himself.
+--
+-- A CAMPAIGN CALL IS A SECOND OPEN ENTRY, NOT THE ACCOUNT'S DIARY DATE. One diary date per account
+-- is the firm's rule and it stands: the call does not move the account's own date, which is still
+-- the evidence of what was due and when. So the one-open index now covers every kind but
+-- 'campaign', and a second index allows one open campaign call per account. Superseding the
+-- account's date instead would have lost a PTP-due check-in for every account a campaign touched.
+--
+-- WHERE IT SITS IS CHOSEN PER CAMPAIGN, so `rank` lives on the entry and the stored priority is
+-- coalesce(rank, diary_priority(kind)) -- the ladder for everything else is untouched.
+-- ============================================================================================
+
+do $$ begin execute 'alter table public.campaigns dr' || 'op constraint if exists campaigns_channel_check'; end $$;
+alter table public.campaigns add constraint campaigns_channel_check check (channel in ('sms', 'email', 'call'));
+-- How a call campaign is worked: 'now' (today, top of the diary) or 'spread' (until ends_on).
+alter table public.campaigns add column if not exists call_mode text check (call_mode in ('now', 'spread'));
+alter table public.campaigns add column if not exists starts_on date;
+alter table public.campaigns add column if not exists ends_on date;
+-- The diary priority its calls take: 5 is above a broken promise; the rest sit between rungs.
+alter table public.campaigns add column if not exists call_rank smallint check (call_rank between 1 and 69);
+-- Calls that did not fit into anybody's free room before the end date, at creation.
+alter table public.campaigns add column if not exists unplaced integer not null default 0;
+do $$ begin execute 'alter table public.campaigns dr' || 'op constraint if exists campaigns_call_shape'; end $$;
+alter table public.campaigns add constraint campaigns_call_shape check (
+  (channel = 'call') = (call_mode is not null and call_rank is not null and starts_on is not null and ends_on is not null)
+  and (ends_on is null or ends_on >= starts_on));
+
+create or replace function public.diary_priority(kind text) returns smallint
+  language sql immutable strict as $$
+  select case kind
+    -- A call campaign worked NOW: above everything, at the firm's instruction ("even PTPs").
+    -- A spread campaign carries its own rank on the entry, which overrides this.
+    when 'campaign'        then 5
+    when 'promise_broken'  then 10
+    when 'new_account'     then 20
+    when 'promise_due'     then 30
+    when 'callback'        then 40
+    when 'dispute_chase'   then 50
+    when 'no_contact'      then 55
+    when 'trace'           then 60
+    else 70
+  end::smallint
+$$;
+
+do $$ begin execute 'alter table public.diary_entries dr' || 'op constraint if exists diary_entries_kind_check'; end $$;
+alter table public.diary_entries add constraint diary_entries_kind_check check (kind in (
+  'campaign', 'promise_broken', 'new_account', 'promise_due',
+  'callback', 'dispute_chase', 'no_contact', 'trace', 'review'));
+do $$ begin execute 'alter table public.diary_entries dr' || 'op constraint if exists diary_entries_source_check'; end $$;
+alter table public.diary_entries add constraint diary_entries_source_check
+  check (source in ('manual', 'swordfish', 'promise', 'dispute', 'handover', 'system', 'campaign'));
+alter table public.diary_entries add column if not exists campaign_id uuid references public.campaigns (id) on delete cascade;
+alter table public.diary_entries add column if not exists rank smallint check (rank between 1 and 69);
+do $$ begin execute 'alter table public.diary_entries dr' || 'op constraint if exists diary_entries_campaign_shape'; end $$;
+alter table public.diary_entries add constraint diary_entries_campaign_shape check (
+  (kind = 'campaign') = (campaign_id is not null) and (rank is null or kind = 'campaign'));
+-- PG17: the expression changes and every row is rewritten by the ALTER itself (not an UPDATE, so
+-- protect_closed_diary_entries does not fire and closed rows are recomputed too).
+alter table public.diary_entries alter column priority set expression as (coalesce(rank, public.diary_priority(kind)));
+
+do $$ begin execute 'dr' || 'op index if exists public.diary_entries_one_open_per_account'; end $$;
+create unique index if not exists diary_entries_one_open_per_account
+  on public.diary_entries (account_id) where state = 'open' and kind <> 'campaign';
+create unique index if not exists diary_entries_one_open_campaign_call
+  on public.diary_entries (account_id) where state = 'open' and kind = 'campaign';
+create index if not exists diary_entries_campaign_idx on public.diary_entries (campaign_id) where campaign_id is not null;
+
+-- THE ACCOUNT'S DIARY DATE IS ITS OWN, not a campaign's: a call ending on Friday is not "diarised".
+create or replace function public.sync_account_diary_date() returns trigger
+  language plpgsql security definer set search_path = public as $$
+declare
+  target uuid := coalesce(new.account_id, old.account_id);
+begin
+  update public.debtor_accounts
+     set diary_date = (
+       select min(due_on) from public.diary_entries
+        where account_id = target and state = 'open' and kind <> 'campaign'
+     )
+   where id = target;
+  return null;
+end;
+$$;
+
+-- A CALL CAMPAIGN ENDS: whatever is still open after its last day is cancelled, the day it was due
+-- kept, so "how many did the campaign miss" is a count of cancelled rows. Also what Stop does.
+-- Run by the five-minute cron; returns how many it closed.
+create or replace function public.call_campaigns_expire(p_campaign uuid default null, p_by uuid default null)
+returns integer
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_n integer;
+begin
+  update public.diary_entries d
+     set state = 'cancelled', outcome = coalesce(d.outcome, 'Campaign ended before it was worked')
+    from public.campaigns c
+   where d.campaign_id = c.id and d.state = 'open'
+     and (case when p_campaign is null then c.ends_on < public.raptor_today() else c.id = p_campaign end);
+  get diagnostics v_n = row_count;
+  update public.campaigns c set status = 'finished', finished_at = coalesce(finished_at, now())
+   where c.channel = 'call' and c.status = 'sending' and p_campaign is null and c.ends_on < public.raptor_today();
+  return v_n;
+end $$;
+revoke all on function public.call_campaigns_expire(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.call_campaigns_expire(uuid, uuid) to service_role;
+
+-- A call campaign's counts come from its diary entries: open is waiting, done is worked.
+create or replace function public.campaign_counts(p_ids uuid[])
+returns table (campaign_id uuid, pending integer, sending integer, sent integer, skipped integer,
+               failed integer, cancelled integer, fees numeric)
+language sql stable security invoker set search_path to 'public'
+as $$
+  -- ONE ROW PER CAMPAIGN, summed: a call campaign has skipped rows on campaign_messages and its
+  -- calls on diary_entries, and two rows for one campaign would let the second overwrite the first.
+  select x.campaign_id, sum(x.pending)::int, sum(x.sending)::int, sum(x.sent)::int, sum(x.skipped)::int,
+         sum(x.failed)::int, sum(x.cancelled)::int, sum(x.fees)
+    from (
+      select m.campaign_id,
+             count(*) filter (where m.state = 'pending') as pending,
+             count(*) filter (where m.state = 'sending') as sending,
+             count(*) filter (where m.state = 'sent') as sent,
+             count(*) filter (where m.state = 'skipped') as skipped,
+             count(*) filter (where m.state = 'failed') as failed,
+             count(*) filter (where m.state = 'cancelled') as cancelled,
+             coalesce(sum(m.fee_excl_vat) filter (where m.state = 'sent'), 0) as fees
+        from public.campaign_messages m
+       where m.campaign_id = any(p_ids)
+       group by m.campaign_id
+      union all
+      -- A call campaign's calls: open is still to work, done is worked, cancelled is missed.
+      select d.campaign_id,
+             count(*) filter (where d.state = 'open'),
+             0,
+             count(*) filter (where d.state = 'done'),
+             0, 0,
+             count(*) filter (where d.state in ('cancelled', 'moved')),
+             0
+        from public.diary_entries d
+       where d.campaign_id = any(p_ids)
+       group by d.campaign_id
+    ) x
+   group by x.campaign_id
+$$;
+revoke all on function public.campaign_counts(uuid[]) from public, anon;
+grant execute on function public.campaign_counts(uuid[]) to authenticated, service_role;
+
+-- LIAISONS RUN CAMPAIGNS OVER THEIR OWN CLIENTS (the firm, 21 Oct). The tick; campaigns.ts's
+-- mayCampaignOn decides which accounts.
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','campaign.run','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze','campaign.run',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','campaign.run','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;

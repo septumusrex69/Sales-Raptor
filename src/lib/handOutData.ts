@@ -134,7 +134,7 @@ export async function loadHandOutContext(input: {
   const currentKinds = new Map<string, DiaryKind>()
   for (const chunk of idChunks(ids)) {
     const { data: openRows, error } = await supabase
-      .from('diary_entries').select('account_id, kind').eq('state', 'open').in('account_id', chunk)
+      .from('diary_entries').select('account_id, kind').eq('state', 'open').neq('kind', 'campaign').in('account_id', chunk)
     if (error) throw new Error(error.message)
     for (const r of (openRows ?? []) as any[]) {
       currentKinds.set(r.account_id as string, r.kind as DiaryKind)

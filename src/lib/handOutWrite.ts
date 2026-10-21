@@ -195,6 +195,8 @@ export async function commitHandOut(input: {
         .update({ state: 'moved', moved_at: clockNow().toISOString(), moved_by: input.actor.id })
         .in('account_id', slice.map((p) => p.accountId))
         .eq('state', 'open')
+        /* The account's own date only. A campaign call is a second entry beside it (callCampaign.ts). */
+        .neq('kind', 'campaign')
       if (supersedeError) throw new Error(supersedeError.message)
 
       const { error } = await supabase.from('diary_entries').insert(rows.slice(i, i + ID_CHUNK))

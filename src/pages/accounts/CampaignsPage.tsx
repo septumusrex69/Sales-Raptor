@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, Mail, MessageSquare, Square } from 'lucide-react'
+import { ArrowLeft, Loader2, Mail, MessageSquare, Phone, Square } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { formatDate } from '../../data/mockData'
 import { rand } from '../../lib/money'
 import {
-  fetchCampaigns, sendCampaignPass, stopCampaign, type CampaignRow,
+  fetchCallProgress, fetchCampaigns, sendCampaignPass, stopCampaign, type CampaignRow,
 } from '../../lib/campaignApi'
+import { rankWords } from '../../lib/callCampaign.ts'
 import { mayManageCampaign } from '../../lib/campaigns.ts'
 import { canRunCampaigns } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
@@ -42,7 +43,8 @@ export function CampaignsPage() {
     id: currentUser.id, role: currentUser.role, teamId: currentUser.teamId ?? null,
     grants: currentUser.grants, revokes: currentUser.revokes,
   } : null
-  const mine = (rows ?? []).filter((r) => r.status === 'sending'
+  /* Call campaigns are not sent: their work is on the diaries, and the cron ends them. */
+  const mine = (rows ?? []).filter((r) => r.status === 'sending' && r.channel !== 'call'
     && caller && mayManageCampaign(caller, { createdBy: r.createdBy, teamId: r.teamId }))
   const nextId = mine[0]?.id ?? null
 
@@ -80,7 +82,7 @@ export function CampaignsPage() {
   }
 
   if (!canRunCampaigns(currentUser)) {
-    return <p className="text-sm text-slate-500">Campaigns are run by an Administrator or a team leader.</p>
+    return <p className="text-sm text-slate-500">Campaigns are run by an Administrator, a team leader or a liaison.</p>
   }
 
   return (
@@ -91,9 +93,9 @@ export function CampaignsPage() {
       <div>
         <h1 className="text-lg font-semibold text-slate-800">Campaigns</h1>
         <p className="text-[13px] text-slate-500">
-          One SMS or email to a selection of debtors, started from the Accounts list. Each message is on the
-          account it went to and charged there under Annexure B. They go out only in the firm’s calling hours,
-          and keep going when this page is closed.
+          One SMS or email to a selection of debtors, or a call campaign onto the collectors’ diaries, started from
+          the Accounts list. Each message is on the account it went to and charged there under Annexure B; they go
+          out only in the firm’s calling hours, and keep going when this page is closed. A call is not charged.
         </p>
       </div>
       {waiting && (
@@ -110,6 +112,10 @@ export function CampaignsPage() {
         ) : (
           <ul className="divide-y divide-slate-100">
             {rows.map((r) => {
+              if (r.channel === 'call') {
+                const may = !!caller && mayManageCampaign(caller, { createdBy: r.createdBy, teamId: r.teamId })
+                return <CallRow key={r.id} r={r} fresh={fresh === r.id} may={may} stopping={stopping === r.id} onStop={() => stop(r.id)} />
+              }
               const c = r.counts
               const total = c.pending + c.sending + c.sent + c.skipped + c.failed + c.cancelled
               const done = c.sent + c.skipped + c.failed + c.cancelled
@@ -151,5 +157,73 @@ export function CampaignsPage() {
         )}
       </Card>
     </div>
+  )
+}
+
+/**
+ * A CALL CAMPAIGN'S ROW: how far the floor has got with it. Worked is a call closed on the diary;
+ * waiting is still open; missed is what its end date (or Stop) took off unworked -- the day it was
+ * due kept, so this is a fact rather than an estimate. By collector on request, because a leader's
+ * question is "who has not got to theirs".
+ */
+function CallRow({ r, fresh, may, stopping, onStop }: {
+  r: CampaignRow; fresh: boolean; may: boolean; stopping: boolean; onStop: () => void
+}) {
+  const [people, setPeople] = useState<Awaited<ReturnType<typeof fetchCallProgress>> | null>(null)
+  const [open, setOpen] = useState(false)
+  const c = r.counts
+  const worked = c.sent
+  const waiting = c.pending
+  const missed = c.cancelled
+  const total = worked + waiting + missed
+  const toggle = async () => {
+    setOpen((o) => !o)
+    if (!people) { try { setPeople(await fetchCallProgress(r.id)) } catch { setPeople([]) } }
+  }
+  return (
+    <li className={`px-4 py-3 ${fresh ? 'bg-gold-50/60' : ''}`} data-testid="campaign-row">
+      <div className="flex flex-wrap items-center gap-2">
+        <Phone size={14} className="text-slate-400" />
+        <span className="font-medium text-slate-800">{r.name}</span>
+        <span className={`text-[11px] rounded px-1.5 py-0.5 ${
+          r.status === 'sending' ? 'bg-brand-50 text-brand-700' : r.status === 'stopped' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-50 text-emerald-700'}`}>
+          {r.status === 'sending' ? 'Running' : r.status === 'stopped' ? 'Stopped' : 'Ended'}
+        </span>
+        <span className="text-xs text-slate-500">
+          {r.callMode ? rankWords(r.callMode, r.callRank ?? 0) : ''}
+          {r.callMode === 'spread' && r.endsOn ? ` · until ${formatDate(r.endsOn)}` : ''}
+          {' · '}{r.createdByName ?? 'Somebody'} · {formatDate(r.createdAt)}
+        </span>
+        {r.status === 'sending' && may && (
+          <button type="button" onClick={onStop} disabled={stopping} data-testid="campaign-stop"
+            className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+            <Square size={12} /> {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 h-1.5 rounded bg-slate-100 overflow-hidden">
+        <div className="h-full bg-navy-950" style={{ width: `${total ? Math.round((worked / total) * 100) : 0}%` }} />
+      </div>
+      <p className="mt-1.5 text-[12.5px] text-slate-600 tabular-nums" data-testid="call-counts">
+        {worked.toLocaleString('en-ZA')} worked · {waiting.toLocaleString('en-ZA')} waiting · {missed.toLocaleString('en-ZA')} missed
+        {r.unplaced > 0 && ` · ${r.unplaced.toLocaleString('en-ZA')} did not fit`}
+        {c.skipped > 0 && ` · ${c.skipped.toLocaleString('en-ZA')} skipped`}
+        {' · '}
+        <button type="button" onClick={toggle} className="underline underline-offset-2 text-slate-500 hover:text-slate-700">
+          {open ? 'Hide collectors' : 'By collector'}
+        </button>
+      </p>
+      {open && (
+        !people ? <Loader2 className="mt-2 h-3.5 w-3.5 animate-spin text-slate-400" /> : (
+          <ul className="mt-2 text-[12.5px] text-slate-600 space-y-0.5" data-testid="call-by-collector">
+            {people.map((p) => (
+              <li key={p.ownerId ?? 'none'} className="tabular-nums">
+                <span className="text-slate-800">{p.ownerName}</span> — {p.worked} worked · {p.waiting} waiting · {p.missed} missed
+              </li>
+            ))}
+          </ul>
+        )
+      )}
+    </li>
   )
 }

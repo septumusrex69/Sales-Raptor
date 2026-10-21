@@ -247,8 +247,9 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
    */
   'campaign.run': {
     label: 'Run a campaign to debtors',
-    blurb: 'Send one SMS or email to a selection of accounts. An Administrator on any accounts, '
-      + 'anybody else only on their own team’s desks. Each message is charged to the debtor.',
+    blurb: 'Send one SMS or email to a selection of accounts, or put them on the collectors’ diaries to be rung. '
+      + 'An Administrator on any accounts, a team leader on their team’s desks, a liaison on their own clients. '
+      + 'Each message is charged to the debtor; a call is not.',
     group: 'The book',
   },
   /* ---------------------------- clients and disputes ---------------------------- */
@@ -355,12 +356,14 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
   Administrator: CAPABILITY_ORDER.filter((c) => !NO_ROLE_CAPABILITIES.includes(c)),
   'Sales Manager': ['book.hand_out', 'book.reassign', 'client.view', 'marketing.send', 'library.view'],
   'Sales Representative': ['client.view', 'library.view'],
+  /* campaign.run for both liaison roles: "even liaisons can run campaigns over their own clients"
+     (the firm, 21 Oct). mayCampaignOn keeps them to those clients. */
   'Liaison Manager': [
-    'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze',
+    'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze', 'campaign.run',
     'client.view', 'dispute.write_to_client', 'settlement.approve', 'marketing.send', 'library.view',
   ],
   Liaison: [
-    'payment.record', 'book.freeze', 'client.view', 'dispute.write_to_client', 'settlement.approve',
+    'payment.record', 'book.freeze', 'campaign.run', 'client.view', 'dispute.write_to_client', 'settlement.approve',
     'library.view',
   ],
   'Call Centre Manager': [

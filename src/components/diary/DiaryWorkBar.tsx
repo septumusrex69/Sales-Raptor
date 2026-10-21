@@ -259,6 +259,9 @@ export function DiaryWorkBar({ account, onWorked }: {
                 {DIARY_KINDS[entry.kind].label}
                 {entry.reason && <span className="text-slate-400"> — {entry.reason}</span>}
               </p>
+              {entry.campaign && (
+                <p className="text-xs text-gold-300 whitespace-pre-wrap" data-testid="campaign-script">{entry.campaign.script}</p>
+              )}
             </div>
 
             {/*

@@ -6,6 +6,7 @@
 import { supabase } from './supabase'
 import type { CampaignChannel, FeeEstimate, SkipTally } from './campaigns.ts'
 import { resolveIds, type Selection } from './accountAllocation'
+import type { CallMode } from './callCampaign.ts'
 
 export interface CampaignDraft {
   channel: CampaignChannel
@@ -69,6 +70,36 @@ export function createCampaign(
   return call({ op: 'create', ...draft, accountIds, name, selection: snapshot })
 }
 
+/* ---------- a call campaign: onto the diaries, not out of a mailbox ---------- */
+
+export interface CallDraft { mode: CallMode; rank: number; endsOn: string | null; script: string }
+
+export interface CallPreview {
+  selected: number
+  found: number
+  outOfScope: number
+  placing: number
+  unplaced: number
+  skipped: number
+  skips: SkipTally[]
+  collectors: { name: string; calls: number; unplaced: number; over: number }[]
+  overCollectors: number
+  today: string
+  endsOn: string
+  dateProblem: string | null
+}
+
+export function previewCallCampaign(draft: CallDraft, accountIds: string[]): Promise<CallPreview> {
+  return call<CallPreview>({ op: 'call-preview', ...draft, accountIds })
+}
+
+export function createCallCampaign(
+  draft: CallDraft, accountIds: string[], name: string, selection: Selection,
+): Promise<{ campaignId: string; placing: number; skipped: number; unplaced: number }> {
+  const snapshot = selection.kind === 'matching' ? { kind: 'matching', query: selection.query } : { kind: 'ids', count: accountIds.length }
+  return call({ op: 'call-create', ...draft, accountIds, name, selection: snapshot })
+}
+
 export interface SendPass {
   outsideHours: string | null
   sent: number; skipped: number; failed: number; returned: number
@@ -86,8 +117,13 @@ export function stopCampaign(campaignId: string): Promise<{ cancelled: number }>
 export interface CampaignRow {
   id: string
   name: string
-  channel: CampaignChannel
+  channel: CampaignChannel | 'call'
   status: 'sending' | 'finished' | 'stopped'
+  /* A call campaign's shape; null on a message campaign. */
+  callMode: CallMode | null
+  callRank: number | null
+  endsOn: string | null
+  unplaced: number
   createdAt: string
   createdBy: string | null
   createdByName: string | null
@@ -102,9 +138,28 @@ export interface CampaignRow {
 const NO_COUNTS = { pending: 0, sending: 0, sent: 0, skipped: 0, failed: 0, cancelled: 0, fees: 0 }
 
 /** The campaigns this person may see (RLS decides), newest first, with their live counts. */
+/** A call campaign's calls by collector: worked, waiting, missed. RLS lets anybody read the diary. */
+export async function fetchCallProgress(campaignId: string): Promise<{ ownerId: string | null; ownerName: string; worked: number; waiting: number; missed: number }[]> {
+  const { data, error } = await supabase.from('diary_entries')
+    .select('owner_id, state, profiles!diary_entries_owner_id_fkey(name)')
+    .eq('campaign_id', campaignId).limit(5000)
+  if (error) throw new Error(error.message)
+  const by = new Map<string, { ownerId: string | null; ownerName: string; worked: number; waiting: number; missed: number }>()
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const key = (r.owner_id as string) ?? ''
+    const p = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles
+    const row = by.get(key) ?? { ownerId: (r.owner_id as string) ?? null, ownerName: ((p as { name?: string } | null)?.name) ?? 'Nobody', worked: 0, waiting: 0, missed: 0 }
+    if (r.state === 'done') row.worked += 1
+    else if (r.state === 'open') row.waiting += 1
+    else row.missed += 1
+    by.set(key, row)
+  }
+  return [...by.values()].sort((a, b) => a.ownerName.localeCompare(b.ownerName))
+}
+
 export async function fetchCampaigns(): Promise<CampaignRow[]> {
   const { data, error } = await supabase.from('campaigns')
-    .select('id, name, channel, status, created_at, created_by, created_by_name, team_id, selected, to_send, fee_estimate, note')
+    .select('id, name, channel, status, created_at, created_by, created_by_name, team_id, selected, to_send, fee_estimate, note, call_mode, call_rank, ends_on, unplaced')
     .order('created_at', { ascending: false }).limit(200)
   if (error) throw new Error(error.message)
   const rows = (data ?? []) as Record<string, unknown>[]
@@ -124,7 +179,11 @@ export async function fetchCampaigns(): Promise<CampaignRow[]> {
   return rows.map((r) => ({
     id: r.id as string,
     name: r.name as string,
-    channel: r.channel as CampaignChannel,
+    channel: r.channel as CampaignRow['channel'],
+    callMode: (r.call_mode as CallMode) ?? null,
+    callRank: r.call_rank === null || r.call_rank === undefined ? null : Number(r.call_rank),
+    endsOn: (r.ends_on as string) ?? null,
+    unplaced: Number(r.unplaced ?? 0),
     status: r.status as CampaignRow['status'],
     createdAt: r.created_at as string,
     createdBy: (r.created_by as string) ?? null,

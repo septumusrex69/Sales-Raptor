@@ -57,6 +57,10 @@ export type SkipReason =
   /* Only at the moment of sending -- each needs the account in hand. */
   | 'unfilled'
   | 'out_of_scope'
+  /* A call campaign's own. */
+  | 'no_desk'
+  | 'no_phone'
+  | 'on_call_campaign'
 
 /** What one account looks like to the skip rule. Gathered in bulk by the server. */
 export interface CampaignFacts {
@@ -114,6 +118,28 @@ export function campaignSkip(
 }
 
 /**
+ * THE SAME QUESTION FOR A CALL CAMPAIGN, and mostly the same answers: nobody rings a closed,
+ * prescribed, frozen or disputed account on a push either. Then the call's own -- a call lands on
+ * the diary of whoever holds the account, so one on nobody's desk has nowhere to go; it needs a
+ * number to ring; and one account carries one campaign call at a time (an index says so).
+ *
+ * NOT A REASON: a workflow notice today. A call is not a second message from the firm, and ringing
+ * the day the section 129 goes is often exactly what the person wants.
+ */
+export function callSkip(
+  facts: CampaignFacts & { assignedTo: string | null; onCallCampaign: boolean },
+): SkipReason | null {
+  if (facts.book === 'closed') return 'closed'
+  if (facts.prescribed) return 'prescribed'
+  if (facts.book === 'on_hold') return 'on_hold'
+  if (facts.openDispute) return 'dispute'
+  if (!facts.assignedTo) return 'no_desk'
+  if (!facts.mobile?.trim()) return 'no_phone'
+  if (facts.onCallCampaign) return 'on_call_campaign'
+  return null
+}
+
+/**
  * A number an SMS can go to -- the same test as toMsisdn on the server (connectMobile.ts), written
  * here as a yes/no because this file cannot import a serverless module. Ten digits starting 0, or
  * 10-15 international digits not starting 0.
@@ -140,6 +166,9 @@ export function skipWords(reason: SkipReason, facts?: Pick<CampaignFacts, 'holdR
     case 'workflow_today': return 'A workflow notice goes to this account today'
     case 'unfilled': return 'Nothing on the account fills a field the message needs'
     case 'out_of_scope': return 'Not on your team’s desks'
+    case 'no_desk': return 'On nobody’s desk, so on nobody’s diary'
+    case 'no_phone': return 'No phone number'
+    case 'on_call_campaign': return 'Already on another call campaign'
   }
 }
 
@@ -297,9 +326,18 @@ export interface DeskHolder { id: string; role: UserRole; teamId: string | null 
  * Asked by the SERVER for every account before anything is created, and again before each message
  * goes -- an account moved to another team's desk mid-campaign is skipped rather than sent.
  */
-export function mayCampaignOn(caller: CampaignCaller, holder: DeskHolder | null): boolean {
+export function mayCampaignOn(
+  caller: CampaignCaller, holder: DeskHolder | null, liaison: DeskHolder | null = null,
+): boolean {
   if (!can(caller, 'campaign.run')) return false
   if (caller.role === 'Administrator') return true
+  /*
+   * A LIAISON OVER THEIR OWN CLIENTS. The firm: "even liaisons can run campaigns over their own
+   * clients." Whose desk the account is on does not matter -- the client is theirs. A Liaison
+   * Manager also over their team's liaisons' clients, as a team leader over their team's desks.
+   */
+  if (liaison && liaison.id === caller.id) return true
+  if (liaison && caller.role === 'Liaison Manager' && caller.teamId && liaison.teamId === caller.teamId) return true
   if (!holder) return false
   if (holder.id === caller.id) return true
   if (caller.teamId) return holder.teamId === caller.teamId

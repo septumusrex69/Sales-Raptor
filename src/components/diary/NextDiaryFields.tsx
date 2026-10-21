@@ -1,7 +1,7 @@
 import { FormField, inputClass } from '../ui/Modal'
 import { DiaryDatePicker, longDate } from './DiaryDatePicker'
 import { type CirculationExit } from '../../lib/diary.ts'
-import { DIARY_KINDS, DIARY_KIND_ORDER, type DiaryKind } from '../../lib/diaryPriority.ts'
+import { BOOKABLE_KINDS, DIARY_KINDS, type DiaryKind } from '../../lib/diaryPriority.ts'
 
 /**
  * "What happens to this account next" — asked the same way wherever an entry is closed.
@@ -49,7 +49,7 @@ export function NextDiaryFields({ plan, onChange, ownerId, capacity, today, pres
           */}
           <FormField label="What kind of work next">
             <select value={plan.kind} onChange={(e) => set({ kind: e.target.value as DiaryKind })} className={inputClass}>
-              {DIARY_KIND_ORDER.map((k) => <option key={k} value={k}>{DIARY_KINDS[k].label}</option>)}
+              {BOOKABLE_KINDS.map((k) => <option key={k} value={k}>{DIARY_KINDS[k].label}</option>)}
             </select>
             <span className="block text-[11px] text-slate-400 mt-1.5">{DIARY_KINDS[plan.kind].why}</span>
           </FormField>

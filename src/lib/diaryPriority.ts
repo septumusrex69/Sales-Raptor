@@ -33,6 +33,7 @@ import { clockNow } from './clock.ts'
  * under two hundred chases from last year.
  */
 export type DiaryKind =
+  | 'campaign'
   | 'promise_broken'
   | 'new_account'
   | 'promise_due'
@@ -44,6 +45,8 @@ export type DiaryKind =
 
 /** Lower is sooner. Mirrors public.diary_priority() exactly. */
 export const DIARY_PRIORITY: Record<DiaryKind, number> = {
+  /* A call campaign worked NOW. A spread campaign's calls carry their own rank -- see CALL_RANKS. */
+  campaign: 5,
   promise_broken: 10,
   new_account: 20,
   promise_due: 30,
@@ -70,6 +73,16 @@ interface KindMeta {
  * the type, to no one's benefit. Nobody outside this file ever sees a key.
  */
 export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
+  campaign: {
+    /*
+     * NOT A RUNG ANYBODY BOOKS. A campaign puts it there (callCampaign.ts), beside the account's own
+     * diary date rather than instead of it, and its place on the ladder is the campaign's choice:
+     * worked now it is above everything -- "even PTPs", the firm's words -- and spread over days it
+     * sits wherever the person who started it put it. Never offered in a picker (BOOKABLE_KINDS).
+     */
+    label: 'Campaign call',
+    why: 'Put on the diary by a call campaign, at the place in the day the campaign chose.',
+  },
   promise_broken: {
     /*
      * ONE RUNG, NOT TWO. There was a separate 'payment_default' — "Arrangement default", then
@@ -138,14 +151,34 @@ export const DIARY_KINDS: Record<DiaryKind, KindMeta> = {
 export const DIARY_KIND_ORDER: DiaryKind[] = (Object.keys(DIARY_PRIORITY) as DiaryKind[])
   .sort((a, b) => DIARY_PRIORITY[a] - DIARY_PRIORITY[b])
 
+/** What a person may diarise by hand: everything but a campaign call, which only a campaign makes. */
+export const BOOKABLE_KINDS: DiaryKind[] = DIARY_KIND_ORDER.filter((k) => k !== 'campaign')
+
 export function priorityOf(kind: DiaryKind): number {
   return DIARY_PRIORITY[kind] ?? DIARY_PRIORITY.review
+}
+
+/** Where an entry sits: its own rank where a campaign gave it one, else its rung. The SQL's
+    coalesce(rank, diary_priority(kind)), which is the stored `priority`. */
+export function placeOf(e: { kind: DiaryKind; rank?: number | null }): number {
+  return e.rank ?? priorityOf(e.kind)
+}
+
+/**
+ * A CAMPAIGN WORKED NOW IS ABOVE EVERYTHING, prescription and the agent's own chosen order
+ * included. The firm: "it takes priority over everything else, even PTPs, everything." Anything
+ * ranked above a broken promise is one -- a spread campaign is never placed that high.
+ */
+export function workedNow(e: { kind: DiaryKind; rank?: number | null }): boolean {
+  return e.kind === 'campaign' && placeOf(e) < DIARY_PRIORITY.promise_broken
 }
 
 /* ---------- ordering a day ---------- */
 
 export interface DiaryOrderable {
   kind: DiaryKind
+  /** A campaign call's own place on the ladder. */
+  rank?: number | null
   dueOn: string
   /** The account's prescription date, if it has one. */
   prescriptionOn?: string | null
@@ -193,6 +226,9 @@ export function nearPrescription(prescriptionOn: string | null | undefined, toda
  * whether the debt still exists.
  */
 export function compareDiary(a: DiaryOrderable, b: DiaryOrderable, today: string): number {
+  const an = workedNow(a)
+  const bn = workedNow(b)
+  if (an !== bn) return an ? -1 : 1
   const ap = nearPrescription(a.prescriptionOn, today)
   const bp = nearPrescription(b.prescriptionOn, today)
   if (ap !== bp) return ap ? -1 : 1
@@ -202,7 +238,7 @@ export function compareDiary(a: DiaryOrderable, b: DiaryOrderable, today: string
     const bd = daysBetween(today, b.prescriptionOn as string)
     if (ad !== bd) return ad - bd
   }
-  const pd = priorityOf(a.kind) - priorityOf(b.kind)
+  const pd = placeOf(a) - placeOf(b)
   if (pd !== 0) return pd
   return at(a.dueOn) - at(b.dueOn)
 }
@@ -479,7 +515,7 @@ export const DIARY_ORDER_GROUPS: DiaryOrderGroup[] = [
     note: 'Everything else keeps the firm’s order underneath it. Nothing is hidden either way.',
     // Short labels here: under this heading "Broken PTP" is the sentence, and "Broken PTP
     // first first" is what appending the suffix would amount to.
-    options: DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: DIARY_KINDS[k].label })),
+    options: BOOKABLE_KINDS.map((k) => ({ id: `first:${k}` as DiaryOrder, label: DIARY_KINDS[k].label })),
   },
 ]
 
@@ -493,7 +529,7 @@ export const DIARY_ORDER_LABELS: { id: DiaryOrder; label: string }[] = [
   { id: 'urgent', label: 'Most urgent first' },
   { id: 'amount', label: 'Biggest balance first' },
   { id: 'oldest', label: 'Longest waiting first' },
-  ...DIARY_KIND_ORDER.map((k) => ({ id: `first:${k}` as DiaryOrder, label: `${DIARY_KINDS[k].label} first` })),
+  ...BOOKABLE_KINDS.map((k) => ({ id: `first:${k}` as DiaryOrder, label: `${DIARY_KINDS[k].label} first` })),
 ]
 
 /** How the order in force reads on a button. Falls back to the firm's own, never to a blank. */
@@ -533,6 +569,11 @@ export interface DiaryOrderable2 extends DiaryOrderable {
  */
 export function orderDiary<T extends DiaryOrderable2>(entries: T[], order: DiaryOrder, today: string): T[] {
   const ladder = (a: T, b: T) => compareDiary(a, b, today)
+  /* Whatever order the agent chose, a campaign worked NOW stays on top: see workedNow. */
+  const now = entries.filter(workedNow).sort(ladder)
+  if (now.length > 0 && order !== FIRM_DIARY_ORDER) {
+    return [...now, ...orderDiary(entries.filter((e) => !workedNow(e)), order, today)]
+  }
 
   if (order === 'amount') {
     return [...entries].sort((a, b) => {

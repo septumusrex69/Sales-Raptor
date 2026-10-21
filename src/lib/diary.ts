@@ -26,6 +26,11 @@ export interface DiaryEntry {
   dueOn: string
   kind: DiaryKind
   priority: number
+  /** A campaign call's own place on the ladder; null for everything else. */
+  rank: number | null
+  /** The call campaign that put it here, with the words the collector reads before ringing. */
+  campaignId: string | null
+  campaign: { name: string; script: string; endsOn: string | null } | null
   reason: string | null
   state: 'open' | 'done' | 'moved' | 'cancelled'
   source: 'manual' | 'swordfish' | 'promise' | 'dispute' | 'handover' | 'system'
@@ -85,6 +90,11 @@ const toEntry = (r: any): DiaryEntry => ({
   dueOn: r.due_on,
   kind: r.kind,
   priority: Number(r.priority ?? 70),
+  rank: r.rank ?? null,
+  campaignId: r.campaign_id ?? null,
+  campaign: r.campaigns
+    ? { name: String(r.campaigns.name ?? ''), script: String(r.campaigns.body ?? ''), endsOn: r.campaigns.ends_on ?? null }
+    : null,
   reason: r.reason ?? null,
   state: r.state,
   source: r.source,
@@ -154,6 +164,7 @@ const toRow = (r: any): DiaryRow => ({
 const ROW_SELECT = `
   *,
   promises_to_pay!diary_entries_promise_id_fkey ( id, amount, due_on, status ),
+  campaigns!diary_entries_campaign_id_fkey ( name, body, ends_on ),
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
     capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at, ended_as,
@@ -268,6 +279,8 @@ export async function hasOpenDiaryEntry(accountId: string): Promise<boolean> {
     .select('id', { count: 'exact', head: true })
     .eq('account_id', accountId)
     .eq('state', 'open')
+    /* A campaign call is not a diary date: the account still needs one of its own. */
+    .neq('kind', 'campaign')
   /* A LOOKUP THAT FAILED SAYS "YES". The cost of being wrong is asymmetric: a false no nags
      somebody who already diarised it, which is the behaviour the firm complained about; a false
      yes stays quiet, and the account is still on the "No diary date" list a team leader works. */
@@ -377,12 +390,19 @@ export async function diarise(input: {
    * was in the middle of closing itself — and it was the bug: the caller's entry stayed open,
    * the insert below made a second, and the unique index refused it. Callers close first now.
    */
+  /*
+   * THE ACCOUNT'S OWN DATE ONLY. A campaign call is a second open entry beside it, put there by a
+   * campaign (callCampaign.ts) and ended by it; booking the next date is not a reason to take a
+   * call off a collector's list that their team leader put on it.
+   */
   const { error: supersedeError } = await supabase
     .from('diary_entries')
     .update({ state: 'moved', moved_at: clockNow().toISOString(), moved_by: input.actor.id })
     .eq('account_id', input.accountId)
     .eq('state', 'open')
+    .neq('kind', 'campaign')
   if (supersedeError) throw new Error(supersedeError.message)
+  if (input.kind === 'campaign') throw new Error('A campaign call is put on the diary by its campaign, not booked by hand.')
 
   const { data, error } = await supabase.from('diary_entries').insert({
     account_id: input.accountId,
@@ -468,6 +488,8 @@ export async function moveEntry(input: {
   alsoNoteOnAccount?: boolean
   actor: Actor
 }): Promise<DiaryEntry> {
+  /* A campaign decides a call's days, and its end date ends it; moving one would outlive both. */
+  if (input.entry.kind === 'campaign') throw new Error('A campaign call cannot be moved. Work it, or leave it to its campaign.')
   const replacement = await diarise({
     accountId: input.entry.accountId,
     ownerId: input.ownerId === undefined ? input.entry.ownerId : input.ownerId,
@@ -789,7 +811,8 @@ export async function fetchOverdue(input: {
   before: string
   limit?: number
 }): Promise<DiaryRow[]> {
-  let q = supabase.from('diary_entries').select(ROW_SELECT).eq('state', 'open').lt('due_on', input.before)
+  /* Not campaign calls: the bulk tool moves work, and a campaign call is not moved (moveEntry). */
+  let q = supabase.from('diary_entries').select(ROW_SELECT).eq('state', 'open').neq('kind', 'campaign').lt('due_on', input.before)
   q = input.ownerId ? q.eq('owner_id', input.ownerId) : q.is('owner_id', null)
   const { data, error } = await q.order('priority').order('due_on').limit(input.limit ?? 500)
   if (error) throw new Error(error.message)

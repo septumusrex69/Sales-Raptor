@@ -18,6 +18,30 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+00000000. **S10, night of 21 Oct: CALL CAMPAIGNS built, and the sign-out that killed every device fixed.**
+   - **Call campaigns** (Accounts -> tick -> Campaign -> **Call**): the firm's design, in their words --
+     **Now** puts every call on today's diary **above everything, broken PTPs and prescription
+     included**; **Spread** runs to a last day at a place the person chooses ("Just under broken PTPs"
+     ... "Above routine follow-ups only"), shared evenly into each collector's **free room**
+     (capacity minus what is booked -- the reserve is why there is room), and what does not fit is
+     reported and left off, never crammed in. Calls go to whoever holds the account; nobody is
+     reassigned. **No fee** for being on one; a consultation the call leads to is charged as usual.
+     Unworked calls come off at the end (cron, `call_campaigns_expire`) and count as **missed**.
+     Campaigns page: worked / waiting / missed, by collector. **Liaisons (and Liaison Managers, for
+     their team's liaisons) now run campaigns -- SMS, email and call -- over their own clients**.
+     Not decided by the firm, built as the obvious default: whether collectors see the campaign's
+     figures (today: Administrators, the creator and their team, via the Campaigns page).
+   - **A CAMPAIGN CALL IS A SECOND OPEN DIARY ENTRY, NOT THE ACCOUNT'S DIARY DATE.** kind
+     `campaign`, `rank` on the entry, stored priority `coalesce(rank, diary_priority(kind))`. The
+     one-open-per-account index now excludes it (one open campaign call per account has its own),
+     `diary_date` ignores it, `diarise`/the hand-out never supersede it, it cannot be moved or booked
+     by hand. Superseding the account's date instead would have dropped every PTP-due check-in a
+     campaign touched. check-call-campaigns (57), e2e/call-campaigns (13).
+   - **Login code "expired" (Stephan, 16:14):** the code was right. `signOut()` was GLOBAL (supabase-js's
+     default), and four idle tabs on the old Mac timed out while the code was in the inbox -- four
+     global sign-outs revoked the new iPad's session, and the check said "Invalid or expired session".
+     Now `scope: 'local'` everywhere, and the code screen says "You were signed out" on a 401.
+     check-sign-out-local.
 0000000. **S10, evening of 21 Oct: cut-over money and campaigns** (§2 under S10, "Cut-over money and
    campaigns"). Built and merged: the clean break defaulting to 10 Dec and recorded per import run;
    Camille's balances brought forward (Trust settings -> Balances brought forward); debtor SMS/email
@@ -1246,6 +1270,12 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **S10's call-campaign migrations** (end of schema.sql): campaigns call columns + checks, the
+  `campaign` diary kind/source/rank/campaign_id, `priority` SET EXPRESSION (PG17), the two one-open
+  indexes, `sync_account_diary_date`, `call_campaigns_expire`, the one-row `campaign_counts`, and
+  `role_capabilities` with `campaign.run` for both liaison roles.
+- **A campaign call stays with the collector it was placed with** if the account is handed to somebody
+  else mid-campaign (an open entry is never edited). Small, and visible on the Campaigns page.
 - **S10's evening migrations too**: `swordfish_import_runs` + `discard_import_batch`; the brought-forward
   columns/kind/index, `bring_forward_client_balances`, `client_ledger`, `business_income`,
   `business_month`; campaigns tables + functions; marketing tables, lead columns + trigger, functions;
