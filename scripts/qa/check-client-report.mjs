@@ -12,7 +12,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-client-report.mjs
  */
 import { readFileSync } from 'node:fs'
-import { buildClientReport, clientReportFilename, shares } from '../../src/lib/clientReport.ts'
+import { buildClientReport, clientReportEmail, clientReportFilename, shares } from '../../src/lib/clientReport.ts'
 import { clientReportPdf, reportDate } from '../../src/lib/clientReportPdf.ts'
 
 let pass = 0
@@ -83,7 +83,21 @@ const pdfSrc = strip(readFileSync(new URL('../../src/lib/clientReportPdf.ts', im
 ok('every chart sits on a table of its own figures', (pdfSrc.match(/rows\.forEach\(\(r, ri\)/g) ?? []).length === 1 && (pdfSrc.match(/section\(/g) ?? []).length === 2)
 const detail = read('src/pages/companies/CompanyDetail.tsx')
 function read(f) { return readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8') }
-ok('the client page offers it, on a client, over the client and its sub-accounts', /<ClientReportButton client=\{\{ id: company\.id, name: company\.name, code: company\.code \?\? null, accountIds: \[company\.id, \.\.\.subAccounts\.map\(\(s\) => s\.id\)\] \}\} \/>/.test(detail))
+ok('the client page offers it, on a client, over the client and its sub-accounts', /<ClientReportButton client=\{\{ id: company\.id, name: company\.name, code: company\.code \?\? null, accountIds: \[company\.id, \.\.\.subAccounts\.map\(\(s\) => s\.id\)\] \}\}/.test(detail))
+
+/* ---------- EMAIL IT (S10): the report goes out from Raptor, through the client page's own compose box ---------- */
+const mail = clientReportEmail('Rinda  Roo Company', '2026-09-03')
+check('the covering email names the client and the day it was drawn, never "Sept"', mail.subject, 'Collection report - Rinda Roo Company - 3 Sep 2026')
+ok('...and says what is attached, as at that day', mail.body.includes('Please find attached your collection report for Rinda Roo Company as at 3 Sep 2026'))
+ok('...in paragraphs: a blank line is what emailBodyHtml reads as one', mail.body.split('\n\n').length === 3)
+const button = strip(read('src/components/companies/ClientReportButton.tsx'))
+ok('Email it opens THE compose box the client page uses, not a second sender', /<ComposeEmailModal[\s\S]*initialAttachments=\{\[compose\.file\]\}/.test(button) && !/api\/email\/send/.test(button))
+ok('...attaching the SAME drawn document Open and Download give (fetchFile, not a second draw)', /async function emailIt\(\)[\s\S]*?await fetchFile\(\)/.test(button) && (button.match(/clientReportFile\(/g) ?? []).length === 1)
+ok('...as a PDF named like the download', /filename: clientReportFilename\(client\.name, today\), contentType: 'application\/pdf'/.test(button))
+ok('...addressed to the client, or empty so the box asks', /to=\{email \?\? ''\}/.test(button))
+ok('...and charges nothing: no letterContext (that is what makes a message about an account), no fee, no account', !/letterContext|annexure|account_fees|\baccountId\b|chargeFee|raiseFee/i.test(button))
+ok('the client page logs it as an Email on the client, as its own Email button does',
+  /email=\{company\.email \?\? null\}\s*onEmailed=\{\(subject, bodyText\) => addActivity\(\{ type: 'Email', subject, notes: bodyText, companyId: company\.id \}\)\}/.test(detail))
 
 if (failures.length) { console.error(`check-client-report: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`); process.exit(1) }
 console.log(`check-client-report: ${pass} passed, 0 failed`)

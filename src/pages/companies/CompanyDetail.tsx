@@ -888,9 +888,13 @@ export function CompanyDetail() {
                   setDebtorOpen(true)
                 }} />
             )}
-            {/* The client's collection report (S9): the firm's Excel dashboard, remade as a PDF. */}
+            {/* The client's collection report (S9): the firm's Excel dashboard, remade as a PDF.
+                Emailed from here (S10), it is logged exactly as the Email button's message is --
+                an Email on this client's timeline -- and nothing is charged: the sales side raises nothing. */}
             {isClient && (
-              <ClientReportButton client={{ id: company.id, name: company.name, code: company.code ?? null, accountIds: [company.id, ...subAccounts.map((s) => s.id)] }} />
+              <ClientReportButton client={{ id: company.id, name: company.name, code: company.code ?? null, accountIds: [company.id, ...subAccounts.map((s) => s.id)] }}
+                email={company.email ?? null}
+                onEmailed={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, companyId: company.id })} />
             )}
 
             {/*
