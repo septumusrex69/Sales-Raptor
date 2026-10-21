@@ -127,6 +127,15 @@ export interface Lead {
   rejectionReason?: RejectionReason
   /** Free-text detail captured alongside the rejection reason. */
   rejectionNote?: string
+  /**
+   * "MAY WE SEND YOU NEWS?" -- answered yes, when and how (S10). Default no: a lead is not a
+   * customer, so POPIA s69 needs a recorded yes before news goes to them (see src/lib/marketing.ts).
+   */
+  marketingConsentAt?: string
+  marketingConsentNote?: string
+  marketingConsentBy?: ID
+  /** When the status last changed, stamped by the database and never by the browser. Dormancy reads it. */
+  statusChangedAt?: string
 }
 
 /**

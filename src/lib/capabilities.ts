@@ -85,6 +85,7 @@ export type Capability =
   | 'dispute.pool'
   | 'mail.refile'
   | 'settlement.approve'
+  | 'marketing.send'
   /* ---- the library ---- */
   | 'library.view'
   | 'library.edit'
@@ -278,6 +279,21 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     group: 'Clients and disputes',
     inDatabase: true,
   },
+  /*
+   * NEWS TO CLIENTS AND LEADS, IN BULK (S10, 21 Oct). The firm asked for a newsletter to "all of
+   * their email addresses" and re-engagement mail to dormant leads. One press reaches hundreds of
+   * inboxes in the firm's name, and a lead approached without consent is a POPIA s69 matter, so it
+   * is a tick rather than something everybody on the sales side has. The Administrator, the Sales
+   * Manager (the leads are theirs) and the Liaison Manager (the client relationship the newsletter
+   * speaks into). Enforced by the marketing tables' policies and by the server before it sends.
+   */
+  'marketing.send': {
+    label: 'Send news and campaigns',
+    blurb: 'Write a newsletter or a re-engagement email and send it to a list of clients or leads '
+      + 'drawn from Raptor. One press reaches every address on the list, in the firm’s name.',
+    group: 'Clients and disputes',
+    inDatabase: true,
+  },
   /* ---------------------------------- the library ---------------------------------- */
   'library.view': {
     label: 'Read the library',
@@ -321,11 +337,11 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
      and the reason a grant exists at all is so it stops being the only way to give somebody one
      extra thing. */
   Administrator: CAPABILITY_ORDER.filter((c) => !NO_ROLE_CAPABILITIES.includes(c)),
-  'Sales Manager': ['book.hand_out', 'book.reassign', 'client.view', 'library.view'],
+  'Sales Manager': ['book.hand_out', 'book.reassign', 'client.view', 'marketing.send', 'library.view'],
   'Sales Representative': ['client.view', 'library.view'],
   'Liaison Manager': [
     'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze',
-    'client.view', 'dispute.write_to_client', 'settlement.approve', 'library.view',
+    'client.view', 'dispute.write_to_client', 'settlement.approve', 'marketing.send', 'library.view',
   ],
   Liaison: [
     'payment.record', 'book.freeze', 'client.view', 'dispute.write_to_client', 'settlement.approve',

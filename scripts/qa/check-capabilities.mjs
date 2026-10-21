@@ -28,7 +28,7 @@ import {
 import {
   canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canViewLibrary, canEditLibrary, mayPoolDisputes,
-  canViewTrust, canViewBusiness,
+  canViewTrust, canViewBusiness, canSendMarketing,
 } from '../../src/lib/permissions.ts'
 
 let pass = 0
@@ -136,10 +136,13 @@ const EXPECTED = {
   canEditLibrary: ['Administrator'],
   mayPoolDisputes: ['Administrator'],
   canViewLibrary: ROLES,
+  /* NEWS & CAMPAIGNS (S10): the sales side's managers and the liaison manager, nobody else by role. */
+  canSendMarketing: ['Administrator', 'Sales Manager', 'Liaison Manager'],
 }
 const FN = {
   canViewFinance, canViewTrust, canViewBusiness, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canEditLibrary, mayPoolDisputes, canViewLibrary,
+  canSendMarketing,
 }
 for (const [name, allowed] of Object.entries(EXPECTED)) {
   for (const role of ROLES) {
@@ -159,7 +162,7 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 18)
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 19)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:

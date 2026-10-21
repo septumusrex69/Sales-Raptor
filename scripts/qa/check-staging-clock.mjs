@@ -96,6 +96,11 @@ check('only the named audit and real-world functions read the real clock', still
      device's last use are about a person at a door, not a business date -- staging's clock set to
      next month must not make a waiver last a month. */
   'login_code_waive',
+  /* marketing_* (S10, News & campaigns): a send's lease, the moment Resend took an email and the
+     moment a person said stop are all the real world's -- an email goes out today whatever date
+     staging's clock reads, and a fifteen-minute lease must not last a month. A lead's status date is
+     NOT among them: dormancy is a business date and leads_stamp_status_change reads raptor_now(). */
+  'marketing_claim_sends', 'marketing_preferences_stamp', 'marketing_record_results',
   'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
   'protect_swordfish_import_run',
   'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',

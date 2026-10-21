@@ -22,6 +22,7 @@ import {
 } from '../../components/record/RecordComment'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
 import { clockNow } from '../../lib/clock.ts'
+import { NewsPreferenceCard } from '../../components/record/NewsPreferenceCard'
 
 type ContactTab = 'Overview' | 'Activity' | 'Notes' | 'Tasks'
 
@@ -324,7 +325,7 @@ export function ContactDetail() {
           details={detailsPanel}
           /* Notes in the middle, and still on their own tab — both places, at the firm's asking. */
           main={<div className="space-y-5">{dealsPanel}{notesPanel}</div>}
-          side={companyPanel ? [companyPanel] : []}
+          side={[...(companyPanel ? [companyPanel] : []), <NewsPreferenceCard key="news" emails={[contact.email]} />]}
         />
       )}
 

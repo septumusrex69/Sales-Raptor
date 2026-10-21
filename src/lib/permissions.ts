@@ -437,3 +437,11 @@ export function canApproveSettlement(user: Pick<User, 'role' | 'grants' | 'revok
 export function canDiscardHandover(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
   return can(user, 'handover.discard')
 }
+
+/**
+ * News & campaigns: writing a newsletter or a lead re-engagement email and sending it in bulk. See
+ * 'marketing.send' in capabilities.ts for who has it and why it is a tick at all.
+ */
+export function canSendMarketing(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'marketing.send')
+}
