@@ -2,7 +2,7 @@ import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } f
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound, MonitorSmartphone } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
@@ -10,6 +10,8 @@ import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
 import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
 import { CapabilitiesModal } from '../../components/settings/CapabilitiesModal'
+import { TrustedDevicesList, TrustedDevicesModal } from '../../components/settings/TrustedDevices'
+import { needsDeviceCode } from '../../lib/loginCode'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
@@ -281,6 +283,14 @@ function ProfileTab() {
           )}
         </div>
       </form>
+      {/* An Administrator's own trusted devices (S10). Remove one and it asks for a code again. */}
+      {currentUser && needsDeviceCode(currentUser.role) && (
+        <div className="mt-6 pt-5 border-t border-slate-100">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Trusted devices</h4>
+          <p className="text-[12px] text-slate-400 mb-3">Any other device asks for a code by email when you sign in.</p>
+          <TrustedDevicesList user={currentUser} isSelf />
+        </div>
+      )}
     </Card>
   )
 }
@@ -358,6 +368,8 @@ function UsersTab() {
    */
   const [capabilityUser, setCapabilityUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
+  /* WHOSE TRUSTED DEVICES ARE OPEN -- an Administrator's only, the one role asked for a code. */
+  const [deviceUser, setDeviceUser] = useState<User | null>(null)
   /*
    * WHOSE BOOK SETTINGS ARE OPEN, and never more than one.
    *
@@ -549,6 +561,14 @@ function UsersTab() {
                         title={`What ${u.name.split(' ')[0]} may do`}>
                         <KeyRound size={14} />
                       </button>
+                      {/* Trusted devices and the "let in without a code" way out (S10). Only on an
+                          Administrator's row: nobody else is ever asked for a code. */}
+                      {needsDeviceCode(u.role) && (
+                        <button onClick={() => setDeviceUser(u)} className="text-slate-400 hover:text-brand-600"
+                          title={`${u.name.split(' ')[0]}'s trusted devices`} aria-label={`${u.name}'s trusted devices`}>
+                          <MonitorSmartphone size={14} />
+                        </button>
+                      )}
                       <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
                         <Pencil size={14} />
                       </button>
@@ -713,6 +733,9 @@ function UsersTab() {
       )}
       {emailUser && session && (
         <AdminEmailConnectModal user={emailUser} accessToken={session.access_token} onClose={() => setEmailUser(null)} />
+      )}
+      {deviceUser && (
+        <TrustedDevicesModal user={deviceUser} isSelf={deviceUser.id === currentUser?.id} onClose={() => setDeviceUser(null)} />
       )}
       {signatureUser && (
         <AdminSignatureModal user={signatureUser} onClose={() => setSignatureUser(null)} onSave={(patch) => updateUser(signatureUser.id, patch)} />

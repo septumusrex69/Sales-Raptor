@@ -151,6 +151,14 @@ export async function stubSupabase(page, handlers, seen) {
         })
       }
     }
+    /*
+     * EVERY TEST'S BROWSER IS A KNOWN DEVICE unless the test says otherwise (S10). An
+     * Administrator on an unknown one sees the code screen and nothing else, so `[]` here would
+     * hide the app from every file signed in as one. e2e/device-code answers it itself.
+     */
+    if (url.includes('/rpc/trusted_device_seen')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: 'true' })
+    }
     return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   })
 }
