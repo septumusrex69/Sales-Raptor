@@ -23,7 +23,7 @@ import {
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
-import { canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
+import { canBeClientLiaison, canEditOwned, canReassign as canReassignRole, useDefaultOwnerFilter, isAssignableOwner} from '../../lib/permissions'
 import { Card } from '../../components/ui/Card'
 import { StatusBadge, ServiceBadge, ClassificationBadge } from '../../components/ui/Badge'
 import { UserAvatar } from '../../components/ui/Avatar'
@@ -678,6 +678,7 @@ export function LeadsList() {
       )}
       {convertLeadTarget && (
         <ConvertLeadModal
+          liaisons={store.users.filter((u) => u.status === 'Active' && canBeClientLiaison(u))}
           lead={convertLeadTarget}
           openDeals={deals.filter((d) => d.leadId === convertLeadTarget.id && d.stage !== 'Won' && d.stage !== 'Rejected')}
           onClose={() => setConvertLeadTarget(null)}

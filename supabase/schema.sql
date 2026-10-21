@@ -44243,3 +44243,14 @@ create or replace trigger debtor_accounts_need_terms
 revoke all on function public.client_work_refusal(uuid) from public, anon;
 revoke all on function public.refuse_account_without_terms() from public, anon;
 grant execute on function public.client_work_refusal(uuid) to authenticated;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 1: A CLIENT ADDED BY HAND CARRIES ITS CONTRACT, OR THE REASON IT DOES NOT.
+-- The firm: "the Add client form asks for everything the client needs, by service. For debt
+-- collection: the commission percentages, the mandate, and the contract upload. With no contract, a
+-- required reason. Saved on the client." The contract itself goes to client_documents as the
+-- Mandate (the card that already holds it); the reason, where there is no file, lives here.
+-- ============================================================================================
+alter table public.companies add column if not exists contract_missing_reason text;
+comment on column public.companies.contract_missing_reason is 'Why a debt-collection client was added with no signed contract uploaded (S10, prompt 13 item 1). Null where the contract was uploaded, or the client predates the rule.';

@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { formatCurrency, services } from '../../data/mockData'
 import { leadServiceValueList } from './LeadOpportunityFields'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import type { ConvertConfirmation, ConvertDealConfirmation, ConvertDealOutcome } from '../../store/AppStore'
-import type { Deal, Lead, ProductService, RejectionReason } from '../../types'
+import type { Deal, ID, Lead, ProductService, RejectionReason, User } from '../../types'
+import { CommissionScaleEditor } from '../companies/CommissionScaleEditor'
+import { asFraction, scaleTerms, tiersToBands, type Tier } from '../../lib/commissionTiers.ts'
+import { scheduleProblems } from '../../lib/commission.ts'
 import { clockToday } from '../../lib/clock.ts'
 
 const OUTCOMES: { value: ConvertDealOutcome; label: string; hint: string }[] = [
@@ -72,16 +75,32 @@ function initialRows(lead: Lead, openDeals: Deal[]): Row[] {
 export function ConvertLeadModal({
   lead,
   openDeals,
+  liaisons,
   onClose,
   onConfirm,
 }: {
   lead: Lead
   openDeals: Deal[]
+  /** Who may look after the client: a Liaison or a Liaison Manager (canBeClientLiaison). */
+  liaisons: User[]
   onClose: () => void
   onConfirm: (confirmation: ConvertConfirmation) => void
 }) {
   const [startDate, setStartDate] = useState(() => clockToday())
   const [rows, setRows] = useState<Row[]>(() => initialRows(lead, openDeals))
+  /*
+   * THE CLIENT'S TERMS, ASKED AT THE MOMENT IT BECOMES ONE (S10, prompt 13 items 2 and 5). The firm:
+   * "the conversion asks for the commission percentage(s) as well", and "a client can't be saved
+   * without a liaison". Converting used to make a client with neither -- and since S10 a client with
+   * no commission takes no work at all, so a conversion that skipped it made a client nobody could
+   * hand a book to.
+   */
+  const [liaisonId, setLiaisonId] = useState<ID | ''>('')
+  const [kind, setKind] = useState<'fixed' | 'scale'>('fixed')
+  const [rate, setRate] = useState('')
+  const [tiers, setTiers] = useState<Tier[]>([{ upTo: '100000', rate: '' }, { upTo: '', rate: '' }])
+  const [source, setSource] = useState('')
+  const bands = useMemo(() => tiersToBands(tiers), [tiers])
 
   function patchRow(key: string, patch: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)))
@@ -93,15 +112,33 @@ export function ConvertLeadModal({
   const signed = rows.filter((r) => r.outcome === 'signed')
   const total = signed.reduce((sum, r) => sum + (r.isDebtCollection ? r.handoverAmount ?? 0 : r.value), 0)
   const missingReason = rows.some((r) => r.outcome === 'rejected' && !r.rejectionReason)
-  const blocked = signed.length === 0 || missingReason
+  /* Commission only where debt collection was SIGNED: it is a rate on what is collected, and a
+     client who signed only for a credit check has nothing collected to take it from. */
+  const collecting = signed.some((r) => r.isDebtCollection)
+  const commissionProblem = !collecting ? null
+    : kind === 'fixed'
+      ? (!Number.isFinite(asFraction(rate)) ? 'Give the commission rate — every account they hand over inherits it.'
+        : asFraction(rate) > 1 ? 'A commission rate above 100% would bill more than the debt.' : null)
+      : (scheduleProblems(bands)[0] ?? null)
+  const noLiaison = !liaisonId
+  const blocked = signed.length === 0 || missingReason || noLiaison || !!commissionProblem
 
   return (
     <Modal title="Convert to Client" onClose={onClose} width={560}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          if (blocked) return
           onConfirm({
             startDate: new Date(startDate).toISOString(),
+            liaisonId: liaisonId as ID,
+            ...(collecting
+              ? {
+                  commission: kind === 'fixed'
+                    ? { commissionRate: asFraction(rate) }
+                    : { commissionBands: bands, commissionBandsSource: source.trim() || 'Signed mandate' },
+                }
+              : {}),
             deals: rows.map(({ key: _key, isDebtCollection, ...deal }) => ({
               ...deal,
               value: isDebtCollection ? deal.handoverAmount ?? 0 : deal.value,
@@ -248,11 +285,65 @@ export function ConvertLeadModal({
           </div>
         </div>
 
+        {/* ---------- who looks after them ---------- */}
+        <div className="mt-4">
+          <FormField label="Client liaison" required>
+            <select className={inputClass} value={liaisonId} onChange={(e) => setLiaisonId(e.target.value as ID | '')}
+              data-testid="convert-liaison" disabled={liaisons.length === 0}>
+              <option value="">{liaisons.length === 0 ? 'Nobody holds that role yet' : 'Choose a liaison…'}</option>
+              {liaisons.map((u) => <option key={u.id} value={u.id}>{u.name}{u.role === 'Liaison Manager' ? ' (manager)' : ''}</option>)}
+            </select>
+            <span className="block text-[11px] text-slate-400 mt-1">
+              {liaisons.length === 0
+                ? 'A Liaison or Liaison Manager. Set somebody\u2019s role in Settings \u2192 Users.'
+                : 'The welcome email goes from her, and a welcome call goes on her list.'}
+            </span>
+          </FormField>
+        </div>
+
+        {/* ---------- the commission, where debt collection was signed ---------- */}
+        {collecting && (
+          <div className="mt-4 rounded-lg border border-slate-200 p-3" data-testid="convert-commission">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Commission</p>
+            <div className="flex gap-2 mb-3">
+              {(['fixed', 'scale'] as const).map((k) => (
+                <button key={k} type="button" onClick={() => setKind(k)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${kind === k
+                    ? 'border-gold-500 bg-gold-100 text-navy-950 font-medium'
+                    : 'border-slate-200 text-slate-500'}`}>
+                  {k === 'fixed' ? 'One rate' : 'A sliding scale'}
+                </button>
+              ))}
+            </div>
+            {kind === 'fixed' ? (
+              <div className="flex items-center gap-2">
+                <input className={`${inputClass} max-w-[7rem]`} value={rate} aria-label="Commission rate"
+                  onChange={(e) => setRate(e.target.value)} placeholder="30" />
+                <span className="text-sm text-slate-500">% of what is collected</span>
+              </div>
+            ) : (
+              /* ONE EDITOR, shared with Add client and Trust settings -- see CommissionScaleEditor. */
+              <CommissionScaleEditor tiers={tiers} onTiers={setTiers} source={source} onSource={setSource} />
+            )}
+            {/* READ BACK IN WORDS, as Add client does: a 3 typed for 30 is invisible in a box. */}
+            {!commissionProblem && (
+              <ul className="mt-2 text-xs text-slate-500 tabular-nums">
+                {(kind === 'fixed' ? [`${rate}% of everything collected, on every account.`] : scaleTerms(tiers))
+                  .map((t) => <li key={t}>{t}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+
         {blocked && (
           <p className="text-[12px] text-[var(--c-rust-deep)] mt-3">
             {signed.length === 0
               ? 'Mark at least one deal as signed — a client is someone who signed for something.'
-              : 'Give a reason for each rejected deal.'}
+              : missingReason
+                ? 'Give a reason for each rejected deal.'
+                : noLiaison
+                  ? 'Choose who looks after this client — a client cannot be saved without a liaison.'
+                  : commissionProblem}
           </p>
         )}
 

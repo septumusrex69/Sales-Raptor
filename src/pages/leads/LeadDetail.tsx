@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
+import { canBeClientLiaison, canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { HeroOwner } from '../../components/RecordOwner'
 import { Card, CardHeader } from '../../components/ui/Card'
@@ -798,6 +798,7 @@ export function LeadDetail() {
       )}
       {convertOpen && (
         <ConvertLeadModal
+          liaisons={users.filter((u) => u.status === 'Active' && canBeClientLiaison(u))}
           lead={lead}
           openDeals={openLeadDeals}
           onClose={() => setConvertOpen(false)}

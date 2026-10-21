@@ -381,6 +381,12 @@ export interface Company {
   commissionTiers?: { prefix: string; rate: number }[]
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
+  /**
+   * WHY A DEBT-COLLECTION CLIENT WAS ADDED WITH NO SIGNED CONTRACT (S10, prompt 13 item 1). The Add
+   * client form takes the contract or a reason, never neither; the contract itself is a Mandate in
+   * client_documents. Undefined where the contract was uploaded, or the client predates the rule.
+   */
+  contractMissingReason?: string
   /** THE WELCOME FLOW (S8). Signed online and waiting for Sales to assign a liaison. */
   liaisonNeeded?: boolean
   /** When Sales handed the client to its liaison. */

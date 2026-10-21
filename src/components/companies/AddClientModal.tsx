@@ -36,7 +36,8 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
   busy: boolean
   error: string | null
   onClose: () => void
-  onSave: (input: Partial<Company> & { name: string }) => void
+  /** The contract travels separately: it can only be uploaded once the client row exists. */
+  onSave: (input: Partial<Company> & { name: string }, contract: File | null) => void
 }) {
   const [name, setName] = useState('')
   /* Null until somebody types: while it is null the proposal follows the name as it is typed,
@@ -47,7 +48,7 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
     phone: '', email: '', website: '',
     address: '', city: '', province: '',
     contactPerson: '', bankingDetails: '',
-    mandateSignedAt: '', accountOwnerId: liaisons[0]?.id ?? '',
+    mandateSignedAt: '', accountOwnerId: '',
   })
   const [services, setServices] = useState<ProductService[]>(['Debt Collection'])
   const [kind, setKind] = useState<'fixed' | 'scale'>('fixed')
@@ -56,6 +57,17 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
     { upTo: '100000', rate: '' }, { upTo: '', rate: '' },
   ])
   const [source, setSource] = useState('')
+  /*
+   * THE SIGNED CONTRACT, OR WHY THERE ISN'T ONE (S10, prompt 13 item 1). The firm: "For debt
+   * collection: the commission percentages, the mandate, and the contract upload. With no contract,
+   * a required reason." Never neither: a client loaded with no paper and no word about it is the
+   * client the import later refuses with nobody able to say what happened to the mandate.
+   */
+  const [contract, setContract] = useState<File | null>(null)
+  const [contractReason, setContractReason] = useState('')
+  /* BY SERVICE: commission, mandate and contract are what a DEBT COLLECTION client needs. A client
+     signed only for tracing or a credit check is billed per job and has no book to collect on. */
+  const collecting = services.includes('Debt Collection')
   const [shown, setShown] = useState<string[]>([])
   /*
    * THE LAST THING BEFORE IT IS SIGNED, at the firm's instruction: "when you click accept, then
@@ -98,12 +110,17 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
         : 'Somebody has to look after this client.')
     }
     if (services.length === 0) out.push('Choose at least one service they have signed for.')
-    if (kind === 'fixed') {
-      const n = asFraction(rate)
-      if (!Number.isFinite(n)) out.push('A commission rate is needed — every account inherits it.')
-      else if (n > 1) out.push('A commission rate above 100% would bill more than the debt.')
-    } else {
-      out.push(...scheduleProblems(bands))
+    if (collecting) {
+      if (kind === 'fixed') {
+        const n = asFraction(rate)
+        if (!Number.isFinite(n)) out.push('A commission rate is needed — every account inherits it.')
+        else if (n > 1) out.push('A commission rate above 100% would bill more than the debt.')
+      } else {
+        out.push(...scheduleProblems(bands))
+      }
+      if (!contract && !contractReason.trim()) {
+        out.push('Upload the signed contract, or say why there is none yet.')
+      }
     }
     return out
   }
@@ -135,16 +152,20 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
       bankingDetails: form.bankingDetails.trim() || undefined,
       mandateSignedAt: form.mandateSignedAt ? new Date(form.mandateSignedAt).toISOString() : undefined,
       services,
-      ...(kind === 'fixed'
-        ? { commissionRate: asFraction(rate) }
-        : { commissionBands: bands, commissionBandsSource: source.trim() || 'Signed mandate' }),
-    })
+      ...(!collecting ? {}
+        : kind === 'fixed'
+          ? { commissionRate: asFraction(rate) }
+          : { commissionBands: bands, commissionBandsSource: source.trim() || 'Signed mandate' }),
+      ...(collecting && !contract ? { contractMissingReason: contractReason.trim() } : {}),
+    }, collecting ? contract : null)
   }
 
   /** The commission in words, which is the half of this worth reading twice. */
-  const terms = kind === 'fixed'
-    ? [`${rate}% of everything collected, on every account.`]
-    : scaleTerms(tiers)
+  const terms = !collecting
+    ? ['No collection commission: they have not signed for debt collection.']
+    : kind === 'fixed'
+      ? [`${rate}% of everything collected, on every account.`]
+      : scaleTerms(tiers)
 
   if (confirming) {
     return (
@@ -153,12 +174,12 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
           <p className="text-sm text-slate-600">
             You are about to sign <strong className="text-navy-950">{name.trim()}</strong>
             {' '}as <span className="font-mono text-navy-950">{code.trim().toUpperCase()}</span>
-            {kind === 'fixed' ? ' on a single commission rate.' : ' on a sliding scale.'}
+            {!collecting ? '.' : kind === 'fixed' ? ' on a single commission rate.' : ' on a sliding scale.'}
           </p>
 
           <div className="rounded-lg border border-gold-500 bg-gold-50 p-3.5">
             <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">
-              {kind === 'fixed' ? 'Collection commission' : 'The sliding scale'}
+              {!collecting ? 'Services' : kind === 'fixed' ? 'Collection commission' : 'The sliding scale'}
             </p>
             <ul className="space-y-1 text-sm text-navy-950 tabular-nums">
               {terms.map((t) => <li key={t}>{t}</li>)}
@@ -175,7 +196,15 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
             keep the rate they were opened at, so this is not something to correct afterwards.
           </p>
 
-          {form.mandateSignedAt
+          {collecting && (
+            <p className="text-xs text-slate-500" data-testid="confirm-contract">
+              {contract
+                ? <>Signed contract: <span className="text-navy-950">{contract.name}</span>, filed as the mandate.</>
+                : <>No contract uploaded: <span className="text-navy-950">{contractReason.trim()}</span></>}
+            </p>
+          )}
+
+          {!collecting ? null : form.mandateSignedAt
             ? (
               <p className="text-xs text-slate-500">
                 Mandate signed {new Date(form.mandateSignedAt).toLocaleDateString('en-ZA')}.
@@ -279,6 +308,57 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
           </div>
         </Section>
 
+        <Section title="What they signed for">
+          {/* FIRST, BECAUSE IT DECIDES THE REST (S10): commission, mandate and contract are asked
+              for a debt-collection client only. */}
+          <FormField label="What they have signed for">
+            <div className="flex flex-wrap gap-1.5">
+              {SERVICES.map((s) => (
+                <button key={s} type="button"
+                  onClick={() => setServices((prev) =>
+                    prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s])}
+                  className={`text-xs px-2.5 py-1 rounded-full border ${services.includes(s)
+                    ? 'border-gold-500 bg-gold-100 text-navy-950 font-medium'
+                    : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </FormField>
+          <FormField label="Client liaison">
+            {/*
+              ONLY A LIAISON OR A LIAISON MANAGER, at the firm's instruction. The list used to be
+              every active person in the firm -- a pre-legal agent, a sales rep, whoever had just
+              been invited -- while the prop was already called `liaisons`.
+            */}
+            <select className={inputClass} value={form.accountOwnerId} onChange={set('accountOwnerId')}
+              disabled={liaisons.length === 0}>
+              {liaisons.length === 0
+                ? <option value="">Nobody holds that role yet</option>
+                : (
+                  <>
+                    {/* CHOSEN, NOT DEFAULTED (S10, prompt 13 item 5): the first name on the list
+                        was preselected, so a client saved in a hurry went to whoever sorted first. */}
+                    <option value="">Choose a liaison…</option>
+                    {liaisons.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </>
+                )}
+            </select>
+            {/* SAID WHERE IT IS CHOSEN, not only in the list of problems after pressing Save:
+                an empty picker with no explanation reads as a screen that failed to load. */}
+            <span className="block text-[11px] text-slate-400 mt-1">
+              {liaisons.length === 0
+                ? 'A Liaison or Liaison Manager. Set somebody\u2019s role in Settings \u2192 Users.'
+                : 'The firm\u2019s named contact for this client.'}
+            </span>
+          </FormField>
+          <FormField label="Remittance details">
+            <input className={inputClass} value={form.bankingDetails} onChange={set('bankingDetails')}
+              placeholder="Where money collected is paid over to them" />
+          </FormField>
+        </Section>
+
+        {collecting && (
         <Section title="The mandate">
           {/*
             A HANDOVER CANNOT BE IMPORTED WITHOUT A SIGNED MANDATE, at the firm's instruction. Not
@@ -301,47 +381,30 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
                 client afterwards, with the signed mandate.
               </span>
             </FormField>
-            <FormField label="Client liaison">
-              {/*
-                ONLY A LIAISON OR A LIAISON MANAGER, at the firm's instruction. The list used to be
-                every active person in the firm -- a pre-legal agent, a sales rep, whoever had just
-                been invited -- while the prop was already called `liaisons`.
-              */}
-              <select className={inputClass} value={form.accountOwnerId} onChange={set('accountOwnerId')}
-                disabled={liaisons.length === 0}>
-                {liaisons.length === 0
-                  ? <option value="">Nobody holds that role yet</option>
-                  : liaisons.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-              {/* SAID WHERE IT IS CHOSEN, not only in the list of problems after pressing Save:
-                  an empty picker with no explanation reads as a screen that failed to load. */}
+            {/*
+              THE CONTRACT, OR WHY NOT (S10, prompt 13 item 1). Filed as the client's Mandate, on the
+              same card that takes it later; the reason is kept on the client.
+            */}
+            <FormField label="Signed contract">
+              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.heic" data-testid="add-client-contract"
+                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:px-3 file:py-1.5 file:text-sm"
+                onChange={(e) => setContract(e.target.files?.[0] ?? null)} />
               <span className="block text-[11px] text-slate-400 mt-1">
-                {liaisons.length === 0
-                  ? 'A Liaison or Liaison Manager. Set somebody\u2019s role in Settings \u2192 Users.'
-                  : 'The firm\u2019s named contact for this client.'}
+                {contract ? 'Filed on the client as its mandate.' : 'The PDF or a photo of it.'}
               </span>
             </FormField>
           </div>
-          <FormField label="What they have signed for">
-            <div className="flex flex-wrap gap-1.5">
-              {SERVICES.map((s) => (
-                <button key={s} type="button"
-                  onClick={() => setServices((prev) =>
-                    prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s])}
-                  className={`text-xs px-2.5 py-1 rounded-full border ${services.includes(s)
-                    ? 'border-gold-500 bg-gold-100 text-navy-950 font-medium'
-                    : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </FormField>
-          <FormField label="Remittance details">
-            <input className={inputClass} value={form.bankingDetails} onChange={set('bankingDetails')}
-              placeholder="Where money collected is paid over to them" />
-          </FormField>
+          {!contract && (
+            <FormField label="No contract yet? Say why">
+              <textarea className={inputClass} rows={2} value={contractReason} data-testid="add-client-contract-reason"
+                onChange={(e) => setContractReason(e.target.value)}
+                placeholder="Signed on paper; the original is at the office" />
+            </FormField>
+          )}
         </Section>
+        )}
 
+        {collecting && (
         <Section title="Commission">
           {/*
             EITHER A RATE OR A SCALE, at the firm's instruction: "accounts between zero rand and a
@@ -376,6 +439,7 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
             <CommissionScaleEditor tiers={tiers} onTiers={setTiers} source={source} onSource={setSource} />
           )}
         </Section>
+        )}
 
         {/* Problems appear on submit, once. Marking a field wrong while somebody is still typing
             in it is shouting at them for not having finished. */}

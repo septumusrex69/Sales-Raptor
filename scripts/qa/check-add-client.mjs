@@ -211,7 +211,7 @@ ok('...and the second says what it does', /Confirm and sign/.test(modal))
 /* The RENDERING, not the definition: this first asserted only that `terms` was computed, and
    stayed green when the list stopped showing it. */
 ok('the terms are read back in words', /terms\.map\(\(t\) => <li key=\{t\}>\{t\}<\/li>\)/.test(modal))
-ok('...worked out from the scale rather than written out', /const terms = kind === 'fixed'/.test(modal))
+ok('...worked out from the scale rather than written out', /const terms = !collecting\s+\?[\s\S]{0,120}: kind === 'fixed'/.test(modal))
 ok('...naming the client and the code', /You are about to sign/.test(modal))
 ok('...and saying every future account inherits it',
   /Every account this client hands over will be billed on this/.test(modal))

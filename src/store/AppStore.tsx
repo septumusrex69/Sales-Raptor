@@ -242,6 +242,10 @@ export interface ConvertConfirmation {
   /** Service commencement date, applied to every deal confirmed in this conversion. */
   startDate: string
   deals: ConvertDealConfirmation[]
+  /** Who looks after the client (S10): required, and assigned through the welcome route. */
+  liaisonId: ID
+  /** The client's commission (S10), where debt collection was signed: a rate or a scale. */
+  commission?: Pick<Company, 'commissionRate' | 'commissionBands' | 'commissionBandsSource'>
 }
 
 interface AppActions {
@@ -275,7 +279,11 @@ interface AppActions {
 
   addContact: (input: Partial<Contact> & { firstName: string; lastName: string }) => Contact
   updateContact: (id: ID, patch: Partial<Contact>) => void
-  addCompany: (input: Partial<Company> & { name: string }) => Company
+  /**
+   * `onSaved` runs once the row is in the database -- for whatever has to point at it, like the
+   * contract the Add client form uploads (client_documents.company_id is a foreign key).
+   */
+  addCompany: (input: Partial<Company> & { name: string }, opts?: { onSaved?: (company: Company) => void }) => Company
   updateCompany: (id: ID, patch: Partial<Company>) => void
   /** The screen's copy only, for a change the SERVER already wrote (the welcome route, S8): no second write. */
   showCompanyChange: (id: ID, patch: Partial<Company>) => void
@@ -1069,7 +1077,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [showError],
   )
 
-  function addCompanyInternal(input: Partial<Company> & { name: string }): Company {
+  function addCompanyInternal(input: Partial<Company> & { name: string }, onSaved?: (company: Company) => void): Company {
     const company: Company = {
       id: crypto.randomUUID(),
       accountOwnerId: ownerId,
@@ -1077,14 +1085,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       ...input,
     }
     setCompanies((prev) => [company, ...prev])
-    insertRow('companies', company, 'addCompany', (message) => {
+    void insertRow('companies', company, 'addCompany', (message) => {
       setCompanies((prev) => prev.filter((c) => c.id !== company.id))
       showError(message)
-    })
+    }).then((failed) => { if (!failed) onSaved?.(company) })
     return company
   }
 
-  const addCompany = useCallback<AppActions['addCompany']>((input) => addCompanyInternal(input), [ownerId])
+  const addCompany = useCallback<AppActions['addCompany']>((input, opts) => addCompanyInternal(input, opts?.onSaved), [ownerId])
 
   const updateCompany = useCallback<AppActions['updateCompany']>(
     (id, patch) => {
@@ -1289,12 +1297,44 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [leads, ensureLeadCompany, addActivity, updateLead, showError],
   )
 
+  /** The welcome route (api/_lib/email/welcome.ts) for a liaison chosen at conversion. */
+  const welcomeOnConversion = useCallback(async (companyId: ID, liaisonId: ID) => {
+    try {
+      const { data } = await supabase.auth.getSession()
+      const res = await fetch('/api/email/welcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session?.access_token ?? ''}` },
+        body: JSON.stringify({ companyId, liaisonId }),
+      })
+      const body = await res.json().catch(() => ({})) as { error?: string; sent?: boolean }
+      if (!res.ok) { showError(`The client is converted, but the liaison's welcome did not go: ${body.error ?? res.status}. Assign her again on the client.`); return }
+      const now = new Date(clockNowMs()).toISOString()
+      setCompanies((prev) => prev.map((c) => (c.id === companyId
+        ? { ...c, liaisonAssignedAt: now, ...(body.sent ? { welcomeSentAt: now } : {}) } : c)))
+      if (!body.sent) showError(`The client is converted and the liaison assigned, but the welcome email could not go${body.error ? `: ${body.error}` : '.'}`)
+    } catch (e) {
+      showError(`The client is converted, but the liaison's welcome did not go: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }, [showError])
+
   const convertLeadToClient = useCallback<AppActions['convertLeadToClient']>(
     (leadId, confirm) => {
       const lead = leads.find((l) => l.id === leadId)
       if (!lead) return undefined
 
       const { companyId, newCompany } = ensureLeadCompany(lead)
+
+      /*
+       * THE CLIENT'S TERMS, SET AS IT BECOMES ONE (S10, prompt 13 items 2 and 5): the commission the
+       * conversion asked for, and the liaison. The liaison is written here so the client is never
+       * saved without one, and then ASSIGNED through the welcome route once the rows exist -- the
+       * same press as "Assign and welcome" on the client (S8), so choosing her at conversion sends
+       * the welcome email and puts the welcome call on her list rather than skipping both.
+       */
+      const terms: Partial<Company> = { ...(confirm.commission ?? {}), accountOwnerId: confirm.liaisonId, liaisonNeeded: false }
+      setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, ...terms } : c)))
+      if (newCompany) Object.assign(newCompany, terms)
+      else updateRow('companies', companyId, terms, 'convertLeadToClient:terms', showError)
 
       let contactId: ID | undefined
       let newContact: Contact | undefined
@@ -1498,6 +1538,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             return
           }
         }
+        /* After the client and its contact are in: the welcome writes to the client's first contact. */
+        void welcomeOnConversion(companyId, confirm.liaisonId)
         if (dealsToCreate.length === 0) return
         const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToClient:deal')))
         const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
@@ -1527,7 +1569,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       return { companyId, deal: firstDeal }
     },
-    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError, celebrate],
+    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError, celebrate, welcomeOnConversion],
   )
 
   const rejectLead = useCallback<AppActions['rejectLead']>(

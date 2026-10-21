@@ -336,6 +336,14 @@ export function MandateCard({
         </p>
       )}
 
+      {/* WHY THERE IS NO CONTRACT, as the person who added the client said it (S10, prompt 13 item 1).
+          Shown only while there is still none filed: once it is uploaded the reason is history. */}
+      {docs !== null && !hasMandateDoc && company.contractMissingReason && (
+        <p className="text-xs text-slate-600 mt-3" data-testid="contract-missing-reason">
+          <span className="font-medium">No contract when the client was added:</span> {company.contractMissingReason}
+        </p>
+      )}
+
       {docs !== null && docs.length > 0 && (
         // One line a document, the checking list's density, which the firm asked for on every
         // list: the kind, size, date and uploader ride after the name instead of under it.

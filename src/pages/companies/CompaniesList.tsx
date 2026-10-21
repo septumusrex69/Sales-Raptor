@@ -13,6 +13,7 @@ import { AddClientModal } from '../../components/companies/AddClientModal'
 import { useAuth } from '../../store/AuthContext'
 import type { ID } from '../../types'
 import { canBeClientLiaison } from '../../lib/permissions'
+import { MANDATE_KIND, uploadClientDocument } from '../../lib/clientDocuments'
 
 export function CompaniesList() {
   const { companies, deals, users, addCompany } = useAppStore()
@@ -237,9 +238,19 @@ export function CompaniesList() {
           busy={false}
           error={addError}
           onClose={() => setAdding(false)}
-          onSave={(input) => {
+          onSave={(input, contract) => {
             try {
-              const created = addCompany({ ...input, accountOwnerId: input.accountOwnerId ?? currentUser?.id ?? '' })
+              /* THE CONTRACT GOES ONCE THE CLIENT IS IN THE DATABASE (S10, prompt 13 item 1): its row
+                 points at the client, so it waits for the insert rather than racing it. Filed as the
+                 Mandate, which is the card on the client page that shows and replaces it. */
+              const created = addCompany({ ...input, accountOwnerId: input.accountOwnerId ?? currentUser?.id ?? '' }, {
+                onSaved: contract ? (c) => {
+                  uploadClientDocument({
+                    companyId: c.id, file: contract, kind: MANDATE_KIND,
+                    uploadedBy: currentUser?.id ?? null, uploadedByName: currentUser?.name ?? null,
+                  }).catch((e) => window.alert(`${c.name} was added, but the contract did not upload: ${e instanceof Error ? e.message : String(e)}. Upload it on the client's mandate card.`))
+                } : undefined,
+              })
               setAdding(false)
               navigate(`/companies/${created.id}`)
             } catch (e) {
