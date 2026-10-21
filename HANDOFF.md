@@ -18,6 +18,16 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+00000. **S10, later on 21 Oct: the open list built** (the user: "you can proceed with building
+   everything"), each in its own worktree and merged (§2 under S10, "The open list"):
+   - **Login code by email for an Administrator on a new device** -- BEFORE THE PREVIEW IS OPENED
+     ON A NEW iPAD, AT LEAST ONE ADMINISTRATOR MUST HAVE A MAILBOX CONNECTED, or nobody gets a code.
+     It is an app gate, not a database guard: a password used directly against the API is not stopped.
+   - **Held for Swordfish payovers** (set in Trust settings; debits taken off it from To sort /
+     Payments out to allocate). No undo for a mis-tag yet; closing what is left is the firm's call.
+   - **FNB bulk-payment file** to FNB's CSV guide -- **one test import in FNB still has to confirm**
+     row 1 / the heading row, account type 1 for every payee, and whether hash totals are on.
+   - **Client report: Email it** from the client page; **Administration keeps its own layout**.
 0000. **S10 · Clients and Credits, 21 Oct: prompt 13, all fourteen items built on staging** (§2 under
    S10). Production has none of it (§5, S10 list). Four readings the firm should confirm, each
    built the way stated and easy to turn:
@@ -345,6 +355,32 @@ probed on staging inside a rolled-back transaction before it was written into sc
    order. **check-clear-staging derives it from every foreign key** in schema.sql
    (`scripts/qa/schemaForeignKeys.mjs`, matched against staging's pg_constraint: all 207 pairs;
    `scripts/qa/live/foreign-keys.sql` re-prints them). Probed: the clear runs and keeps the 915 mails.
+
+**The open list, built later on 21 Oct** (four worktrees, merged into this branch):
+- **Login code by email** (`src/lib/loginCode.ts`, `src/components/auth/AdminDeviceCode.tsx` in
+  RequireAuth, `api/_lib/email/loginCode.ts` on the email dispatcher as `login-code`, tables
+  `trusted_devices`, `login_codes`, `login_code_waivers`; `trusted_device_seen`,
+  `trusted_devices_remove`, `login_code_waive`). Administrators only; device id in localStorage,
+  stored hashed; code HMAC'd under EMAIL_CREDENTIALS_KEY, 10 minutes, 5 tries, single use, resend
+  throttled. Sent from the person's own connected mailbox, else another Administrator's (Raptor has
+  no system mailbox -- Barry has none, so his comes from Camille's). Way out: another Administrator,
+  Settings -> Users -> devices -> "Let in without a code (30 min)". NOT a database guard -- see the
+  header in schema.sql. check-login-code (103), e2e/device-code (19).
+- **Held for Swordfish payovers** (`swordfish_holding`, `set_swordfish_holding`,
+  `allocate_swordfish_line`, `swordfish_holding_figures/position`; trust_position, accountedFromCash
+  and currentHoldings take what is left; clear_staging empties it). Firm to decide: closing what is
+  left, how a mis-tag is corrected (no undo -- tags are frozen), and the two refusals added (not above
+  the opening balance, not below what is already paid out). check-swordfish-holding (70).
+- **FNB bulk-payment file** (`bankFileCsv`, `fnbHashTotal`): FNB Payments CSV, 36 columns, row 2
+  action date CCYY/MM/DD, row 3 the TRUST account (hash total blank unless the profile has hash totals
+  on -- `hashTotal` option, sum-of-account-numbers reading), fields sanitised to letters/digits/
+  `- / .`, leading zeros kept, account type 1 for everyone (no type is stored), notifications off.
+  Row 1 and the heading row are a reconstruction: one test import confirms. check-bank-file (41).
+- **Client report: Email it** (compose box, PDF attached, nothing charged, logged on the timeline);
+  date range still not built. **Administration** saves its own pane arrangement
+  (`raptor.dashboard.admin.layout`) instead of rearranging Sales/Communications. check-dashboard-panes.
+- **e2e on a shared machine: set `RAPTOR_E2E_PORT`** to a private port when another session may be
+  running browser tests; two runs died on 5199 with "connection refused".
 
 **Tests at the end of S10:** fast suite all green (18 688 checks, 304 files). Full `npm run qa`: 357 of
 361 green. `e2e/upload-a-batch` was red because its client had no commission (the new rule, item 3);
@@ -1153,6 +1189,9 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **S10's open-list migrations too** (end of schema.sql, after the S10 list below): the login-code
+  tables and three functions; the Swordfish holding table, column, functions, and the new
+  `trust_position`, `protect_bank_statement_line`, `clear_staging`, and the revoke loop.
 - **S10's migrations, for production when the firm says go** (staging has them; end of schema.sql, in
   this order): `clear_staging` (production refuses it anyway); `client_work_refusal`,
   `refuse_handover_without_mandate`, `refuse_account_without_terms` + `debtor_accounts_need_terms`
