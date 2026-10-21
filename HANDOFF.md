@@ -1,22 +1,39 @@
 # Handoff — where Raptor stands
 
-> **This session: S9 · Balance Sort** — branch `claude/s09-balance-sort`, from `claude/s08-cut-over` at `5f4d67e`.
+> **This session: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **21 October 2026**, S9 · Balance Sort, on `claude/s09-balance-sort` (branched from
-`claude/s08-cut-over` at `5f4d67e`). Its section is the first under §2.
+Last updated: **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+(branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 ### Start here tomorrow
+
+0000. **S10 · Clients and Credits, 21 Oct: prompt 13, all fourteen items built on staging** (§2 under
+   S10). Production has none of it (§5, S10 list). Four readings the firm should confirm, each
+   built the way stated and easy to turn:
+   - **Item 9, when section 129 starts on a broken arrangement.** On BROKEN -- when the 48 hours the
+     notice of default gives have run out -- not at the missed instalment itself, because the firm's
+     own notice tells the debtor "no further step is taken" if they pay within 48 hours. The day-1
+     section 129 still waits for a collector to release it, as it always has. The notice of default
+     still goes at the missed instalment.
+   - **Item 8, credit notes credit only what is still OWING on a fee.** What the debtor already paid
+     towards it is in trust as the firm's; crediting that would leave the statement in credit with
+     no money behind it -- that is a payment reversal. Receipt fees are not credited (they come off
+     with their payment's reversal). Disputes were never perusals and are still charged item 3.
+   - **Item 11, which perusal fees were removed.** Only Raptor's own (`source 'raptor'`, description
+     "Perusal of documents"). Swordfish's imported item-3 history is frozen (CLAUDE.md) and stays.
+   - **Item 3, commission has no Swordfish exemption** (the mandate does): a client with no rate
+     and no scale takes no debtors and no handovers, wherever it came from.
 
 000. **S9 · Balance Sort, 19 Oct. Accounts sort by "To settle"**, highest first, across the whole
    book (§2 under S9). The figure it sorts by is computeBalance's own, stored in `account_balances`
@@ -265,6 +282,61 @@ own and is green: `workspace-split` (124), `payover-sends` (42), `client-stateme
 ---
 
 ## 2. What shipped this session
+
+### S10 · Clients and Credits (21 Oct, prompt 13)
+
+All on staging, each with a check under scripts/qa that was break-tested, and each database change
+probed on staging inside a rolled-back transaction before it was written into schema.sql.
+
+**Clients**
+1. **Add client asks by service** (`AddClientModal`). Debt collection: commission (rate or scale), the
+   mandate date, and the **signed contract** -- uploaded as the client's Mandate once the client row
+   exists (`addCompany(..., { onSaved })`) -- or, with no file, a **required reason** kept on the client
+   (`companies.contract_missing_reason`, shown on the mandate card). Other services skip all three.
+2. **Converting a lead asks for the commission** where debt collection was signed (`ConvertLeadModal`).
+5. **Liaison required**, chosen not defaulted, on Add client and on conversion. At conversion she is
+   written on the client and then assigned through the welcome route (`welcomeOnConversion`), the same
+   press as Assign and welcome: welcome email from her, call on her list.
+3. **No mandate or no commission = no work.** `client_work_refusal` + `handovers_need_a_mandate` (now
+   both halves) and a new `debtor_accounts_need_terms` trigger (Add debtor went round the batch
+   trigger). Client page greys Upload a batch / Add debtor and says why with a link to the commission
+   and mandate card (`#commission-mandate`); the import screen says the same. `workBlock` in
+   mandateRule.ts. Check: check-mandate-rule.
+4. **Back to the client** from Upload a batch (`BackToClient` in SettingsPage).
+6. **Recent activity card removed**; Notes (newest first) stays. `ClientRecentActivity` deleted.
+
+**Accounts**
+7. **Search by cell and email**: `debtor_accounts.contact_search`, kept by a trigger on
+   account_contacts (every number as digits in 0 and 27 forms), matched in `applyAccountFilters`.
+   Check: check-contact-search.
+8. **Credit notes, never a deleted fee.** `credit_fee(fee, amount, reason)`, Administrator only, from
+   Transactions (`FeeCreditPanel`). A negative account_fees row with `credits_fee_id`, who and why;
+   every summing reader nets it; `fee_split` and `account_money_position` read `account_fees_net`. Own
+   statement line (`fee-credit`). Only the still-owing part of a fee; never a receipt fee. Check:
+   check-fee-credit.
+9. **A broken arrangement goes back to section 129**: `workflow_resume_on_promise_broken` now also
+   STARTS the section 129 (`section_129_version`: active, by hand, statutory steps) on an account that
+   never had one -- once ever, not over a live promise, open dispute or closed account. See "Start
+   here" for why on broken. Check: check-promise-rules-s10.
+10. **One live promise** (open or defaulted): trigger in words + partial unique index; the panel stops
+   offering Take one.
+11. **Perusal fee gone**: no code raises it (check-perusal now holds its absence); disputes keep item
+   3 under their own `'dispute'` action code with the one a day they had; Raptor-raised perusal fees
+   removed by the one-off SQL (none were on staging). The `'perusal'` code stays for imported history.
+12. **Unmatch for everybody**, from the mailbox and from the account's Emails tab: trigger lets a
+   cleared account link stand (re-pointing still needs mail.refile); `unmatch_email` clears the mailbox
+   copy and stamps the account's copy unmatched (kept: its R13 is on the statement). Checks:
+   check-unmatch-email, check-silent-triggers.
+
+**Trust**
+13. **Move to suspense from Needs an account**, with a required note: `suspend_bank_line`, the line
+   stays unallocated, listed under In suspense, placed or split from there, or sent back.
+
+**Staging**
+14. **Clear staging fixed**: one truncate for the whole book, six tables removed row by row in key
+   order. **check-clear-staging derives it from every foreign key** in schema.sql
+   (`scripts/qa/schemaForeignKeys.mjs`, matched against staging's pg_constraint: all 207 pairs;
+   `scripts/qa/live/foreign-keys.sql` re-prints them). Probed: the clear runs and keeps the 915 mails.
 
 ### S9 · Balance Sort (19 Oct)
 
@@ -1068,6 +1140,26 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **S10's migrations, for production when the firm says go** (staging has them; end of schema.sql, in
+  this order): `clear_staging` (production refuses it anyway); `client_work_refusal`,
+  `refuse_handover_without_mandate`, `refuse_account_without_terms` + `debtor_accounts_need_terms`
+  (**check production's clients have commission and, outside Swordfish, a mandate date before this
+  goes on -- every hand-added debtor for one without is refused**); `companies.contract_missing_reason`;
+  `debtor_accounts.contact_search`, `account_contact_terms`, `refresh_account_contact_search` + trigger
+  and the backfill update; the perusal-fee removal; `protect_filed_mail_target`,
+  `account_emails.unmatched_*`, `unmatch_email`; `refuse_second_live_promise` + trigger + the
+  `promises_to_pay_one_live` index (**check production has no account with two live promises first,
+  or the index will not build**), `section_129_version`, `workflow_resume_on_promise_broken`;
+  `bank_statement_lines.suspended_*`, `suspend_bank_line`, `release_bank_line_from_suspense`,
+  `unallocated_receipts`, `suspended_bank_lines`; `account_fees.credits_fee_id / credit_reason /
+  credited_by_name`, `account_fees_net`, `fee_split`, `account_money_position`, `credit_fee`,
+  `refuse_credit_note_by_hand` + trigger; the finance revoke loop.
+- **`account_charge_basis` is not in schema.sql** (found in S10): the charge engine calls it and it
+  exists only on the databases. Whether a credit note reopens room under an item's ceiling depends on
+  its filters, which nobody can read from the repo. Mirror it from staging's `pg_proc`.
+- **schema.sql still declares a key staging dropped**: `account_fees.payment_id -> account_payments`.
+  Harmless (it only makes check-clear-staging stricter); find out which is right.
+
 - **S9's migration, for production when the firm says go** (staging has it; end of schema.sql):
   `account_balances` + its three policies, `bump_balance_version`, `mark_balance_stale` and its
   three ledger triggers, `mark_account_balance_stale` and its `debtor_accounts` trigger,
@@ -1253,6 +1345,20 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 ---
 
 ## 6. Traps in this repo that cost real time
+
+**S10: a probe that inserts an account now needs a client with terms.** `debtor_accounts_need_terms`
+refuses a debtor for a client with no mandate date (outside Swordfish) or no commission. Insert the
+company with `mandate_signed_at = now(), commission_rate = 0.2` (and `account_owner_id`, not null).
+
+**S10: a check's comment-stripper eats `image/*`.** Several checks strip `/* ... */` before reading
+source, so an attribute like `accept=".pdf,image/*"` swallows everything up to the next `*/`. List the
+extensions instead.
+
+**S10: a new finance function must join the revoke loop.** check-finance-is-administrator-only reads
+the LAST `foreach fn in array array[...]` loop in schema.sql and wants every function a finance page
+calls in it -- append a fresh copy of the loop with the new names, as S10 did.
+
+**S10: run-all wants "N passed, 0 failed"** on a check's last line; "all N passed" counts as a failure.
 
 These are not in CLAUDE.md because they are about the tools, not the firm.
 
