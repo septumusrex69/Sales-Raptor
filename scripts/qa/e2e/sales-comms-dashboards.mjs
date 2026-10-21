@@ -196,6 +196,35 @@ try {
     (await widthOf('figures')) > (await widthOf('existing-handovers')) * 1.3)
   await page.screenshot({ path: `${OUT}/comms-layout-wide.png` })
   t.check('...and the choice is remembered', await page.evaluate(() => localStorage.getItem('raptor.dashboard.communications.layout')), 'wide')
+
+  /* ADMINISTRATION (S10): the last dashboard without the three arrangements -- it showed the department
+     dashboards on THEIR keys, so arranging the office rearranged the department's page. Now its own. */
+  {
+    await page.goto(`http://localhost:${PORT}/dashboard/admin`)
+    await page.getByTestId('mandate-outcomes').waitFor({ timeout: 15000 })
+    const ap = page.getByTestId('dashboard-panes')
+    const stored = () => page.evaluate(() => ['admin', 'sales', 'communications'].map((k) => localStorage.getItem(`raptor.dashboard.${k}.layout`)).join(' '))
+    t.ok('Administration has the arrangement switcher', await ap.getByRole('button', { name: 'One column' }).isVisible())
+    t.check('...opening in its own default, not the Sales page\'s choice', await ap.getAttribute('data-layout'), 'columns')
+    await ap.getByRole('button', { name: 'One column' }).click(); await page.waitForTimeout(300)
+    const box = async (id) => (await ap.locator(`[data-pane="${id}"]`).boundingBox()) ?? { x: -1, y: -1, width: -1 }
+    const [m1, d1] = [await box('mandates'), await box('deals')]
+    t.ok('one column: deals under mandates, as wide', Math.abs(m1.x - d1.x) < 2 && d1.y > m1.y && Math.abs(m1.width - d1.width) < 2)
+    t.check('...remembered as Administration\'s, the departments\' own untouched', await stored(), 'stacked columns wide')
+    await page.getByRole('button', { name: /Change dashboard view/ }).click()
+    await page.getByRole('menuitem', { name: /^Communications/ }).click()
+    await page.getByTestId('top-clients').waitFor({ timeout: 15000 })
+    t.check('the Communications view keeps the office\'s arrangement', await page.getByTestId('dashboard-panes').getAttribute('data-layout'), 'stacked')
+    await page.getByTestId('dashboard-panes').getByRole('button', { name: 'Wide' }).click(); await page.waitForTimeout(300)
+    const cp = page.getByTestId('dashboard-panes')
+    const w = async (id) => (await cp.locator(`[data-pane="${id}"]`).boundingBox())?.width ?? -1
+    t.ok('...and the figure rows stay across the page in it', (await w('figures')) > (await w('existing-handovers')) * 1.3)
+    await page.screenshot({ path: `${OUT}/admin-layout-wide.png` })
+    t.check('...one memory for the office, both views', await stored(), 'wide columns wide')
+    await page.goto(`http://localhost:${PORT}/dashboard/sales`)
+    await page.getByTestId('mandate-outcomes').waitFor({ timeout: 15000 })
+    t.check('the Sales page still opens in its own choice', await page.getByTestId('dashboard-panes').getAttribute('data-layout'), 'columns')
+  }
   await context.close()
 
   /* THE SALES PAGE FOLLOWS THE STAGING CLOCK (the firm, 18 Oct: staging on 11 Sep, the page opened on

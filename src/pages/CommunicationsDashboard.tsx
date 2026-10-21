@@ -73,7 +73,8 @@ function scopeIdsFor(scope: Scope, members: User[], teams: Team[]): ID[] {
   return members.map((m) => m.id)
 }
 
-export function CommunicationsDashboard() {
+/** `layoutKey`: the Communications page's own memory by default; Administration passes its own (AdminOverview). */
+export function CommunicationsDashboard({ layoutKey = 'raptor.dashboard.communications.layout' }: { layoutKey?: string } = {}) {
   const { deals, tasks, activities, companies, users, teams, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
 
@@ -351,7 +352,7 @@ export function CommunicationsDashboard() {
         Figure rows stay across the page; charts and tables are wide; lists are narrow. See
         DashboardPanes for where each kind goes in each arrangement.
       */}
-      <DashboardPanes layoutKey="raptor.dashboard.communications.layout" panes={[
+      <DashboardPanes layoutKey={layoutKey} panes={[
         /* ---------- the clients' work, first ---------- */
         { id: 'figures', kind: 'full', node: (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="comms-row">

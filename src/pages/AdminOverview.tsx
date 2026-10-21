@@ -11,6 +11,21 @@ import { useTitleSlot } from '../components/layout/TitleSlot'
  */
 type View = 'sales' | 'communications'
 
+/**
+ * ADMINISTRATION'S OWN PANE ARRANGEMENT (S10). HANDOFF had it as the one dashboard without the three
+ * arrangements; it is a window onto the Sales and Communications dashboards, each whole, so it was
+ * borrowing theirs -- and with them their MEMORY, which meant an Administrator who chose One column
+ * for the office changed the Sales page somebody else on that iPad opens, and the other way about.
+ *
+ * ONE KEY FOR BOTH VIEWS, not one per department: the arrangement is how this person reads the
+ * office, and flipping the view menu from Sales to Communications should not also flip the layout
+ * under them. The departments' own pages keep their own keys (raptor.dashboard.sales.layout,
+ * raptor.dashboard.communications.layout), untouched. Every figure, every pane and the order of
+ * them is the department's: nothing here is drawn twice, so the office and the department cannot
+ * disagree about a number -- only about where it sits.
+ */
+const ADMIN_LAYOUT_KEY = 'raptor.dashboard.admin.layout'
+
 const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: 'sales', label: 'Sales', hint: 'The full sales dashboard' },
   { key: 'communications', label: 'Communications', hint: 'The full communications dashboard' },
@@ -31,9 +46,9 @@ export function AdminOverview() {
   // the title rather than among the filters inside the page.
   useTitleSlot(<ViewMenu view={view} onChange={setView} />, [view])
 
-  if (view === 'communications') return <CommunicationsDashboard />
+  if (view === 'communications') return <CommunicationsDashboard layoutKey={ADMIN_LAYOUT_KEY} />
 
-  return <Dashboard />
+  return <Dashboard layoutKey={ADMIN_LAYOUT_KEY} />
 }
 
 function ViewMenu({ view, onChange }: { view: View; onChange: (v: View) => void }) {

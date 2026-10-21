@@ -77,7 +77,12 @@ function minutesToLabel(mins: number): string {
   return `${Math.round(mins / (60 * 24))}d`
 }
 
-export function Dashboard() {
+/**
+ * `layoutKey` is where the pane arrangement is remembered. The sales page's own by default;
+ * Administration passes its own, so the office keeps its arrangement apart from the department's
+ * (see AdminOverview).
+ */
+export function Dashboard({ layoutKey = 'raptor.dashboard.sales.layout' }: { layoutKey?: string } = {}) {
   const { leads, deals, tasks, activities, users, teams, targets, userById, companyById, updateTask, companies } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -520,7 +525,7 @@ export function Dashboard() {
           columns / wide-and-narrow on the other dashboards too. DashboardPanes decides where each
           kind goes; the order here is still the firm's, and Mandates and Deals are both narrow so
           they stay side by side in Three columns -- "fit these guys in next to each other". */}
-      <DashboardPanes layoutKey="raptor.dashboard.sales.layout" panes={[
+      <DashboardPanes layoutKey={layoutKey} panes={[
         { id: 'mandates', node: (
           <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
             newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
