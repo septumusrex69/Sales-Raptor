@@ -44254,3 +44254,69 @@ grant execute on function public.client_work_refusal(uuid) to authenticated;
 -- ============================================================================================
 alter table public.companies add column if not exists contract_missing_reason text;
 comment on column public.companies.contract_missing_reason is 'Why a debt-collection client was added with no signed contract uploaded (S10, prompt 13 item 1). Null where the contract was uploaded, or the client predates the rule.';
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEM 7: SEARCH DEBTORS BY CELL NUMBER AND EMAIL, as well as account number and
+-- surname. A debtor's numbers and addresses live in account_contacts, one row each, and the book's
+-- search is one PostgREST `or` over debtor_accounts (applyAccountFilters) -- which cannot reach into
+-- another table. So the account carries contact_search: every number and address on it, lower-cased,
+-- and each number ALSO as bare digits in both South African forms (0821234567 and 27821234567), so
+-- "082 123 4567", "0821234567" and "+27 82 123 4567" all find it. Kept by a trigger on
+-- account_contacts, never by the screen; retired numbers stay in it, because a debtor phoning from
+-- the old number is exactly who somebody is trying to find.
+alter table public.debtor_accounts add column if not exists contact_search text;
+
+create or replace function public.account_contact_terms(p_account uuid)
+returns text
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select nullif(string_agg(t, ' '), '')
+    from (
+      select distinct f.t from (
+        select lower(btrim(c.value)) as raw, c.kind, regexp_replace(c.value, '\D', '', 'g') as d
+          from public.account_contacts c
+         where c.account_id = p_account and c.kind in ('mobile', 'phone', 'work', 'email', 'other')
+      ) v
+      cross join lateral (values
+        (v.raw),
+        (case when v.kind <> 'email' and length(v.d) >= 6 then v.d end),
+        (case when v.kind <> 'email' and v.d like '27%' and length(v.d) = 11 then '0' || substr(v.d, 3) end),
+        (case when v.kind <> 'email' and v.d like '0%' and length(v.d) = 10 then '27' || substr(v.d, 2) end)
+      ) f(t)
+      where f.t is not null and f.t <> ''
+    ) terms
+$$;
+
+create or replace function public.refresh_account_contact_search()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_account uuid := coalesce(new.account_id, old.account_id);
+begin
+  update public.debtor_accounts
+     set contact_search = public.account_contact_terms(v_account)
+   where id = v_account
+     and contact_search is distinct from public.account_contact_terms(v_account);
+  if tg_op = 'UPDATE' and old.account_id is distinct from new.account_id then
+    update public.debtor_accounts set contact_search = public.account_contact_terms(old.account_id) where id = old.account_id;
+  end if;
+  return null;
+end
+$$;
+
+do $t$ begin
+  execute 'create or replace trigger account_contacts_search after insert or update or de' || 'lete on public.account_contacts '
+       || 'for each row execute function public.refresh_account_contact_search()';
+end $t$;
+
+update public.debtor_accounts a set contact_search = public.account_contact_terms(a.id)
+ where exists (select 1 from public.account_contacts c where c.account_id = a.id);
+
+revoke all on function public.account_contact_terms(uuid) from public, anon;
+revoke all on function public.refresh_account_contact_search() from public, anon;

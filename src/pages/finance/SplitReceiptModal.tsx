@@ -131,7 +131,7 @@ export function SplitReceiptModal({ receipt, onClose, onDone }: {
           <span className="relative block mt-1">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={term} onChange={(e) => setTerm(e.target.value)}
-              placeholder="Case number, account number, reference or surname"
+              placeholder="Case number, account number, reference, surname, cell or email"
               className={`${inputClass} pl-8`} />
           </span>
         </label>

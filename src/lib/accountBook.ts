@@ -12,6 +12,7 @@
  * boundary moved on purpose rather than eroding one call site at a time.
  */
 import type { AccountSort } from './accountFilters.ts'
+import { contactDigits } from './contactSearch.ts'
 import { supabase } from './supabase'
 import type { LedgerRows } from './balanceInput.ts'
 import type { FrozenBy } from './clientPosition.ts'
@@ -564,7 +565,12 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
     /* The case number FIRST, because it is the one on every notice and therefore the one a
        debtor reads back down the phone. Searching without it would have left the clerk typing
        the number off their own letter into a box that could not find it. */
-    out = out.or(`case_number.ilike.%${s}%,account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%`)
+    /* AND BY CELL NUMBER AND EMAIL (S10, prompt 13 item 7), through contact_search -- every number and
+       address on the account, kept by a trigger on account_contacts. A number is matched on its
+       digits, so "082 123 4567" and "+27 82 123 4567" find the same debtor. */
+    const digits = contactDigits(s)
+    out = out.or(`case_number.ilike.%${s}%,account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%,`
+      + `contact_search.ilike.%${(digits ?? s).toLowerCase()}%`)
   }
 
   return out as T
