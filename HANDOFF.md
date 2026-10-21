@@ -21,6 +21,14 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 0000. **S10 · Clients and Credits, 21 Oct: prompt 13, all fourteen items built on staging** (§2 under
    S10). Production has none of it (§5, S10 list). Four readings the firm should confirm, each
    built the way stated and easy to turn:
+   - **THE SECTION 129 ALWAYS GOES OUT (the firm, 21 Oct, after item 9).** First call, debtor says "I'll
+     pay by Friday", arrangement captured -- but no section 129 has gone yet. Chosen by the user: the
+     promise form now offers "No Section 129 has gone to this debtor yet — send it first", ticked;
+     the press starts the section 129 (day 1 sent as that person) and THEN records the promise. A
+     promise never pauses a section 129 whose first notice has not gone (weekend/holiday start);
+     the pause lands the moment the day-1 notices are out (`workflow_first_notice_pending`,
+     `workflow_hold_after_first_notice`). A broken arrangement resumes it from where it stopped,
+     as it always did. Check: check-promise-rules-s10.
    - **Item 9, when section 129 starts on a broken arrangement.** On BROKEN -- when the 48 hours the
      notice of default gives have run out -- not at the missed instalment itself, because the firm's
      own notice tells the debtor "no further step is taken" if they pay within 48 hours. The day-1
@@ -1158,7 +1166,8 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   `bank_statement_lines.suspended_*`, `suspend_bank_line`, `release_bank_line_from_suspense`,
   `unallocated_receipts`, `suspended_bank_lines`; `account_fees.credits_fee_id / credit_reason /
   credited_by_name`, `account_fees_net`, `fee_split`, `account_money_position`, `credit_fee`,
-  `refuse_credit_note_by_hand` + trigger; the finance revoke loop.
+  `refuse_credit_note_by_hand` + trigger; the finance revoke loop; `workflow_first_notice_pending`, `workflow_hold_account` (LAST
+  definition), `workflow_hold_after_first_notice` + trigger.
 - **`account_charge_basis` is not in schema.sql** (found in S10): the charge engine calls it and it
   exists only on the databases. Whether a credit note reopens room under an item's ceiling depends on
   its filters, which nobody can read from the repo. Mirror it from staging's `pg_proc`.

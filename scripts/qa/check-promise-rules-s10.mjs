@@ -45,6 +45,25 @@ const which = lastFn('section_129_version')
 ok('the section 129 is the active by-hand version with statutory steps',
   /v\.state = 'active' and v\.trigger_kind = 'by_hand'/.test(which) && /n\.statutory/.test(which))
 
+/* ---------- the section 129 always goes out, even when the promise comes first ---------- */
+const pending = lastFn('workflow_first_notice_pending')
+ok('a section 129 whose first notice has not gone is recognised',
+  /n\.statutory/.test(pending) && /s\.state in \('sent', 'failed', 'skipped'\)/.test(pending))
+const hold = lastFn('workflow_hold_account')
+ok('...and a promise does not pause it yet', /and not \(p_cause = 'promise' and public\.workflow_first_notice_pending\(r\.id\)\)/.test(hold))
+const after = lastFn('workflow_hold_after_first_notice')
+ok('once the day-1 notices are out, the promise pauses it',
+  /s\.state in \('pending', 'held'\) and s\.due_on <= new\.due_on/.test(after)
+  && /perform public\.workflow_hold_account\(v_run\.account_id, 'promise', 'A promise to pay was made', v_promise\)/.test(after))
+ok('...fired as each step finishes', /create or replace trigger workflow_hold_after_first_notice\s+after update of state on public\.workflow_run_steps/.test(sql))
+const form = page.slice(page.indexOf('function PromisePanel('))
+ok('the promise form offers the section 129 first, ticked', /data-testid="promise-send-129"/.test(form) && /useState\(true\)/.test(form))
+ok('...and starts it BEFORE recording the promise',
+  form.indexOf('await startWorkflow(session.access_token, accountId, section129.versionId)') > 0
+  && form.indexOf('await startWorkflow(session.access_token, accountId, section129.versionId)') < form.indexOf('await recordPromise({'))
+ok('...offered only while the debtor has not had it', /section129=\{startable\.find\(\(w\) => w\.statutory\) \?\? null\}/.test(page))
+ok('startable sequences say which is statutory', /statutory: nodes\.some\(\(n\) => !!n\.statutory\)/.test(read('src/lib/accountRun.ts')))
+
 if (failures.length) {
   console.error(`check-promise-rules-s10: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)
   process.exit(1)

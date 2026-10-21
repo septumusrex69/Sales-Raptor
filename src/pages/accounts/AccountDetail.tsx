@@ -115,7 +115,7 @@ import { LeavingModal } from './LeavingModal'
 import { hasOpenDiaryEntry } from '../../lib/diary'
 import { shouldAskOnLeaving } from '../../lib/leavingAccount.ts'
 import {
-  fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn,
+  fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn, startWorkflow,
   type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
 import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
@@ -1503,6 +1503,9 @@ export function AccountDetail() {
       letterValues={letterContext.values}
       letterReference={letterContext.reference}
       audience={account.debtorKind}
+      /* THE SECTION 129 THIS DEBTOR HAS NOT HAD YET, if any (S10): offered with the promise. */
+      section129={startable.find((w) => w.statutory) ?? null}
+      onStarted={loadRuns}
       /*
        * THE PRESS THAT EMAILS A SIMULATION, owned here rather than in the panel.
        *
@@ -3336,8 +3339,21 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation, section129, onStarted }: {
   accountId: string
+  /**
+   * THE SECTION 129 NOT YET SENT TO THIS DEBTOR, or null once it has been (or cannot be).
+   *
+   * THE FIRM (21 Oct), of a first call: "the debtor ... says, oh, I know about the account, I'll pay
+   * it by Friday ... we capture the arrangement while we're still on the phone ... But then the
+   * section 129 hasn't been sent." The demand always goes. So the form offers it in the same press,
+   * ticked: the section 129 is started FIRST (the start route sends day 1 as this person, charged as
+   * any notice is), then the promise is written, which pauses the rest of the sequence -- and never a
+   * first notice that has not gone yet (workflow_first_notice_pending).
+   */
+  section129: StartableWorkflow | null
+  /** The runs are re-read after a start, so the Workflow tab shows the section 129 at once. */
+  onStarted: () => Promise<void> | void
   promises: PromiseToPay[]
   userName: string | null
   userId: string | null
@@ -3393,6 +3409,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   const [dueOn, setDueOn] = useState('')
   const [onLastDay, setOnLastDay] = useState(false)
   const [charged, setCharged] = useState<string | null>(null)
+  /* Ticked by default whenever there is a section 129 still to send -- see `section129`. */
+  const [send129, setSend129] = useState(true)
   /*
    * WHICH ARRANGEMENT IS BEING CANCELLED, or null. See CancelArrangementModal for why cancelling
    * is no longer one press: the cause decides what the account does next, so the box has to ask.
@@ -3415,7 +3433,19 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
     const value = Number(amount)
     if (!arrangement || !(value > 0) || !dueOn || problem) return
     let message: string | null = null
+    let issued: string | null = null
     const ok = await run(async () => {
+      /* THE DEMAND FIRST, THEN THE PROMISE. Started the other way round, the start route refuses a
+         live promise -- and the order is also the truth: the debtor was sent the section 129 and
+         then made the arrangement. If the start fails, nothing is recorded and the error says why. */
+      if (section129 && send129) {
+        if (!session?.access_token) throw new Error('Signed out. Sign in again to send the section 129.')
+        const started = await startWorkflow(session.access_token, accountId, section129.versionId)
+        issued = started.sent > 0
+          ? 'Section 129 sent.'
+          : `Section 129 started; its first notice is dated ${started.firstStepOn ?? section129.firstStepOn} and goes then — the promise does not stop it.`
+        void onStarted()
+      }
       const { charge } = await recordPromise({
         accountId, amount: value, dueOn, arrangement,
         onLastDay: arrangement === 'monthly' && onLastDay,
@@ -3427,7 +3457,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
            database starts the run, and this is what dates it and sends what is due. */
         accessToken: session?.access_token ?? null,
       })
-      message = chargeMessage(charge, PROMISE_ITEM_ID)
+      message = [issued, chargeMessage(charge, PROMISE_ITEM_ID)].filter(Boolean).join(' ')
     })
     // Said after the fact rather than promised beforehand: whether item 5 has room on this
     // account depends on the ledger, and the ledger is read when the charge is made.
@@ -3599,9 +3629,24 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               onEmail={onEmailSimulation}
             />
           )}
+          {/* THE SECTION 129 GOES FIRST, in the same press (S10) -- see `section129`. Untick only for a
+              debtor the firm has decided not to send it to; the sequence can still be started later. */}
+          {section129 && (
+            <label className="flex items-start gap-2 rounded-lg border border-gold-200 bg-gold-50/60 px-2.5 py-2 text-[12.5px]" data-testid="promise-send-129">
+              <input type="checkbox" checked={send129} onChange={(e) => setSend129(e.target.checked)} className="mt-0.5" />
+              <span>
+                <span className="font-medium text-navy-950">No Section 129 has gone to this debtor yet — send it first</span>
+                <span className="block text-slate-500">
+                  {section129.firstStepOn > firmToday()
+                    ? `Today is not a working day: it goes on ${section129.firstStepOn}, and the promise does not stop it.`
+                    : 'It goes now, by email and SMS, charged as usual. The promise then pauses the rest of the sequence.'}
+                </span>
+              </span>
+            </label>
+          )}
           <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
-            {busy ? 'Saving...' : 'Record promise'}
+            {busy ? 'Saving...' : section129 && send129 ? 'Send the Section 129 and record the promise' : 'Record promise'}
           </button>
         </form>
       )}

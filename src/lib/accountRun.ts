@@ -413,6 +413,11 @@ export interface StartableWorkflow {
    * not what "it starts on Monday" leads anybody to expect, so the button says it.
    */
   firstStepNeedsRelease: boolean
+  /**
+   * A SEQUENCE WITH STATUTORY STEPS -- the section 129. Read off the nodes, the same test the
+   * database's section_129_version applies, so the promise form can offer to send it first (S10).
+   */
+  statutory: boolean
 }
 
 export async function fetchStartableWorkflows(accountId: string): Promise<StartableWorkflow[]> {
@@ -420,7 +425,7 @@ export async function fetchStartableWorkflows(accountId: string): Promise<Starta
     supabase.from('workflow_versions')
       /* day_unit and the nodes' day numbers, because when the first notice goes is arithmetic on
          both and the answer belongs on the button rather than in a surprise afterwards. */
-      .select('id, trigger_note, day_unit, workflows!inner(name), workflow_nodes(day, needs_release)')
+      .select('id, trigger_note, day_unit, workflows!inner(name), workflow_nodes(day, needs_release, statutory)')
       .eq('state', 'active')
       .eq('trigger_kind', 'by_hand'),
     supabase.from('workflow_runs').select('version_id, reissue_allowed').eq('account_id', accountId),
@@ -448,7 +453,7 @@ export async function fetchStartableWorkflows(accountId: string): Promise<Starta
        * A version with no nodes at all cannot send anything; it is dated as day 1 so the sentence
        * falls back to the ordinary one rather than to NaN.
        */
-      const nodes = (v.workflow_nodes as { day: number; needs_release: boolean }[] | null) ?? []
+      const nodes = (v.workflow_nodes as { day: number; needs_release: boolean; statutory?: boolean }[] | null) ?? []
       const days = nodes.map((n) => n.day)
       const first = days.length > 0 ? Math.min(...days) : (unit === 'business' ? 1 : 0)
       return {
@@ -461,6 +466,7 @@ export async function fetchStartableWorkflows(accountId: string): Promise<Starta
            SMS together and both carry it, but a day where one of two needs a press is still a day
            that ends in a press. */
         firstStepNeedsRelease: nodes.some((n) => n.day === first && n.needs_release),
+        statutory: nodes.some((n) => !!n.statutory),
       }
     })
 }

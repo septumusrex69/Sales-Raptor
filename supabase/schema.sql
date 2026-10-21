@@ -45060,3 +45060,148 @@ begin
     end;
   end loop;
 end $$;
+
+
+-- ============================================================================================
+-- S10: THE SECTION 129 ALWAYS GOES OUT, EVEN WHEN THE PROMISE COMES FIRST.
+--
+-- The firm (21 Oct), of a first call: the debtor says "I'll pay it by Friday" and the arrangement is
+-- captured on the call -- "but then the section 129 hasn't been sent". The demand must still go. So
+-- the promise form now offers to send the section 129 in the same press (PromisePanel), starting it
+-- before the promise is written, and the PROMISE DOES NOT PAUSE A SECTION 129 WHOSE FIRST NOTICE HAS
+-- NOT GONE YET -- which matters on a weekend or holiday, when day 1 is the next working day and the
+-- run would otherwise be held before it ever said anything. Once the day-1 notices have gone (sent,
+-- or failed or skipped -- finished either way), workflow_hold_after_first_notice applies the hold the
+-- promise would have applied, and a broken arrangement then resumes it from where it stopped, as
+-- before. "Once per run" is untouched: a run a promise has already held is not held again.
+-- ============================================================================================
+create or replace function public.workflow_first_notice_pending(p_run uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select exists (
+           select 1 from public.workflow_runs r
+             join public.workflow_nodes n on n.version_id = r.version_id and n.statutory
+            where r.id = p_run)
+     and not exists (
+           select 1 from public.workflow_run_steps s
+            where s.run_id = p_run and s.state in ('sent', 'failed', 'skipped'))
+$$;
+
+revoke all on function public.workflow_first_notice_pending(uuid) from public, anon;
+
+create or replace function public.workflow_hold_account(
+  p_account_id uuid, p_cause text, p_reason text default null, p_cause_id uuid default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_held integer := 0;
+  v_reason text;
+begin
+  v_reason := coalesce(p_reason, case p_cause
+    when 'promise' then 'A promise to pay was made'
+    when 'dispute' then 'A dispute was raised in writing'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow hold cause "%". It is one of promise, dispute.', p_cause;
+  end if;
+
+  /*
+   * ONCE PER RUN FOR A PROMISE, AND THAT IS THE FIRM'S RULE IN ONE CLAUSE.
+   *
+   * "People sometimes make a promise and then they break the promise, and then they make another
+   * promise and then they break that again. So if we stop it for all of that time, then that's a
+   * problem. Unless we can stop it only once. Not twice."
+   *
+   * The second promise is still recorded, still diarised and still worked -- it simply does not
+   * stop the sequence, because the debtor has already been told in writing that only payment
+   * will. A WRITTEN DISPUTE is not limited this way: a new objection is a new thing to answer,
+   * and the firm has to answer it before it can go on demanding.
+   */
+  with live as (
+    select r.id from public.workflow_runs r
+     join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state = 'running'
+       /* S10: NOT A SECTION 129 WHOSE FIRST NOTICE HAS NOT GONE YET -- see workflow_first_notice_pending. */
+       and not (p_cause = 'promise' and public.workflow_first_notice_pending(r.id))
+       and (p_cause <> 'promise' or not exists (
+         select 1 from public.workflow_run_holds h
+          where h.run_id = r.id and h.cause = 'promise'))
+       /*
+        * AND NOT THE SEQUENCE THIS EVENT STARTED.
+        *
+        * A promise arrives, workflow_start_on_promise creates the arrangement sequence to confirm
+        * it in writing -- and a moment later this function stopped that sequence because a promise
+        * had been made. The confirmation the debtor was owed never went out, and the screen showed
+        * "Promise to pay -- Paused -- A promise to pay was made", which is a sentence with no
+        * meaning.
+        *
+        * MATCHED ON THE VERSION'S TRIGGER, not on when the run was created. "Started five seconds
+        * ago" is a guess about clocks; "this version exists to answer exactly this event" is a
+        * fact about the workflow, and it stays true if the run was created by a person pressing
+        * the button a minute before the promise was captured.
+        */
+       and v.trigger_kind <> case p_cause
+         when 'promise' then 'promise_due'
+         when 'dispute' then 'dispute_logged'
+       end
+  ), opened as (
+    insert into public.workflow_run_holds (run_id, cause, cause_id, reason, started_by)
+    select live.id, p_cause, p_cause_id, v_reason, auth.uid() from live
+    /* A run already held is left alone rather than held twice: whichever event arrived second
+       finds it stopped, and two open holds would count the clock twice. */
+    on conflict do nothing
+    returning run_id
+  )
+  update public.workflow_runs r
+     set state = 'held'
+    from opened
+   where r.id = opened.run_id;
+
+  get diagnostics v_held = row_count;
+  return v_held;
+end $$;
+
+create or replace function public.workflow_hold_after_first_notice()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_run public.workflow_runs%rowtype;
+  v_promise uuid;
+begin
+  if new.state not in ('sent', 'failed', 'skipped') or old.state in ('sent', 'failed', 'skipped') then
+    return new;
+  end if;
+  select * into v_run from public.workflow_runs where id = new.run_id;
+  if v_run.state <> 'running' then return new; end if;
+  if not exists (select 1 from public.workflow_nodes n where n.version_id = v_run.version_id and n.statutory) then
+    return new;
+  end if;
+  if exists (select 1 from public.workflow_run_steps s
+              where s.run_id = new.run_id and s.id <> new.id
+                and s.state in ('pending', 'held') and s.due_on <= new.due_on) then
+    return new;
+  end if;
+  select p.id into v_promise from public.promises_to_pay p
+   where p.account_id = v_run.account_id and p.status in ('open', 'defaulted')
+   order by p.created_at desc limit 1;
+  if v_promise is null then return new; end if;
+  perform public.workflow_hold_account(v_run.account_id, 'promise', 'A promise to pay was made', v_promise);
+  return new;
+end $$;
+
+revoke all on function public.workflow_hold_after_first_notice() from public, anon;
+
+create or replace trigger workflow_hold_after_first_notice
+  after update of state on public.workflow_run_steps
+  for each row execute function public.workflow_hold_after_first_notice();

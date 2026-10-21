@@ -193,14 +193,14 @@ ok('there is a start-words library to read', lib.length > 1500)
  * saying the demand goes out today.
  */
 ok('the offer reads the version’s day unit', /day_unit/.test(store))
-ok('...and the day numbers on its nodes', /workflow_nodes\(day, needs_release\)/.test(store))
+ok('...and the day numbers on its nodes', /workflow_nodes\(day, needs_release(, statutory)?\)/.test(store))
 ok('...and works out when the first step would go', /firstStepOn\(today, first, unit\)/.test(store))
 ok('...from the lowest day on the chart, not an assumed one', /Math\.min\(\.\.\.days\)/.test(store))
 /* ANY NODE ON THE FIRST DAY, not all of them: day 1 of the section 129 is the letter and the SMS
    together, and a day where one of the two needs a press is still a day that ends in a press. */
 ok('...and whether that day waits for a person',
   /nodes\.some\(\(n\) => n\.day === first && n\.needs_release\)/.test(store))
-ok('...which it reads off the nodes', /workflow_nodes\(day, needs_release\)/.test(store))
+ok('...which it reads off the nodes', /workflow_nodes\(day, needs_release(, statutory)?\)/.test(store))
 
 /* ONE SENTENCE, TWO BUTTONS. The action row's button and the tab's card make the same promise; a
    promise written twice is a promise that drifts. */
