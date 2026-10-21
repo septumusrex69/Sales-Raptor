@@ -76,6 +76,9 @@ export async function fetchClientDebts(): Promise<ClientDebt[]> {
     /* VAT IS PART OF WHAT THEY OWE. The client pays the inclusive figure; splitting it out is a
        question for the firm's VAT return, not for "how much is outstanding". */
     const gross = n(r.amount) + n(r.vat)
+    /* A BROUGHT-FORWARD CREDIT IS OWED TO THE CLIENT, NOT BY THEM (S10): the only charge allowed
+       below nothing, and it is not a debt. */
+    if (gross <= 0) continue
     const row = by.get(id) ?? {
       companyId: id, client: name, invoiced: 0, offPayover: 0, total: 0, oldest: null, count: 0,
     }
@@ -114,6 +117,11 @@ export type ClientEntryKind =
   | 'charge_pending' | 'invoice_raised' | 'invoice_paid'
   /** A run below nil the client paid into the business account (record_client_business_receipt). */
   | 'paid_direct'
+  /**
+   * The balance brought forward from Swordfish at the cut-over (S10): the line the ledger opens
+   * with. Negative is what the client owed the firm, positive a credit the firm owed them.
+   */
+  | 'brought_forward'
 
 export interface ClientEntry {
   on: string

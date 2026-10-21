@@ -298,8 +298,12 @@ export function buildRemittanceAdvice(input: {
      the client was paid. Now every rand of the net has a line. */
   const setOff = run.chargesSetOff ?? 0
   const releasedTotal = run.excessReleased ?? 0
-  if (setOff !== 0) {
+  /* BELOW NOTHING ONLY WHERE A CREDIT BROUGHT FORWARD FROM SWORDFISH IS ON THE RUN (S10): what the
+     firm owed the client is added to the payment, and the line has to say so in their words. */
+  if (setOff > 0) {
     workings.push({ label: 'Less our charges set off against this payment', amount: -setOff })
+  } else if (setOff < 0) {
+    workings.push({ label: 'Add the credit we owed you, paid with this payment', amount: -setOff })
   }
   if (releasedTotal !== 0) {
     workings.push({ label: 'Add debtor overpayments paid over to you in full (no commission)', amount: releasedTotal })

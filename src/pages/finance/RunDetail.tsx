@@ -342,7 +342,11 @@ export function RunDetail() {
             <Line label="VAT on commission" value={-run.commission_vat} sub />
             {run.carried_in !== 0 && <Line label="Brought forward from last run" value={run.carried_in} sub />}
             {/* Both already in "Amount to pay" and on no line above it (the firm, 8 Oct). */}
-            {Number(run.charges_set_off) !== 0 && <Line label="Charges set off against this payover" value={-run.charges_set_off} sub />}
+            {/* BELOW NOTHING ONLY WHERE A CREDIT BROUGHT FORWARD FROM SWORDFISH IS IN IT (S10): the firm owed
+                the client, so it is added to what they are paid rather than taken off. */}
+            {Number(run.charges_set_off) !== 0 && <Line
+              label={Number(run.charges_set_off) < 0 ? 'Credit owed to the client, paid with this payover' : 'Charges set off against this payover'}
+              value={-run.charges_set_off} sub />}
             {Number(run.excess_released) !== 0 && <Line label="Overpayments released to the client, no commission" value={run.excess_released} sub />}
             <tr className="border-t-2 border-slate-800">
               {/* BELOW NIL IS THE CLIENT OWING US (the firm, 10 Oct): said in words, the figure positive. */}

@@ -46,6 +46,8 @@ const KIND: Record<ClientEntryKind, { label: string; tone: string }> = {
   invoice_raised: { label: 'Invoiced', tone: 'bg-brand-100 text-brand-700' },
   invoice_paid: { label: 'Invoice paid', tone: 'bg-slate-100 text-slate-600' },
   paid_direct: { label: 'Paid to us', tone: 'bg-emerald-50 text-emerald-700' },
+  /* S10: the opening balance from Swordfish, the first line of a client's ledger. */
+  brought_forward: { label: 'Brought forward', tone: 'bg-slate-100 text-slate-700' },
 }
 
 /*

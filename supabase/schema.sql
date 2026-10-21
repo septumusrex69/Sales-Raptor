@@ -45685,7 +45685,6 @@ begin
     end;
   end loop;
 end $$;
-=======
 -- ==========================================================================================
 -- S10 / A LOGIN CODE BY EMAIL WHEN AN ADMINISTRATOR SIGNS IN FROM A NEW DEVICE (21 Oct)
 -- ==========================================================================================
@@ -45989,4 +45988,435 @@ begin
    where id = p_batch and discarded_at is null;
 
   return jsonb_build_object('accounts', v_accounts, 'batches', v_batches, 'clients', v_clients);
+-- ==========================================================================================
+-- S10 / BALANCES BROUGHT FORWARD FROM SWORDFISH (HANDOFF §3a, go-live item 3)
+-- ==========================================================================================
+--
+-- Camille keeps what each client owes the firm, month by month, in an Excel workbook ("Trust
+-- Debtors"). At the cut-over the newest month of it comes into Raptor once, as the opening line of
+-- every client's ledger, and from then on Raptor carries it.
+--
+-- TWO DIRECTIONS, ONE ROW. A positive figure on her sheet is what the client owes the firm; a
+-- NEGATIVE one is the client in credit -- an amount the firm owes THEM. Both are a client_charges
+-- row of kind 'brought_forward', settlement 'set_off', and the sign is the direction:
+--   owed    amount > 0: taken off the client's next payover, exactly like a withdrawal fee;
+--   credit  amount < 0: ADDED to the client's next payover. Nothing new does the adding -- the run
+--           already nets `charges_set_off` out of net_payover (recompute_payover_run), so a
+--           negative charge line raises the payout by the credit, to the cent.
+-- WHY NOT A NEW TABLE. Every reader of what passes between the firm and a client already reads
+-- client_charges: build_payover_run claims it, close_payover_cycle builds a run for it, the run's
+-- approval writes it to the trust ledger, client_ledger and client_balances show it. A second
+-- table would have to be taught to all of them and the first one forgotten would be the client
+-- paid short. A negative amount is allowed for this kind ONLY, and only as a set-off, never VAT
+-- and never "paid" -- a credit is not a debt the client settles.
+--
+-- THE TRUST SIDE OF A CREDIT. When the run carrying it is approved, trust_creditors_on_run writes
+-- its usual pair for `charges_set_off`: client -charges, firm +charges. With the credit in it, that
+-- is client +credit, firm -credit: the firm's own money in trust becomes the client's, and the
+-- payout then takes it out. That is the rule CLAUDE.md states -- the firm settles what it owes THIS
+-- client out of the FIRM's share, never another client's -- and if the firm's share in trust is
+-- smaller than the credit, the Trust overview shows the firm short rather than another client's
+-- money quietly paying it. The cure is the firm's transfer into trust, which already exists.
+--
+-- AN OWED BALANCE WITH NO TRUST MONEY BEHIND IT is the existing rule, unchanged: the run that takes
+-- it goes below nil ("Client owes us"), is carried into the next run until the client's own
+-- collections cover it, or the client pays it into the business account (record_client_payment).
+-- A GAP IN THAT EXISTING RULE, found probing this and NOT changed here (it is the firm's money model,
+-- and every withdrawal fee already rides it): trust_creditors_on_run moves the WHOLE set-off to the
+-- firm when the run is approved, even where the run is below nil. The firm's share in trust then
+-- includes money the client never had in trust, firm_trust_split counts it drawable (a run at or
+-- below nil is "settled"), and when the client later pays the shortfall into the BUSINESS account
+-- the client's trust entry is cleared with no cash behind it. Proved on staging, rolled back: R1 000
+-- owed, no collections -> firm R1 000 drawable; client paid R1 000 to the business account -> the
+-- trust ledger R1 000 above the bank. The PTC share already follows the safe rule (credited only as
+-- far as trust money actually covered it); the set-off should too before balances owed go live.
+--
+-- NOT INCOME, NOT AGAIN. It was billed in Swordfish; counting it as charges raised on the cut-over
+-- day would put the better part of a million rand into one month's Business figures. So
+-- business_income and business_month leave this kind out, and a credit is not "owed by clients".
+--
+-- ONCE PER CLIENT. A second brought-forward for the same client, from the same file or another, is
+-- skipped and reported; to replace one, cancel it (cancel_client_charge, while its payover has not
+-- gone out) and bring the corrected sheet forward. The source file and the cell it came from are on
+-- the row for audit -- the cell, not the client's name, which is already the row's company.
+-- ==========================================================================================
+
+alter table public.client_charges
+  add column if not exists source_file text,
+  add column if not exists source_ref text;
+
+comment on column public.client_charges.source_file is
+  'A brought-forward balance: the name of the file it was read from (Camille''s Trust Debtors workbook).';
+comment on column public.client_charges.source_ref is
+  'A brought-forward balance: the sheet and cell it was read from, e.g. Trust Debtors!E12.';
+
+do $x$ begin
+  execute 'alter table public.client_charges dr' || 'op constraint if exists client_charges_kind_check';
+  execute 'alter table public.client_charges dr' || 'op constraint if exists client_charges_amount_check';
+end $x$;
+
+alter table public.client_charges add constraint client_charges_kind_check
+  check (kind in ('withdrawal', 'listing', 'other', 'brought_forward'));
+
+/* A NEGATIVE AMOUNT IS A CREDIT, AND ONLY A BROUGHT-FORWARD BALANCE MAY BE ONE: set off against a
+   payover (that is how it reaches the client), no VAT (it is a balance, not a supply), and never
+   marked paid (the client does not pay a credit). */
+alter table public.client_charges add constraint client_charges_amount_check
+  check (amount > 0
+         or (kind = 'brought_forward' and amount < 0 and settlement = 'set_off'
+             and vat = 0 and paid_at is null));
+
+/* ONLY THE IMPORT WRITES ONE: it is the only writer that has a source to give it, so
+   raise_client_charge cannot be used to make a brought-forward balance by hand. */
+alter table public.client_charges add constraint client_charges_brought_forward_shape
+  check (kind <> 'brought_forward'
+         or (settlement = 'set_off' and account_id is null
+             and source_file is not null and source_ref is not null));
+
+create unique index if not exists client_charges_brought_forward_once
+  on public.client_charges (company_id)
+  where kind = 'brought_forward' and cancelled_at is null;
+
+-- BRINGING THEM FORWARD, ALL IN ONE TRANSACTION. The browser reads the workbook and matches each row
+-- to a client; this writes what it was given, or nothing. Administrator AND the trust tick, because
+-- these balances land on payovers. Re-running the same file adds nothing: every client that already
+-- has a live brought-forward balance is skipped and counted.
+create or replace function public.bring_forward_client_balances(
+  p_source text, p_month date, p_cut_over date, p_rows jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_source text := nullif(btrim(coalesce(p_source, '')), '');
+  v_label text;
+  v_row jsonb;
+  v_company uuid;
+  v_amount numeric;
+  v_ref text;
+  v_added integer := 0;
+  v_skipped integer := 0;
+  v_owed numeric := 0;
+  v_credited numeric := 0;
+begin
+  if public.current_user_role() is distinct from 'Administrator'
+     or not public.has_capability('finance.view') then
+    raise exception 'Bringing balances forward is for an Administrator with the trust tick.'
+      using errcode = '42501';
+  end if;
+  if v_source is null then
+    raise exception 'Say which file the balances come from.' using errcode = '22023';
+  end if;
+  if p_month is null then
+    raise exception 'Say which month of the sheet is being brought forward.' using errcode = '22023';
+  end if;
+  if p_cut_over is null then
+    raise exception 'Say the cut-over date the balances are brought forward on.' using errcode = '22023';
+  end if;
+  if jsonb_typeof(p_rows) is distinct from 'array' or jsonb_array_length(p_rows) = 0 then
+    raise exception 'There is nothing to bring forward.' using errcode = '22023';
+  end if;
+  /* ONE BALANCE A CLIENT. Two rows matched to one client is a question for a person (two figures,
+     or a wrong match), never a sum taken here. */
+  if (select count(*) <> count(distinct x->>'company_id') from jsonb_array_elements(p_rows) x) then
+    raise exception 'A client appears on more than one row. Bring forward one balance a client.'
+      using errcode = '22023';
+  end if;
+
+  v_label := 'Balance brought forward from Swordfish (' || to_char(p_month, 'FMMonth YYYY') || ')';
+  /* Two presses at once must not both find nothing there and both write. */
+  perform pg_advisory_xact_lock(hashtext('bring_forward_client_balances'));
+
+  for v_row in select * from jsonb_array_elements(p_rows) loop
+    v_company := nullif(v_row->>'company_id', '')::uuid;
+    v_amount := round((v_row->>'amount')::numeric, 2);
+    v_ref := nullif(btrim(coalesce(v_row->>'row_ref', '')), '');
+    if v_ref is null then
+      raise exception 'Every balance needs the cell it came from.' using errcode = '22023';
+    end if;
+    if v_company is null or not exists (select 1 from public.companies where id = v_company) then
+      raise exception 'The client for % is not in Raptor.', v_ref using errcode = 'P0002';
+    end if;
+    if v_amount is null or v_amount = 0 then
+      raise exception '% has nothing to bring forward.', v_ref using errcode = '22023';
+    end if;
+    if exists (select 1 from public.client_charges c
+                where c.company_id = v_company and c.kind = 'brought_forward'
+                  and c.cancelled_at is null) then
+      v_skipped := v_skipped + 1;
+      continue;
+    end if;
+    insert into public.client_charges (
+      company_id, kind, description, amount, vat, settlement, raised_by, raised_on,
+      source_file, source_ref)
+    values (
+      v_company, 'brought_forward', v_label, v_amount, 0, 'set_off', auth.uid(), p_cut_over,
+      v_source, v_ref);
+    v_added := v_added + 1;
+    if v_amount > 0 then v_owed := v_owed + v_amount;
+    else v_credited := v_credited - v_amount; end if;
+  end loop;
+
+  return jsonb_build_object('added', v_added, 'skipped', v_skipped,
+                            'owed', v_owed, 'credited', v_credited);
+end $$;
+
+revoke all on function public.bring_forward_client_balances(text, date, date, jsonb) from public, anon;
+grant execute on function public.bring_forward_client_balances(text, date, date, jsonb) to authenticated;
+
+-- THE CLIENT'S LEDGER OPENS WITH IT. The brought-forward balance is its own line, dated the cut-over
+-- and ordered first on that day, and it STAYS its own line after the payover that takes it is
+-- approved (named, with that run) -- so the ledger still opens with it a year later. To keep the
+-- running balance true, the run's "Charges set off" trust entry is shown less the brought-forward
+-- part it contains (that part is already on the opening line); an entry left at nothing is not drawn.
+-- Every other line is as it was.
+create or replace function public.client_ledger(p_company uuid)
+returns table(entry_on date, sort_at timestamptz, kind text, description text, reference text,
+              case_number text, amount numeric, balance numeric, run_id uuid, charge_id uuid)
+language sql stable security definer set search_path to 'public'
+as $$
+  with lines as (
+    select (e.entry_at at time zone 'Africa/Johannesburg')::date as entry_on, e.entry_at as sort_at,
+           case when e.reason like 'Paid to the business account%' then 'paid_direct'
+                when e.reason like 'Payment reversed:%' then 'reversal'
+                when e.reason like 'Re-split:%' then 're_split'
+                when e.reason like 'Payover % paid to the client' then 'payover_paid'
+                when e.reason like 'Charges set off%' then 'set_off'
+                when e.reason like 'Overpayment released%' then 'released'
+                when e.amount < 0 then 'owed'
+                else 'held' end as kind,
+           e.reason as description, r.invoice_number as reference, d.case_number,
+           e.amount + case when e.reason like 'Charges set off%' then coalesce((
+               select sum(b.amount + b.vat) from public.client_charges b
+                where b.payover_run_id = e.payover_run_id and b.kind = 'brought_forward'), 0)
+             else 0 end as amount,
+           r.id as run_id, null::uuid as charge_id
+      from public.trust_creditor_entries e
+      left join public.payment_allocations pa on pa.id = e.allocation_id
+      left join public.payover_runs r on r.id = coalesce(e.payover_run_id,
+             case when e.reason like 'Payment reversed:%' then pa.reversal_carried_run_id
+                  else pa.payover_run_id end)
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'client' and e.company_id = p_company
+    union all
+    select c.raised_on, c.raised_on::timestamp at time zone 'Africa/Johannesburg', 'brought_forward',
+           c.description, r.invoice_number, null::text, -(c.amount + c.vat), r.id, c.id
+      from public.client_charges c
+      left join public.payover_runs r on r.id = c.payover_run_id
+                                      and r.status in ('approved', 'sent', 'paid')
+     where c.company_id = p_company and c.cancelled_at is null and c.kind = 'brought_forward'
+    union all
+    select c.raised_on, c.raised_on::timestamptz + interval '12 hours', 'charge_pending',
+           c.description || ' (comes off the next payover)', null, d.case_number,
+           -(c.amount + c.vat), null, c.id
+      from public.client_charges c
+      left join public.payover_runs r on r.id = c.payover_run_id
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'set_off'
+       and c.kind <> 'brought_forward'
+       and (c.payover_run_id is null or r.status not in ('approved', 'sent', 'paid'))
+    union all
+    select c.raised_on, c.raised_on::timestamptz + interval '12 hours', 'invoice_raised',
+           c.description, c.invoice_number, d.case_number, -(c.amount + c.vat), null, c.id
+      from public.client_charges c
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'invoice'
+    union all
+    select (c.paid_at at time zone 'Africa/Johannesburg')::date, c.paid_at, 'invoice_paid',
+           'Invoice paid by the client', coalesce(c.paid_reference, c.invoice_number), d.case_number,
+           c.amount + c.vat, null, c.id
+      from public.client_charges c
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'invoice'
+       and c.paid_at is not null
+       and not exists (select 1 from public.client_payment_applications x where x.client_charge_id = c.id)
+    union all
+    select x_r.received_on, x_r.received_on::timestamptz + interval '13 hours', 'invoice_paid',
+           'Paid by the client against ' || coalesce(c.invoice_number, 'an invoice'),
+           x_r.reference, d.case_number, x.amount, null, c.id
+      from public.client_payment_applications x
+      join public.client_business_receipts x_r on x_r.id = x.receipt_id
+      join public.client_charges c on c.id = x.client_charge_id
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company
+  )
+  select l.entry_on, l.sort_at, l.kind, l.description, l.reference, l.case_number, l.amount,
+         sum(l.amount) over (order by l.sort_at, l.kind rows between unbounded preceding and current row),
+         l.run_id, l.charge_id
+    from lines l
+   where (public.has_capability('finance.view') or public.has_capability('business.view'))
+     and not (l.kind = 'set_off' and l.amount = 0)
+   order by l.sort_at, l.kind
+$$;
+
+-- AND IT IS NOT INCOME AGAIN. Billed in Swordfish, so Business leaves the brought-forward kind out of
+-- charges raised (business_income) and invoiced (business_month); and a brought-forward CREDIT is
+-- owed to the client, so it is not "owed by clients". Everything else in both is as it was.
+create or replace function public.business_income(p_from date, p_to date)
+returns table(company_id uuid, company_name text, interest numeric, costs numeric,
+              commission numeric, commission_vat numeric, credit_taken numeric,
+              charges_raised numeric, bank_interest numeric, other numeric, total numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(e.company_id, d.company_id) as company_id,
+           public.firm_entry_kind(e.reason) as kind, e.amount, a.id as alloc_id,
+           a.to_interest, a.to_costs, a.commission, a.commission_vat
+      from public.trust_creditor_entries e
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'firm'
+       and (e.entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  lines as (
+    select company_id,
+           -- A RECEIPT'S EARNINGS ARE SPLIT ONLY WHERE THE ALLOCATION IS THERE TO SPLIT THEM BY;
+           -- an earned entry with none falls to `other`, whole, rather than being guessed apart.
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_interest, 0) else 0 end) as interest,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_costs, 0) else 0 end) as costs,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission, 0) else 0 end) as commission,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission_vat, 0) else 0 end) as commission_vat,
+           sum(case when kind = 'credit' then amount else 0 end) as credit_taken,
+           0::numeric as charges_raised,
+           -- THE BANK'S INTEREST ON THE TRUST ACCOUNT IS THE FIRM'S INTEREST INCOME (the firm, 8 Oct:
+           -- "The regulator said that we can take it"). Its own line, not "other".
+           sum(case when kind = 'bank_interest' then amount else 0 end) as bank_interest,
+           sum(case when kind not in ('earned', 'credit', 'bank_interest') or (kind = 'earned' and alloc_id is null) then amount else 0 end)
+             -- AND WHATEVER THE SPLIT DID NOT ACCOUNT FOR, so the parts always sum to the ledger.
+             + sum(case when kind = 'earned' and alloc_id is not null
+                        then amount - (coalesce(to_interest, 0) + coalesce(to_costs, 0)
+                                       + coalesce(commission, 0) + coalesce(commission_vat, 0))
+                        else 0 end) as other
+      from firm
+     where kind not in ('drawing', 'charge_recovered', 'bank_charge', 'transfer_in')
+     group by company_id
+    union all
+    select c.company_id, 0, 0, 0, 0, 0, sum(c.amount + c.vat), 0, 0
+      from public.client_charges c
+     where c.cancelled_at is null and c.raised_on between p_from and p_to
+       /* S10: a balance brought forward from Swordfish was billed there; it is not income again. */
+       and c.kind <> 'brought_forward'
+     group by c.company_id
+  )
+  select l.company_id, co.name,
+         sum(l.interest), sum(l.costs), sum(l.commission), sum(l.commission_vat),
+         sum(l.credit_taken), sum(l.charges_raised), sum(l.bank_interest), sum(l.other),
+         sum(l.interest + l.costs + l.commission + l.commission_vat + l.credit_taken
+             + l.charges_raised + l.bank_interest + l.other)
+    from lines l
+    left join public.companies co on co.id = l.company_id
+   where public.has_capability('business.income')
+   group by l.company_id, co.name
+   order by 11 desc
+$$;
+
+create or replace function public.business_month(p_from date, p_to date)
+returns table(earned numeric, drawn numeric, still_in_trust numeric, invoiced numeric,
+              invoices_paid numeric, owed_by_clients numeric, expenses numeric, expenses_vat numeric,
+              made numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(sum(amount) filter (where public.firm_entry_kind(reason) not in ('drawing', 'charge_recovered', 'bank_charge', 'transfer_in')), 0) as earned,
+           coalesce(-sum(amount) filter (where public.firm_entry_kind(reason) = 'drawing'), 0) as drawn,
+           coalesce(-sum(amount) filter (where public.firm_entry_kind(reason) = 'bank_charge'), 0) as bank_charges
+      from public.trust_creditor_entries
+     where party = 'firm'
+       and (entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  held as (
+    select coalesce(sum(amount), 0) as bal from public.trust_creditor_entries where party = 'firm'
+  ),
+  charges as (
+    select coalesce(sum(amount + vat) filter (where cancelled_at is null), 0) as invoiced,
+           coalesce(sum(amount + vat) filter (where cancelled_at is null and paid_at is not null), 0) as paid
+      from public.client_charges
+     where raised_on between p_from and p_to
+       /* S10: billed in Swordfish, so not invoiced again on the cut-over day. */
+       and kind <> 'brought_forward'
+  ),
+  owing as (
+    select coalesce(sum(amount + vat), 0) as bal from public.client_charges
+     where cancelled_at is null and paid_at is null
+       /* S10: a brought-forward CREDIT is owed to the client, not by them. */
+       and amount > 0
+  ),
+  spent as (
+    select coalesce(sum(amount), 0) as ex, coalesce(sum(vat), 0) as vat
+      from public.business_expenses
+     where cancelled_at is null and incurred_on between p_from and p_to
+  )
+  select f.earned, f.drawn, h.bal, c.invoiced, c.paid, o.bal, s.ex, s.vat,
+         f.earned + c.invoiced - s.ex - f.bank_charges
+    from firm f, held h, charges c, owing o, spent s
+   where public.has_capability('business.view')
+$$;
+
+-- S10 / BALANCES BROUGHT FORWARD: THE FINANCE REVOKE LIST, with bring_forward_client_balances on it
+-- (check-finance-is-administrator-only reads the last copy of the loop).
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)',
+    /* THE PAYOUT DAY GATE AND ITS OVERRIDE (11 Oct). */
+    'assert_payover_run_due(uuid)', 'release_payover_run_early(uuid, text)',
+    'payover_run_due(uuid)',
+    /* S10: suspense from Needs an account, and the fee credit note. */
+    'suspend_bank_line(uuid, text)', 'release_bank_line_from_suspense(uuid)', 'suspended_bank_lines()',
+    'credit_fee(uuid, numeric, text)',
+    /* S10: HELD FOR SWORDFISH PAYOVERS. */
+    'swordfish_holding_figures()', 'swordfish_holding_position()',
+    'set_swordfish_holding(numeric, text)', 'allocate_swordfish_line(uuid, text, text)',
+    /* S10: BALANCES BROUGHT FORWARD FROM SWORDFISH. */
+    'bring_forward_client_balances(text, date, date, jsonb)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
 end $$;
