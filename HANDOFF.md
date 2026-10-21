@@ -1406,6 +1406,12 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 6. Traps in this repo that cost real time
 
+**S10: removing a team leaves its people pointing at nothing.** `profiles.team_id` is `on delete set
+null`, but protect_profile_privileged_fields puts the old team_id back when nobody is signed in as an
+Administrator -- so the set-null is undone and the profile points at a deleted team (FKs are not
+re-checked after an action). Clear the people's team_id FIRST, with Administrator claims set, then
+remove the team. Found removing staging's four teams at the user's request (21 Oct).
+
 **S10: a probe that inserts an account now needs a client with terms.** `debtor_accounts_need_terms`
 refuses a debtor for a client with no mandate date (outside Swordfish) or no commission. Insert the
 company with `mandate_signed_at = now(), commission_rate = 0.2` (and `account_owner_id`, not null).
