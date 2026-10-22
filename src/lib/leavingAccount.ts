@@ -77,3 +77,49 @@ export type WorkingAction = typeof WORKING_ACTIONS[number]
 export function worked(actions: readonly string[]): boolean {
   return actions.some((a) => (WORKING_ACTIONS as readonly string[]).includes(a))
 }
+
+/* ------------------------------------------------------------------------------------------
+ * STOPPING THEM AT THE DOOR (22 Oct)
+ * ------------------------------------------------------------------------------------------ */
+
+/**
+ * WHAT HAPPENS WHEN SOMEBODY LEAVES AN ACCOUNT FOR ANY OTHER SCREEN.
+ *
+ * THE FIRM: "before they leave just any account to go to any other pane, it should ask them to
+ * re-diarize it. If that same date on the diary is for today, then it should force them to make
+ * one in the future. If that diary is for any day after today, then it could possibly ask a
+ * question, leave it where it is in the diary or re-diarize." And, of anybody else's account:
+ * "it shouldn't force them to re-diarize that account."
+ *
+ *   'must'     their own account, worked, and its date is today, already gone, or missing: they
+ *              may not leave until it has a day AFTER today. A date of today is the one answer
+ *              that is certainly wrong -- the account was just worked, and today's entry is the
+ *              thing they just did.
+ *   'confirm'  their own account, worked, and its date is in the future: one question, keep it
+ *              or move it. Keep is one tap.
+ *   'none'     everything else, and each for a reason:
+ *     NOT WORKED   reading a balance is most of what anybody does; a question every time is a
+ *                  question nobody reads (CLAUDE.md). A call taken in is worked once it is logged.
+ *     NOT THEIRS   a team leader or a colleague covering may do anything on it, and is never
+ *                  forced; diarising it tells the owner instead (DiariseModal).
+ *     CLOSED       there is no next day to pick.
+ *     A DIARY RUN  "Done & next" already books the next date; asking again on the way to the next
+ *                  account is the same question twice.
+ *     JUST BOOKED  a future date set during this visit IS the answer to "keep or move".
+ */
+export type LeavingAsk = 'none' | 'must' | 'confirm'
+
+export function leavingAsk(v: {
+  worked: boolean
+  mine: boolean
+  closed: boolean
+  inDiaryRun: boolean
+  /** The account's own diary date (never a campaign call), or null where it has none. */
+  entry: { dueOn: string; bookedThisVisit: boolean } | null
+  today: string
+}): LeavingAsk {
+  if (!v.worked || v.closed || !v.mine || v.inDiaryRun) return 'none'
+  if (!v.entry || v.entry.dueOn <= v.today) return 'must'
+  if (v.entry.bookedThisVisit) return 'none'
+  return 'confirm'
+}

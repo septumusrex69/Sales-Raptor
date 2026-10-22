@@ -726,6 +726,8 @@ export type NotificationType =
   /* The welcome flow (S8): the closer, told a mandate was signed; the liaison, given a new client. */
   | 'mandate_signed'
   | 'client.assigned'
+  /* Somebody else diarised your account -- covering, or a team leader (22 Oct). Shown only. */
+  | 'diary.covered'
 
 export interface AppNotification {
   id: ID

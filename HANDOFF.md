@@ -18,6 +18,22 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+000000000. **S10, 22 Oct: THE QUESTION AT THE DOOR OF AN ACCOUNT** (the firm's design, two messages).
+   - **Your own account, worked** (a call, note, SMS, email, promise, trace -- not just reading it):
+     leaving it for ANY screen is **stopped while its diary date is today, past or missing** -- only a
+     day after today lets you go; Stay keeps you on it. A **future** date asks **Keep 14 Nov** (one
+     tap) or **Move it**. A date booked during the visit is the answer and is not asked again. A
+     **diary run** ("Done & next") is never asked twice. `leavingAsk` in leavingAccount.ts,
+     `LeaveDiaryGate`, AccountDetail's `useBlocker`.
+   - **Somebody else's account: never stopped** -- anybody may do anything on it. Diarising it asks
+     **"Mine" or "<owner>'s"** diary (covering for somebody away), and **the owner is notified**
+     ("Thabo worked your account ... and diarised it for 14 Nov, in your diary"), type `diary.covered`.
+     The old "one person does not put work into another person's diary" rule is retired for this.
+   - **THE APP IS NOW ON A DATA ROUTER** (`createBrowserRouter` with one splat route around App's
+     unchanged `<Routes>`), because `useBlocker` needs one. AccountDetail is keyed on the account id
+     (`AccountPage`), so "worked" no longer carries from one account to the next.
+   - Closing the tab only gets the browser's own "leave site?" while a date is owed. check-leave-gate
+     (21), e2e/leave-gate (9).
 00000000. **S10, night of 21 Oct: CALL CAMPAIGNS built, and the sign-out that killed every device fixed.**
    - **Call campaigns** (Accounts -> tick -> Campaign -> **Call**): the firm's design, in their words --
      **Now** puts every call on today's diary **above everything, broken PTPs and prescription

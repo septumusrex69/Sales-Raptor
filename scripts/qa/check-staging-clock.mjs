@@ -244,10 +244,12 @@ const walk = (dir) => readdirSync(new URL(dir, root)).flatMap((n) => {
 const offenders = walk('src').filter((f) => !ALLOWED.has(f)
   && /new Date\(\)|Date\.now\(\)/.test(stripTs(read(f))))
 check('no other file reads the machine\'s clock', offenders, [])
-/* The allowed files' remaining reads are the real-world ones, counted so a new one is looked at. */
+/* The allowed files' remaining reads are the real-world ones, counted so a new one is looked at.
+   51 since 22 Oct: AccountDetail's visit start, compared with a diary entry's created_at -- both
+   wall time, so a jumped staging clock must not make every booking look older than the visit. */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 50)
+check('...and the allowed files keep exactly their real-world reads', realReads, 51)
 
 /* ---------- 7. the arithmetic ---------- */
 

@@ -15,14 +15,21 @@
 import '@fontsource-variable/inter'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 
+/*
+ * A DATA ROUTER WRAPPING THE SAME <Routes>, and for one reason: useBlocker, which only works under
+ * one. The firm (22 Oct): before a collector leaves their own account -- for any screen -- it asks
+ * for the next diary date, and refuses to let them go while the date is today. A bar that asks
+ * cannot do that; stopping the navigation can (AccountDetail, leavingAccount.ts). App's routes are
+ * untouched: one splat route hands every path to them, exactly as BrowserRouter did.
+ */
+const router = createBrowserRouter([{ path: '*', element: <App /> }])
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <RouterProvider router={router} />
   </StrictMode>,
 )

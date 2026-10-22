@@ -1,6 +1,6 @@
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useBlocker, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
@@ -112,8 +112,9 @@ import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import { TestClockPanel } from '../../components/collections/TestClockPanel'
 import { SigningPanel } from './SigningPanel'
 import { LeavingModal } from './LeavingModal'
-import { hasOpenDiaryEntry } from '../../lib/diary'
-import { shouldAskOnLeaving } from '../../lib/leavingAccount.ts'
+import { fetchOwnDiaryDate } from '../../lib/diary'
+import { LeaveDiaryGate } from '../../components/diary/LeaveDiaryGate'
+import { leavingAsk, shouldAskOnLeaving } from '../../lib/leavingAccount.ts'
 import {
   fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn, startWorkflow,
   type AccountRun, type StartableWorkflow,
@@ -180,7 +181,17 @@ const TODAY = () => clockToday()
  * point of the whole model: a debtor, a client or the Council for Debt Collectors can ask how a
  * number was arrived at, and Transactions is the answer, line by line.
  */
+/*
+ * ONE PAGE LIFE PER ACCOUNT. Without the key, going from one account straight to another kept this
+ * page mounted, and "you worked this account" (touched) carried over to an account nobody had
+ * touched -- harmless while it only drew a bar, wrong once it stops somebody at the door.
+ */
 export function AccountDetail() {
+  const { id } = useParams<{ id: string }>()
+  return <AccountPage key={id} />
+}
+
+function AccountPage() {
   const { id } = useParams<{ id: string }>()
   const { companies, users, teams } = useAppStore()
   const { currentUser, session } = useAuth()
@@ -402,6 +413,42 @@ export function AccountDetail() {
   const [hasEntry, setHasEntry] = useState<boolean | null>(null)
   const [leavingOpen, setLeavingOpen] = useState(false)
   /*
+   * THE ACCOUNT'S OWN DIARY DATE, and when this visit began -- the two facts the question at the
+   * door needs (leavingAsk). Undefined until the first reload: nothing is asked before something
+   * was done, and doing anything reloads.
+   */
+  const [ownDate, setOwnDate] = useState<{ dueOn: string; createdBy: string | null; createdAt: string } | null | undefined>(undefined)
+  /* One page life per account (AccountDetail keys the page on the id), so this is the visit. */
+  const [visitStart] = useState(() => new Date().toISOString())
+  /** Set when the gate's own "Move it" opened the diary box, so a booking walks on through the door. */
+  const [gateDiarising, setGateDiarising] = useState(false)
+  /* Whether the box the gate opened saved: its close follows its save, and must not then undo it. */
+  const gateBooked = useRef(false)
+
+  /*
+   * THE QUESTION AT THE DOOR (leavingAsk): their own worked account may not be left while its date
+   * is today, and one with a future date asks keep-or-move. Anybody else's account never stops
+   * anybody. The page's own query string changing (a tab, the diary run's ?diary=) is not leaving.
+   */
+  const ask = leavingAsk({
+    worked: touched,
+    mine: !!account && account.assignedTo === currentUser?.id,
+    closed: !!account && isWrittenOff(account.status),
+    inDiaryRun: params.get('diary') !== null,
+    entry: ownDate ? { dueOn: ownDate.dueOn, bookedThisVisit: ownDate.createdBy === currentUser?.id && Date.parse(ownDate.createdAt) >= Date.parse(visitStart) } : null,
+    today: clockToday(),
+  })
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    ask !== 'none' && ownDate !== undefined && currentLocation.pathname !== nextLocation.pathname)
+  /* Closing the tab or reloading cannot be stopped with a question of ours; the browser's own is
+     all there is, and only where leaving is refused. */
+  useEffect(() => {
+    if (ask !== 'must' || ownDate === undefined) return
+    const stop = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', stop)
+    return () => window.removeEventListener('beforeunload', stop)
+  }, [ask, ownDate])
+  /*
    * THE UPLOAD BOX, AND THE PDF IT WAS HANDED WHERE THERE IS ONE.
    *
    * THE FIRM: "these 2 could be one screen and one step if you combine them." The trace
@@ -601,7 +648,10 @@ export function AccountDetail() {
     /* AND WHETHER IT NOW HAS A DATE. Re-asked on every reload, because diarising IS one of the
        actions: a prompt that kept firing after somebody had just answered it is the thing the firm
        complained about, moved rather than cured. */
-    setHasEntry(await hasOpenDiaryEntry(account.id))
+    const own = await fetchOwnDiaryDate(account.id).catch(() => undefined)
+    setOwnDate(own)
+    /* A lookup that failed says "yes" -- the bar's old rule: a false no nags, a false yes is quiet. */
+    setHasEntry(own === undefined ? true : own !== null)
   }, [account, loadRuns])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
@@ -2471,13 +2521,41 @@ export function AccountDetail() {
 
       {/* Choosing when it comes back. Charges nothing — it is a note about a day, not an action
           against the debtor. */}
-      {diariseOpen && (
+      {blocker.state === 'blocked' && !gateDiarising && ask !== 'none' && (
+        <LeaveDiaryGate
+          ask={ask}
+          dueOn={ownDate?.dueOn ?? null}
+          today={clockToday()}
+          onKeep={() => blocker.proceed()}
+          onMove={() => { gateBooked.current = false; setGateDiarising(true) }}
+          onStay={() => blocker.reset()}
+        />
+      )}
+      {/* The door released by its own question: whatever no longer needs asking walks on. */}
+      {blocker.state === 'blocked' && ask === 'none' && <ProceedOnce onReady={() => blocker.proceed()} />}
+
+      {(diariseOpen || gateDiarising) && (
         <DiariseModal
           accountId={account.id}
           accountLabel={[name, account.accountNumber].filter(Boolean).join(' · ')}
           prescriptionDate={account.prescriptionDate}
-          onClose={() => setDiariseOpen(false)}
-          onDone={reload}
+          accountHolder={account.assignedTo
+            ? { id: account.assignedTo, name: users.find((u) => u.id === account.assignedTo)?.name ?? 'the collector' }
+            : null}
+          requireFuture={gateDiarising && ask === 'must'}
+          onClose={() => {
+            setDiariseOpen(false)
+            if (gateDiarising) {
+              setGateDiarising(false)
+              /* Cancelled: back on the account. Saved: the reload has answered the question, and
+                 ProceedOnce lets them through. */
+              if (!gateBooked.current && blocker.state === 'blocked') blocker.reset()
+            }
+          }}
+          onDone={async () => {
+            if (gateDiarising) gateBooked.current = true
+            await reload()
+          }}
         />
       )}
 
@@ -5020,4 +5098,10 @@ function Figure2({ label, value, tone }: { label: string; value: string; tone?: 
       </div>
     </div>
   )
+}
+
+/** Lets a held navigation through once, after render -- never during it. */
+function ProceedOnce({ onReady }: { onReady: () => void }) {
+  useEffect(() => { onReady() }, [onReady])
+  return null
 }

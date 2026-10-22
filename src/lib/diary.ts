@@ -288,6 +288,25 @@ export async function hasOpenDiaryEntry(accountId: string): Promise<boolean> {
   return (count ?? 0) > 0
 }
 
+/**
+ * THE ACCOUNT'S OWN DIARY DATE: its one open entry that is not a campaign call, or null.
+ *
+ * For the question on the way out (leavingAsk): whether the date is today, and whether it was
+ * booked during this visit -- created_at against when the page opened.
+ */
+export async function fetchOwnDiaryDate(accountId: string): Promise<{
+  id: string; dueOn: string; ownerId: string | null; createdBy: string | null; createdAt: string
+} | null> {
+  const { data, error } = await supabase.from('diary_entries')
+    .select('id, due_on, owner_id, created_by, created_at')
+    .eq('account_id', accountId).eq('state', 'open').neq('kind', 'campaign')
+    .limit(1).maybeSingle()
+  if (error) throw new Error(error.message)
+  return data
+    ? { id: data.id, dueOn: data.due_on, ownerId: data.owner_id ?? null, createdBy: data.created_by ?? null, createdAt: data.created_at }
+    : null
+}
+
 /** Everything ever diarised on one account, newest first — the account page's Diary tab. */
 export async function fetchAccountDiary(accountId: string): Promise<DiaryEntry[]> {
   const { data, error } = await supabase

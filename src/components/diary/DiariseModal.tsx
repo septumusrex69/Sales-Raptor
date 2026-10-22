@@ -17,6 +17,7 @@ import {
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
 import { clockToday } from '../../lib/clock.ts'
+import { supabase } from '../../lib/supabase'
 
 /**
  * When does this account come back?
@@ -38,7 +39,9 @@ import { clockToday } from '../../lib/clock.ts'
  * Either way it lands on whoever is doing it. Moving work to somebody else is escalation, not
  * diarising — see the note where the owner picker used to be.
  */
-export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaultOwnerId, onClose, onDone }: {
+export function DiariseModal({
+  accountId, accountLabel, prescriptionDate, defaultOwnerId, accountHolder, requireFuture, onClose, onDone,
+}: {
   accountId: string
   /** How the account reads in the confirmation: "Piet Pompies · BF-10023". */
   accountLabel: string
@@ -46,6 +49,13 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   prescriptionDate: string | null
   /** Whose diary to put it in. Defaults to the person doing the diarising. */
   defaultOwnerId?: string | null
+  /**
+   * Whose desk the account is on. Where it is somebody else's, the box asks whose diary it goes
+   * in -- "put it in my diary or put it in their diary", the firm, 22 Oct -- and tells them.
+   */
+  accountHolder?: { id: string; name: string } | null
+  /** Asked on the way out of a worked account whose date is today: only a later day will do. */
+  requireFuture?: boolean
   onClose: () => void
   onDone: () => void | Promise<void>
 }) {
@@ -53,8 +63,15 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const { users } = useAppStore()
 
   const today = clockToday()
-  // Always the person doing the diarising. See the note where the picker used to be.
-  const ownerId = defaultOwnerId ?? currentUser?.id ?? null
+  /*
+   * WHOSE DIARY. Yours, unless the account is somebody else's and you choose theirs: covering for
+   * somebody who is away, you may put it in your own diary or back in theirs for when they return
+   * (the firm, 22 Oct). It used to be yours always -- "one person does not put work into another
+   * person's diary" -- and the firm has since said otherwise, for exactly the covering case.
+   */
+  const someoneElses = !!accountHolder && accountHolder.id !== currentUser?.id
+  const [forHolder, setForHolder] = useState(false)
+  const ownerId = someoneElses && forHolder ? accountHolder.id : (defaultOwnerId ?? currentUser?.id ?? null)
   // Five working days out: far enough that a debtor has had time to do what they said, near
   // enough that nothing goes cold. The agent overrides it constantly, which is the point.
   const [mode, setMode] = useState<'day' | 'today'>('day')
@@ -143,6 +160,8 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
     : remindingToday && !custom ? dueAt(minutes)
       : custom ? atDayAndTime(remindOn, custom) : null
   const customBad = mode === 'today' && custom !== '' && remindAt === null
+  /* Today will not do on the way out of a worked account: today's entry is what was just worked. */
+  const tooSoon = !!requireFuture && mode === 'day' && dueOn <= today
 
   async function save() {
     setBusy(true)
@@ -171,6 +190,23 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         alsoNoteOnAccount: true,
         actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
       })
+      /*
+       * THE OWNER IS TOLD. The firm: "it should maybe notify the person ... Thabo has worked your
+       * account and re-diarised it for this, just check it out." Their account's one date has
+       * moved, possibly out of their diary altogether, and they should not find that out by its
+       * absence. A bell that did not ring must not undo a booking that did happen.
+       */
+      if (someoneElses && accountHolder) {
+        const where = forHolder ? 'your diary' : `${currentUser?.name ?? 'their'}’s own diary`
+        try {
+          await supabase.rpc('notify_user', {
+            p_user_id: accountHolder.id,
+            p_type: 'diary.covered',
+            p_message: `${currentUser?.name ?? 'Somebody'} worked your account ${accountLabel} and diarised it for ${longDate(dueOn)}, in ${where}.`,
+            p_link: `/accounts/${accountId}`,
+          })
+        } catch { /* see above */ }
+      }
       await onDone()
       onClose()
     } catch (e) {
@@ -190,6 +226,8 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
           the wrong one is a reminder that interrupts a colleague's afternoon, or a callback that
           never happens.
         */}
+        {/* A reminder is not a diary date, so it is not offered when a date is what is owed. */}
+        {!requireFuture && (
         <div className="flex gap-1 p-0.5 rounded-lg bg-slate-100">
           {([
             ['day', 'In the diary'],
@@ -202,6 +240,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             </button>
           ))}
         </div>
+        )}
 
         {/*
           The account, and nothing else. Each side used to carry a sentence explaining what it
@@ -384,11 +423,32 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
         </FormField>
 
         {/*
-          NO "whose diary" PICKER, at the firm's instruction: one person does not put work into
-          another person's diary. It lands in yours, and if it belongs to somebody else — a team
-          leader, or the liaison with a recommendation for litigation — that is an escalation,
-          which is a different act with a different record. See the Dispute action on the account.
+          WHOSE DIARY, only where the account is somebody else's. Mine first: the case the firm
+          described is covering for somebody who is away. Either way they are told.
         */}
+        {someoneElses && mode === 'day' && accountHolder && (
+          <div data-testid="diarise-whose">
+            <span className="block text-xs font-medium text-slate-500 mb-1.5">Whose diary</span>
+            <div className="flex gap-1 p-0.5 rounded-lg bg-slate-100">
+              {([[false, 'Mine'], [true, `${accountHolder.name}’s`]] as const).map(([v, label]) => (
+                <button key={String(v)} type="button" onClick={() => setForHolder(v)}
+                  data-testid={v ? 'diarise-for-holder' : 'diarise-for-me'}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm transition-colors ${
+                    forHolder === v ? 'bg-white shadow-sm font-medium text-navy-950' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="block text-[11px] text-slate-400 mt-1">
+              This is {accountHolder.name}’s account. They will be told you diarised it.
+            </span>
+          </div>
+        )}
+        {tooSoon && (
+          <p className="text-xs text-[var(--c-rust-deep)]" data-testid="diarise-too-soon">
+            You worked this account today, so choose a day after today.
+          </p>
+        )}
 
         {error && <p className="text-sm text-negative-700">{error}</p>}
 
@@ -396,7 +456,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
           <span className="text-xs text-slate-400">
             {mode === 'today'
               ? remindAt ? `Pops up ${whenItLands(remindAt)}, on whatever page you are on.` : 'Pick a time.'
-              : `Lands in your diary for ${longDate(dueOn)}.`}
+              : `Lands in ${someoneElses && forHolder && accountHolder ? `${accountHolder.name}’s` : 'your'} diary for ${longDate(dueOn)}.`}
           </span>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">
@@ -410,7 +470,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
             */}
             <button type="button"
               onClick={() => { if (overCapacity && !acceptedOver) setAcceptedOver(true); else void save() }}
-              disabled={busy || (mode === 'today' && !remindAt)}
+              disabled={busy || (mode === 'today' && !remindAt) || tooSoon}
               className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg disabled:opacity-50 ${
                 overCapacity && !acceptedOver
                   ? 'bg-[var(--c-gold-dark)] text-white hover:opacity-90'
