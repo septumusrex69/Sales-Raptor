@@ -47251,3 +47251,808 @@ as $$
     else array[]::text[]
   end
 $$;
+
+-- ============================================================================================
+-- S10 / CALL CAMPAIGNS, ROUND TWO (22 Oct): the call follows the desk, a RECOVERY campaign on
+-- closed accounts, results for everybody.
+-- ============================================================================================
+
+-- A CALL CAMPAIGN IS ONE OF TWO KINDS. 'work' is the push on the live book (21 Oct). 'recovery' is
+-- the firm's second kind (Stephan, 22 Oct): "another type of call campaign ... on archived ...
+-- accounts that have already been closed, or written off, not paid up stuff, or withdrawn, just
+-- like unrecoverable ... to try to get them back ... And if a guy makes a PTP, he can keep the
+-- account. Otherwise, the account just stays where it was."
+alter table public.campaigns add column if not exists call_kind text check (call_kind in ('work', 'recovery'));
+update public.campaigns set call_kind = 'work' where channel = 'call' and call_kind is null;
+-- WITHDRAWN IS OPT-IN PER CAMPAIGN AND OFF BY DEFAULT: the client took the mandate back, so the firm
+-- may have no right to collect it at all until the client says so.
+alter table public.campaigns add column if not exists include_withdrawn boolean not null default false;
+-- WHO WORKS A RECOVERY CAMPAIGN. A closed account is usually on nobody's desk, or on the desk of
+-- somebody who has left, so the person running it chooses the collectors; the calls are shared
+-- among them. Kept for the record ("who was this given to"); null on a work campaign, whose calls
+-- go to whoever holds each account.
+alter table public.campaigns add column if not exists collector_ids uuid[];
+do $$ begin execute 'alter table public.campaigns dr' || 'op constraint if exists campaigns_call_kind_shape'; end $$;
+alter table public.campaigns add constraint campaigns_call_kind_shape check (
+  (channel = 'call') = (call_kind is not null)
+  and (not include_withdrawn or call_kind = 'recovery')
+  and ((call_kind = 'recovery') = (collector_ids is not null and cardinality(collector_ids) > 0)));
+
+-- WHAT A RECOVERY CALL WON BACK, on the call itself. Set by recovery_reopen in the same statement
+-- that re-opens the account, while the entry is still open (protect_closed_diary_entries reverts
+-- edits to a done or moved entry, and an open one is not that). `recovered_from` is what the
+-- account was before -- how it was closed, when, why, its status and whose desk -- so the closure
+-- the re-open cleared is still on record beside the call that undid it.
+alter table public.diary_entries add column if not exists recovered_at timestamptz;
+alter table public.diary_entries add column if not exists recovered_from jsonb;
+
+-- ---------------------------------------------------------------------------------------------
+-- 1. A CAMPAIGN CALL FOLLOWS THE ACCOUNT TO ITS NEW DESK.
+--
+-- The firm (22 Oct): "If a campaign is reallocated in the middle of a campaign to a new collector,
+-- the new collector should work it." In the database, on assigned_to itself, so every path that
+-- moves an account -- the hand-out, a reassign, a leader's bulk move, a fix in SQL -- moves its
+-- call too; written in each of those it would hold in three of them.
+--
+-- MOVED, NEVER EDITED: the old entry is stamped `moved` with who, when and why and points at the
+-- new one, which carries the same day, rank, campaign, script and source. The day is the
+-- campaign's, and the move is the evidence of the handover. In that ORDER, because one open
+-- campaign call per account is a unique index: the old one is closed before the new one exists.
+--
+-- TO NOBODY, IT COMES OFF: an account on nobody's desk is on nobody's diary. Cancelled with the
+-- reason, which the campaign counts as missed -- it was not worked.
+--
+-- NOT A RECOVERY CALL. A recovery call was given to a collector the campaign chose, not to whoever
+-- holds the account (a closed account is usually on nobody's desk), so a desk change is not a
+-- reason to move it -- and recovery_reopen sets the desk to the collector already holding it.
+--
+-- SECURITY DEFINER because the person moving the account may not be the one allowed to write the
+-- new owner's diary under some future policy, and the move must not half-happen when they are not.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.campaign_call_follows_desk() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old public.diary_entries%rowtype;
+  v_new uuid;
+  v_name text;
+begin
+  if new.assigned_to is not distinct from old.assigned_to then
+    return new;
+  end if;
+  select d.* into v_old
+    from public.diary_entries d
+    join public.campaigns c on c.id = d.campaign_id
+   where d.account_id = new.id and d.state = 'open' and d.kind = 'campaign'
+     and c.call_kind is distinct from 'recovery'
+   for update of d;
+  if not found or v_old.owner_id is not distinct from new.assigned_to then
+    return new;
+  end if;
+
+  if new.assigned_to is null then
+    update public.diary_entries
+       set state = 'cancelled',
+           outcome = coalesce(outcome, 'Taken off the diary: the account was left on nobody''s desk mid-campaign')
+     where id = v_old.id;
+    return new;
+  end if;
+
+  select nullif(btrim(p.name), '') into v_name from public.profiles p where p.id = new.assigned_to;
+  update public.diary_entries
+     set state = 'moved', moved_at = public.raptor_now(), moved_by = auth.uid(),
+         moved_reason = 'Account reallocated to ' || coalesce(v_name, 'another collector')
+   where id = v_old.id;
+  insert into public.diary_entries
+    (account_id, owner_id, due_on, kind, rank, campaign_id, source, reason, created_by, created_by_name)
+  values
+    (v_old.account_id, new.assigned_to, v_old.due_on, v_old.kind, v_old.rank, v_old.campaign_id,
+     v_old.source, v_old.reason, v_old.created_by, v_old.created_by_name)
+  returning id into v_new;
+  -- moved_to is not one of the columns protect_closed_diary_entries holds, so the pointer can be
+  -- written onto the row it has just closed.
+  update public.diary_entries set moved_to = v_new where id = v_old.id;
+  return new;
+end $$;
+revoke all on function public.campaign_call_follows_desk() from public, anon, authenticated;
+
+do $$ begin execute 'dr' || 'op trigger if exists campaign_call_follows_desk on public.debtor_accounts'; end $$;
+create trigger campaign_call_follows_desk
+  after update of assigned_to on public.debtor_accounts
+  for each row execute function public.campaign_call_follows_desk();
+
+-- ---------------------------------------------------------------------------------------------
+-- 2. "IF A GUY MAKES A PTP, HE CAN KEEP THE ACCOUNT."
+--
+-- The collector holding an OPEN recovery call on a closed account presses "Debtor agreed to pay --
+-- re-open and keep it". This is that press, and only that press: nobody else re-opens an account
+-- through it, and nothing re-opens one automatically -- the account otherwise "just stays where it
+-- was".
+--
+-- REFUSED unless the caller holds an open call on this account from a recovery campaign that is
+-- still running; and refused on what a recovery campaign may never chase -- paid up or settled,
+-- prescribed (NCA s126B), or withdrawn where the campaign did not include withdrawn accounts.
+--
+-- THE DESK FIRST, WHILE THE ACCOUNT IS STILL CLOSED. workflow_start_on_allocation fires on
+-- assigned_to and starts the Handover sequence on an account's first desk -- if the book is active.
+-- A written-off file that was never on anybody's desk would otherwise be sent "your account has
+-- been handed over to us" years after it was. Moving the desk while `book` is still 'closed', and
+-- re-opening in a second statement that does not touch assigned_to, keeps that trigger quiet.
+--
+-- THE RECORD: what the account was before -- closed as, on, why, the status, the desk -- goes onto
+-- the call (recovered_from) and onto the account's timeline as a note, and the status history
+-- records the move between books itself (record_account_status_event). Interest is not touched:
+-- a written-off account accrues until prescription (the firm, 12 Oct).
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.recovery_reopen(p_account uuid)
+returns uuid
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_entry public.diary_entries%rowtype;
+  v_c public.campaigns%rowtype;
+  v_a public.debtor_accounts%rowtype;
+  v_as text;
+  v_me text;
+  v_was text;
+begin
+  if v_uid is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  select d.* into v_entry from public.diary_entries d
+   where d.account_id = p_account and d.state = 'open' and d.kind = 'campaign' and d.owner_id = v_uid
+   for update;
+  if not found then
+    raise exception 'Only the collector with an open recovery call on this account may re-open it.' using errcode = '42501';
+  end if;
+  select * into v_c from public.campaigns where id = v_entry.campaign_id;
+  if v_c.call_kind is distinct from 'recovery' then
+    raise exception 'That call is not from a recovery campaign. Only a recovery call re-opens a closed account.' using errcode = '42501';
+  end if;
+  if v_c.status <> 'sending' or v_c.ends_on < public.raptor_today() then
+    raise exception 'That recovery campaign has ended.' using errcode = '42501';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account for update;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book <> 'closed' then
+    raise exception 'That account is not closed.' using errcode = '22023';
+  end if;
+  -- How it ended: the firm's own word where it gave one, else Swordfish's reason read the way
+  -- accountBooks.closureKind reads it ("Paid in Full" is paid up, "Settled by way of" settled).
+  v_as := coalesce(v_a.ended_as, case
+    when coalesce(v_a.write_off_reason, '') ~* 'paid\s*in\s*full' then 'paid_up'
+    when coalesce(v_a.write_off_reason, '') ~* '^\s*settled' then 'settled'
+    else 'written_off' end);
+  if v_as in ('paid_up', 'settled') then
+    raise exception 'That account was paid. There is nothing to recover.' using errcode = '22023';
+  end if;
+  if v_as = 'withdrawn' and not v_c.include_withdrawn then
+    raise exception 'The client withdrew that account, and this campaign does not include withdrawn accounts.' using errcode = '42501';
+  end if;
+  if v_a.prescribed then
+    raise exception 'That debt has prescribed (NCA s126B) and may not be collected.' using errcode = '22023';
+  end if;
+
+  select nullif(btrim(name), '') into v_me from public.profiles where id = v_uid;
+  v_was := case v_as when 'written_off' then 'written off' when 'withdrawn' then 'withdrawn by the client' else v_as end;
+
+  update public.diary_entries
+     set recovered_at = public.raptor_now(),
+         recovered_from = jsonb_build_object(
+           'ended_as', v_a.ended_as, 'closed_as', v_as, 'ended_on', v_a.ended_on, 'ended_reason', v_a.ended_reason,
+           'status', v_a.status, 'assigned_to', v_a.assigned_to)
+   where id = v_entry.id;
+
+  if v_a.assigned_to is distinct from v_uid then
+    update public.debtor_accounts set assigned_to = v_uid where id = p_account;
+  end if;
+  update public.debtor_accounts
+     set ended_as = null, ended_on = null, ended_reason = null, ended_note = null, ended_by = null, ended_at = null,
+         -- Swordfish's own word for a file coming back, already in the inherited vocabulary.
+         status = case when status ~* '^(written.off|closed)' then 'Active: Re-opened' else status end
+   where id = p_account;
+
+  insert into public.account_notes (account_id, body, source, author_name, created_by)
+  values (p_account,
+    'Re-opened on a recovery call (campaign "' || v_c.name || '") by ' || coalesce(v_me, 'the collector')
+      || ': the debtor agreed to pay. It was closed as ' || v_was
+      || coalesce(' on ' || to_char(v_a.ended_on, 'DD Mon YYYY'), '')
+      || coalesce(' - ' || nullif(btrim(v_a.ended_reason), ''), '')
+      || '. It is now on ' || coalesce(v_me, 'their') || '''s desk.',
+    'system', v_me, v_uid);
+  return v_c.id;
+end $$;
+revoke all on function public.recovery_reopen(uuid) from public, anon;
+grant execute on function public.recovery_reopen(uuid) to authenticated;
+
+-- A COLLECTOR SEES THE CAMPAIGN THEIR CALL CAME FROM: its name, its script, its kind. campaign_visible
+-- is for those who run campaigns; without this the diary's embed came back empty for the very
+-- person meant to read the script before ringing.
+do $$ begin execute 'dr' || 'op policy if exists campaigns_read_own_calls on public.campaigns'; end $$;
+create policy campaigns_read_own_calls on public.campaigns for select to authenticated
+  using (exists (select 1 from public.diary_entries d where d.campaign_id = campaigns.id and d.owner_id = auth.uid()));
+
+-- THE LIVE COUNTS, with a reallocated call counted once. A `moved` entry is a call handed to the
+-- next collector (campaign_call_follows_desk), whose own entry is the one that is worked or missed;
+-- counting the moved one as well made one call two, one of them "missed".
+create or replace function public.campaign_counts(p_ids uuid[])
+returns table (campaign_id uuid, pending integer, sending integer, sent integer, skipped integer,
+               failed integer, cancelled integer, fees numeric)
+language sql stable security invoker set search_path to 'public'
+as $$
+  select x.campaign_id, sum(x.pending)::int, sum(x.sending)::int, sum(x.sent)::int, sum(x.skipped)::int,
+         sum(x.failed)::int, sum(x.cancelled)::int, sum(x.fees)
+    from (
+      select m.campaign_id,
+             count(*) filter (where m.state = 'pending') as pending,
+             count(*) filter (where m.state = 'sending') as sending,
+             count(*) filter (where m.state = 'sent') as sent,
+             count(*) filter (where m.state = 'skipped') as skipped,
+             count(*) filter (where m.state = 'failed') as failed,
+             count(*) filter (where m.state = 'cancelled') as cancelled,
+             coalesce(sum(m.fee_excl_vat) filter (where m.state = 'sent'), 0) as fees
+        from public.campaign_messages m
+       where m.campaign_id = any(p_ids)
+       group by m.campaign_id
+      union all
+      select d.campaign_id,
+             count(*) filter (where d.state = 'open'),
+             0,
+             count(*) filter (where d.state = 'done'),
+             0, 0,
+             count(*) filter (where d.state = 'cancelled'),
+             0
+        from public.diary_entries d
+       where d.campaign_id = any(p_ids)
+       group by d.campaign_id
+    ) x
+   group by x.campaign_id
+$$;
+revoke all on function public.campaign_counts(uuid[]) from public, anon;
+grant execute on function public.campaign_counts(uuid[]) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- 3. CAMPAIGN RESULTS, FOR EVERYBODY.
+--
+-- The firm (22 Oct): "Collector sees the campaign results, also the administrators ... anybody can
+-- see the campaign results ... a place about like campaign results. PTPs made." The RESULTS, not
+-- the rows: SECURITY DEFINER and aggregated, so a collector sees how every campaign went without
+-- being able to read another team's campaign rows, messages or accounts. Running and stopping one
+-- is still campaign.run's (campaign_visible).
+--
+-- NO MONEY THE FIRM EARNS. No fees, no estimate: CLAUDE.md's condition for a screen everybody
+-- sees. The rand figure is what DEBTORS PROMISED -- the client's money to recover.
+--
+-- A PTP MADE FROM A CAMPAIGN, the definition, chosen and stated so it can be argued with:
+--   a promise to pay on an account in the campaign, RECORDED BY THE COLLECTOR WHOSE DIARY THE CALL
+--   WAS ON, from the moment the call landed on that diary until the end of the day it was worked
+--   (Johannesburg's day). For a call not worked: until the campaign ended or was stopped; for one
+--   handed to another collector: until the hand-over. Counted once per promise however many calls
+--   it falls inside. A promise somebody else took, or one taken a week after the call, is not the
+--   campaign's.
+-- The amount is the whole arrangement (total_promised) where there is one, else the promise.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.campaign_call_promises(p_ids uuid[])
+returns table (campaign_id uuid, owner_id uuid, promise_id uuid, amount numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  select distinct on (d.campaign_id, p.id) d.campaign_id, d.owner_id, p.id, coalesce(p.total_promised, p.amount)
+    from public.diary_entries d
+    join public.campaigns c on c.id = d.campaign_id
+    join public.promises_to_pay p
+      on p.account_id = d.account_id and p.created_by = d.owner_id and p.created_at >= d.created_at
+     and p.created_at < case d.state
+           when 'done' then (((d.done_at at time zone 'Africa/Johannesburg')::date + 1)::timestamp at time zone 'Africa/Johannesburg')
+           when 'moved' then d.moved_at
+           when 'open' then 'infinity'::timestamptz
+           else coalesce(c.stopped_at, c.finished_at, ((c.ends_on + 1)::timestamp at time zone 'Africa/Johannesburg'))
+         end
+   where d.campaign_id = any(p_ids) and d.kind = 'campaign'
+   order by d.campaign_id, p.id, d.created_at
+$$;
+revoke all on function public.campaign_call_promises(uuid[]) from public, anon, authenticated;
+
+create or replace function public.campaign_results()
+returns table (campaign_id uuid, name text, channel text, call_kind text, call_mode text, status text,
+               created_by_name text, created_at timestamptz, starts_on date, ends_on date,
+               selected integer, skipped integer, sent integer, failed integer,
+               worked integer, waiting integer, missed integer, unplaced integer,
+               ptps integer, ptp_amount numeric, reopened integer)
+language sql stable security definer set search_path to 'public'
+as $$
+  with me as (
+    select 1 from public.profiles where id = auth.uid() and status = 'Active'
+  ), cs as (
+    select c.* from public.campaigns c where exists (select 1 from me)
+     order by c.created_at desc limit 300
+  ), msgs as (
+    select m.campaign_id,
+           count(*) filter (where m.state = 'skipped') skipped,
+           count(*) filter (where m.state = 'sent') sent,
+           count(*) filter (where m.state = 'failed') failed
+      from public.campaign_messages m where m.campaign_id in (select id from cs)
+     group by m.campaign_id
+  ), calls as (
+    select d.campaign_id,
+           count(*) filter (where d.state = 'done') worked,
+           count(*) filter (where d.state = 'open') waiting,
+           count(*) filter (where d.state = 'cancelled') missed,
+           count(*) filter (where d.recovered_at is not null) reopened
+      from public.diary_entries d where d.campaign_id in (select id from cs)
+     group by d.campaign_id
+  ), promised as (
+    select x.campaign_id, count(*) n, sum(x.amount) amount
+      from public.campaign_call_promises((select array_agg(id) from cs)) x group by x.campaign_id
+  )
+  select cs.id, cs.name, cs.channel, cs.call_kind, cs.call_mode, cs.status, cs.created_by_name, cs.created_at,
+         coalesce(cs.starts_on, (cs.created_at at time zone 'Africa/Johannesburg')::date), cs.ends_on,
+         cs.selected, coalesce(msgs.skipped, 0)::int, coalesce(msgs.sent, 0)::int, coalesce(msgs.failed, 0)::int,
+         coalesce(calls.worked, 0)::int, coalesce(calls.waiting, 0)::int, coalesce(calls.missed, 0)::int, cs.unplaced,
+         coalesce(promised.n, 0)::int, coalesce(promised.amount, 0), coalesce(calls.reopened, 0)::int
+    from cs
+    left join msgs on msgs.campaign_id = cs.id
+    left join calls on calls.campaign_id = cs.id
+    left join promised on promised.campaign_id = cs.id
+   order by cs.created_at desc
+$$;
+revoke all on function public.campaign_results() from public, anon;
+grant execute on function public.campaign_results() to authenticated;
+
+create or replace function public.campaign_results_by_collector(p_campaign uuid)
+returns table (owner_id uuid, owner_name text, worked integer, waiting integer, missed integer,
+               ptps integer, ptp_amount numeric, reopened integer)
+language sql stable security definer set search_path to 'public'
+as $$
+  with me as (
+    select 1 from public.profiles where id = auth.uid() and status = 'Active'
+  ), calls as (
+    select d.owner_id,
+           count(*) filter (where d.state = 'done') worked,
+           count(*) filter (where d.state = 'open') waiting,
+           count(*) filter (where d.state = 'cancelled') missed,
+           count(*) filter (where d.recovered_at is not null) reopened
+      from public.diary_entries d
+     where d.campaign_id = p_campaign and exists (select 1 from me)
+     group by d.owner_id
+  ), promised as (
+    select x.owner_id, count(*) n, sum(x.amount) amount
+      from public.campaign_call_promises(array[p_campaign]) x
+     where exists (select 1 from me)
+     group by x.owner_id
+  ), people as (
+    select owner_id from calls union select owner_id from promised
+  )
+  select people.owner_id, coalesce(p.name, 'Nobody'),
+         coalesce(calls.worked, 0)::int, coalesce(calls.waiting, 0)::int, coalesce(calls.missed, 0)::int,
+         coalesce(promised.n, 0)::int, coalesce(promised.amount, 0), coalesce(calls.reopened, 0)::int
+    from people
+    left join calls on calls.owner_id is not distinct from people.owner_id
+    left join promised on promised.owner_id is not distinct from people.owner_id
+    left join public.profiles p on p.id = people.owner_id
+   order by coalesce(p.name, 'Nobody')
+$$;
+revoke all on function public.campaign_results_by_collector(uuid) from public, anon;
+grant execute on function public.campaign_results_by_collector(uuid) to authenticated;
+-- ============================================================================================
+-- S10 / CAMPAIGNS, ROUND TWO AMENDED (22 Oct, the firm's second message): withdrawn and paid
+-- accounts are NEVER in a recovery campaign; a recovery campaign is chosen BY WRITE-OFF REASON;
+-- and a third diary campaign, the TRACE campaign.
+-- ============================================================================================
+
+-- THE WITHDRAWN TICK IS GONE. The firm: withdrawn and paid-up accounts are never in a recovery
+-- campaign -- not behind a tick, not at all. A column that can only ever be false is a question
+-- somebody will one day answer yes to.
+do $$ begin execute 'alter table public.campaigns dr' || 'op constraint if exists campaigns_call_kind_shape'; end $$;
+do $$ begin execute 'alter table public.campaigns dr' || 'op column if exists include_withdrawn'; end $$;
+
+-- A TRACE CAMPAIGN IS A DIARY CAMPAIGN TOO. channel 'call' has always meant "onto the diaries,
+-- not out of a mailbox"; call_kind now says what the diary item asks for: ring the live book
+-- ('work'), ring the written-off book to win it back ('recovery'), or trace ('trace'). Everything
+-- the diary already does for a campaign -- now or spread, the rank, the end date, Stop, the cron
+-- that ends it, one campaign item per account -- holds for all three unchanged.
+do $$ begin execute 'alter table public.campaigns dr' || 'op constraint if exists campaigns_call_kind_check'; end $$;
+alter table public.campaigns add constraint campaigns_call_kind_check check (call_kind in ('work', 'recovery', 'trace'));
+-- WHICH WRITE-OFF REASONS A CLOSED-BOOK CAMPAIGN TOOK. The firm: "we should be able to choose which
+-- type of accounts ... this one was written off because of uncontactability. Or this one ... because
+-- of refusal to pay". Stored as the grouping keys writeOffReasonKey (campaigns.ts) makes, so the
+-- record says exactly what was chosen. Required on a recovery campaign; on a trace campaign it is
+-- set where the trace runs on the closed book, null where it runs on live accounts.
+alter table public.campaigns add column if not exists write_off_reasons text[];
+alter table public.campaigns add constraint campaigns_call_kind_shape check (
+  (channel = 'call') = (call_kind is not null)
+  and ((call_kind in ('recovery', 'trace')) = (collector_ids is not null and cardinality(collector_ids) > 0))
+  and (call_kind <> 'recovery' or (write_off_reasons is not null and cardinality(write_off_reasons) > 0))
+  and (write_off_reasons is null or call_kind in ('recovery', 'trace')));
+
+-- THE CALL FOLLOWS THE DESK -- for a WORK campaign only. A recovery call and a trace item were
+-- given to collectors the campaign chose, not to whoever holds the account, so a desk change is
+-- not a reason to move them.
+create or replace function public.campaign_call_follows_desk() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old public.diary_entries%rowtype;
+  v_new uuid;
+  v_name text;
+begin
+  if new.assigned_to is not distinct from old.assigned_to then
+    return new;
+  end if;
+  select d.* into v_old
+    from public.diary_entries d
+    join public.campaigns c on c.id = d.campaign_id
+   where d.account_id = new.id and d.state = 'open' and d.kind = 'campaign'
+     and c.call_kind = 'work'
+   for update of d;
+  if not found or v_old.owner_id is not distinct from new.assigned_to then
+    return new;
+  end if;
+
+  if new.assigned_to is null then
+    update public.diary_entries
+       set state = 'cancelled',
+           outcome = coalesce(outcome, 'Taken off the diary: the account was left on nobody''s desk mid-campaign')
+     where id = v_old.id;
+    return new;
+  end if;
+
+  select nullif(btrim(p.name), '') into v_name from public.profiles p where p.id = new.assigned_to;
+  update public.diary_entries
+     set state = 'moved', moved_at = public.raptor_now(), moved_by = auth.uid(),
+         moved_reason = 'Account reallocated to ' || coalesce(v_name, 'another collector')
+   where id = v_old.id;
+  insert into public.diary_entries
+    (account_id, owner_id, due_on, kind, rank, campaign_id, source, reason, created_by, created_by_name)
+  values
+    (v_old.account_id, new.assigned_to, v_old.due_on, v_old.kind, v_old.rank, v_old.campaign_id,
+     v_old.source, v_old.reason, v_old.created_by, v_old.created_by_name)
+  returning id into v_new;
+  update public.diary_entries set moved_to = v_new where id = v_old.id;
+  return new;
+end $$;
+revoke all on function public.campaign_call_follows_desk() from public, anon, authenticated;
+
+-- HOW A CLOSED ACCOUNT ENDED, FOR RECOVERY: the firm's own word where it gave one, else Swordfish's
+-- reason read as accountBooks.closureKind reads it, and WITHDRAWN wherever the status or the
+-- imported reason says so (Swordfish has no ended_as, and a withdrawal it recorded must not be
+-- read as a write-off). campaigns.ts recoveryClosure is the same reading.
+create or replace function public.recovery_closure(p_ended_as text, p_status text, p_write_off_reason text)
+returns text
+language sql immutable set search_path to 'public'
+as $$
+  select case
+    when p_ended_as is not null then p_ended_as
+    when coalesce(p_status, '') ~* 'withdr' or coalesce(p_write_off_reason, '') ~* 'withdr' then 'withdrawn'
+    when coalesce(p_write_off_reason, '') ~* 'paid\s*in\s*full' then 'paid_up'
+    when coalesce(p_write_off_reason, '') ~* '^\s*settled' then 'settled'
+    else 'written_off'
+  end
+$$;
+
+-- THE WRITE-OFF REASON'S GROUPING KEY: where the reason came from and its words, trimmed and
+-- case-folded FOR GROUPING ONLY -- the label shown is the words as stored. Raptor's own write-off
+-- writes the closed list (accountEnding.ts WRITE_OFF_REASONS) into ended_reason; an imported one
+-- carries Swordfish's free text in write_off_reason. campaigns.ts writeOffReasonKey is the same.
+create or replace function public.write_off_reason_key(p_ended_as text, p_ended_reason text, p_write_off_reason text)
+returns text
+language sql immutable set search_path to 'public'
+as $$
+  select case
+    when p_ended_as = 'written_off' and nullif(btrim(coalesce(p_ended_reason, '')), '') is not null
+      then 'raptor:' || lower(regexp_replace(btrim(p_ended_reason), '\s+', ' ', 'g'))
+    when p_ended_as is null and nullif(btrim(coalesce(p_write_off_reason, '')), '') is not null
+      then 'imported:' || lower(regexp_replace(btrim(p_write_off_reason), '\s+', ' ', 'g'))
+    else 'none'
+  end
+$$;
+
+-- THE REASONS IN A SELECTION, with a count each, most common first: what the recovery and trace
+-- boxes offer. Counted in the database over the ids the box already resolved, never by loading the
+-- book into the browser. Only accounts a recovery could take are counted -- closed, written off
+-- (not paid, settled or withdrawn) and not prescribed -- so the count beside a reason is the count
+-- of calls it can become. campaign.run, as for every campaign; the server checks each account's
+-- desk again on preview and on create.
+create or replace function public.recovery_reasons(p_ids uuid[])
+returns table (reason_key text, source text, label text, accounts integer)
+language sql stable security definer set search_path to 'public'
+as $$
+  with x as (
+    select public.write_off_reason_key(a.ended_as, a.ended_reason, a.write_off_reason) k,
+           case when a.ended_as = 'written_off' then btrim(a.ended_reason) else btrim(a.write_off_reason) end raw
+      from public.debtor_accounts a
+     where a.id = any(p_ids) and public.has_capability('campaign.run')
+       and a.book = 'closed' and not coalesce(a.prescribed, false)
+       and public.recovery_closure(a.ended_as, a.status, a.write_off_reason) = 'written_off'
+  )
+  select k, split_part(k, ':', 1),
+         case when k = 'none' then 'No reason recorded' else mode() within group (order by raw) end,
+         count(*)::int
+    from x group by k order by count(*) desc, k
+$$;
+revoke all on function public.recovery_reasons(uuid[]) from public, anon;
+grant execute on function public.recovery_reasons(uuid[]) to authenticated;
+
+-- RE-OPEN ON A RECOVERY CALL: withdrawn is now refused outright (the firm), and read from the
+-- status and the imported reason as well as ended_as.
+create or replace function public.recovery_reopen(p_account uuid)
+returns uuid
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_entry public.diary_entries%rowtype;
+  v_c public.campaigns%rowtype;
+  v_a public.debtor_accounts%rowtype;
+  v_as text;
+  v_me text;
+begin
+  if v_uid is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  select d.* into v_entry from public.diary_entries d
+   where d.account_id = p_account and d.state = 'open' and d.kind = 'campaign' and d.owner_id = v_uid
+   for update;
+  if not found then
+    raise exception 'Only the collector with an open recovery call on this account may re-open it.' using errcode = '42501';
+  end if;
+  select * into v_c from public.campaigns where id = v_entry.campaign_id;
+  if v_c.call_kind is distinct from 'recovery' then
+    raise exception 'That call is not from a recovery campaign. Only a recovery call re-opens a closed account.' using errcode = '42501';
+  end if;
+  if v_c.status <> 'sending' or v_c.ends_on < public.raptor_today() then
+    raise exception 'That recovery campaign has ended.' using errcode = '42501';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account for update;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book <> 'closed' then
+    raise exception 'That account is not closed.' using errcode = '22023';
+  end if;
+  v_as := public.recovery_closure(v_a.ended_as, v_a.status, v_a.write_off_reason);
+  if v_as in ('paid_up', 'settled') then
+    raise exception 'That account was paid. There is nothing to recover.' using errcode = '22023';
+  end if;
+  if v_as = 'withdrawn' then
+    raise exception 'The client withdrew that account. A recovery campaign never re-opens a withdrawn account.' using errcode = '42501';
+  end if;
+  if v_a.prescribed then
+    raise exception 'That debt has prescribed (NCA s126B) and may not be collected.' using errcode = '22023';
+  end if;
+
+  select nullif(btrim(name), '') into v_me from public.profiles where id = v_uid;
+
+  update public.diary_entries
+     set recovered_at = public.raptor_now(),
+         recovered_from = jsonb_build_object(
+           'ended_as', v_a.ended_as, 'closed_as', v_as, 'ended_on', v_a.ended_on, 'ended_reason', v_a.ended_reason,
+           'write_off_reason', v_a.write_off_reason, 'status', v_a.status, 'assigned_to', v_a.assigned_to)
+   where id = v_entry.id;
+
+  if v_a.assigned_to is distinct from v_uid then
+    update public.debtor_accounts set assigned_to = v_uid where id = p_account;
+  end if;
+  update public.debtor_accounts
+     set ended_as = null, ended_on = null, ended_reason = null, ended_note = null, ended_by = null, ended_at = null,
+         status = case when status ~* '^(written.off|closed)' then 'Active: Re-opened' else status end
+   where id = p_account;
+
+  insert into public.account_notes (account_id, body, source, author_name, created_by)
+  values (p_account,
+    'Re-opened on a recovery call (campaign "' || v_c.name || '") by ' || coalesce(v_me, 'the collector')
+      || ': the debtor agreed to pay. It was written off'
+      || coalesce(' on ' || to_char(v_a.ended_on, 'DD Mon YYYY'), '')
+      || coalesce(' - ' || nullif(btrim(coalesce(v_a.ended_reason, v_a.write_off_reason)), ''), '')
+      || '. It is now on ' || coalesce(v_me, 'their') || '''s desk.',
+    'system', v_me, v_uid);
+  return v_c.id;
+end $$;
+revoke all on function public.recovery_reopen(uuid) from public, anon;
+grant execute on function public.recovery_reopen(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------------------------
+-- A TRACE CAMPAIGN'S SUCCESS, ACCOUNT BY ACCOUNT. The firm: "it refers them to trace. And then if
+-- there's new details ... did we make contact? ... then we can manage the success of the campaign."
+--
+-- DERIVED, NEVER STORED: every stage is read off records the work already leaves, so nothing has
+-- to remember to tick a box and nothing can drift from what happened. From NEW DETAILS on, each
+-- stage is counted only after the one before it, so the funnel reads "because of the trace";
+-- SEARCHED stands beside it (details can arrive without a search -- the debtor rings in):
+--
+--   REFERRED      the account's item on this campaign (the earliest, where it was handed on).
+--   SEARCHED      a trace was run after the referral: a bureau report filed (account_traces) or a
+--                 credit bureau search charged under item 4(c) (recordTrace raises it even when the
+--                 account is written off and earns nothing -- the row is still written).
+--   NEW DETAILS   after the referral, a contact was added to the account or verified, or a trace
+--                 finding was marked verified. The earliest of those is when the details arrived.
+--   CONTACT MADE  after the new details, a consultation -- item 7, raised only when a person says
+--                 they spoke to somebody about the account (CallButton). An SMS or email going
+--                 OUT is not contact; a call that rang out is not contact.
+--   PTP MADE      a promise to pay recorded on the account after that contact, by anybody.
+--   PAID          a live receipt (not reversed, rejected or demo) received after that contact.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.trace_campaign_funnel(p_campaign uuid)
+returns table (account_id uuid, case_number text, debtor text, referred_at timestamptz,
+               searched_at timestamptz, details_at timestamptz, contact_at timestamptz,
+               promised_at timestamptz, promised numeric, paid numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with me as (
+    select 1 from public.profiles where id = auth.uid() and status = 'Active'
+  ), ref as (
+    select d.account_id, min(d.created_at) t0
+      from public.diary_entries d
+      join public.campaigns c on c.id = d.campaign_id and c.call_kind = 'trace'
+     where d.campaign_id = p_campaign and exists (select 1 from me)
+     group by d.account_id
+  ), s1 as (
+    select ref.*,
+      least(
+        (select min(t.created_at) from public.account_traces t where t.account_id = ref.account_id and t.created_at >= ref.t0),
+        (select min(f.incurred_at) from public.account_fees f where f.account_id = ref.account_id
+            and f.annexure_item = '4c' and f.incurred_at >= ref.t0)) searched_at,
+      least(
+        (select min(k.created_at) from public.account_contacts k where k.account_id = ref.account_id and k.created_at >= ref.t0),
+        (select min(k.verified_at) from public.account_contacts k where k.account_id = ref.account_id and k.verified_at >= ref.t0),
+        (select min(i.outcome_at) from public.account_trace_items i where i.account_id = ref.account_id
+            and i.outcome = 'verified' and i.outcome_at >= ref.t0)) details_at
+      from ref
+  ), s2 as (
+    select s1.*,
+      case when s1.details_at is null then null else
+        (select min(f.incurred_at) from public.account_fees f where f.account_id = s1.account_id
+            and f.annexure_item = '7' and f.incurred_at >= s1.details_at) end contact_at
+      from s1
+  ), s3 as (
+    select s2.*,
+      case when s2.contact_at is null then null else
+        (select min(p.created_at) from public.promises_to_pay p where p.account_id = s2.account_id and p.created_at >= s2.contact_at) end promised_at,
+      case when s2.contact_at is null then null else
+        (select sum(coalesce(p.total_promised, p.amount)) from public.promises_to_pay p where p.account_id = s2.account_id and p.created_at >= s2.contact_at) end promised,
+      case when s2.contact_at is null then null else
+        (select sum(m.amount) from public.account_payments m where m.account_id = s2.account_id and m.received_at >= s2.contact_at
+            and m.reversed_at is null and m.rejected_at is null and not coalesce(m.is_demo, false)) end paid
+      from s2
+  )
+  select s3.account_id, a.case_number,
+         nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), ''),
+         s3.t0, s3.searched_at, s3.details_at, s3.contact_at, s3.promised_at, s3.promised, s3.paid
+    from s3 join public.debtor_accounts a on a.id = s3.account_id
+   order by a.case_number
+$$;
+revoke all on function public.trace_campaign_funnel(uuid) from public, anon;
+grant execute on function public.trace_campaign_funnel(uuid) to authenticated;
+
+-- THE LABEL A REASON IS SHOWN UNDER is its most common stored form, ties to the one with capitals
+-- (collate "C" sorts them first) -- "Uncontactable" rather than "  uncontactable " typed once.
+create or replace function public.recovery_reasons(p_ids uuid[])
+returns table (reason_key text, source text, label text, accounts integer)
+language sql stable security definer set search_path to 'public'
+as $$
+  with x as (
+    select public.write_off_reason_key(a.ended_as, a.ended_reason, a.write_off_reason) k,
+           case when a.ended_as = 'written_off' then btrim(a.ended_reason) else btrim(a.write_off_reason) end raw
+      from public.debtor_accounts a
+     where a.id = any(p_ids) and public.has_capability('campaign.run')
+       and a.book = 'closed' and not coalesce(a.prescribed, false)
+       and public.recovery_closure(a.ended_as, a.status, a.write_off_reason) = 'written_off'
+  ), forms as (
+    select k, raw, count(*) n from x group by k, raw
+  )
+  select k, split_part(k, ':', 1),
+         case when k = 'none' then 'No reason recorded'
+              else (array_agg(raw order by n desc, raw collate "C"))[1] end,
+         sum(n)::int
+    from forms group by k order by sum(n) desc, k
+$$;
+revoke all on function public.recovery_reasons(uuid[]) from public, anon;
+grant execute on function public.recovery_reasons(uuid[]) to authenticated;
+
+-- ============================================================================================
+-- S10 / CAMPAIGN RESULTS: ONE CLOCK FOR "WHILE THE CALL WAS OPEN" (22 Oct).
+--
+-- A PTP made from a campaign is a promise recorded between the call landing on a diary and the
+-- call being worked. created_at on both is the database's now(); done_at and moved_at are written
+-- by the app from the FIRM'S clock (clockNow / raptor_now), which on staging is a different day.
+-- Comparing the two kinds of stamp counted no promise at all on staging. So the moment an entry
+-- leaves `open` is stamped here, on the same clock as created_at, and the window reads that.
+-- Old rows have none and fall back to the firm's-clock stamps, which on production agree.
+-- ============================================================================================
+alter table public.diary_entries add column if not exists closed_at timestamptz;
+
+create or replace function public.stamp_diary_closed_at() returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if old.state = 'open' and new.state <> 'open' then
+    new.closed_at := now();
+  end if;
+  return new;
+end $$;
+
+do $$ begin execute 'dr' || 'op trigger if exists stamp_diary_closed_at on public.diary_entries'; end $$;
+create trigger stamp_diary_closed_at
+  before update on public.diary_entries
+  for each row execute function public.stamp_diary_closed_at();
+
+create or replace function public.campaign_call_promises(p_ids uuid[])
+returns table (campaign_id uuid, owner_id uuid, promise_id uuid, amount numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  select distinct on (d.campaign_id, p.id) d.campaign_id, d.owner_id, p.id, coalesce(p.total_promised, p.amount)
+    from public.diary_entries d
+    join public.campaigns c on c.id = d.campaign_id
+    join public.promises_to_pay p
+      on p.account_id = d.account_id and p.created_by = d.owner_id and p.created_at >= d.created_at
+     and p.created_at < case d.state
+           when 'open' then 'infinity'::timestamptz
+           -- Worked: to the end of the firm's day it was worked on (a promise written up after Done).
+           when 'done' then ((((coalesce(d.closed_at, d.done_at)) at time zone 'Africa/Johannesburg')::date + 1)::timestamp
+                             at time zone 'Africa/Johannesburg')
+           -- Handed to the next collector with the account: theirs from then on.
+           when 'moved' then coalesce(d.closed_at, d.moved_at)
+           -- Missed: to when the campaign took it off.
+           else coalesce(d.closed_at, c.stopped_at, c.finished_at, ((c.ends_on + 1)::timestamp at time zone 'Africa/Johannesburg'))
+         end
+   where d.campaign_id = any(p_ids) and d.kind = 'campaign'
+   order by d.campaign_id, p.id, d.created_at
+$$;
+revoke all on function public.campaign_call_promises(uuid[]) from public, anon, authenticated;
+
+-- THE TRACE FUNNEL ON ONE CLOCK (22 Oct). The referral's stamp (diary_entries.created_at) is the
+-- database's now(); a fee's incurred_at, a payment's received_at, a contact's verified_at and a trace
+-- finding's outcome_at are the FIRM'S clock, which on staging is another day -- so the first version
+-- found nothing on staging. Every stage is now read off the row's own created_at (now(), the same
+-- clock as the referral), and the two stamps that only exist on the firm's clock (a contact verified,
+-- a finding verified) are brought onto the real one by today's offset between the two -- nought on
+-- production, where the clocks are one.
+create or replace function public.trace_campaign_funnel(p_campaign uuid)
+returns table (account_id uuid, case_number text, debtor text, referred_at timestamptz,
+               searched_at timestamptz, details_at timestamptz, contact_at timestamptz,
+               promised_at timestamptz, promised numeric, paid numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with me as (
+    select 1 from public.profiles where id = auth.uid() and status = 'Active'
+  ), shift as (
+    select (((now() at time zone 'Africa/Johannesburg')::date - public.raptor_today()) * interval '1 day') d
+  ), ref as (
+    select d.account_id, min(d.created_at) t0
+      from public.diary_entries d
+      join public.campaigns c on c.id = d.campaign_id and c.call_kind = 'trace'
+     where d.campaign_id = p_campaign and exists (select 1 from me)
+     group by d.account_id
+  ), s1 as (
+    select ref.*,
+      least(
+        (select min(t.created_at) from public.account_traces t where t.account_id = ref.account_id and t.created_at >= ref.t0),
+        (select min(f.created_at) from public.account_fees f where f.account_id = ref.account_id
+            and f.annexure_item = '4c' and f.created_at >= ref.t0)) searched_at,
+      least(
+        (select min(k.created_at) from public.account_contacts k where k.account_id = ref.account_id and k.created_at >= ref.t0),
+        (select min(k.verified_at + (select d from shift)) from public.account_contacts k where k.account_id = ref.account_id
+            and k.verified_at + (select d from shift) >= ref.t0),
+        (select min(i.outcome_at + (select d from shift)) from public.account_trace_items i where i.account_id = ref.account_id
+            and i.outcome = 'verified' and i.outcome_at + (select d from shift) >= ref.t0)) details_at
+      from ref
+  ), s2 as (
+    select s1.*,
+      case when s1.details_at is null then null else
+        (select min(f.created_at) from public.account_fees f where f.account_id = s1.account_id
+            and f.annexure_item = '7' and f.created_at >= s1.details_at) end contact_at
+      from s1
+  ), s3 as (
+    select s2.*,
+      case when s2.contact_at is null then null else
+        (select min(p.created_at) from public.promises_to_pay p where p.account_id = s2.account_id and p.created_at >= s2.contact_at) end promised_at,
+      case when s2.contact_at is null then null else
+        (select sum(coalesce(p.total_promised, p.amount)) from public.promises_to_pay p where p.account_id = s2.account_id and p.created_at >= s2.contact_at) end promised,
+      case when s2.contact_at is null then null else
+        (select sum(m.amount) from public.account_payments m where m.account_id = s2.account_id and m.created_at >= s2.contact_at
+            and m.reversed_at is null and m.rejected_at is null and not coalesce(m.is_demo, false)) end paid
+      from s2
+  )
+  select s3.account_id, a.case_number,
+         nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), ''),
+         s3.t0, s3.searched_at, s3.details_at, s3.contact_at, s3.promised_at, s3.promised, s3.paid
+    from s3 join public.debtor_accounts a on a.id = s3.account_id
+   order by a.case_number
+$$;
+revoke all on function public.trace_campaign_funnel(uuid) from public, anon;
+grant execute on function public.trace_campaign_funnel(uuid) to authenticated;

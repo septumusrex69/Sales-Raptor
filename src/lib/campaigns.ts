@@ -61,6 +61,11 @@ export type SkipReason =
   | 'no_desk'
   | 'no_phone'
   | 'on_call_campaign'
+  /* A recovery or trace campaign's own (22 Oct). */
+  | 'not_closed'
+  | 'paid'
+  | 'withdrawn'
+  | 'reason_not_chosen'
 
 /** What one account looks like to the skip rule. Gathered in bulk by the server. */
 export interface CampaignFacts {
@@ -139,6 +144,148 @@ export function callSkip(
   return null
 }
 
+/* ------------------------------------------------------------------------------------------
+ * THE CLOSED BOOK: A RECOVERY CALL, AND A TRACE ON WRITTEN-OFF ACCOUNTS (S10, 22 Oct)
+ * ------------------------------------------------------------------------------------------ */
+
+/**
+ * HOW A CLOSED ACCOUNT ENDED, AS A RECOVERY READS IT. The firm's own word (`ended_as`) where it
+ * gave one; else Swordfish's, read the way accountBooks.closureKind reads it ("Paid in Full" is paid
+ * up, "Settled by way of..." settled), with WITHDRAWN taken from the status or the imported reason
+ * as well -- Swordfish has no ended_as, and a withdrawal it recorded must never be read as a
+ * write-off and rung. The database's recovery_closure() is the same reading; check-campaign-recovery
+ * holds the two together.
+ */
+export function recoveryClosure(a: {
+  endedAs: string | null; status: string | null; writeOffReason: string | null
+}): 'paid_up' | 'settled' | 'written_off' | 'withdrawn' {
+  if (a.endedAs) return a.endedAs as 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
+  if (/withdr/i.test(a.status ?? '') || /withdr/i.test(a.writeOffReason ?? '')) return 'withdrawn'
+  if (/paid\s*in\s*full/i.test(a.writeOffReason ?? '')) return 'paid_up'
+  if (/^\s*settled/i.test(a.writeOffReason ?? '')) return 'settled'
+  return 'written_off'
+}
+
+/**
+ * THE WRITE-OFF REASON, AS A KEY TO CHOOSE BY. The firm: "we should be able to choose which type of
+ * accounts ... this one was written off because of uncontactability. Or this one ... because of
+ * refusal to pay or recommended write-off from us."
+ *
+ * TWO SOURCES, KEPT APART. Raptor's own write-off writes one of accountEnding.ts WRITE_OFF_REASONS
+ * into `ended_reason` (settle_account); an imported one carries whatever Swordfish's user typed in
+ * `write_off_reason`. Trimmed and case-folded FOR GROUPING ONLY -- the box shows the words as
+ * stored. 'none' is "No reason recorded". The database's write_off_reason_key() is the same.
+ */
+export function writeOffReasonKey(a: {
+  endedAs: string | null; endedReason: string | null; writeOffReason: string | null
+}): string {
+  const fold = (t: string) => t.trim().replace(/\s+/g, ' ').toLowerCase()
+  if (a.endedAs === 'written_off' && a.endedReason?.trim()) return `raptor:${fold(a.endedReason)}`
+  if (!a.endedAs && a.writeOffReason?.trim()) return `imported:${fold(a.writeOffReason)}`
+  return 'none'
+}
+
+/** What one account looks like to the closed-book rules. */
+export interface ClosedFacts extends CampaignFacts {
+  endedAs: string | null
+  endedReason: string | null
+  writeOffReason: string | null
+  status: string | null
+  onCallCampaign: boolean
+}
+
+/**
+ * IS THIS ACCOUNT SKIPPED BY A RECOVERY CALL CAMPAIGN, and for what.
+ *
+ * THE FIRM: "on archived ... accounts that have already been closed, or written off, not paid up
+ * stuff ... just like unrecoverable ... to try to get them back" -- and then, plainly: withdrawn and
+ * paid-up accounts are NEVER in one. Not behind a tick.
+ *
+ *   not_closed         a live account is the ordinary call campaign's, not this one's.
+ *   paid               paid up or settled: there is nothing to recover.
+ *   withdrawn          the client took it back; the firm may have no right to collect it at all.
+ *   prescribed         NCA s126B -- a prescribed debt may not be collected, written off or not.
+ *   reason_not_chosen  written off for a reason the person did not pick.
+ *   dispute            an open dispute stops a call on any book.
+ *   no_phone           a call needs a number.
+ *   on_call_campaign   one campaign item per account (the index's rule).
+ *
+ * NOT A REASON: nobody's desk. A closed account usually sits on nobody's desk, or on the desk of
+ * somebody who has left -- which is exactly why the recovery box asks who works it.
+ */
+export function recoverySkip(facts: ClosedFacts, chosenReasons: readonly string[]): SkipReason | null {
+  if (facts.book !== 'closed') return 'not_closed'
+  const closed = recoveryClosure(facts)
+  if (closed === 'paid_up' || closed === 'settled') return 'paid'
+  if (closed === 'withdrawn') return 'withdrawn'
+  if (facts.prescribed) return 'prescribed'
+  if (!chosenReasons.includes(writeOffReasonKey(facts))) return 'reason_not_chosen'
+  if (facts.openDispute) return 'dispute'
+  if (!facts.mobile?.trim()) return 'no_phone'
+  if (facts.onCallCampaign) return 'on_call_campaign'
+  return null
+}
+
+/**
+ * IS THIS ACCOUNT SKIPPED BY A TRACE CAMPAIGN. The firm: "we can also run a trace campaign. So it
+ * refers them to trace." On the LIVE book -- the ordinary rules, without needing a number, since no
+ * working number is the commonest reason to trace -- or on the CLOSED book chosen by write-off
+ * reason: the recovery rules, again without the number.
+ */
+export function traceSkip(
+  facts: ClosedFacts, target: 'live' | 'closed', chosenReasons: readonly string[],
+): SkipReason | null {
+  if (target === 'closed') {
+    /* The number is not asked for: tracing is how an account without one gets one. */
+    return recoverySkip({ ...facts, mobile: facts.mobile || 'not needed' }, chosenReasons)
+  }
+  if (facts.book === 'closed') return 'closed'
+  if (facts.prescribed) return 'prescribed'
+  if (facts.book === 'on_hold') return 'on_hold'
+  if (facts.openDispute) return 'dispute'
+  if (facts.onCallCampaign) return 'on_call_campaign'
+  return null
+}
+
+/**
+ * MAY THIS PERSON PUT THIS CLOSED ACCOUNT ON A RECOVERY OR TRACE CAMPAIGN?
+ *
+ * mayCampaignOn first -- an Administrator any, a liaison their own clients, a leader their team's
+ * desks. Then the one widening the closed book needs: an account on NOBODY'S desk, or on the desk of
+ * somebody no longer here, may be taken by a leader (anybody with campaign.run who is not a liaison)
+ * -- otherwise the written-off book, which is mostly exactly that, could be recovered by nobody but
+ * an Administrator. A liaison stays inside their own clients.
+ */
+export function mayRecoverOn(
+  caller: CampaignCaller, holder: (DeskHolder & { active?: boolean }) | null, liaison: DeskHolder | null = null,
+): boolean {
+  if (mayCampaignOn(caller, holder, liaison)) return true
+  if (!can(caller, 'campaign.run')) return false
+  if (caller.role === 'Liaison' || caller.role === 'Liaison Manager') return false
+  return !holder || holder.active === false
+}
+
+/** A person a campaign's work can be given to, as the box and the server read them. */
+export interface Collector { id: string; role: UserRole; teamId: string | null; active: boolean }
+
+/**
+ * MAY THIS PERSON GIVE A RECOVERY OR TRACE CAMPAIGN'S WORK TO THIS COLLECTOR?
+ *
+ * Only active people on the collections floor (FLOOR_ROLES). An Administrator, a liaison or a
+ * Liaison Manager to any of them -- a liaison runs it over their own clients' accounts and has no
+ * floor of their own, so "choosing collectors any". A team leader to their own team; a leader with
+ * no team but floor.lead (the Call Centre Manager) to the whole floor -- the same desks mayCampaignOn
+ * lets them campaign on.
+ */
+export function mayGiveCampaignTo(caller: CampaignCaller, collector: Collector): boolean {
+  if (!can(caller, 'campaign.run')) return false
+  if (!collector.active || !FLOOR_ROLES.includes(collector.role)) return false
+  if (caller.role === 'Administrator' || caller.role === 'Liaison' || caller.role === 'Liaison Manager') return true
+  if (collector.id === caller.id) return true
+  if (caller.teamId) return collector.teamId === caller.teamId
+  return can(caller, 'floor.lead')
+}
+
 /**
  * A number an SMS can go to -- the same test as toMsisdn on the server (connectMobile.ts), written
  * here as a yes/no because this file cannot import a serverless module. Ten digits starting 0, or
@@ -169,6 +316,10 @@ export function skipWords(reason: SkipReason, facts?: Pick<CampaignFacts, 'holdR
     case 'no_desk': return 'On nobody’s desk, so on nobody’s diary'
     case 'no_phone': return 'No phone number'
     case 'on_call_campaign': return 'Already on another call campaign'
+    case 'not_closed': return 'Not closed: a recovery campaign rings the closed book only'
+    case 'paid': return 'Paid up or settled: there is nothing to recover'
+    case 'withdrawn': return 'Withdrawn by the client: never in a recovery campaign'
+    case 'reason_not_chosen': return 'Written off for a reason not chosen for this campaign'
   }
 }
 

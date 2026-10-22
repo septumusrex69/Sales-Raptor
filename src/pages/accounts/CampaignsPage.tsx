@@ -7,7 +7,7 @@ import { rand } from '../../lib/money'
 import {
   fetchCallProgress, fetchCampaigns, sendCampaignPass, stopCampaign, type CampaignRow,
 } from '../../lib/campaignApi'
-import { rankWords } from '../../lib/callCampaign.ts'
+import { CALL_KIND_LABEL, rankWords } from '../../lib/callCampaign.ts'
 import { mayManageCampaign } from '../../lib/campaigns.ts'
 import { canRunCampaigns } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
@@ -94,7 +94,8 @@ export function CampaignsPage() {
         <h1 className="text-lg font-semibold text-slate-800">Campaigns</h1>
         <p className="text-[13px] text-slate-500">
           One SMS or email to a selection of debtors, or a call campaign onto the collectors’ diaries, started from
-          the Accounts list. Each message is on the account it went to and charged there under Annexure B; they go
+          the Accounts list. How every campaign went, PTPs made included, is under{' '}
+          <Link to="/campaigns/results" className="underline underline-offset-2">Campaign results</Link>. Each message is on the account it went to and charged there under Annexure B; they go
           out only in the firm’s calling hours, and keep going when this page is closed. A call is not charged.
         </p>
       </div>
@@ -185,6 +186,12 @@ function CallRow({ r, fresh, may, stopping, onStop }: {
       <div className="flex flex-wrap items-center gap-2">
         <Phone size={14} className="text-slate-400" />
         <span className="font-medium text-slate-800">{r.name}</span>
+        {/* A recovery or trace campaign says so: its calls are on the closed book or are traces. */}
+        {r.callKind && r.callKind !== 'work' && (
+          <span className="text-[11px] rounded px-1.5 py-0.5 bg-gold-50 text-gold-800" data-testid="call-kind-tag">
+            {CALL_KIND_LABEL[r.callKind]}
+          </span>
+        )}
         <span className={`text-[11px] rounded px-1.5 py-0.5 ${
           r.status === 'sending' ? 'bg-brand-50 text-brand-700' : r.status === 'stopped' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-50 text-emerald-700'}`}>
           {r.status === 'sending' ? 'Running' : r.status === 'stopped' ? 'Stopped' : 'Ended'}

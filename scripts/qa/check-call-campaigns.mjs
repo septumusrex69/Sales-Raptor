@@ -135,7 +135,8 @@ ok('...nor books one', /if \(input\.kind === 'campaign'\) throw/.test(diarise))
 ok('a call is never moved', /if \(input\.entry\.kind === 'campaign'\) throw/.test(diary))
 ok('"has a diary date" means its own', /\.eq\('account_id', accountId\)\s*\.eq\('state', 'open'\)\s*\.neq\('kind', 'campaign'\)/.test(diary))
 ok('the hand-out supersedes only the account\'s own date', /\.eq\('state', 'open'\)\s*\.neq\('kind', 'campaign'\)/.test(strip(read('src/lib/handOutWrite.ts'))))
-ok('the day list carries the campaign\'s script', /campaigns!diary_entries_campaign_id_fkey \( name, body, ends_on \)/.test(diary))
+ok('the day list carries the campaign\'s script, and what kind of campaign it is',
+  /campaigns!diary_entries_campaign_id_fkey \( name, body, ends_on, call_kind, status \)/.test(diary))
 
 /* ---------- 5. who ---------- */
 const person = (id, role, teamId = null) => ({ id, role, teamId })

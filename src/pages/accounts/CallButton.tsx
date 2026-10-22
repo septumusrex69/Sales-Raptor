@@ -15,6 +15,10 @@ import { recordOutcome } from '../../lib/recordOutcome'
 import type { ChargeResult } from '../../lib/accountCharges'
 import type { ClientPosition } from '../../lib/clientPosition'
 import { clockNow } from '../../lib/clock.ts'
+import { useBuzzBox } from '../../store/BuzzBoxContext'
+import {
+  AUTO_DIAL_EVENT, AUTO_DIAL_RESULT_EVENT, type AutoDialRequest, type AutoDialResult,
+} from '../../lib/autoDial.ts'
 
 /**
  * THE FIVE OUTCOMES A CALL SOMEBODY ANSWERED CAN HAVE.
@@ -177,6 +181,33 @@ export function CallButton({ accountId, numbers, actor, livePromise, standing, c
     if (call.viaPabx && placed.callId) watchForAnswer(placed.callId, call.to)
     else { setConnected(null); setAsking(call.to) }
   }
+
+  /*
+   * AUTO-DIAL ARRIVES HERE (autoDial.ts). The diary run's bar decides a call should be placed; this
+   * places it, through BuzzBox, and then runs `dialled` -- the very path a press takes -- so the
+   * auto-dialled call is charged under item 2, written to the timeline and asked about afterwards
+   * exactly like one somebody clicked. The bar only ever asks when BuzzBox can dial; a tel: link
+   * cannot be pressed for anybody, so there is no fallback here either.
+   */
+  const latestDialled = useRef(dialled)
+  latestDialled.current = dialled
+  const { canDial, dial } = useBuzzBox()
+  useEffect(() => {
+    const onRequest = (ev: Event) => {
+      const req = (ev as CustomEvent<AutoDialRequest>).detail
+      if (!req || req.accountId !== accountId) return
+      const answer = (r: AutoDialResult) => window.dispatchEvent(new CustomEvent<AutoDialResult>(AUTO_DIAL_RESULT_EVENT, { detail: r }))
+      if (!canDial) { answer({ accountId, ok: false, error: 'BuzzBox is not connected for you.' }); return }
+      void (async () => {
+        const r = await dial(req.number, `Campaign call (account)`)
+        if (!r.ok) { answer({ accountId, ok: false, error: r.error }); return }
+        answer({ accountId, ok: true })
+        await latestDialled.current({ from: r.from, to: r.to, viaPabx: true })
+      })()
+    }
+    window.addEventListener(AUTO_DIAL_EVENT, onRequest)
+    return () => window.removeEventListener(AUTO_DIAL_EVENT, onRequest)
+  }, [accountId, canDial, dial])
 
   /*
    * Ask when the call is over, not when it was placed.

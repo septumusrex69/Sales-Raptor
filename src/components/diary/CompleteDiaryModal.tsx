@@ -4,12 +4,13 @@ import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { NextDiaryFields, initialPlan, type NextPlan } from './NextDiaryFields'
-import { workEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
+import { finishOnClosedAccount, workEntry, debtorName, type DiaryRow } from '../../lib/diary.ts'
 import { DIARY_KINDS } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
 import { ClientLinePreview } from './ClientLinePreview'
 import { OutcomePicker } from './OutcomePicker'
+import { ClosedFinish } from './ClosedFinish'
 import {
   CALL_OUTCOMES, EMPTY_OUTCOME, outcomeReady, type CallOutcome, type OutcomeChoice,
 } from '../../lib/callOutcome.ts'
@@ -94,6 +95,28 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
     } finally {
       setBusy(false)
     }
+  }
+
+  /*
+   * A CAMPAIGN ITEM ON A CLOSED ACCOUNT (a recovery call, or a trace on the written-off book) that
+   * was not won back: closed with what came of it, and nothing else -- no outcome that writes a
+   * promise onto a closed account, no next date. "Otherwise, the account just stays where it was."
+   * A promise is taken on the account page, after its collector re-opens it.
+   */
+  if (entry.kind === 'campaign' && entry.account.book === 'closed') {
+    const closeIt = async () => {
+      setBusy(true); setError(null)
+      try {
+        await finishOnClosedAccount({ entry, outcome, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
+        await onDone()
+      } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+    }
+    return (
+      <Modal title="Mark this worked" onClose={onClose} width={520}>
+        <ClosedFinish name={`${debtorName(entry)} — ${entry.campaign?.name ?? ''}`} script={entry.campaign?.script ?? null}
+          outcome={outcome} setOutcome={setOutcome} error={error} busy={busy} onClose={onClose} onSave={() => void closeIt()} />
+      </Modal>
+    )
   }
 
   return (
