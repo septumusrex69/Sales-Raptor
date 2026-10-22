@@ -218,9 +218,11 @@ ok('...counted once per promise', /distinct on \(d\.campaign_id, p\.id\)/.test(p
 const page = strip(read('src/pages/campaigns/CampaignResultsPage.tsx'))
 ok('the results page shows no fee', !/fee|feeEstimate|counts\.fees/i.test(page))
 ok('...and changes nothing', !/stopCampaign|sendCampaignPass|createCallCampaign/.test(page))
-ok('it is in the menu for everybody', /\{ to: '\/campaigns\/results', label: 'Campaign results'/.test(read('src/components/layout/Sidebar.tsx'))
-  && !/n\.to !== '\/campaigns\/results'/.test(read('src/components/layout/Sidebar.tsx')))
-ok('...and routed', /path="\/campaigns\/results" element=\{<CampaignResultsPage \/>\}/.test(read('src/App.tsx')))
+/* 22 Oct: a tab of Reports (open to everybody) rather than a menu item of its own -- the firm asked. */
+ok('it is a Reports tab, which everybody has', /'Rejected Deals', 'Campaigns'\] as const/.test(read('src/pages/reports/ReportsPage.tsx'))
+  && /\{tab === 'Campaigns' && <CampaignResultsPage \/>\}/.test(read('src/pages/reports/ReportsPage.tsx'))
+  && !/n\.to !== '\/reports'/.test(read('src/components/layout/Sidebar.tsx')))
+ok('...and the old address still lands there', /path="\/campaigns\/results" element=\{<Navigate to="\/reports\?tab=Campaigns" replace \/>\}/.test(read('src/App.tsx')))
 ok('a collector can read the campaign their call came from', /create policy campaigns_read_own_calls on public\.campaigns for select to authenticated/.test(sql))
 check('kinds in the firm\'s words', ['sms', 'email', 'work', 'recovery', 'trace'].map((k) => resultKind({ channel: k === 'sms' || k === 'email' ? k : 'call', callKind: k })),
   ['SMS', 'Email', 'Calls', 'Recovery calls', 'Trace'])

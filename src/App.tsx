@@ -82,7 +82,6 @@ const AccountDetail = lazy(() => import('./pages/accounts/AccountDetail').then((
 const DisputesBoard = lazy(() => import('./pages/accounts/DisputesBoard').then((m) => ({ default: m.DisputesBoard })))
 const ReadyToClose = lazy(() => import('./pages/accounts/ReadyToClose').then((m) => ({ default: m.ReadyToClose })))
 const CampaignsPage = lazy(() => import('./pages/accounts/CampaignsPage').then((m) => ({ default: m.CampaignsPage })))
-const CampaignResultsPage = lazy(() => import('./pages/campaigns/CampaignResultsPage').then((m) => ({ default: m.CampaignResultsPage })))
 const QueryDetail = lazy(() => import('./pages/queries/QueryDetail').then((m) => ({ default: m.QueryDetail })))
 const LibraryWorkflows = lazy(() => import('./pages/library/LibraryWorkflows').then((m) => ({ default: m.LibraryWorkflows })))
 const LibraryLetterhead = lazy(() => import('./pages/library/LibraryLetterhead').then((m) => ({ default: m.LibraryLetterhead })))
@@ -267,7 +266,8 @@ function App() {
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/diary" element={<DiaryPage />} handle={{ title: 'Diary' }} />
               {/* For everybody (22 Oct): "anybody can see the campaign results". Reading, not running. */}
-              <Route path="/campaigns/results" element={<CampaignResultsPage />} handle={{ title: 'Campaign results' }} />
+              {/* A tab of Reports now (22 Oct); the old address still lands there. */}
+              <Route path="/campaigns/results" element={<Navigate to="/reports?tab=Campaigns" replace />} />
               <Route path="/performance" element={<CollectorDashboard />} handle={{ title: 'Collections' }} />
               {/* One collector's own page. Open to everybody, at the firm's instruction: "they
                   should also be able to see the entire company's performance, and where they

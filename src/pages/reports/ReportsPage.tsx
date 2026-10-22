@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { CampaignResultsPage } from '../campaigns/CampaignResultsPage'
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { SlidersHorizontal } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -22,7 +23,10 @@ import { isAssignableOwner } from '../../lib/permissions'
 import { LEAD_STATUSES, isActiveLead, isEngagedLead } from '../../lib/leadStatus'
 import { dealKind } from '../../lib/dealKind'
 
-const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Rejected Deals'] as const
+/* CAMPAIGNS IS A REPORT, not a menu item of its own (the firm, 22 Oct: "the campaign runs review,
+   shouldn't that be somewhere under reports rather than having its own pane?"). Reports is open to
+   everybody, which is what campaign results must be. */
+const TABS = ['Overview', 'Leads', 'Pipeline', 'Products & Services', 'Debt Collection', 'Sales Team', 'Lead Sources', 'Geography', 'Rejected Deals', 'Campaigns'] as const
 type Tab = (typeof TABS)[number]
 const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
 const BAR_COLOR = STAGE_COLORS['Quotation Sent']
@@ -30,7 +34,8 @@ const BAR_COLOR = STAGE_COLORS['Quotation Sent']
 export function ReportsPage() {
   const { leads, deals, activities, users } = useAppStore()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
-  const [tab, setTab] = useState<Tab>('Overview')
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => (TABS as readonly string[]).includes(params.get('tab') ?? '') ? params.get('tab') as Tab : 'Overview')
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
   const [compareMode, setCompareMode] = useState<CompareMode>('previous')
   const [showFilters, setShowFilters] = useState(false)
@@ -307,8 +312,12 @@ export function ReportsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">Reports</h2>
-          <p className="text-sm text-slate-400 mt-0.5">Sales performance across the selected Sales Cycle</p>
+          <p className="text-sm text-slate-400 mt-0.5">
+            {tab === 'Campaigns' ? 'How every campaign went' : 'Sales performance across the selected Sales Cycle'}
+          </p>
         </div>
+        {/* The sales cycle and its filters mean nothing to a campaign, so they step aside for it. */}
+        {tab !== 'Campaigns' && (
         <div className="flex flex-wrap items-center gap-2">
           <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={TODAY} />
           <CompareSelector value={compareMode} onChange={setCompareMode} />
@@ -319,9 +328,10 @@ export function ReportsPage() {
             <SlidersHorizontal size={14} /> Filters
           </button>
         </div>
+        )}
       </div>
 
-      {showFilters && (
+      {showFilters && tab !== 'Campaigns' && (
         <Card className="p-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <FormField label="Sales Rep">
@@ -420,6 +430,8 @@ export function ReportsPage() {
           </button>
         ))}
       </div>
+
+      {tab === 'Campaigns' && <CampaignResultsPage />}
 
       {tab === 'Overview' && (
         <div className="space-y-5">

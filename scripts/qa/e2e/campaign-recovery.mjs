@@ -166,9 +166,10 @@ try {
       [(u) => /\/rpc\/trace_campaign_funnel/.test(u), () => ({ body: funnel })],
     ]), [])
     await go(page, '/')
-    const link = page.locator('a[href="/campaigns/results"]').first()
+    const link = page.locator('a[href="/reports"]').first()
     await link.waitFor({ timeout: 20000 }).catch(() => {})
-    t.ok('a Pre-legal Agent has Campaign results in the menu', await link.count() > 0)
+    t.ok('a Pre-legal Agent has Reports in the menu, where campaign results now live', await link.count() > 0)
+    /* The old address, which lands on the Reports tab. */
     await go(page, '/campaigns/results')
     await page.getByTestId('result-row').first().waitFor({ timeout: 20000 })
       .catch(async (e) => { await page.screenshot({ path: `${OUT}/campaign-results-fail.png`, fullPage: true }); throw e })

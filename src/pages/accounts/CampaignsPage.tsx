@@ -95,7 +95,7 @@ export function CampaignsPage() {
         <p className="text-[13px] text-slate-500">
           One SMS or email to a selection of debtors, or a call campaign onto the collectors’ diaries, started from
           the Accounts list. How every campaign went, PTPs made included, is under{' '}
-          <Link to="/campaigns/results" className="underline underline-offset-2">Campaign results</Link>. Each message is on the account it went to and charged there under Annexure B; they go
+          <Link to="/reports?tab=Campaigns" className="underline underline-offset-2">Campaign results</Link>. Each message is on the account it went to and charged there under Annexure B; they go
           out only in the firm’s calling hours, and keep going when this page is closed. A call is not charged.
         </p>
       </div>
