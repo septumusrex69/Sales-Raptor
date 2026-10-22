@@ -18,6 +18,30 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+0000000000. **S10, 22 Oct: THE SET-OFF GAP IS CLOSED** (the firm: "you can proceed with one"). Staging has
+   it (migration `s10_set_off_credited_as_covered`); production does not (§5).
+   - **A charge set off is the firm's only as far as the client's trust money covered it.** The client
+     side of an approved run is unchanged (client -charges, the "Client owes us" carry); the firm is
+     credited cumulatively per client -- set-off owed, less what is still short (read as PTC first, then
+     set-off), less what the client paid into the business account (never credited in trust), less what
+     was already credited. The PTC share's own rule. Probed on staging, rolled back, to the cent:
+     R1 000 owed, nothing collected -> firm R0 (was R1 000 drawable); next run collects R600 -> R600; the
+     client pays R400 into business -> no trust credit, ledger R600 = bank (was R1 000 vs R600).
+   - **A brought-forward CREDIT is unchanged** (client +credit, firm -credit, same wording); a fully
+     covered run writes exactly the old pair.
+   - **The PTC rule changed in one place**: business payments count against the PTC share only up to
+     what of it was resolved. Before, a set-off shortfall paid into the business account wrote a false
+     "PTC share recovered, taken back (a PTC was reversed)" -R400 on the next run (seen in the probe).
+   - **Against the bank / the cash view**: `trust_position` counts the uncovered set-off as the firm's,
+     waiting (derived, not drawable, like the PTC share); `trust_cash_by_cycle` reads a run's set-off off
+     the client's entry so its cycles still total the bank. check-set-off-covered (40);
+     check-ptc-share-recovered updated.
+   - **For the firm to decide** (nothing historic touched): (1) clients already credited in full while
+     below nil get a catch-up negative entry at their next approval -- if the firm already DREW that
+     money, the firm's share in trust goes short and is shown so; (2) a shortfall from a payment
+     reversed after payover is read after PTC and set-off, so a business payment that in fact paid such
+     a reversal under-credits the firm (safe side) -- and a reversal paid into the business account
+     leaves the trust short by it, an older question than this one.
 000000000. **S10, 22 Oct: THE QUESTION AT THE DOOR OF AN ACCOUNT** (the firm's design, two messages).
    - **Your own account, worked** (a call, note, SMS, email, promise, trace -- not just reading it):
      leaving it for ANY screen is **stopped while its diary date is today, past or missing** -- only a
@@ -68,7 +92,7 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      collected, the firm shows R1 000 drawable from trust that is not there. Withdrawal fees already
      do this; brought-forward balances (R400k-R1m) make it large. Proposed fix: credit the firm only
      as far as the client's trust money covered it, the rest carried as owing (the PTC share's rule).
-     Asked the user 21 Oct; not changed until they say.
+     Asked the user 21 Oct; **approved and built 22 Oct -- see the first item above.**
    - **Bring the balances forward ON cut-over day**, not during the parallel run: a balance dated 10
      Dec is taken by the first Raptor run after it.
    - **Resend setup** for News: account, domain + DNS records, `RESEND_API_KEY`, `MARKETING_FROM`
@@ -1286,6 +1310,13 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **S10's set-off migration (22 Oct, `s10_set_off_credited_as_covered`, the very end of schema.sql)**:
+  `trust_creditors_on_run`, `trust_position`, `trust_cash_by_cycle`. Production needs it BEFORE any
+  balance brought forward is taken by a run. On production's first approval after it, a client whose
+  earlier runs were credited in full while below nil gets a negative "Charges recovered ... (less than
+  was credited ...)" entry -- **run this on production first, read-only, and show the firm the list**:
+  per client, `sum(-amount)` of client "Charges set off against payover %" less firm "Charges recovered
+  from payover %", where that client's latest approved run is below nil.
 - **S10's call-campaign migrations** (end of schema.sql): campaigns call columns + checks, the
   `campaign` diary kind/source/rank/campaign_id, `priority` SET EXPRESSION (PG17), the two one-open
   indexes, `sync_account_diary_date`, `call_campaigns_expire`, the one-row `campaign_counts`, and
