@@ -18,6 +18,13 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+0000000000000. **S10, 22 Oct: NEWS CAN SEND ONCE bfnews.co.za VERIFIES.** Added to Resend (eu-west-1) by this session
+   at the user's request; DNS records given to the user (DKIM TXT resend._domainkey, MX + SPF TXT on
+   `send`, CNAME `rsend`, plus a DMARC `_dmarc` p=none). Vercel now has `RESEND_API_KEY` (a SEND-ONLY
+   key restricted to bfnews.co.za, "Raptor news (Vercel)") and `MARKETING_FROM` = "Bredell Ferreira
+   News <news@bfnews.co.za>", Production + Preview. Not set yet: `MARKETING_REPLY_TO`, the webhook
+   (+ `RESEND_WEBHOOK_SECRET`), and the prospect domain (`MARKETING_PROSPECT_DOMAIN`, bredell-ferreira).
+   Open/click tracking was switched on through the API; check it shows on in Resend's domain page.
 000000000000. **S10, 22 Oct: A MARKETER ON GITHUB (Reno).** `.github/CODEOWNERS` (on both branches): everything is
    @septumusrex69's except leads, deals, contacts, reps, the sales Dashboard and the News page, which
    have NO owner -- inside those, ConvertLeadModal (commission), SendMandateModal, the opt-in and
