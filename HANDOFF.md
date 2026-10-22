@@ -18,6 +18,9 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+00000000000000. **S10, 22 Oct: THE OPT-IN NOW NEEDS A SECOND PRESS** (the firm agreed). The /opt-in page asks 'status' on
+   opening and records the yes only on "Confirm — keep me informed", so a mail system's link scanner
+   cannot leave a consent nobody gave. e2e/news-prospects holds it (opening records nothing).
 0000000000000. **S10, 22 Oct: NEWS CAN SEND ONCE bfnews.co.za VERIFIES.** Added to Resend (eu-west-1) by this session
    at the user's request; DNS records given to the user (DKIM TXT resend._domainkey, MX + SPF TXT on
    `send`, CNAME `rsend`, plus a DMARC `_dmarc` p=none). Vercel now has `RESEND_API_KEY` (a SEND-ONLY

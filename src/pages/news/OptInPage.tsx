@@ -7,8 +7,12 @@ import { optInStep, type OptInState } from '../../lib/marketingApi'
  *
  * The firm: "everyone gets one introduction email to opt in, 'Yes, keep me informed' button", and
  * after it a small page: thank you, you'll hear from us. The person has no Raptor login and never
- * will; the signed token in the path names the one send that asked, and opening the page records the
- * yes against that lead. The button in the email was the question, so the page does not ask it twice.
+ * will; the signed token in the path names the one send that asked.
+ *
+ * OPENING THE PAGE RECORDS NOTHING; ONE MORE PRESS DOES (the firm, 22 Oct). Company mail systems --
+ * Microsoft's above all -- open every link in an email to scan it, some running the page as they
+ * do, and a yes recorded on opening could be a scanner's. POPIA consent has to be the person's own
+ * act, so the page asks "Confirm -- keep me informed" and only that press writes the yes.
  *
  * "That wasn't me" undoes it and unsubscribes the address -- recorded as an objection, because a yes
  * somebody did not give must leave the address further from our news, not back where it was.
@@ -23,11 +27,17 @@ export default function OptInPage() {
   const [busy, setBusy] = useState(false)
   const ran = useRef(false)
 
+  /* Only asks what this address has said so far -- never records anything on its own. */
   useEffect(() => {
     if (ran.current || token === 'preview') return
     ran.current = true
-    optInStep(token, 'yes').then(setState).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+    optInStep(token, 'status').then(setState).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [token])
+
+  async function confirm() {
+    setBusy(true)
+    try { setState(await optInStep(token, 'yes')) } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
 
   async function withdraw() {
     setBusy(true)
@@ -49,6 +59,15 @@ export default function OptInPage() {
           <p className="text-red-700" data-testid="opt-in-error">{error}</p>
         ) : !state ? (
           <p className="text-slate-500">One moment…</p>
+        ) : !state.optedIn && !withdrawn ? (
+          <>
+            <h1 className="text-xl text-slate-900 mb-2" data-testid="opt-in-heading">Keep {state.email} informed?</h1>
+            <p className="text-sm text-slate-600 mb-6">Press below to confirm and we will send you our news. Every email has a link to stop it.</p>
+            <button type="button" onClick={() => void confirm()} disabled={busy} data-testid="opt-in-confirm"
+              className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+              {busy ? 'One moment…' : 'Confirm — keep me informed'}
+            </button>
+          </>
         ) : withdrawn ? (
           <>
             <h1 className="text-xl text-slate-900 mb-2" data-testid="opt-in-heading">You will not hear from us</h1>

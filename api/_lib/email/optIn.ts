@@ -15,15 +15,15 @@ import { maskEmail, unsubscribe } from './unsubscribe.js'
  * campaign can say how many said yes. Without this press, nothing more is ever sent: the queue and
  * the drain both refuse a lead with no consent (resolveAudience, sendBlockReason).
  *
- *   POST { token, step: 'yes' }        the page at /opt-in/<token>, the moment it opens
+ *   POST { token, step: 'yes' }        the page's "Confirm -- keep me informed" press
  *   POST { token, step: 'withdraw' }   "that wasn't me": the consent undone and the address unsubscribed
  *   POST { token, step: 'status' }     what this link's address has said
  *   GET  ?t=<token>                    sent to the page, never acted on
  *
- * WHY THE PAGE RECORDS IT ON OPENING rather than asking a second time: the button in the email IS
- * the question, and the firm's design is one press. A link scanner that only fetches does not run
- * the page, and the API never acts on a GET; the undo button on the page covers the rest, and is
- * recorded as an objection rather than quietly reversed.
+ * A SECOND PRESS, NOT THE PAGE OPENING (the firm, 22 Oct). It used to record the yes as the page
+ * opened; a mail system's link scanner that runs the page could then record a yes nobody gave. Now
+ * the page asks 'status' on opening and only the person's "Confirm" press sends 'yes'. The API never
+ * acts on a GET either, and "that wasn't me" stays as the undo.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const fromQuery = typeof req.query.t === 'string' ? req.query.t : ''
