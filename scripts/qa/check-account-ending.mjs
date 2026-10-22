@@ -229,6 +229,7 @@ for (const b of [0, 22.77, 5000]) {
    text cannot answer, and the liaison's conversation starts from whichever it was. */
 ok('uncontactable is a reason', WRITE_OFF_REASONS.includes('Uncontactable'))
 ok('and so is a small residue', WRITE_OFF_REASONS.includes('Small residue, not worth chasing'))
+ok('refusing to pay and the firm\'s own recommendation are reasons (22 Oct)', WRITE_OFF_REASONS.includes('Refuses to pay') && WRITE_OFF_REASONS.includes('Recommended by us'))
 
 /* THE NOTE THE FIRM CORRECTED IS GONE. It read "THE CLIENT DECIDES, ALWAYS", which is the opposite
    of the mandate they hold. Asserted because a stale comment is how the next person gets it wrong. */

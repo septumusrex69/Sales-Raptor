@@ -11,6 +11,7 @@ import {
 import { johannesburgMinute } from '../../lib/contactHours.ts'
 import { clockNow } from '../../lib/clock.ts'
 import { ClosedFinish } from './ClosedFinish'
+import { recoveryReopen } from '../../lib/campaignApi'
 import { finishOnClosedAccount } from '../../lib/diary.ts'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
@@ -519,11 +520,26 @@ function FinishModal({ entry, account, today, remaining, onClose, onDone }: {
         await onDone()
       } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
     }
+    /* Kept without a promise (recovery only): re-opened onto this desk with the reason, then the call
+       is worked like any live account's -- closed with what came of it and the next date booked. */
+    const keepIt = async (reason: string, dueOn: string) => {
+      setBusy(true); setError(null)
+      try {
+        await recoveryReopen(entry.accountId, reason)
+        await workEntry({
+          entry, outcome: [outcome.trim(), `Kept: ${reason}`].filter(Boolean).join(' '),
+          next: { comesBack: true, dueOn, kind: 'review' },
+          actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+        })
+        await onDone()
+      } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+    }
     return (
       <Modal title="Finish this account" onClose={onClose} width={520}>
         <ClosedFinish name={entry.campaign?.name ?? 'Campaign'} script={entry.campaign?.script ?? null}
           outcome={outcome} setOutcome={setOutcome} error={error} busy={busy} onClose={onClose}
           onSave={() => void closeIt()}
+          onKeep={entry.campaign?.kind === 'recovery' ? (r, d) => void keepIt(r, d) : undefined}
           saveLabel={remaining > 0 ? 'Done, leave it closed, next' : 'Done, leave it closed'} />
       </Modal>
     )

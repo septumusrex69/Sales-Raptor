@@ -1,5 +1,8 @@
-import { CheckCircle2, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { CheckCircle2, Hand, Loader2 } from 'lucide-react'
 import { FormField, inputClass } from '../ui/Modal'
+import { addWorkingDays } from '../../lib/workingDays.ts'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * FINISHING A CAMPAIGN ITEM ON A CLOSED ACCOUNT -- a recovery call, or a trace on the written-off
@@ -11,7 +14,7 @@ import { FormField, inputClass } from '../ui/Modal'
  * promise is the account page's "Debtor agreed to pay — re-open and keep it", which is the
  * collector's own press and the only thing that re-opens it.
  */
-export function ClosedFinish({ name, script, outcome, setOutcome, error, busy, onClose, onSave, saveLabel }: {
+export function ClosedFinish({ name, script, outcome, setOutcome, error, busy, onClose, onSave, saveLabel, onKeep }: {
   name: string
   script: string | null
   outcome: string
@@ -21,7 +24,48 @@ export function ClosedFinish({ name, script, outcome, setOutcome, error, busy, o
   onClose: () => void
   onSave: () => void
   saveLabel?: string
+  /**
+   * KEEP IT WITHOUT A PROMISE, on a recovery call only. The firm: "If no PTP was made ... they
+   * should also have another option ... the request to keep this account. If they want to keep
+   * this account, they should write a reason for it, and then it can go to their names." A reason
+   * is required, and the account comes onto their desk with a diary date, like any live account.
+   */
+  onKeep?: (reason: string, dueOn: string) => void
 }) {
+  const [keeping, setKeeping] = useState(false)
+  const [reason, setReason] = useState('')
+  const [dueOn, setDueOn] = useState(() => addWorkingDays(clockToday(), 5))
+  const today = clockToday()
+  if (keeping && onKeep) {
+    return (
+      <div className="space-y-4" data-testid="finish-keep">
+        <p className="text-sm text-slate-600">{name}</p>
+        <FormField label="What came of it">
+          <textarea value={outcome} onChange={(e) => setOutcome(e.target.value)} rows={2}
+            className={`${inputClass} resize-none`} />
+        </FormField>
+        <FormField label="Why keep it? (required)">
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} autoFocus data-testid="finish-keep-reason"
+            placeholder="Found a new employer; he says he will pay once he starts on the 1st." className={`${inputClass} resize-none`} />
+        </FormField>
+        <FormField label="When does it come back?">
+          <input type="date" className={inputClass} value={dueOn} min={today} onChange={(e) => setDueOn(e.target.value)} />
+        </FormField>
+        <p className="text-[13px] text-slate-600">
+          The account is re-opened onto your desk, and whoever ran the campaign is told your reason.
+        </p>
+        {error && <p className="text-sm text-negative-700">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setKeeping(false)} className="text-sm text-slate-500 hover:text-slate-700 px-2">Back</button>
+          <button type="button" onClick={() => onKeep(reason.trim(), dueOn)} disabled={busy || !reason.trim() || dueOn <= today}
+            data-testid="finish-keep-save"
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />} Keep it on my desk
+          </button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="space-y-4" data-testid="finish-closed">
       <p className="text-sm text-slate-600">{name}</p>
@@ -37,8 +81,14 @@ export function ClosedFinish({ name, script, outcome, setOutcome, error, busy, o
         and keep it” on the account first; then take the promise there.
       </p>
       {error && <p className="text-sm text-negative-700">{error}</p>}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-700 px-2">Cancel</button>
+        {onKeep && (
+          <button type="button" onClick={() => setKeeping(true)} disabled={busy} data-testid="finish-keep-go"
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+            <Hand size={14} /> No promise, but I want to keep it
+          </button>
+        )}
         <button type="button" onClick={onSave} disabled={busy} data-testid="finish-closed-save"
           className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-950 text-white hover:bg-navy-900 disabled:opacity-50">
           {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}

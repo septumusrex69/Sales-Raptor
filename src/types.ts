@@ -730,6 +730,8 @@ export type NotificationType =
   | 'client.assigned'
   /* Somebody else diarised your account -- covering, or a team leader (22 Oct). Shown only. */
   | 'diary.covered'
+  /* A collector kept a written-off account from a recovery campaign without a promise. */
+  | 'campaign.kept'
 
 export interface AppNotification {
   id: ID

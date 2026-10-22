@@ -48652,3 +48652,102 @@ as $$
 $$;
 revoke all on function public.trace_campaign_funnel(uuid) from public, anon;
 grant execute on function public.trace_campaign_funnel(uuid) to authenticated;
+
+
+-- ============================================================================================
+-- S10 / KEEP IT WITHOUT A PROMISE (22 Oct). The firm, of a recovery call that did not end in a
+-- PTP: "they should also have another option ... the request to keep this account. If they want
+-- to keep this account, they should write a reason for it, and then it can go to their names."
+-- So recovery_reopen takes an optional reason: given, the account is re-opened onto the caller's
+-- desk WITHOUT a promise, the reason goes on the account's note and on the call's record, and
+-- whoever ran the campaign is notified. Every other guard is the same (an open recovery call of
+-- the caller's own, a running campaign, never paid, withdrawn or prescribed). The one-argument
+-- version goes, or a call naming one argument would be ambiguous.
+-- ============================================================================================
+drop function if exists public.recovery_reopen(uuid);
+create or replace function public.recovery_reopen(p_account uuid, p_keep_reason text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_entry public.diary_entries%rowtype;
+  v_c public.campaigns%rowtype;
+  v_a public.debtor_accounts%rowtype;
+  v_as text;
+  v_me text;
+  v_keep text := nullif(btrim(coalesce(p_keep_reason, '')), '');
+begin
+  if v_uid is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  select d.* into v_entry from public.diary_entries d
+   where d.account_id = p_account and d.state = 'open' and d.kind = 'campaign' and d.owner_id = v_uid
+   for update;
+  if not found then
+    raise exception 'Only the collector with an open recovery call on this account may re-open it.' using errcode = '42501';
+  end if;
+  select * into v_c from public.campaigns where id = v_entry.campaign_id;
+  if v_c.call_kind is distinct from 'recovery' then
+    raise exception 'That call is not from a recovery campaign. Only a recovery call re-opens a closed account.' using errcode = '42501';
+  end if;
+  if v_c.status <> 'sending' or v_c.ends_on < public.raptor_today() then
+    raise exception 'That recovery campaign has ended.' using errcode = '42501';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account for update;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book <> 'closed' then
+    raise exception 'That account is not closed.' using errcode = '22023';
+  end if;
+  v_as := public.recovery_closure(v_a.ended_as, v_a.status, v_a.write_off_reason);
+  if v_as in ('paid_up', 'settled') then
+    raise exception 'That account was paid. There is nothing to recover.' using errcode = '22023';
+  end if;
+  if v_as = 'withdrawn' then
+    raise exception 'The client withdrew that account. A recovery campaign never re-opens a withdrawn account.' using errcode = '42501';
+  end if;
+  if v_a.prescribed then
+    raise exception 'That debt has prescribed (NCA s126B) and may not be collected.' using errcode = '22023';
+  end if;
+
+  select nullif(btrim(name), '') into v_me from public.profiles where id = v_uid;
+
+  update public.diary_entries
+     set recovered_at = public.raptor_now(),
+         recovered_from = jsonb_build_object(
+           'ended_as', v_a.ended_as, 'closed_as', v_as, 'ended_on', v_a.ended_on, 'ended_reason', v_a.ended_reason,
+           'write_off_reason', v_a.write_off_reason, 'status', v_a.status, 'assigned_to', v_a.assigned_to,
+           'kept_without_promise', v_keep)
+   where id = v_entry.id;
+
+  if v_a.assigned_to is distinct from v_uid then
+    update public.debtor_accounts set assigned_to = v_uid where id = p_account;
+  end if;
+  update public.debtor_accounts
+     set ended_as = null, ended_on = null, ended_reason = null, ended_note = null, ended_by = null, ended_at = null,
+         status = case when status ~* '^(written.off|closed)' then 'Active: Re-opened' else status end
+   where id = p_account;
+
+  insert into public.account_notes (account_id, body, source, author_name, created_by)
+  values (p_account,
+    'Re-opened on a recovery call (campaign "' || v_c.name || '") by ' || coalesce(v_me, 'the collector')
+      || case when v_keep is null then ': the debtor agreed to pay.'
+              else ': kept without a promise, because ' || v_keep || '.' end
+      || ' It was written off'
+      || coalesce(' on ' || to_char(v_a.ended_on, 'DD Mon YYYY'), '')
+      || coalesce(' - ' || nullif(btrim(coalesce(v_a.ended_reason, v_a.write_off_reason)), ''), '')
+      || '. It is now on ' || coalesce(v_me, 'their') || '''s desk.',
+    'system', v_me, v_uid);
+
+  /* KEPT WITHOUT A PROMISE IS A CLAIM SOMEBODY SHOULD SEE: whoever ran the campaign is told, with
+     the collector's reason. A promise speaks for itself; a hunch is checked. */
+  if v_keep is not null and v_c.created_by is not null and v_c.created_by <> v_uid then
+    insert into public.notifications (user_id, type, message, link)
+    values (v_c.created_by, 'campaign.kept',
+      coalesce(v_me, 'A collector') || ' kept ' || coalesce(v_a.case_number, 'an account') || ' from "' || v_c.name
+        || '" without a promise: ' || v_keep, '/accounts/' || p_account);
+  end if;
+  return v_c.id;
+end $$;
+revoke all on function public.recovery_reopen(uuid, text) from public, anon;
+grant execute on function public.recovery_reopen(uuid, text) to authenticated;

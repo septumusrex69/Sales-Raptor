@@ -237,8 +237,10 @@ export async function fetchRecoveryReasons(accountIds: string[]): Promise<Reason
  * "DEBTOR AGREED TO PAY -- RE-OPEN AND KEEP IT." The collector's own press on a recovery call; the
  * database refuses it to anybody without an open recovery call on the account (recovery_reopen).
  */
-export async function recoveryReopen(accountId: string): Promise<void> {
-  const { error } = await supabase.rpc('recovery_reopen', { p_account: accountId })
+export async function recoveryReopen(accountId: string, keepReason?: string): Promise<void> {
+  /* With a reason it is "keep it without a promise" (22 Oct): the same guards, and whoever ran the
+     campaign is told why. */
+  const { error } = await supabase.rpc('recovery_reopen', { p_account: accountId, p_keep_reason: keepReason?.trim() || null })
   if (error) throw new Error(error.message)
 }
 

@@ -218,6 +218,11 @@ export function endingAdvice(balance: number): { ending: AccountEnding; because:
 export const WRITE_OFF_REASONS = [
   'Uncontactable',
   'Cannot pay',
+  /* 22 Oct, the firm's own examples: "written off because of refusal to pay or recommended
+     write-off from us". Refusing is not cannot-pay (CLAUDE.md) -- a decision, not a pensioner --
+     so it is its own reason; "recommended by us" is the firm's call that chasing costs more. */
+  'Refuses to pay',
+  'Recommended by us',
   'Deceased, no estate',
   'Sequestrated, no dividend',
   'Liquidated, no dividend',
