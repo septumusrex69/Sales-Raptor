@@ -41,10 +41,24 @@ const paidAt = trig.indexOf('if old.paid_at is null and new.paid_at is not null'
 ok('it is written when the run is approved, not when it is paid', approvalAt >= 0 && shareAt > approvalAt && shareAt < paidAt)
 ok('the PTC debt is what the client was debited for PTCs on approved runs',
   /from public\.trust_creditor_entries e\s+join public\.payment_allocations a on a\.id = e\.allocation_id\s+join public\.payover_runs r on r\.id = a\.payover_run_id\s+where e\.party = 'client' and e\.company_id = new\.company_id and a\.paid_to_client\s+and r\.status in \('approved', 'sent', 'paid'\);/.test(trig))
-ok('...less what was already credited, or paid into the business account',
-  /e\.party = 'firm' and e\.reason like 'PTC share recovered%'\)\s+or \(e\.party = 'client' and e\.reason like 'Paid to the business account%'\)/.test(trig))
+/*
+ * 22 Oct (the set-off gap, approved by the firm): the same rule, its two halves now read apart,
+ * because a charge set off can be owed too and a business payment may have paid either. What
+ * was credited and what was paid into the business account are summed separately, and the
+ * business payments are counted against the PTC share only up to what of it has been resolved
+ * -- the rest paid set-off (check-set-off-covered holds that half). Where business payments
+ * never exceeded the PTC share, the figure is the one this check always held.
+ */
+ok('...less what was already credited',
+  /e\.party = 'firm' and e\.reason like 'PTC share recovered%';/.test(trig))
+ok('...or paid into the business account (no trust money either way)',
+  /e\.party = 'client'\s+and e\.reason like 'Paid to the business account%';/.test(trig))
 ok('...and less what this run still leaves short, read as PTC debt first',
-  /v_now := round\(greatest\(v_ptc_debt - greatest\(-coalesce\(new\.net_payover, 0\), 0\), 0\) - v_recovered, 2\);/.test(trig))
+  /v_short := greatest\(-coalesce\(new\.net_payover, 0\), 0\);/.test(trig)
+  && /v_ptc_resolved := greatest\(v_ptc_debt - v_short, 0\);/.test(trig))
+ok('...business payments read against the PTC share only as far as it was resolved',
+  /v_biz_ptc := least\(greatest\(v_paid_biz, 0\), v_ptc_resolved\);/.test(trig)
+  && /v_now := round\(v_ptc_resolved - v_biz_ptc - v_ptc_credited, 2\);/.test(trig))
 ok('one firm entry for the difference, named by the run',
   /values \('firm', new\.company_id, v_now,\s+case when v_now > 0 then 'PTC share recovered from payover '/.test(trig))
 ok('...a reversed PTC takes back a share already credited', /'PTC share recovered, taken back \(a PTC was reversed\), on '/.test(trig))

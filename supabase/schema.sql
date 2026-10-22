@@ -47251,3 +47251,334 @@ as $$
     else array[]::text[]
   end
 $$;
+
+-- ==========================================================================================
+-- S10 / THE SET-OFF GAP CLOSED: A CHARGE SET OFF IS THE FIRM'S ONLY AS FAR AS TRUST MONEY COVERED IT
+-- (the firm, 22 Oct, asked about the gap written up under "BALANCES BROUGHT FORWARD" above: "you can
+-- proceed with one"). The note there -- "A GAP IN THAT EXISTING RULE ... NOT changed here" -- and the
+-- sentence above it that THE TRUST SIDE OF A CREDIT is written as "its usual pair" describe the rule
+-- before this block. From here: a credit is still that pair; a charge owed is not, as follows.
+--
+-- WHAT WAS WRONG. Approving a payover run wrote the whole `charges_set_off` as a pair: client -charges,
+-- firm +charges. Where the run went below nil (the client's collections did not cover the charges) the
+-- firm's half was money that never reached the trust account. R1 000 owed, nothing collected: the
+-- firm showed R1 000 DRAWABLE (firm_trust_split reads a run at or below nil as settled), and when the
+-- client then paid the R1 000 into the BUSINESS account the client's trust minus was cleared with no
+-- cash behind it -- the trust ledger R1 000 above the bank. Proved on staging, rolled back, before
+-- this was written. Withdrawal fees ride this path; balances brought forward (R400k-R1m) made it large.
+--
+-- THE RULE, THE PTC SHARE'S (see "THE FIRM'S PTC SHARE, RECOVERED BY SET-OFF" above), applied to
+-- charges. The CLIENT side is unchanged: the run still writes client -charges_set_off, so the client's
+-- trust balance goes below nil by what it owes -- that is the "Client owes us" every screen already
+-- reads, and what record_client_payment clears. The FIRM side is now cumulative per client, written
+-- when a run is approved (its figures freeze):
+--   set-off owed     = every approved run's "Charges set off" for the client, this one included,
+--                      counting a run whose charges net to a debt (a CREDIT is handled apart, below);
+--   still short      = what this run leaves the client owing, read as PTC debt FIRST (the PTC rule's
+--                      own reading, unchanged), then as set-off -- never more than the set-off owed;
+--   paid to business = the client's "Paid to the business account" entries, read against the PTC
+--                      share first (as the PTC rule always read them) and the rest against set-off.
+--                      That money is in the BUSINESS account, so it is never credited in trust;
+--   the firm's due   = set-off owed - still short - paid to business + credits;
+--   already credited = every "Charges recovered from payover" entry the firm already has.
+-- One firm entry for the difference. So: nothing collected -> nothing credited, R1 000 carried as owing;
+-- the next run collects R600 -> R600 credited, R400 still owing; the client pays the R400 into the
+-- business account -> no trust credit at all for it, and the trust ledger equals the bank.
+--
+-- A CREDIT IS UNCHANGED. A brought-forward credit (a negative charge) is the firm's own money becoming
+-- the client's: it is credited in full at once, client +credit, firm -credit, exactly as before -- it
+-- needs no trust money of the client's to "cover" it, and if the firm's share is too small the Trust
+-- overview shows the firm short, which is the rule already written for it. A run with no shortfall
+-- writes exactly the old pair, to the cent, under the old wording.
+--
+-- THE PTC RULE CHANGES IN ONE PLACE ONLY. It subtracted EVERY business-account payment from the PTC
+-- share. With set-off shortfalls now owed for real, a client paying a withdrawal fee's shortfall into
+-- the business account would have written a negative "PTC share recovered, taken back" on the next
+-- approval (and, before this change, that negative was what accidentally hid the set-off's false
+-- credit). The business payments are now capped at the PTC share they could have paid; the rest is
+-- the set-off's. Where business payments never exceeded the PTC share -- every case before set-offs
+-- could be owed -- the PTC figure is identical.
+--
+-- READ ALONGSIDE: trust_position counts the set-off not yet covered as the firm's, WAITING (derived,
+-- not written, never drawable -- the PTC share's own treatment), so "against the bank" still balances;
+-- trust_cash_by_cycle shows a run's set-off as the firm's in that run's cycle, as it always did, read
+-- from the client's "Charges set off" entry rather than the firm's credit (which may now land on a
+-- later run), so its cycles still total the bank. firm_trust_split is unchanged: it reads real entries
+-- only, so it can only fall.
+--
+-- GOING FORWARD ONLY. Nothing already in the ledger is rewritten. The rule works on a client's totals,
+-- so a client whose earlier runs were credited in full while below nil is caught up the next time one
+-- of its runs is approved -- by a negative "Charges recovered" entry if trust money never covered it.
+-- That entry is the firm's share falling to what is really there; whether any past drawing against it
+-- needs correcting is the firm's decision (CLAUDE.md), not this migration's.
+--
+-- WHAT IT DOES NOT HANDLE: a shortfall from a payment reversed after payover is read LAST, after PTC
+-- and set-off; a business payment that in fact paid such a reversal is read against the set-off and
+-- under-credits the firm. Only ever in the safe direction (less drawable), and reported to the firm.
+-- ==========================================================================================
+create or replace function public.trust_creditors_on_run()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_short numeric;
+  v_paid_biz numeric;
+  v_ptc_debt numeric;
+  v_ptc_credited numeric;
+  v_ptc_short numeric;
+  v_ptc_resolved numeric;
+  v_biz_ptc numeric;
+  v_now numeric;
+  v_so_owed numeric;
+  v_so_credit numeric;
+  v_so_credited numeric;
+  v_so_short numeric;
+  v_so_resolved numeric;
+  v_biz_so numeric;
+  v_so_now numeric;
+begin
+  -- WHEN THE RUN IS APPROVED ITS FIGURES FREEZE, AND THREE RECLASSIFICATIONS FALL DUE. No money
+  -- moves here -- it is the same cash in the same account changing whose it is.
+  if public.payover_run_is_open(old.status) and not public.payover_run_is_open(new.status)
+     and new.status <> 'void' then
+    /* A charge set off is what the client owes the firm, taken off this payover. The CLIENT side is
+       written whole -- below nil, that minus is the "Client owes us" carried into the next run. The
+       FIRM side is written below, only as far as trust money covered it (22 Oct). */
+    if coalesce(new.charges_set_off, 0) <> 0 then
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('client', new.company_id, -new.charges_set_off,
+              'Charges set off against payover ' || new.invoice_number, new.id);
+    end if;
+    /* A released overpayment stops being the debtor's and becomes the client's. */
+    if coalesce(new.excess_released, 0) <> 0 then
+      /* THE DEBTOR SIDE PER ACCOUNT, because a debtor's credit is held per account: written as one
+         lump with no account it left each debtor's credit standing and a nameless minus beside
+         it -- and the trust ledger page could not read it at all (8 Oct). */
+      insert into public.trust_creditor_entries (party, company_id, account_id, amount, reason,
+                                                payover_run_id, allocation_id, payment_id)
+      select 'debtor', new.company_id, a.account_id, -l.excess_credit,
+             'Overpayment released to the client on ' || new.invoice_number, new.id, a.id, a.payment_id
+        from public.payover_run_lines l
+        join public.payment_allocations a on a.id = l.allocation_id
+       where l.run_id = new.id and a.excess_disposal = 'released' and l.excess_credit <> 0;
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('client', new.company_id, new.excess_released,
+              'Overpayment released by the debtor, on ' || new.invoice_number, new.id);
+    end if;
+
+    /* WHAT THIS RUN STILL LEAVES THE CLIENT OWING, and what the client has paid into the BUSINESS
+       account against its shortfalls -- shared by the two rules below. */
+    v_short := greatest(-coalesce(new.net_payover, 0), 0);
+    select coalesce(sum(e.amount), 0) into v_paid_biz
+      from public.trust_creditor_entries e
+     where e.company_id = new.company_id and e.party = 'client'
+       and e.reason like 'Paid to the business account%';
+
+    /* THE FIRM'S PTC SHARE, RECOVERED FROM THE CLIENT'S TRUST MONEY (the firm, 10 Oct). The shortfall
+       is read as PTC debt first; business payments are read against it too, but never beyond what of
+       it has been resolved (22 Oct -- the rest of them paid set-off). */
+    select coalesce(-sum(e.amount), 0) into v_ptc_debt
+      from public.trust_creditor_entries e
+      join public.payment_allocations a on a.id = e.allocation_id
+      join public.payover_runs r on r.id = a.payover_run_id
+     where e.party = 'client' and e.company_id = new.company_id and a.paid_to_client
+       and r.status in ('approved', 'sent', 'paid');
+    select coalesce(sum(e.amount), 0) into v_ptc_credited
+      from public.trust_creditor_entries e
+     where e.company_id = new.company_id and e.party = 'firm' and e.reason like 'PTC share recovered%';
+    v_ptc_short := least(v_short, greatest(v_ptc_debt, 0));
+    v_ptc_resolved := greatest(v_ptc_debt - v_short, 0);
+    v_biz_ptc := least(greatest(v_paid_biz, 0), v_ptc_resolved);
+    v_now := round(v_ptc_resolved - v_biz_ptc - v_ptc_credited, 2);
+    if v_now <> 0 then
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('firm', new.company_id, v_now,
+              case when v_now > 0 then 'PTC share recovered from payover '
+                   else 'PTC share recovered, taken back (a PTC was reversed), on ' end
+                || new.invoice_number, new.id);
+    end if;
+
+    /* CHARGES SET OFF, CREDITED TO THE FIRM ONLY AS FAR AS TRUST MONEY COVERED THEM (the firm, 22 Oct).
+       Per run, a set-off that nets to a debt is owed; one that nets to a credit is the firm's money
+       moving to the client and is credited in full, as it always was. */
+    select coalesce(sum(-e.amount) filter (where e.amount < 0), 0),
+           coalesce(sum(-e.amount) filter (where e.amount > 0), 0)
+      into v_so_owed, v_so_credit
+      from public.trust_creditor_entries e
+     where e.company_id = new.company_id and e.party = 'client'
+       and e.reason like 'Charges set off against payover %';
+    select coalesce(sum(e.amount), 0) into v_so_credited
+      from public.trust_creditor_entries e
+     where e.company_id = new.company_id and e.party = 'firm'
+       and e.reason like 'Charges recovered from payover %';
+    v_so_short := least(v_short - v_ptc_short, v_so_owed);
+    v_so_resolved := v_so_owed - v_so_short;
+    v_biz_so := least(greatest(v_paid_biz - v_biz_ptc, 0), v_so_resolved);
+    v_so_now := round(v_so_resolved - v_biz_so + v_so_credit - v_so_credited, 2);
+    if v_so_now <> 0 then
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('firm', new.company_id, v_so_now,
+              'Charges recovered from payover ' || new.invoice_number
+                || case when v_so_now = round(coalesce(new.charges_set_off, 0), 2) then ''
+                        when v_so_now > 0 then ' (as far as the client''s trust money has covered the charges)'
+                        else ' (less than was credited: not covered by the client''s trust money)' end,
+              new.id);
+    end if;
+  end if;
+
+  -- AND WHEN IT IS PAID, THE MONEY ACTUALLY LEAVES. This is the only one of the three that moves
+  -- cash, which is why it hangs off paid_at and not off the status alone.
+  if old.paid_at is null and new.paid_at is not null and coalesce(new.net_payover, 0) <> 0 then
+    insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+    values ('client', new.company_id, -new.net_payover,
+            'Payover ' || new.invoice_number || ' paid to the client', new.id);
+  end if;
+  return new;
+end $$;
+
+-- "AGAINST THE BANK": THE SET-OFF NOT YET COVERED IS THE FIRM'S, WAITING -- the PTC share's treatment,
+-- in the same derived figure. Per client: PTC fees debited + charges set off (client entries) less
+-- what the firm was credited for either, less what the client paid into the business account; never
+-- below nil, and summed BEFORE the floor, because a business payment may have paid either. Every run
+-- approved before 22 Oct wrote both sides of its set-off, so its part here is nil and the figure is
+-- unchanged for history. Not drawable: firm_trust_split reads only real entries.
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(max(f.trust_opening_balance), 0) + coalesce(sum(l.amount), 0) as bal
+      from public.firm_settings f
+      left join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+  ),
+  /*
+   * THE FIRM'S SHARE NOT YET RECOVERED IS THE FIRM'S, WAITING: the PTC share (the firm, 13 Oct) and,
+   * since 22 Oct, charges set off on a run below nil. DERIVED, NOT WRITTEN: the ledger is immutable,
+   * and a credit written now would be credited again at approval.
+   */
+  ptc_pending as (
+    select coalesce(sum(greatest(owed, 0)), 0) as bal from (
+      select company_id,
+             sum(case when party = 'client' and reason like '%Paid straight to the client%' then -amount
+                      when party = 'firm' and reason like 'PTC share recovered%' then -amount
+                      when party = 'client' and reason like 'Paid to the business account against PO-%' then -amount
+                      when party = 'client' and reason like 'Charges set off against payover %' then -amount
+                      when party = 'firm' and reason like 'Charges recovered from payover %' then -amount
+                      else 0 end) as owed
+        from public.trust_creditor_entries
+       where company_id is not null
+       group by company_id) x
+  ),
+  by_party as (
+    select party, who, sum(bal) as bal from (
+    select party,
+           case party when 'client' then company_id::text
+                      when 'debtor' then coalesce(account_id::text, party)
+                      else party end as who,
+           amount as bal
+      from public.trust_creditor_entries
+    union all
+    select 'firm', 'firm', bal from ptc_pending
+    ) e group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  swordfish as (
+    select coalesce((select x.left_over from public.swordfish_holding_figures() x), 0) as bal
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal + s.bal,
+         h.owed_in,
+         (h.owed_out + u.bal + s.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal + s.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u, swordfish s
+   where public.has_capability('finance.view')
+$$;
+revoke all on function public.trust_position() from public, anon;
+grant execute on function public.trust_position() to authenticated;
+
+-- THE CASH VIEW: A RUN'S SET-OFF IS THE FIRM'S IN THAT RUN'S CYCLE, AS IT ALWAYS WAS. Its firm_other
+-- read the firm's "Charges recovered" entry, which until 22 Oct always sat on the same run as the
+-- client's "Charges set off" and matched it to the cent. The firm's credit may now land on a LATER run
+-- (when that run's collections cover it), or never (paid into the business account), so the cycles
+-- would stop totalling the bank. It reads the client's entry, negated, instead: for every run approved
+-- before 22 Oct that is the same number on the same run, so no cycle moves.
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id, x.reason,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) or x.reason like 'Paid to the business account%' as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc, e.reason,
+           (e.party = 'client' and coalesce(e.reason, '') like '%Paid straight to the client%') as ptc_fee,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           coalesce(public.firm_run_settled(r.id), false) as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0)
+        + coalesce(sum(amount) filter (where ptc_fee and not run_paid), 0) as clients_open,
+      coalesce(-sum(amount) filter (where ptc_fee and not run_paid), 0) as ptc_waiting,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt
+                                    and coalesce(reason, '') not like 'PTC share recovered%'
+                                    and coalesce(reason, '') not like 'Charges recovered from payover %'), 0)
+        + coalesce(-sum(amount) filter (where party = 'client'
+                                         and coalesce(reason, '') like 'Charges set off against payover %'), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         public.raptor_today() <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back + a.ptc_waiting, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.ptc_waiting + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned + a.ptc_waiting, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;
+revoke all on function public.trust_cash_by_cycle() from public, anon;
+grant execute on function public.trust_cash_by_cycle() to authenticated;
