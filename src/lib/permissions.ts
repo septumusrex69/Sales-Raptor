@@ -359,6 +359,14 @@ export function canViewIncome(user: Pick<User, 'role' | 'grants' | 'revokes'> | 
 }
 
 /**
+ * THE PEOPLE WORKSPACE: pay, profiles and the clerks' commission. people.pay, which no role has --
+ * the firm named the two people who see pay. Every People table and both pay functions ask the same.
+ */
+export function canViewPay(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'people.pay')
+}
+
+/**
  * MAY THIS PERSON DRAW THE FIRM'S EARNINGS OUT OF TRUST? Both ticks: it is done from the business
  * side and it moves trust money, at the firm's ruling -- and draw_from_trust asks both, so the
  * button is never drawn for somebody the database would refuse.

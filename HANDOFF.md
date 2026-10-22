@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **22 October 2026** (People and pay added at the top of Start here); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -21,6 +21,43 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 00000000000000. **S10, 22 Oct: THE OPT-IN NOW NEEDS A SECOND PRESS** (the firm agreed). The /opt-in page asks 'status' on
    opening and records the yes only on "Confirm — keep me informed", so a mail system's link scanner
    cannot leave a consent nobody gave. e2e/news-prospects holds it (opening records nothing).
+00000000000000. **22 Oct: PEOPLE -- PROFILES, PAY AND THE CLERKS' COLLECTION COMMISSION** (the firm, Stephan:
+   "start building ... salaries ... an employee profile and an HR type of function"). A new workspace
+   **People** at `/people` (People list, a person's profile + pay statement, Month summary, Commission
+   rules), a sidebar item for **`people.pay` only** -- a NEW tick in NO role, the Administrator's
+   included ("not even all Administrators"), granted on staging to **Stephan and Camille** only
+   (`profiles.grants`, read back). Enforced in the database: `employee_profiles`,
+   `employee_profile_history`, `clerk_commission_overrides` all RLS on `has_capability('people.pay')`;
+   `clerk_commission_lines` and `clerk_commission_ledgers` refuse without it. Probed with an
+   Administrator who lacks the grant: 0 rows, insert refused.
+   - **The rule** (`src/lib/clerkCommission.ts`, pure): a share of the MONEY COLLECTED; client at 25%
+     or more -> 3%, below -> client rate / 10 (24% -> 2.4%). Exceptions per ACCOUNT beat per CLIENT
+     beat the rule, up or down, append-only rows with a reason, an effective-from date and who/when
+     written by the database; a payment uses the decision in force on its own day.
+   - **The client's rate** is the one stamped on the receipt's allocation
+     (`payment_allocations.commission_rate`, i.e. what the client was charged -- frozen for imported
+     history), else `account_commission_rate` for a receipt not yet split ("not split yet" on screen).
+   - **Who earns it**: whoever held the account on the payment day -- `account_desk_history` ALREADY
+     EXISTED (the floor uses it), so no new table. Rows marked `backfill` are the reconstruction made
+     when that table began (holder assumed since handover); the statement marks those lines "Holder
+     reconstructed". Money nobody held earns nobody commission (shown on the Month summary).
+   - **What counts as collected** is the floor's figure: `collector_performance` and `collector_daily`
+     now ALSO leave out rejected and demo receipts (they counted them; neither is money in), and
+     `clerk_commission_lines` reads the same predicate -- check-clerk-commission holds the three.
+   - **PTCs**: commission calculated per PTC, HELD while the client owes the firm anything, read off
+     the client's own `client_ledger` (reused, not re-summed); released in full in the first pay period
+     at whose close the PTC is approved, not reversed, and the client's ledger balance is nought or in
+     their favour. Fails closed: without the trust or business tick the ledger is not read and every
+     PTC stays waiting.
+   - **The statement** (period = the firm's collections month, 11th to 10th, as the floor): (a)
+     Payments with rate and its source, reversals as negative lines in the month reversed; (b) PTCs
+     paid out, by client; (c) PTCs waiting, by client, with what the client owes and since when.
+     Payable = basic + (a) + (b); waiting is shown below the total and never in it. Sales,
+     communications and other staff: basic only, "commission scheme not set up yet".
+   - Nothing is stored but the profile, its history and the overrides; no ID numbers, bank details or
+     real salaries anywhere in the repo. check-clerk-commission (143), e2e/people (15).
+   - **Open for the firm (§4 item 00)**: clawback month, rounding, the release definition, history
+     before the desk table, sales/communications schemes and KPIs.
 0000000000000. **S10, 22 Oct: NEWS CAN SEND ONCE bfnews.co.za VERIFIES.** Added to Resend (eu-west-1) by this session
    at the user's request; DNS records given to the user (DKIM TXT resend._domainkey, MX + SPF TXT on
    `send`, CNAME `rsend`, plus a DMARC `_dmarc` p=none). Vercel now has `RESEND_API_KEY` (a SEND-ONLY
@@ -1341,6 +1378,26 @@ The four that stood here at the start of the fifth session were answered by the 
 
 Do not guess these. Each one changes money.
 
+00. **PEOPLE / THE CLERKS' COMMISSION (22 Oct, built as stated, each easy to turn).**
+   (a) **A reversed payment** is a NEGATIVE line in the pay period it is reversed in (clawback); the
+   month the money came in is left as it was paid. Firm to confirm. (The floor's collected figure, by
+   contrast, drops a reversed payment from every month, so for a past month the two differ by exactly
+   the reversals -- said on the profile.) A receipt REJECTED after a month was paid simply disappears
+   (rejection happens before approval, normally the same day); say if that ever needs a clawback too.
+   (b) **Rounding**: each payment's commission to the cent, half away from zero; totals are the sum of
+   the printed lines.
+   (c) **The PTC release**: the first pay period (11th-10th), from the PTC's own onwards, at whose
+   CLOSE the PTC is approved, not reversed, and the client's ledger (`client_ledger`, the client's
+   running statement) is nought or in the client's favour. So money the trust holds for the client
+   counts against what they owe -- a client the firm owes on balance releases at once. Whole, never
+   part. Is "owes us nothing" the NET ledger, or must the PTC fee itself be settled (set off or paid)?
+   (d) **Before the desk history existed** (backfill rows) the holder then is taken to have held the
+   account since handover; such lines say "Holder reconstructed".
+   (e) **The period**: the collections month, 11th to 10th, the same as the floor and the payover
+   cycle, not the calendar month. Payroll on a calendar month would show two "October"s.
+   (f) **Override cap**: an exception may be 0% to 10% of what was collected.
+   (g) **Still to come from the firm**: the sales and communications commission schemes and the
+   KPIs ("I'll share that with you later"). Those people show basic only.
 0. **WHAT COUNTS AS "A PTP MADE" FROM A CAMPAIGN (22 Oct, built as stated, easy to turn).** A promise on
    an account in the campaign, recorded by the collector whose diary the call was on, from the moment the
    call landed there until the end of the day they worked it (or until the campaign ended / it was handed
@@ -1445,6 +1502,16 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **People migration (22 Oct, `people_pay_and_clerk_commission`, the very end of schema.sql; staging
+  only)**: `all_capabilities` (+ `people.pay`), `employee_profiles` + `employee_profile_history` +
+  trigger `employee_profile_stamp`, `clerk_commission_overrides` + trigger
+  `clerk_commission_override_stamp`, `collector_performance` and `collector_daily` (rejected and demo
+  receipts no longer counted), `clerk_commission_lines`, `clerk_commission_ledgers`. **Applied through
+  MCP with the seven foreign keys added in a do-block** (the word in "on ... cascade / set null" hangs
+  the tool); schema.sql carries them inline. Then, as data and NOT in schema.sql, `people.pay` added
+  to the grants of Stephan (48eb7492-...) and Camille (0f12f712-...) under Stephan's JWT claims; on
+  production that grant has to be made the same way. No `clear_staging` change was needed: the new
+  tables key into profiles (kept) and into companies / debtor_accounts with cascade (check-clear-staging).
 - **S10's set-off migration (22 Oct, `s10_set_off_credited_as_covered`, the very end of schema.sql)**:
   `trust_creditors_on_run`, `trust_position`, `trust_cash_by_cycle`. Production needs it BEFORE any
   balance brought forward is taken by a run. On production's first approval after it, a client whose
