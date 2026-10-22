@@ -13,6 +13,7 @@ import loginCode from '../_lib/email/loginCode.js'
 import marketing from '../_lib/email/marketing.js'
 import unsubscribe from '../_lib/email/unsubscribe.js'
 import resendWebhook from '../_lib/email/resendWebhook.js'
+import optIn from '../_lib/email/optIn.js'
 
 /**
  * One serverless function for every /api/email/* route.
@@ -54,6 +55,9 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* ANONYMOUS, and Resend's signature (RESEND_WEBHOOK_SECRET) is the authority: bounces and
      complaints on a newsletter. */
   'resend-webhook': resendWebhook,
+  /* ANONYMOUS, like unsubscribe: "Yes, keep me informed" in an introduction email (S10, 22 Oct).
+     The signed token names the send; pressing it records the lead's consent. */
+  'opt-in': optIn,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

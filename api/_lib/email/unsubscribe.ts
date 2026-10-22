@@ -67,15 +67,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
  * THE FIRST OBJECTION'S DATE IS KEPT. Pressing the link twice must not move "Unsubscribed from news
  * on 3 March" to today, and a hard bounce already on file is a stronger state than an unsubscribe.
  */
-export async function unsubscribe(admin: SupabaseClient, email: string, how: string, campaignId?: string | null) {
+export async function unsubscribe(admin: SupabaseClient, email: string, how: string, campaignId?: string | null, sendId?: string | null) {
   const { data } = await admin.from('marketing_preferences').select('status').eq('email', email).maybeSingle()
   const current = (data as { status?: string } | null)?.status
   if (current === 'unsubscribed') return
   if (current === 'undeliverable' && how !== 'complaint') return
+  /*
+   * WHICH CAMPAIGN LOST THEM (S10, 22 Oct: "unsubscribed" is one of a campaign's results). The link
+   * names an address, not a campaign -- it must still work on a newsletter two years old -- so the
+   * unsubscribe is put against the LAST campaign that reached the address, which is the one the
+   * mail clients' own buttons sit on. A spam complaint and the opt-in page's undo know their send.
+   */
+  let target = sendId ?? null
+  if (!target) {
+    const { data: last } = await admin.from('marketing_sends').select('id, campaign_id')
+      .eq('email', email).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(1).maybeSingle()
+    const row = last as { id: string; campaign_id: string } | null
+    target = row?.id ?? null
+    campaignId = campaignId ?? row?.campaign_id ?? null
+  }
   await admin.from('marketing_preferences').upsert(
     { email, status: 'unsubscribed', how, reason: null, campaign_id: campaignId ?? null },
     { onConflict: 'email' },
   )
+  if (target) await admin.from('marketing_sends').update({ unsubscribed_at: new Date().toISOString() }).eq('id', target).is('unsubscribed_at', null)
 }
 
 /** Enough of the address for the person to recognise it, not enough to harvest from a forwarded link. */

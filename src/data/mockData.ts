@@ -50,7 +50,7 @@ export const currentUser = users[0]
 
 // ---------- Reference data ----------
 export const leadSources: LeadSource[] = [
-  'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'ChatGPT', 'Claude', 'Gemini', 'Other',
+  'Website', 'Google Ads', 'Referral', 'LinkedIn', 'Facebook', 'Direct', 'Email', 'Existing Client', 'Sales Rep', 'Event', 'ChatGPT', 'Claude', 'Gemini', 'Imported list', 'Other',
 ]
 
 export const industries = ['Construction', 'Legal', 'Education', 'Property', 'IT Services', 'Retail', 'Manufacturing', 'Healthcare', 'Hospitality', 'Financial Services']

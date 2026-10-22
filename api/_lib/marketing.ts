@@ -4,8 +4,10 @@ import { keyedHash, sameHex } from './crypto.js'
 import { siteOrigin } from './workflow/siteOrigin.js'
 import { fetchAllRows } from '../../src/lib/fetchAll.js'
 import {
-  RESEND_BATCH_MAX, RESEND_MIN_GAP_MS, SENDER_ENV, isSendableEmail, newsletterActivitySubject,
-  normaliseEmail, parseAudience, renderCampaignEmail, resolveAudience, type AudienceResult, type Recipient,
+  DEFAULT_WARMUP_CEILING, LEAD_AUDIENCES, PROSPECT_SENDER_ENV, RESEND_BATCH_MAX, RESEND_MIN_GAP_MS, SENDER_ENV,
+  isProspectKind, isSendableEmail, newsSender, newsletterActivitySubject, normaliseEmail, parseAudience, parseKind,
+  prospectSender, renderCampaignEmail, resolveAudience, sendBlockReason, warmupDailyCap, warmupWeek,
+  type AudienceResult, type CampaignKind, type Recipient, type SenderChoice,
 } from '../../src/lib/marketing.js'
 
 /**
@@ -26,12 +28,24 @@ import {
  * ---------------------------------------------------------------------------------------------- */
 
 export interface SenderConfig {
+  /** NEWS: ready to send, and what is missing or wrong if not. */
   ready: boolean
   missing: string[]
+  /** Set when MARKETING_FROM is present but refused -- not an address, or on the firm's own domain. */
+  problem: string | null
   from: string | null
   replyTo: string | null
-  /** Whether bounces and complaints can be heard -- RESEND_WEBHOOK_SECRET is set. */
+  /** Whether delivery results can be heard -- RESEND_WEBHOOK_SECRET is set. */
   webhook: boolean
+  /** INTRODUCTIONS AND PROSPECT MARKETING: their own domain, their own readiness. */
+  prospect: { ready: boolean; missing: string[]; problem: string | null; domain: string | null }
+  /** The daily allowance a warmed-up prospect sender reaches. */
+  warmupCeiling: number
+}
+
+export function warmupCeiling(): number {
+  const n = Math.floor(Number(process.env.MARKETING_WARMUP_CEILING))
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_WARMUP_CEILING
 }
 
 export async function senderConfig(admin: SupabaseClient): Promise<SenderConfig> {
@@ -43,13 +57,58 @@ export async function senderConfig(admin: SupabaseClient): Promise<SenderConfig>
     const { data } = await admin.from('firm_settings').select('email').eq('id', true).maybeSingle()
     replyTo = (data as { email?: string | null } | null)?.email?.trim() || null
   }
+  const news = newsSender(process.env.MARKETING_FROM, replyTo)
+  const problem = process.env.MARKETING_FROM?.trim() && 'error' in news ? news.error : null
+  const prospectMissing = PROSPECT_SENDER_ENV.filter((k) => !process.env[k]?.trim())
+  const domain = process.env.MARKETING_PROSPECT_DOMAIN?.trim() || null
+  /* The domain alone, checked with a stand-in marketer: which marketer it goes from is per campaign. */
+  const probe = domain ? prospectSender(domain, { name: null, email: 'probe@example.org' }) : null
+  const prospectProblem = probe && 'error' in probe ? probe.error : null
   return {
-    ready: missing.length === 0,
+    ready: missing.length === 0 && !problem,
     missing,
-    from: process.env.MARKETING_FROM?.trim() || null,
+    problem,
+    from: 'from' in news ? news.from : null,
     replyTo,
     webhook: !!process.env.RESEND_WEBHOOK_SECRET?.trim(),
+    prospect: { ready: prospectMissing.length === 0 && !prospectProblem, missing: prospectMissing, problem: prospectProblem, domain },
+    warmupCeiling: warmupCeiling(),
   }
+}
+
+/** Whether a campaign of this kind can go at all, in words for the screen when it cannot. */
+export function kindNotReady(config: SenderConfig, kind: CampaignKind): string | null {
+  if (isProspectKind(kind)) {
+    if (config.prospect.missing.length) return `Prospect sending is not set up yet: ${config.prospect.missing.join(' and ')} must be set in Vercel.`
+    return config.prospect.problem
+  }
+  if (config.missing.length) return `Sending is not set up yet: ${config.missing.join(' and ')} must be set in Vercel.`
+  return config.problem
+}
+
+interface MarketerRow { id: string; name: string | null; email: string | null }
+
+/** Who a prospect campaign goes out under: the marketer chosen on it, or whoever wrote it. */
+export async function campaignMarketer(admin: SupabaseClient, campaign: Pick<CampaignRow, 'sender_id' | 'created_by'>): Promise<MarketerRow | null> {
+  const id = campaign.sender_id ?? campaign.created_by
+  if (!id) return null
+  const { data } = await admin.from('profiles').select('id, name, email').eq('id', id).maybeSingle()
+  return (data as MarketerRow | null) ?? null
+}
+
+/** The From and Reply-To for one campaign, or why there are none. */
+export async function senderForCampaign(
+  admin: SupabaseClient, config: SenderConfig, campaign: Pick<CampaignRow, 'kind' | 'sender_id' | 'created_by'>,
+): Promise<SenderChoice> {
+  if (isProspectKind(campaign.kind)) {
+    return prospectSender(process.env.MARKETING_PROSPECT_DOMAIN, await campaignMarketer(admin, campaign))
+  }
+  return newsSender(process.env.MARKETING_FROM, config.replyTo)
+}
+
+/** The bare address out of "Name <a@b>" -- what the warm-up counts against. */
+export function bareAddress(from: string): string {
+  return normaliseEmail(/<([^>]+)>\s*$/.exec(from)?.[1] ?? from)
 }
 
 /** The site an unsubscribe link opens. The deployment's own, so a staging link finds staging's row. */
@@ -82,6 +141,25 @@ export function readUnsubscribeToken(token: string | null | undefined): string |
   try { email = Buffer.from(payload, 'base64url').toString('utf8') } catch { return null }
   if (email !== normaliseEmail(email) || !email.includes('@')) return null
   return sameHex(keyedHash('marketing-unsubscribe', email).slice(0, 32), sig) ? email : null
+}
+
+/**
+ * THE "YES, KEEP ME INFORMED" TOKEN: the send's own id and a keyed hash over it, the unsubscribe
+ * link's construction with its own purpose mixed in, so neither token can be passed off as the other.
+ * It names a SEND rather than an address, because consent is recorded on the LEAD that send went to,
+ * against the campaign that asked -- and a send id is unguessable without the server's key anyway.
+ */
+export function optInToken(sendId: string): string {
+  return `${Buffer.from(sendId, 'utf8').toString('base64url')}.${keyedHash('marketing-opt-in', sendId).slice(0, 32)}`
+}
+
+export function readOptInToken(token: string | null | undefined): string | null {
+  const [payload, sig] = (token ?? '').split('.')
+  if (!payload || !sig || !/^[0-9a-f]{32}$/.test(sig)) return null
+  let id: string
+  try { id = Buffer.from(payload, 'base64url').toString('utf8') } catch { return null }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return null
+  return sameHex(keyedHash('marketing-opt-in', id).slice(0, 32), sig) ? id : null
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -157,16 +235,19 @@ interface CampaignRow {
   image_url: string | null
   audience: unknown
   first_approach: boolean
+  kind: CampaignKind
+  sender_id: string | null
   status: string
   created_by: string | null
   queued_by: string | null
 }
 
-const CAMPAIGN_COLUMNS = 'id, name, subject, preheader, body, image_url, audience, first_approach, status, created_by, queued_by'
+const CAMPAIGN_COLUMNS = 'id, name, subject, preheader, body, image_url, audience, first_approach, kind, sender_id, status, created_by, queued_by'
 
 export async function loadCampaign(admin: SupabaseClient, id: string): Promise<CampaignRow | null> {
   const { data } = await admin.from('marketing_campaigns').select(CAMPAIGN_COLUMNS).eq('id', id).maybeSingle()
-  return (data as CampaignRow | null) ?? null
+  const row = data as CampaignRow | null
+  return row ? { ...row, kind: parseKind(row.kind) } : null
 }
 
 /**
@@ -174,10 +255,20 @@ export async function loadCampaign(admin: SupabaseClient, id: string): Promise<C
  * that quietly stopped at PostgREST's thousand would be a newsletter that quietly missed people.
  */
 export async function resolveOnServer(
-  admin: SupabaseClient, audienceRaw: unknown, firstApproach: boolean,
+  admin: SupabaseClient, audienceRaw: unknown, kindRaw: unknown,
 ): Promise<AudienceResult | { error: string }> {
   const audience = parseAudience(audienceRaw)
   if (!audience) return { error: 'This campaign has no list chosen.' }
+  const kind = parseKind(kindRaw)
+  /*
+   * THE INTRODUCTION IS THE ONLY FIRST APPROACH THERE IS. A news campaign's old "first approach" box
+   * is gone and its stored flag is not read: one route to a stranger's inbox, so "once ever" has one
+   * door to guard (and the database's one-first-approach index behind it).
+   */
+  const firstApproach = kind === 'introduction'
+  if (isProspectKind(kind) && !LEAD_AUDIENCES.includes(audience.kind)) {
+    return { error: 'A prospect campaign goes to leads only. Choose a list of leads.' }
+  }
   try {
     const [companies, contacts, leads, activities, prefs, approached] = await Promise.all([
       fetchAllRows<Record<string, unknown>>(() => admin.from('companies')
@@ -185,7 +276,7 @@ export async function resolveOnServer(
       fetchAllRows<Record<string, unknown>>(() => admin.from('contacts')
         .select('id, first_name, email, company_id, lead_id').order('id'), { table: 'contacts' }),
       fetchAllRows<Record<string, unknown>>(() => admin.from('leads')
-        .select('id, first_name, company_name, email, status, source, created_at, last_contact_at, rejection_reason, status_changed_at, marketing_consent_at')
+        .select('id, first_name, company_name, email, status, source, created_at, last_contact_at, rejection_reason, status_changed_at, marketing_consent_at, marketing_list_id')
         .order('id'), { table: 'leads' }),
       audience.kind === 'dormant_leads'
         ? fetchAllRows<Record<string, unknown>>(() => admin.from('activities')
@@ -204,6 +295,7 @@ export async function resolveOnServer(
     return resolveAudience({
       audience,
       firstApproach,
+      kind,
       companies: companies.map((c) => ({
         id: String(c.id), name: String(c.name ?? ''), email: s(c.email), parentCompanyId: s(c.parent_company_id),
         services: (Array.isArray(c.services) ? c.services : []) as never[], contactPerson: s(c.contact_person),
@@ -216,6 +308,7 @@ export async function resolveOnServer(
         status: l.status as never, source: l.source as never, createdAt: String(l.created_at),
         lastContactAt: s(l.last_contact_at), rejectionReason: l.rejection_reason as never,
         statusChangedAt: s(l.status_changed_at), marketingConsentAt: s(l.marketing_consent_at),
+        marketingListId: s(l.marketing_list_id),
       })),
       activities: activities.map((a) => ({
         leadId: s(a.lead_id), activityDate: String(a.activity_date), type: String(a.type), subject: String(a.subject ?? ''),
@@ -247,7 +340,7 @@ export async function queueCampaign(admin: SupabaseClient, campaignId: string, c
   if (campaign.status !== 'draft') return { error: 'This campaign has already been sent.', status: 409 }
   if (!campaign.subject.trim() || !campaign.body.trim()) return { error: 'Give it a subject and a body first.', status: 400 }
 
-  const resolved = await resolveOnServer(admin, campaign.audience, campaign.first_approach)
+  const resolved = await resolveOnServer(admin, campaign.audience, campaign.kind)
   if ('error' in resolved) return { error: resolved.error, status: 500 }
   if (resolved.recipients.length === 0) return { error: 'Nobody on this list can be sent to.', status: 400 }
 
@@ -294,6 +387,9 @@ interface SendRow {
 
 interface Result { id: string; state: 'sent' | 'failed' | 'skipped' | 'queued'; resend_id?: string | null; error?: string | null }
 
+/** Where a prospect sender stands today -- the campaign page says it. */
+export interface Allowance { sender: string; week: number; cap: number; used: number }
+
 export interface DrainReport {
   sent: number
   failed: number
@@ -301,6 +397,10 @@ export interface DrainReport {
   remaining: number
   /** Why it stopped before the list was done, when it did -- said on the screen. */
   stoppedFor: string | null
+  /** Rows of prospect campaigns whose sender has used today's allowance: they go tomorrow, on their own. */
+  waitingForTomorrow: number
+  /** The sender's day, for a prospect campaign drained by itself. */
+  allowance: Allowance | null
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -309,25 +409,36 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 export const MAX_ATTEMPTS = 3
 
 /**
- * SEND WHAT IS QUEUED, A CHUNK AT A TIME, UNTIL THE BUDGET IS SPENT.
+ * SEND WHAT IS QUEUED, A CHUNK AT A TIME, CAMPAIGN BY CAMPAIGN, UNTIL THE BUDGET IS SPENT.
  *
  * Called by the open screen (one campaign, a short budget, again and again) and by the five-minute
  * mail sweep (every campaign, a longer one) -- so a send started on an iPad that is then closed
- * still finishes. The two never send one row twice: marketing_claim_sends hands each a different
- * chunk.
+ * still finishes. The two never send one row twice: the claim functions hand each a different chunk.
  *
- * THE UNSUBSCRIBE IS READ AGAIN HERE, not only when the list was drawn. Somebody who unsubscribed
- * from last month's newsletter between this one being queued and their chunk going out is skipped.
+ * ONE CAMPAIGN PER CHUNK, because a chunk has one sender: news goes from MARKETING_FROM, a prospect
+ * campaign from its marketer on MARKETING_PROSPECT_DOMAIN -- and a prospect chunk is claimed only up
+ * to what that sender has left of today's warm-up allowance (marketing_claim_prospect counts it under
+ * a lock). A sender at its allowance is skipped until tomorrow; its rows simply stay queued.
+ *
+ * THE UNSUBSCRIBE AND THE CONSENT ARE READ AGAIN HERE, not only when the list was drawn. Somebody who
+ * unsubscribed between the queue and their chunk is skipped; a lead with no consent on record is
+ * never sent anything but its one introduction (sendBlockReason).
  */
 export async function drainMarketing(
   admin: SupabaseClient,
   opts: { budgetMs: number; campaignId?: string | null; host?: string | null; fetchImpl?: FetchLike },
 ): Promise<DrainReport> {
-  const report: DrainReport = { sent: 0, failed: 0, skipped: 0, remaining: 0, stoppedFor: null }
+  const report: DrainReport = { sent: 0, failed: 0, skipped: 0, remaining: 0, stoppedFor: null, waitingForTomorrow: 0, allowance: null }
+  const campaigns = new Map<string, CampaignRow>()
+  const senders = new Map<string, SenderChoice>()
+  /* Campaigns whose sender is at today's allowance: not tried again in this drain. */
+  const waiting = new Set<string>()
+  /* Campaigns that cannot go at all just now (no sender) -- said once, not retried. */
+  const blocked = new Set<string>()
   const config = await senderConfig(admin)
   const apiKey = process.env.RESEND_API_KEY?.trim() ?? ''
   const origin = originFor(opts.host)
-  if (!config.ready || !config.from) { report.stoppedFor = `Not set up: ${config.missing.join(', ')}`; return finish() }
+  if (!apiKey) { report.stoppedFor = 'Not set up: RESEND_API_KEY'; return finish() }
   if (!origin) { report.stoppedFor = 'The site address is not known, so no unsubscribe link can be written.'; return finish() }
 
   const { data: firmRow } = await admin.from('firm_settings')
@@ -337,40 +448,89 @@ export async function drainMarketing(
   const firmName = firm.firm_name?.trim() || 'Bredell Ferreira'
   const firmAddress = firm.postal_address?.trim() || firm.physical_address?.trim() || null
 
-  const campaigns = new Map<string, CampaignRow>()
   const started = Date.now()
   let lastCall = 0
+  let halt: string | null = null
 
-  while (Date.now() - started < opts.budgetMs) {
-    const { data: claimedRows, error } = await admin.rpc('marketing_claim_sends', {
-      p_limit: RESEND_BATCH_MAX, p_campaign: opts.campaignId ?? null,
-    })
-    if (error) { report.stoppedFor = error.message; break }
-    const claimed = (claimedRows ?? []) as SendRow[]
-    if (!claimed.length) break
+  while (!halt && Date.now() - started < opts.budgetMs) {
+    let q = admin.from('marketing_campaigns').select(CAMPAIGN_COLUMNS).eq('status', 'sending')
+    if (opts.campaignId) q = q.eq('id', opts.campaignId)
+    const { data: live } = await q
+    const open = ((live ?? []) as CampaignRow[]).map((c) => ({ ...c, kind: parseKind(c.kind) }))
+      .filter((c) => !waiting.has(c.id) && !blocked.has(c.id))
+    if (!open.length) break
+    let progressed = false
+    for (const campaign of open) {
+      if (halt || Date.now() - started >= opts.budgetMs) break
+      campaigns.set(campaign.id, campaign)
+      let sender = senders.get(campaign.id)
+      if (!sender) { sender = await senderForCampaign(admin, config, campaign); senders.set(campaign.id, sender) }
+      if ('error' in sender) { blocked.add(campaign.id); report.stoppedFor = sender.error; continue }
 
-    const results: Result[] = []
-    for (const id of new Set(claimed.map((r) => r.campaign_id))) {
-      if (!campaigns.has(id)) { const c = await loadCampaign(admin, id); if (c) campaigns.set(id, c) }
+      let claimed: SendRow[]
+      if (isProspectKind(campaign.kind)) {
+        const address = bareAddress(sender.from)
+        const { data: dayRows } = await admin.rpc('marketing_sender_today', { p_sender: address })
+        const day = (Array.isArray(dayRows) ? dayRows[0] : dayRows) as { used?: number; first_sent_at?: string | null } | null
+        /* Real time, not the firm's clock: see warmupDailyCap. */
+        const now = new Date().toISOString()
+        const cap = warmupDailyCap(day?.first_sent_at ?? null, now, config.warmupCeiling)
+        const used = Number(day?.used ?? 0)
+        if (opts.campaignId === campaign.id || !report.allowance) {
+          report.allowance = { sender: address, week: warmupWeek(day?.first_sent_at ?? null, now), cap, used }
+        }
+        if (used >= cap) { waiting.add(campaign.id); continue }
+        const { data, error } = await admin.rpc('marketing_claim_prospect', {
+          p_campaign: campaign.id, p_sender: address, p_cap: cap, p_limit: RESEND_BATCH_MAX,
+        })
+        if (error) { halt = error.message; break }
+        claimed = (data ?? []) as SendRow[]
+        if (report.allowance?.sender === address) report.allowance.used = Math.min(cap, used + claimed.length)
+        if (!claimed.length) { waiting.add(campaign.id); continue }
+      } else {
+        const { data, error } = await admin.rpc('marketing_claim_sends', { p_limit: RESEND_BATCH_MAX, p_campaign: campaign.id })
+        if (error) { halt = error.message; break }
+        claimed = (data ?? []) as SendRow[]
+        if (!claimed.length) continue
+      }
+      progressed = true
+      halt = await sendChunk(campaign, sender, claimed)
     }
+    if (!progressed) break
+  }
+  if (halt) report.stoppedFor = halt
+  return finish()
+
+  async function sendChunk(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, claimed: SendRow[]): Promise<string | null> {
+    const results: Result[] = []
     const { data: prefRows } = await admin.from('marketing_preferences').select('email, status')
       .in('email', claimed.map((r) => r.email)).neq('status', 'subscribed')
     const stopped = new Map(((prefRows ?? []) as { email: string; status: string }[]).map((p) => [p.email, p.status]))
+    /* THE LEAD AS IT STANDS NOW, for the consent rule. */
+    const leadIds = [...new Set(claimed.map((r) => r.lead_id).filter((x): x is string => !!x))]
+    const { data: leadRows } = leadIds.length
+      ? await admin.from('leads').select('id, marketing_consent_at').in('id', leadIds)
+      : { data: [] }
+    const leads = new Map(((leadRows ?? []) as { id: string; marketing_consent_at: string | null }[])
+      .map((l) => [l.id, { marketingConsentAt: l.marketing_consent_at }]))
 
-    const toSend: { row: SendRow; email: ReturnType<typeof buildEmail> }[] = []
+    const toSend: { row: SendRow; email: OutgoingEmail }[] = []
     for (const row of claimed) {
-      const campaign = campaigns.get(row.campaign_id)
-      if (!campaign) { results.push({ id: row.id, state: 'failed', error: 'The campaign is gone.' }); continue }
       if (stopped.has(row.email)) {
         results.push({ id: row.id, state: 'skipped', error: stopped.get(row.email) === 'undeliverable' ? 'Undeliverable' : 'Unsubscribed before it was sent' })
         continue
       }
+      const block = sendBlockReason(
+        { leadId: row.lead_id, companyId: row.company_id, firstApproach: row.first_approach },
+        row.lead_id ? leads.get(row.lead_id) ?? null : null,
+      )
+      if (block) { results.push({ id: row.id, state: 'skipped', error: block }); continue }
       if (!isSendableEmail(row.email)) { results.push({ id: row.id, state: 'failed', error: 'The address does not look right.' }); continue }
       if (row.attempts > MAX_ATTEMPTS) { results.push({ id: row.id, state: 'failed', error: `Gave up after ${MAX_ATTEMPTS} attempts.` }); continue }
-      toSend.push({ row, email: buildEmail(campaign, row) })
+      toSend.push({ row, email: buildEmail(campaign, sender, row) })
     }
 
-    let halt: string | null = null
+    let stop: string | null = null
     if (toSend.length) {
       const wait = RESEND_MIN_GAP_MS - (Date.now() - lastCall)
       if (wait > 0) await sleep(wait)
@@ -388,14 +548,14 @@ export async function drainMarketing(
           const one = await resendSend(apiKey, [t.email], idempotencyKey([t.row.id]), opts.fetchImpl)
           if (one.ok) results.push({ id: t.row.id, state: 'sent', resend_id: one.ids[0] || null, error: null })
           else if (isValidationFailure(one.status)) results.push({ id: t.row.id, state: 'failed', error: one.message.slice(0, 500) })
-          else { results.push({ id: t.row.id, state: 'queued', error: one.message.slice(0, 500) }); halt = haltReason(one) }
+          else { results.push({ id: t.row.id, state: 'queued', error: one.message.slice(0, 500) }); stop = haltReason(one) }
         }
       } else if (isValidationFailure(outcome.status)) {
         results.push({ id: toSend[0].row.id, state: 'failed', error: outcome.message.slice(0, 500) })
       } else {
         /* Rate-limited, refused or unreachable: back in the queue untouched, and stop for now. */
         for (const t of toSend) results.push({ id: t.row.id, state: 'queued', error: outcome.message.slice(0, 500) })
-        halt = haltReason(outcome)
+        stop = haltReason(outcome)
       }
     }
 
@@ -406,21 +566,25 @@ export async function drainMarketing(
       else if (r.state === 'skipped') report.skipped += 1
     }
     await logOnTimelines(admin, campaigns, claimed, results)
-    if (halt) { report.stoppedFor = halt; break }
+    return stop
   }
-  return finish()
 
-  function buildEmail(campaign: CampaignRow, row: SendRow): OutgoingEmail {
+  function buildEmail(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, row: SendRow): OutgoingEmail {
     const token = unsubscribeToken(row.email)
+    const introduction = campaign.kind === 'introduction'
     const rendered = renderCampaignEmail(
       { subject: campaign.subject, preheader: campaign.preheader, body: campaign.body, imageUrl: campaign.image_url },
       { firstName: row.first_name, companyName: row.company_name },
-      { unsubscribeUrl: `${origin}/unsubscribe/${token}`, firmName, face, firmAddress, basis: row.lead_id && !row.company_id ? 'lead' : 'client' },
+      {
+        unsubscribeUrl: `${origin}/unsubscribe/${token}`, firmName, face, firmAddress,
+        basis: introduction ? 'introduction' : row.lead_id && !row.company_id ? 'lead' : 'client',
+        optInUrl: introduction ? `${origin}/opt-in/${optInToken(row.id)}` : null,
+      },
     )
     return {
-      from: config.from as string,
+      from: sender.from,
       to: [row.email],
-      ...(config.replyTo ? { reply_to: config.replyTo } : {}),
+      ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
@@ -441,6 +605,14 @@ export async function drainMarketing(
     if (opts.campaignId) q = q.eq('campaign_id', opts.campaignId)
     const { count } = await q
     report.remaining = count ?? 0
+    if (waiting.size) {
+      const { count: held } = await admin.from('marketing_sends').select('id', { count: 'exact', head: true })
+        .in('campaign_id', [...waiting]).eq('state', 'queued')
+      report.waitingForTomorrow = held ?? 0
+      if (!report.stoppedFor && report.waitingForTomorrow > 0 && report.allowance) {
+        report.stoppedFor = `Today’s allowance for ${report.allowance.sender} (${report.allowance.cap}, week ${report.allowance.week} of the warm-up) is used. ${report.waitingForTomorrow} waiting for tomorrow’s allowance.`
+      }
+    }
     return report
   }
 }

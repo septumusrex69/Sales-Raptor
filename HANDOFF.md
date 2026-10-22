@@ -42,6 +42,55 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      reversed after payover is read after PTC and set-off, so a business payment that in fact paid such
      a reversal under-credits the firm (safe side) -- and a reversal paid into the business account
      leaves the trust short by it, an older question than this one.
+0000000000. **S10, 22 Oct: NEWS & CAMPAIGNS GROWS UP -- PROSPECT LISTS, ONE INTRODUCTION, DELIVERY
+   RESULTS, TWO SENDERS, WARM-UP** (the firm's five decisions, Stephan, 22 Oct). `/news`.
+   - **Import a prospect list** (News & campaigns -> Import a prospect list): a .csv/.xlsx with an Email
+     heading (name, company, phone if there; other columns kept as a note). The SERVER counts it first
+     -- new / already a lead (earlier imports included) / already a client / bad email / in the file
+     twice -- and Add writes a `marketing_lists` row (name, file name, who, when, counts; never the
+     file) and one LEAD per new address, source **"Imported list"**, on the importer's desk.
+     `src/lib/prospectImport.ts`, `api/_lib/marketingLists.ts`.
+   - **Campaign kinds**: News (clients + consented leads, from `MARKETING_FROM`), **Introduction**
+     (only leads never asked and never consented -- the ONLY first approach now; the old news
+     "first approach" box is gone and its stored flag is not read), **Prospect marketing** (only leads
+     who said yes). The introduction carries a **"Yes, keep me informed"** button -> `/opt-in/<signed
+     send token>` (public page, no login, "Thank you -- you'll hear from us", with a "that wasn't me"
+     undo that unsubscribes) -> consent on the lead + `marketing_preferences` how `'opt-in link'` +
+     the send's `opted_in_at`. **A lead with no yes is refused at the queue AND at the send**
+     (`sendBlockReason`), so an imported lead who did not press it is never sent marketing again.
+   - **Delivery results** per campaign (counts + rates) and per recipient: sent, delivered, didn't
+     arrive, opened, clicked, unsubscribed (put against the LAST campaign that reached the address),
+     marked as spam, opted in. Opens are labelled approximate. Webhook records every event through
+     `marketing_record_event`, idempotent on the svix-id; a click on the unsubscribe link is not a click.
+   - **Three domains** (the firm went back and forth on 22 Oct and settled here): the main domain
+     `bredellferreira.co.za` is for everyday mail and is **never** a bulk From -- news or prospect,
+     nor any subdomain of it (`newsSender` / `prospectSender` refuse it; check-marketing-prospects).
+     News goes from its own domain (`MARKETING_FROM`, name still being chosen); prospect mail from
+     `<marketer's local part>@MARKETING_PROSPECT_DOMAIN`, display name the marketer, Reply-To their
+     real address. Neither domain is in the code.
+   - **Warm-up** for prospect mail, per sender: 30/day week 1, 60, 120, 250, then
+     `MARKETING_WARMUP_CEILING` (500). Counted in the database under a lock (`marketing_claim_prospect`);
+     the rest wait ("N waiting for tomorrow's allowance") and the five-minute sweep sends them.
+     **News is not capped** -- the news domain should still be ramped up by hand (below).
+   - **WHAT THE FIRM MUST SET UP (Resend + DNS + Vercel)** -- nothing sends until it is done:
+     1. Resend account; API key with sending access -> Vercel `RESEND_API_KEY`.
+     2. **News domain** (separate from bredellferreira.co.za): add in Resend, put its SPF + DKIM TXT and
+        bounce MX records at its DNS host, wait for Verified, switch ON open + click tracking. Vercel
+        `MARKETING_FROM` = e.g. `Bredell Ferreira <news@<news domain>>`. **Ramp it up by hand**: the
+        first newsletters to a few hundred clients at a time over the first weeks, not all ~3 000
+        clients + ~10 000 leads at once.
+     3. **Prospect domain** (separate again): same in Resend (SPF, DKIM, MX, Verified, open + click
+        tracking). Vercel `MARKETING_PROSPECT_DOMAIN` = just the domain. Each marketer needs an email
+        on their profile. Optional `MARKETING_WARMUP_CEILING`.
+     4. **The main domain is not added to Resend for bulk at all.** Its SPF/DKIM/MX stay as they are.
+     5. Webhook in Resend -> `https://<site>/api/email/resend-webhook` for `email.sent`,
+        `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`,
+        `email.opened`, `email.clicked`; signing secret -> Vercel `RESEND_WEBHOOK_SECRET`. Redeploy.
+   - check-marketing-prospects (145), check-marketing (128), e2e/news-prospects (38), e2e/news-campaigns (35).
+     **e2e port note:** another session's Vite was sitting on 5402/5403 today and served ITS code to
+     this suite (an old News page); run news-prospects on a free port (`RAPTOR_E2E_PORT=5463`) if a
+     button "is not there".
+
 000000000. **S10, 22 Oct: THE QUESTION AT THE DOOR OF AN ACCOUNT** (the firm's design, two messages).
    - **Your own account, worked** (a call, note, SMS, email, promise, trace -- not just reading it):
      leaving it for ANY screen is **stopped while its diary date is today, past or missing** -- only a
@@ -1317,6 +1366,21 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   was credited ...)" entry -- **run this on production first, read-only, and show the firm the list**:
   per client, `sum(-amount)` of client "Charges set off against payover %" less firm "Charges recovered
   from payover %", where that client's latest approved run is below nil.
+- **S10's prospect / results / warm-up migration (22 Oct)** (staging has it; end of schema.sql, "S10 /
+  PROSPECT LISTS, THE INTRODUCTION, DELIVERY RESULTS"): `marketing_lists` (+ RLS select only),
+  `leads.marketing_list_id`, `marketing_campaigns.kind` + `sender_id`, the `marketing_preferences.how`
+  check with `'opt-in link'`, eleven `marketing_sends` columns (sender, delivered/delayed/bounced/
+  complained/first_opened/first_clicked/unsubscribed/opted_in timestamps, open/click counts),
+  `marketing_send_events`, `marketing_record_event`, `marketing_sender_today`,
+  `marketing_claim_prospect`, `marketing_campaign_results` (replaces `marketing_campaign_counts`,
+  which is removed), and `clear_staging` with the events + lists. **Applied to staging through MCP with
+  the four foreign keys added in a do-block** (the words in "on ... set null" hang the tool); schema.sql
+  carries them inline. Another session redefining `clear_staging` after this must keep
+  `marketing_send_events` in the truncate and the `marketing_lists` removal.
+- **Opt-in by a link scanner.** The opt-in page records the yes when it OPENS (the firm's one-press
+  design); the API never acts on a GET, but a scanner that runs JavaScript could press it. The page's
+  "that wasn't me" undo unsubscribes the address. If the firm sees opt-ins it does not believe, the
+  page can be changed to ask for one more press.
 - **S10's call-campaign migrations** (end of schema.sql): campaigns call columns + checks, the
   `campaign` diary kind/source/rank/campaign_id, `priority` SET EXPRESSION (PG17), the two one-open
   indexes, `sync_account_diary_date`, `call_campaigns_expire`, the one-row `campaign_counts`, and

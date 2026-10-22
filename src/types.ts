@@ -37,6 +37,8 @@ export type LeadSource =
   | 'ChatGPT'
   | 'Claude'
   | 'Gemini'
+  /* A prospect list the marketer uploaded on News & campaigns (S10, 22 Oct). */
+  | 'Imported list'
   | 'Other'
 
 export type LeadCategory = 'Cold' | 'Warm' | 'Hot' | 'Priority'
