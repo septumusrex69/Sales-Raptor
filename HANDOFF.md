@@ -90,6 +90,45 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      **e2e port note:** another session's Vite was sitting on 5402/5403 today and served ITS code to
      this suite (an old News page); run news-prospects on a free port (`RAPTOR_E2E_PORT=5463`) if a
      button "is not there".
+0000000000. **S10, 22 Oct: CAMPAIGNS ROUND TWO -- the call follows the desk, RECOVERY and TRACE campaigns,
+   results for everybody, AUTO-DIAL** (the firm's four instructions, then their amendment A-C). On staging;
+   production has none of it (§5).
+   - **Reallocated mid-campaign, the new collector works it.** A trigger on `debtor_accounts.assigned_to`
+     (`campaign_call_follows_desk`) marks a WORK campaign's open call `moved` (who, when, "Account
+     reallocated to <name>"), THEN inserts the same day/rank/campaign for the new holder, then points
+     `moved_to` at it -- every path that moves an account, hand-out included. To nobody: the call is
+     cancelled with a reason (counts as missed). A moved call is no longer counted as missed anywhere.
+   - **Recovery call campaign** (Accounts -> Closed -> tick -> Campaign -> Call -> **Recovery**): the
+     written-off book only, chosen **by write-off reason** -- Raptor's closed list by name with a count each,
+     the Swordfish free text grouped as stored, "No reason recorded" (`recovery_reasons`, counted in the
+     database). **Withdrawn, paid up and settled are NEVER in one** (the firm's amendment; ended_as, or
+     Swordfish's status/reason -- `recovery_closure`); prescribed never. Calls shared among collectors the
+     person picks, by the same planner (`planCalls` with a `pool`, `shareAmong`). **The account stays where
+     it was.** On the account (diary run or not) the collector holding the call sees **"Debtor agreed to
+     pay -- re-open and keep it"**, asked twice; `recovery_reopen` refuses anybody else, moves the desk to
+     them BEFORE clearing the closure (so no Handover sequence starts), sets 'Active: Re-opened' where the
+     status said written off/closed, records what it was on the call (`recovered_from`) and the timeline.
+     Then the ordinary promise form (which a closed account no longer offers). Finishing a call that did
+     not win the account back closes it with a note and books no date.
+   - **Trace campaign** (same box -> **Trace**): live accounts, or written off by reason; shared among the
+     people picked to trace; the preview prices one item 4(c) search per account. **The referral is the
+     bulk part; the search is still manual** (XDS has no way to be handed a debtor -- a person runs it and
+     records it on the account, charged by recordTrace as always).
+   - **Campaign results** (sidebar, everybody; `/campaigns/results`): every campaign, its kind, who, dates;
+     calls worked/waiting/missed and **PTPs made** (rand promised), accounts won back; SMS/email sent/
+     skipped/failed; a trace campaign's **funnel** (sent to trace -> searched -> new details -> contact made
+     -> PTP -> paid, `trace_campaign_funnel`). **No fees on it.** Security definer, aggregated.
+   - **Auto-dial** in a diary run: a toggle on the bar of a campaign call (remembered per browser). With
+     BuzzBox + an extension, landing on the next campaign account places the call through CallButton's own
+     path (item 2 charged, outcome asked), once per visit, only in calling hours, "Dialling 082 555 1234..."
+     with Stop. Without BuzzBox it says so and does nothing. No new serverless function.
+   - check-campaign-recovery (111), check-call-campaigns (57), e2e/campaign-recovery (29).
+   - **QUESTIONS FOR THE FIRM:** (1) the PTP-made definition (§4); (2) which write-off reasons a recovery
+     should usually take -- **staging has no written-off accounts at all** (the STC book is ten live
+     accounts), so nothing could be counted; "refusal to pay" and "recommended write-off" are NOT in
+     Raptor's closed list and were not added; (3) whether a team leader may recover accounts on nobody's
+     desk / a departed collector's desk (built: yes); (4) whether a call box outcome "promised" on a closed
+     account should be refused too (only the promise panel refuses today).
 
 000000000. **S10, 22 Oct: THE QUESTION AT THE DOOR OF AN ACCOUNT** (the firm's design, two messages).
    - **Your own account, worked** (a call, note, SMS, email, promise, trace -- not just reading it):
@@ -1262,6 +1301,13 @@ The four that stood here at the start of the fifth session were answered by the 
 
 Do not guess these. Each one changes money.
 
+0. **WHAT COUNTS AS "A PTP MADE" FROM A CAMPAIGN (22 Oct, built as stated, easy to turn).** A promise on
+   an account in the campaign, recorded by the collector whose diary the call was on, from the moment the
+   call landed there until the end of the day they worked it (or until the campaign ended / it was handed
+   to another collector). Counted once per promise. A promise somebody else took, or one a week later, is
+   not the campaign's. And the trace funnel's stages: SEARCHED a bureau report or an item 4(c) search
+   after the referral; NEW DETAILS a contact added or verified (or a finding verified) after it; CONTACT
+   MADE a consultation (item 7) after the new details; PTP and PAID after that contact.
 1. ~~R502 or R509?~~ — **decided 8 Oct: R502 stays.** "The actual fee was 509 as per the Gazette
    ... they undercharged 7 Rand for years. There's nothing that we can do about that now. So we will
    leave it like that." Do not move it. Recorded in `check-fees.mjs`.
@@ -1381,12 +1427,22 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   design); the API never acts on a GET, but a scanner that runs JavaScript could press it. The page's
   "that wasn't me" undo unsubscribes the address. If the firm sees opt-ins it does not believe, the
   page can be changed to ask for one more press.
+- **S10's campaigns-round-two migrations** (end of schema.sql, staging only): `campaigns.call_kind`
+  ('work'|'recovery'|'trace'), `collector_ids`, `write_off_reasons` (+ `campaigns_call_kind_shape`;
+  `include_withdrawn` added and then removed the same day); `diary_entries.recovered_at`,
+  `recovered_from`, `closed_at` (+ trigger `stamp_diary_closed_at`); `campaign_call_follows_desk` +
+  trigger; `recovery_closure`, `write_off_reason_key`, `recovery_reasons`, `recovery_reopen`;
+  policy `campaigns_read_own_calls`; `campaign_counts` (moved not counted); `campaign_call_promises`,
+  `campaign_results`, `campaign_results_by_collector`, `trace_campaign_funnel`.
+- **Clocks on staging:** results compare `created_at` (now()) stamps; the firm-clock stamps
+  (verified_at, outcome_at) are shifted by today's offset. Right while the staging clock has not been
+  moved since the stamp was written; exact on production.
 - **S10's call-campaign migrations** (end of schema.sql): campaigns call columns + checks, the
   `campaign` diary kind/source/rank/campaign_id, `priority` SET EXPRESSION (PG17), the two one-open
   indexes, `sync_account_diary_date`, `call_campaigns_expire`, the one-row `campaign_counts`, and
   `role_capabilities` with `campaign.run` for both liaison roles.
-- **A campaign call stays with the collector it was placed with** if the account is handed to somebody
-  else mid-campaign (an open entry is never edited). Small, and visible on the Campaigns page.
+- ~~A campaign call stays with the collector it was placed with~~ -- **fixed 22 Oct**: it follows the
+  account to its new desk (campaign_call_follows_desk).
 - **S10's evening migrations too**: `swordfish_import_runs` + `discard_import_batch`; the brought-forward
   columns/kind/index, `bring_forward_client_balances`, `client_ledger`, `business_income`,
   `business_month`; campaigns tables + functions; marketing tables, lead columns + trigger, functions;

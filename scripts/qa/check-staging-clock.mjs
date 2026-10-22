@@ -117,7 +117,13 @@ check('only the named audit and real-world functions read the real clock', still
   'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',
   /* signing_accept (S9): the moment the debtor accepted, a real-world stamp like signing_sign's. */
   'signing_accept', 'signing_document',
-  'signing_open', 'signing_sign', 'step_staging_clock', 'touch_message_template', 'trusted_device_seen',
+  'signing_open', 'signing_sign',
+  /* stamp_diary_closed_at and trace_campaign_funnel (S10, 22 Oct): campaign results compare a moment
+     against created_at, which is now(); the closing moment has to be on the same clock or nothing
+     lands inside a window on staging. Not a business date -- done_at and due_on still are the firm's.
+     The funnel reads now() only to shift the firm-clock stamps onto that clock. */
+  'stamp_diary_closed_at',
+  'step_staging_clock', 'touch_message_template', 'trace_campaign_funnel', 'trusted_device_seen',
   'workflow_publish',
 ])
 ok('...and set_trust_opening_balance only for its updated_at',

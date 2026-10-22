@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, Loader2, MessageSquareWarning, X,
+  ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, Loader2, MessageSquareWarning, PhoneCall, X,
 } from 'lucide-react'
+import { useBuzzBox } from '../../store/BuzzBoxContext'
+import {
+  AUTO_DIAL_EVENT, AUTO_DIAL_RESULT_EVENT, autoDialClaimed, autoDialDecision, claimAutoDial, dialWords,
+  readAutoDial, writeAutoDial, type AutoDialRequest, type AutoDialResult,
+} from '../../lib/autoDial.ts'
+import { johannesburgMinute } from '../../lib/contactHours.ts'
+import { clockNow } from '../../lib/clock.ts'
+import { ClosedFinish } from './ClosedFinish'
+import { finishOnClosedAccount } from '../../lib/diary.ts'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
@@ -73,7 +82,7 @@ function pushTrail(item: Worked): void {
  * has to come back, and asking afterwards means it often is not asked at all: that is how 355
  * accounts in the imported book ended up with nobody on them and no date.
  */
-export function DiaryWorkBar({ account, onWorked }: {
+export function DiaryWorkBar({ account, callNumber = null, onWorked }: {
   account: {
     id: string
     mainComment: string | null
@@ -82,13 +91,22 @@ export function DiaryWorkBar({ account, onWorked }: {
     debtorFirstName: string | null
     debtorSurname: string | null
     accountNumber: string | null
+    /** The database's book: a campaign item on a CLOSED account is finished without a next date. */
+    book?: string | null
   }
+  /** The number the Call button rings (dialableNumber) -- what auto-dial rings. */
+  callNumber?: string | null
   /** Re-read the account after the entry closes, so the page is not showing stale figures. */
   onWorked?: () => void | Promise<void>
 }) {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { currentUser } = useAuth()
+  const { canDial } = useBuzzBox()
+  /* AUTO-DIAL (autoDial.ts): remembered per browser, off until somebody turns it on. */
+  const [autoDial, setAutoDial] = useState(readAutoDial)
+  const [dialLine, setDialLine] = useState<string | null>(null)
 
   const entryId = params.get('diary')
   const today = clockToday()
@@ -139,6 +157,54 @@ export function DiaryWorkBar({ account, onWorked }: {
   }, [entryId, currentUser?.id, today])
 
   useEffect(() => { void load() }, [load])
+
+  /*
+   * AUTO-DIAL, decided on every render and acted on once per visit (autoDial.ts). The decision is
+   * pure; the claim is held outside React, so StrictMode's second effect and every re-render find
+   * the visit already claimed and do nothing.
+   */
+  const current = queue?.find((e) => e.id === entryId) ?? null
+  const decision = autoDialDecision({
+    enabled: autoDial,
+    canDial,
+    isCampaignCall: current?.kind === 'campaign',
+    number: callNumber,
+    day: today,
+    minute: johannesburgMinute(clockNow()),
+    alreadyDialled: !!current && autoDialClaimed(current.id, location.key),
+  })
+  const dialAccount = current?.accountId ?? null
+  const dialNumber = decision.dial ? decision.number : null
+  /* The answer comes back from CallButton, which placed the call. Listening is its own effect so
+     the second run of the dispatching one (which does nothing) cannot take the listener away. */
+  useEffect(() => {
+    if (!dialAccount) return
+    const onResult = (ev: Event) => {
+      const r = (ev as CustomEvent<AutoDialResult>).detail
+      if (r?.accountId !== dialAccount) return
+      setDialLine(r.ok ? 'Ringing your extension: pick up to be put through.' : `Could not dial: ${r.error ?? 'BuzzBox did not take the call.'}`)
+    }
+    window.addEventListener(AUTO_DIAL_RESULT_EVENT, onResult)
+    return () => window.removeEventListener(AUTO_DIAL_RESULT_EVENT, onResult)
+  }, [dialAccount])
+  useEffect(() => {
+    if (!current || !dialNumber) return
+    if (!claimAutoDial(current.id, location.key)) return
+    setDialLine(`Dialling ${dialWords(dialNumber)}…`)
+    window.dispatchEvent(new CustomEvent<AutoDialRequest>(AUTO_DIAL_EVENT, {
+      detail: { accountId: current.accountId, number: dialNumber },
+    }))
+    /* Nobody answered the event -- no Call button on the page to place it. Said, not left spinning. */
+    window.setTimeout(() => setDialLine((l) => (l?.startsWith('Dialling')
+      ? 'The call could not be started from this page. Use Call.' : l)), 8000)
+  }, [current, dialNumber, location.key])
+
+  const stopAutoDial = () => { writeAutoDial(false); setAutoDial(false); setDialLine(null) }
+  const toggleAutoDial = () => {
+    const on = !autoDial
+    writeAutoDial(on); setAutoDial(on)
+    if (!on) setDialLine(null)
+  }
 
   if (!entryId || !queue) return null
 
@@ -262,6 +328,27 @@ export function DiaryWorkBar({ account, onWorked }: {
               {entry.campaign && (
                 <p className="text-xs text-gold-300 whitespace-pre-wrap" data-testid="campaign-script">{entry.campaign.script}</p>
               )}
+              {/* AUTO-DIAL, on a campaign call only: the next one rings itself (autoDial.ts). */}
+              {entry.kind === 'campaign' && (
+                <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px]" data-testid="auto-dial">
+                  <button type="button" onClick={toggleAutoDial} aria-pressed={autoDial} data-testid="auto-dial-toggle"
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${autoDial ? 'border-gold-500 bg-gold-400 text-navy-950' : 'border-white/30 text-slate-300 hover:bg-white/10'}`}>
+                    <PhoneCall size={11} /> Auto-dial {autoDial ? 'on' : 'off'}
+                  </button>
+                  {dialLine && (
+                    <>
+                      <span className="text-slate-200" data-testid="auto-dial-line">{dialLine}</span>
+                      <button type="button" onClick={stopAutoDial} data-testid="auto-dial-stop"
+                        className="px-2 py-0.5 rounded-full border border-white/30 text-slate-200 hover:bg-white/10">
+                        Stop
+                      </button>
+                    </>
+                  )}
+                  {!dialLine && !decision.dial && decision.why && (
+                    <span className="text-slate-400" data-testid="auto-dial-why">{decision.why}</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/*
@@ -323,7 +410,7 @@ export function DiaryWorkBar({ account, onWorked }: {
 
 function FinishModal({ entry, account, today, remaining, onClose, onDone }: {
   entry: DiaryRow
-  account: { id: string; prescriptionDate: string | null }
+  account: { id: string; prescriptionDate: string | null; book?: string | null }
   today: string
   remaining: number
   onClose: () => void
@@ -416,6 +503,30 @@ function FinishModal({ entry, account, today, remaining, onClose, onDone }: {
     } finally {
       setBusy(false)
     }
+  }
+
+  /*
+   * A CAMPAIGN ITEM ON AN ACCOUNT THAT IS STILL CLOSED -- a recovery call that did not win it back,
+   * or a trace on the written-off book. Read off the page's own account, which is current: a
+   * collector who pressed "Debtor agreed to pay" a minute ago is on an active account by now and
+   * gets the ordinary box below, promise and next date included.
+   */
+  if (entry.kind === 'campaign' && account.book === 'closed') {
+    const closeIt = async () => {
+      setBusy(true); setError(null)
+      try {
+        await finishOnClosedAccount({ entry, outcome, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
+        await onDone()
+      } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+    }
+    return (
+      <Modal title="Finish this account" onClose={onClose} width={520}>
+        <ClosedFinish name={entry.campaign?.name ?? 'Campaign'} script={entry.campaign?.script ?? null}
+          outcome={outcome} setOutcome={setOutcome} error={error} busy={busy} onClose={onClose}
+          onSave={() => void closeIt()}
+          saveLabel={remaining > 0 ? 'Done, leave it closed, next' : 'Done, leave it closed'} />
+      </Modal>
+    )
   }
 
   return (

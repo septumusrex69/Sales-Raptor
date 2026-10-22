@@ -30,7 +30,15 @@ export interface DiaryEntry {
   rank: number | null
   /** The call campaign that put it here, with the words the collector reads before ringing. */
   campaignId: string | null
-  campaign: { name: string; script: string; endsOn: string | null } | null
+  campaign: {
+    name: string; script: string; endsOn: string | null
+    /** What it asks for (22 Oct): ring the live book, win a written-off account back, or trace. */
+    kind: 'work' | 'recovery' | 'trace'
+    /** Running or not -- a recovery call re-opens an account only while its campaign runs. */
+    status: string | null
+  } | null
+  /** Set where this recovery call re-opened its account (recovery_reopen). */
+  recoveredAt: string | null
   reason: string | null
   state: 'open' | 'done' | 'moved' | 'cancelled'
   source: 'manual' | 'swordfish' | 'promise' | 'dispute' | 'handover' | 'system'
@@ -79,6 +87,9 @@ export interface DiaryRow extends DiaryEntry {
     lastActionAt: string | null
     /* Set when the account was ended (closed, withdrawn, written off): the position's `closed`. */
     endedAs: string | null
+    /* The database's own book -- a recovery call is on a CLOSED account, and finishing one that was
+       not won back must not book it a diary date (DiaryWorkBar, CompleteDiaryModal). */
+    book: string | null
   }
 }
 
@@ -93,8 +104,13 @@ const toEntry = (r: any): DiaryEntry => ({
   rank: r.rank ?? null,
   campaignId: r.campaign_id ?? null,
   campaign: r.campaigns
-    ? { name: String(r.campaigns.name ?? ''), script: String(r.campaigns.body ?? ''), endsOn: r.campaigns.ends_on ?? null }
+    ? {
+      name: String(r.campaigns.name ?? ''), script: String(r.campaigns.body ?? ''), endsOn: r.campaigns.ends_on ?? null,
+      kind: r.campaigns.call_kind === 'recovery' || r.campaigns.call_kind === 'trace' ? r.campaigns.call_kind : 'work',
+      status: r.campaigns.status ?? null,
+    }
     : null,
+  recoveredAt: r.recovered_at ?? null,
   reason: r.reason ?? null,
   state: r.state,
   source: r.source,
@@ -149,6 +165,7 @@ const toRow = (r: any): DiaryRow => ({
     mainCommentAt: r.debtor_accounts?.main_comment_at ?? null,
     lastActionAt: r.debtor_accounts?.last_action_at ?? null,
     endedAs: r.debtor_accounts?.ended_as ?? null,
+    book: r.debtor_accounts?.book ?? null,
   },
 })
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -164,10 +181,10 @@ const toRow = (r: any): DiaryRow => ({
 const ROW_SELECT = `
   *,
   promises_to_pay!diary_entries_promise_id_fkey ( id, amount, due_on, status ),
-  campaigns!diary_entries_campaign_id_fkey ( name, body, ends_on ),
+  campaigns!diary_entries_campaign_id_fkey ( name, body, ends_on, call_kind, status ),
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
-    capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at, ended_as,
+    capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at, ended_as, book,
     prescription_date, main_comment, main_comment_at
   )
 `
@@ -725,6 +742,36 @@ export async function workEntry(input: {
         + 'The account is now under No diary date on the accounts screen.',
       )
     }
+  }
+}
+
+/**
+ * A CAMPAIGN ITEM ON A CLOSED ACCOUNT, WORKED: closed, with what came of it, and NOTHING BOOKED.
+ *
+ * The firm, of a recovery call: "if a guy makes a PTP, he can keep the account. Otherwise, the
+ * account just stays where it was." workEntry would book the account's next diary date, which on a
+ * closed account is a date on an account nobody may chase. So a recovery call (or a trace on the
+ * written-off book) that did not win the account back is closed here, the note goes on the
+ * timeline, and the account stays exactly as it was. One that WAS won back is open again by then
+ * (recovery_reopen) and goes through workEntry like any other call.
+ */
+export async function finishOnClosedAccount(input: {
+  entry: DiaryEntry
+  outcome?: string
+  actor: Actor
+}): Promise<void> {
+  const said = input.outcome?.trim() ?? ''
+  await completeEntry({ id: input.entry.id, outcome: said || null, actor: input.actor })
+  try {
+    const what = input.entry.campaign?.kind === 'trace' ? 'Trace campaign item worked' : 'Recovery call worked'
+    await addNote({
+      accountId: input.entry.accountId,
+      body: `${said ? `${said} ` : ''}${what}; the account stays closed.`,
+      authorName: input.actor.name,
+      createdBy: input.actor.id,
+    })
+  } catch {
+    // As workEntry: the entry is closed, and a missing note is a small gap.
   }
 }
 

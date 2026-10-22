@@ -44,6 +44,12 @@ export interface AccountFacts extends CampaignFacts {
   assignedTo: string | null
   /** The client's liaison (companies.account_owner_id) -- a liaison may campaign on their own clients. */
   liaisonId: string | null
+  /* How a closed account ended, for the recovery and trace rules (campaigns.ts recoveryClosure,
+     writeOffReasonKey). Read for every campaign because it is four columns on a row already read. */
+  status: string | null
+  endedAs: string | null
+  endedReason: string | null
+  writeOffReason: string | null
 }
 
 /**
@@ -57,7 +63,7 @@ export async function factsFor(
   for (const part of chunks([...new Set(ids)])) {
     const [accounts, contacts, disputes, steps] = await Promise.all([
       admin.from('debtor_accounts')
-        .select('id, book, hold_reason, prescribed, debtor_kind, assigned_to, companies(account_owner_id)')
+        .select('id, book, hold_reason, prescribed, debtor_kind, assigned_to, status, ended_as, ended_reason, write_off_reason, companies(account_owner_id)')
         .in('id', part),
       fetchAllRows<ContactRow>(() => admin.from('account_contacts')
         .select('account_id, kind, value, is_primary, retired_at')
@@ -107,6 +113,10 @@ export async function factsFor(
         email: pickContact(list, 'email'),
         openDispute: disputed.has(a.id as string),
         workflowToday: worked.has(a.id as string),
+        status: (a.status as string) ?? null,
+        endedAs: (a.ended_as as string) ?? null,
+        endedReason: (a.ended_reason as string) ?? null,
+        writeOffReason: (a.write_off_reason as string) ?? null,
       })
     }
   }
@@ -126,14 +136,15 @@ export async function callerFor(admin: SupabaseClient, userId: string): Promise<
 }
 
 /** Every desk holder named, for mayCampaignOn. */
-export async function holdersFor(admin: SupabaseClient, userIds: (string | null)[]): Promise<Map<string, DeskHolder>> {
+export async function holdersFor(admin: SupabaseClient, userIds: (string | null)[]): Promise<Map<string, DeskHolder & { active: boolean }>> {
   const ids = [...new Set(userIds.filter((u): u is string => !!u))]
-  const out = new Map<string, DeskHolder>()
+  const out = new Map<string, DeskHolder & { active: boolean }>()
   for (const part of chunks(ids)) {
-    const { data, error } = await admin.from('profiles').select('id, role, team_id').in('id', part)
+    const { data, error } = await admin.from('profiles').select('id, role, team_id, status').in('id', part)
     if (error) throw new Error(error.message)
     for (const p of data ?? []) {
-      out.set(p.id as string, { id: p.id as string, role: p.role as UserRole, teamId: (p.team_id as string) ?? null })
+      /* Active, for the closed book: a desk held by somebody no longer here is nobody's (mayRecoverOn). */
+      out.set(p.id as string, { id: p.id as string, role: p.role as UserRole, teamId: (p.team_id as string) ?? null, active: p.status !== 'Inactive' })
     }
   }
   return out

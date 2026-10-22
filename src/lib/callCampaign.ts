@@ -28,6 +28,32 @@ import { isWorkingDay } from './workingDays.js'
 
 export type CallMode = 'now' | 'spread'
 
+/**
+ * WHAT A DIARY CAMPAIGN ASKS FOR (22 Oct). The same machinery -- now or spread, a rank, an end date,
+ * Stop, the cron that ends it -- carrying three different jobs:
+ *
+ *   work      ring the live book; each call to whoever holds the account (21 Oct).
+ *   recovery  ring the WRITTEN-OFF book, chosen by write-off reason, to win accounts back: "if a
+ *             guy makes a PTP, he can keep the account. Otherwise, the account just stays where it
+ *             was." Shared among collectors the person chooses -- a closed account is usually on
+ *             nobody's desk.
+ *   trace     refer accounts to trace, live or written off: "it refers them to trace. And then if
+ *             there's new details ... did we make contact?" Shared among the people chosen to
+ *             trace. Its success is a funnel the results page reads (trace_campaign_funnel).
+ *
+ * Stored as campaigns.call_kind on channel 'call', which has always meant "onto the diaries".
+ */
+export type CallKind = 'work' | 'recovery' | 'trace'
+
+export const CALL_KIND_LABEL: Record<CallKind, string> = {
+  work: 'Call campaign',
+  recovery: 'Recovery call campaign',
+  trace: 'Trace campaign',
+}
+
+/** Whether the person running it chooses who works it (true), or it goes to each account's holder. */
+export const sharedAmongChosen = (kind: CallKind): boolean => kind !== 'work'
+
 /** Where a campaign's calls sit on the day. The numbers are the stored `rank` (coalesced over the
     rung in the database), placed BETWEEN the rungs so a campaign never ties with one. */
 export interface CallRank { rank: number; label: string }
@@ -95,6 +121,43 @@ export interface CallPlan {
 }
 
 /**
+ * WHO GETS WHICH, WHERE THE CAMPAIGN CHOOSES THE PEOPLE: "as evenly as their free room allows".
+ *
+ * Each account goes to whoever has the most room left over the campaign's days (today only, for
+ * NOW), counting what this share has already given them -- so equal rooms give equal shares, and a
+ * collector with half the room gets half the calls. Where nobody has room left the rest go to
+ * whoever has been given fewest, so what does not fit is reported against everybody evenly rather
+ * than all against one name. Ties go to the order the people were chosen in.
+ */
+export function shareAmong(input: {
+  mode: CallMode
+  today: string
+  endsOn: string
+  accounts: CallAccount[]
+  pool: string[]
+  capacityOf: (ownerId: string) => number
+  loadOf: (ownerId: string, day: string) => number
+}): CallAccount[] {
+  const pool = [...new Set(input.pool)]
+  if (pool.length === 0) return []
+  const days = input.mode === 'now' ? [input.today] : callDays(input.today, input.endsOn)
+  const room = new Map(pool.map((p) => [p,
+    days.reduce((n, d) => n + Math.max(0, input.capacityOf(p) - input.loadOf(p, d)), 0)]))
+  const given = new Map(pool.map((p) => [p, 0]))
+  return input.accounts.map((a) => {
+    let best = pool[0]
+    for (const p of pool) {
+      const r = room.get(p) ?? 0
+      const b = room.get(best) ?? 0
+      if (r > b || (r === b && (given.get(p) ?? 0) < (given.get(best) ?? 0))) best = p
+    }
+    room.set(best, Math.max(0, (room.get(best) ?? 0) - 1))
+    given.set(best, (given.get(best) ?? 0) + 1)
+    return { accountId: a.accountId, ownerId: best }
+  })
+}
+
+/**
  * WHERE EACH CALL LANDS.
  *
  *   capacityOf(owner)       their working rate (diary_capacity, 50 where unset).
@@ -111,12 +174,19 @@ export function planCalls(input: {
   accounts: CallAccount[]
   capacityOf: (ownerId: string) => number
   loadOf: (ownerId: string, day: string) => number
+  /**
+   * SHARED AMONG THESE PEOPLE rather than given to each account's holder (a recovery or trace
+   * campaign). Each account's ownerId is ignored; shareAmong decides it, and then the plan is the
+   * same one every other campaign gets -- one planner, not a second written beside it.
+   */
+  pool?: string[]
 }): CallPlan {
   const placed: CallPlan['placed'] = []
   const unplaced: CallAccount[] = []
   const over = new Map<string, number>()
   const byOwner = new Map<string, string[]>()
-  for (const a of input.accounts) byOwner.set(a.ownerId, [...(byOwner.get(a.ownerId) ?? []), a.accountId])
+  const accounts = input.pool ? shareAmong({ ...input, pool: input.pool }) : input.accounts
+  for (const a of accounts) byOwner.set(a.ownerId, [...(byOwner.get(a.ownerId) ?? []), a.accountId])
 
   for (const [ownerId, ids] of byOwner) {
     const cap = input.capacityOf(ownerId)
@@ -148,10 +218,19 @@ export function planCalls(input: {
 export function callConfirmation(input: {
   name: string; mode: CallMode; rank: number; endsOn: string; placing: number; collectors: number
   skipped: number; unplaced: number; overCollectors: number; endWords: string
+  kind?: CallKind
 }): string {
   const n = (x: number) => x.toLocaleString('en-ZA')
+  const kind = input.kind ?? 'work'
   const who = `${input.collectors} ${input.collectors === 1 ? 'collector' : 'collectors'}`
-  const calls = `${n(input.placing)} ${input.placing === 1 ? 'call' : 'calls'}`
+  const one = kind === 'trace' ? 'account to trace' : kind === 'recovery' ? 'recovery call' : 'call'
+  const many = kind === 'trace' ? 'accounts to trace' : kind === 'recovery' ? 'recovery calls' : 'calls'
+  const calls = `${n(input.placing)} ${input.placing === 1 ? one : many}`
+  /* THE ONE SENTENCE A RECOVERY CAMPAIGN MUST SAY: nothing is re-opened by being on it. */
+  const stays = kind === 'work' ? ''
+    : kind === 'recovery'
+      ? ' The accounts stay closed and where they are; one is re-opened only when its collector presses “Debtor agreed to pay”.'
+      : ' Nothing is searched or charged until somebody runs the trace on the account.'
   const head = input.mode === 'now'
     ? `“${input.name}” puts ${calls} on today’s diary for ${who}, above everything else on it.`
     : `“${input.name}” spreads ${calls} over ${who}’ diaries until ${input.endWords}, ${rankWords('spread', input.rank).toLowerCase()}.`
@@ -160,5 +239,5 @@ export function callConfirmation(input: {
     input.unplaced > 0 ? `${n(input.unplaced)} do not fit before the end date and are left off` : '',
     input.overCollectors > 0 ? `${input.overCollectors} ${input.overCollectors === 1 ? 'collector goes' : 'collectors go'} over their day` : '',
   ].filter(Boolean)
-  return `${head}${tail.length ? ` ${tail.join('; ')}.` : ''} Anything not worked by the end is taken off, and still counted as missed.`
+  return `${head}${tail.length ? ` ${tail.join('; ')}.` : ''}${stays} Anything not worked by the end is taken off, and still counted as missed.`
 }

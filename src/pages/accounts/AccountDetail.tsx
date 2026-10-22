@@ -87,6 +87,7 @@ import { ParkTraceModal } from './ParkTraceModal'
 import { ReferAccountModal } from './ReferAccountModal'
 import { EstatePanel } from './EstatePanel'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
+import { RecoveryReopen } from '../../components/accounts/RecoveryReopen'
 import { DiariseModal } from '../../components/diary/DiariseModal'
 import { fetchQueries, openDisputeOn, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
 import {
@@ -1537,6 +1538,7 @@ function AccountPage() {
   const promisePanel = (
     <PromisePanel
       accountId={account.id}
+      closed={account.book === 'closed'}
       promises={workspace?.promises ?? []}
       userId={currentUser?.id ?? null}
       userName={currentUser?.name ?? null}
@@ -1782,7 +1784,12 @@ function AccountPage() {
         this account at all — it says where you are in a queue of sixty-six and offers the way on.
         That belongs with the page's chrome, in the first screenful, never scrolled past.
       */}
-      <DiaryWorkBar account={account} onWorked={reload} />
+      <DiaryWorkBar account={account} callNumber={callContact?.value ?? null} onWorked={reload} />
+
+      {/* A RECOVERY CALL ON THIS CLOSED ACCOUNT, held by the person looking at it: the one press that
+          wins it back (S10, 22 Oct). In the diary run and out of it alike. */}
+      <RecoveryReopen accountId={account.id} book={account.book ?? null} userId={currentUser?.id ?? null}
+        onReopened={async () => { await reload(); setTab('Overview'); setPromiseOpen(true) }} />
 
       {/*
         One number, not two. "Balance" and "To settle today" differ by the receipt fee, and a
@@ -3417,7 +3424,13 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation, section129, onStarted }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation, section129, onStarted, closed = false }: {
+  /**
+   * THE ACCOUNT IS CLOSED (S10, 22 Oct). No promise is taken on a closed account: a promise is a
+   * claim the account is live, and the firm's way back for a written-off one is a recovery call's
+   * "Debtor agreed to pay -- re-open and keep it", after which this form is offered as on any other.
+   */
+  closed?: boolean
   accountId: string
   /**
    * THE SECTION 129 NOT YET SENT TO THIS DEBTOR, or null once it has been (or cannot be).
@@ -3564,7 +3577,9 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
         /* ONE LIVE PROMISE PER ACCOUNT (S10, prompt 13 item 10): "Take one" is not offered while one
            is open or in its 48 hours. The database refuses a second as well
            (promises_one_live_per_account), so this is the explanation, not the guard. */
-        outstanding.length > 0 && !open
+        closed
+          ? <span className="text-[11px] text-slate-400" data-testid="promise-closed">Closed — re-open it to take one</span>
+          : outstanding.length > 0 && !open
           ? <span className="text-[11px] text-slate-400" data-testid="one-live-promise">One is live — settle it first</span>
           : (
             <button onClick={() => setOpen(!open)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
@@ -3582,7 +3597,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
         </p>
       )}
 
-      {open && (
+      {open && !closed && (
         <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
           {/*
             What kind of arrangement, before anything else. Choosing "once-off settlement" fills

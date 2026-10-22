@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, Megaphone, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, Megaphone, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Trophy, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
@@ -38,6 +38,10 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   // The collections work queue: which accounts this person is due to work today, and what they
   // are behind on. Badged, because it is the definition of something one person clears in a day.
   { to: '/diary', label: 'Diary', icon: CalendarClock, badge: 'diary' },
+  // How every campaign went -- calls worked, PTPs made, accounts won back, what a trace led to. FOR
+  // EVERYBODY, at the firm's instruction (22 Oct): "anybody can see the campaign results ... a place
+  // about like campaign results. PTPs made." Under the diary because that is where the work is done.
+  { to: '/campaigns/results', label: 'Campaign results', icon: Trophy },
   //
   // NO "COLLECTIONS" ITEM ANY MORE, at the firm's instruction once the company dashboard landed:
   // "that tab can be removed." The floor's own screen is a DEPARTMENT dashboard now, reached the
