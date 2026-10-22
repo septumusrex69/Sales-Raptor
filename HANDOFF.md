@@ -18,6 +18,16 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+000000000000. **S10, 22 Oct: A MARKETER ON GITHUB (Reno).** `.github/CODEOWNERS` (on both branches): everything is
+   @septumusrex69's except leads, deals, contacts, reps, the sales Dashboard and the News page, which
+   have NO owner -- inside those, ConvertLeadModal (commission), SendMandateModal, the opt-in and
+   unsubscribe pages (POPIA consent) and `.github/` stay owned. The firm chose "approval, and tell
+   me", not a hard block. THE USER STILL HAS TO: invite Reno with Write; add a branch ruleset on
+   `claude/sales-raptor-review-p1pzx2` (PR required, "Require review from Code Owners", 0
+   approvals, bypass list = Repository admin + the Claude app, or sessions cannot push the
+   preview); a second on `Main` with 1 approval. Keep Reno out of Supabase and Vercel.
+   **A session that pushes the preview and is refused has hit the ruleset -- the Claude app is
+   missing from its bypass list.**
 00000000000. **S10, 22 Oct: SETTING SOMEBODY UP** (Camille and the others, testing). Three faults, one cause each:
    - **A collector could not be put in a team.** Every team on staging had been made as a SALES team
      -- the new-team kind defaulted to Sales -- and the database refuses a pre-legal agent in one
