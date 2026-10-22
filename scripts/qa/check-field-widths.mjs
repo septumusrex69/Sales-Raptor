@@ -130,11 +130,12 @@ ok('...and the kind keeps its own width', /\$\{controlClass\} w-40 shrink-0/.tes
  * unpressable — which is quieter than a warning, and CLAUDE.md is clear that a warning firing when
  * nothing is wrong is worse than no warning.
  */
-ok('the add button is dead while the name is blank', /disabled=\{!name\.trim\(\)\}/.test(form))
+/* 22 Oct: the button also waits for a kind (check-user-setup); the name half is what this holds. */
+ok('the add button is dead while the name is blank', /disabled=\{!name\.trim\(\)( \|\| !kind)?\}/.test(form))
 ok('...and says why when somebody hovers it', /Give the team a name first/.test(form))
 /* THE GUARD STAYS TOO. The button is the courtesy; the early return is the rule, and a form can
    still be submitted with Enter from the name field. */
-ok('...while the handler still refuses a blank name', /if \(!name\.trim\(\)\) return/.test(form))
+ok('...while the handler still refuses a blank name', /if \(!name\.trim\(\)( \|\| !kind)?\) return/.test(form))
 
 console.log(`\ncheck-field-widths: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

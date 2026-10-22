@@ -18,6 +18,19 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+00000000000. **S10, 22 Oct: SETTING SOMEBODY UP** (Camille and the others, testing). Three faults, one cause each:
+   - **A collector could not be put in a team.** Every team on staging had been made as a SALES team
+     -- the new-team kind defaulted to Sales -- and the database refuses a pre-legal agent in one
+     ("Pre-legal Agent works in Call centre ..."). Now the kind has no default, is guessed from the
+     name as it is typed (`guessTeamKind`: "Call Centre" -> Call centre), and must be chosen; "Add
+     member" offers only people whose role fits and says why about the rest; the invite box says
+     why no team is offered. Staging's "Call Centre" team was corrected to Call centre (no members).
+   - **A new user did not show until a refresh.** The profile row exists the moment the invitation
+     goes; the list is now re-read then (`refreshPeople` in AppStore).
+   - **Mailbox and BuzzBox asked for at once** (the firm: "it should immediately ask you for the email
+     address settings ... like what is the extension"): after "Invite sent", the box offers
+     **Connect mailbox** (the admin-on-behalf form, host guessed as mail.<domain>) and the **BuzzBox
+     extension**; Edit User carries the extension too. check-user-setup (16).
 0000000000. **S10, 22 Oct: THE SET-OFF GAP IS CLOSED** (the firm: "you can proceed with one"). Staging has
    it (migration `s10_set_off_credited_as_covered`); production does not (§5).
    - **A charge set off is the firm's only as far as the client's trust money covered it.** The client

@@ -161,6 +161,21 @@ export function teamKindForRole(role: UserRole | undefined): TeamKind | null {
 }
 
 /**
+ * WHAT KIND OF TEAM A NAME SOUNDS LIKE, offered as the kind while somebody types it.
+ *
+ * A guess, never a decision: the box shows it and a person may change it. It exists because a
+ * default of 'Sales' turned a team called "Call Centre" into a sales team (staging, 22 Oct) and
+ * every collector put in it was then refused. Null where the name says nothing, so the box asks.
+ */
+export function guessTeamKind(name: string): TeamKind | null {
+  const n = name.toLowerCase()
+  if (/call\s*cent|collect|pre-?\s*legal|floor|recover|trac(e|ing)/.test(n)) return 'Call centre'
+  if (/comm|liaison|client\s*serv/.test(n)) return 'Communications'
+  if (/sales|market|business\s*dev|new\s*business/.test(n)) return 'Sales'
+  return null
+}
+
+/**
  * The teams this person may be put in. Everything, where their role has no department.
  *
  * Returned as a list rather than a boolean so a picker can be built from it -- a dropdown that

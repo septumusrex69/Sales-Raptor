@@ -315,6 +315,12 @@ interface AppActions {
   removeUserLocal: (id: ID) => void
   addTeam: (input: Partial<Team> & { name: string }) => Team
   updateTeam: (id: ID, patch: Partial<Pick<Team, 'name' | 'kind'>>) => void
+  /**
+   * Re-reads the people and the teams. The firm, testing on 22 Oct: a user added "doesn't show
+   * immediately ... you need to refresh". The list is loaded once at start-up, and an invitation
+   * makes its profile row on the server, out of this session's sight.
+   */
+  refreshPeople: () => Promise<void>
   deleteTeam: (id: ID) => void
 
   dismissToast: () => void
@@ -533,6 +539,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
    */
   const showCompanyChange = useCallback<AppActions['showCompanyChange']>((id, patch) => {
     setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+  }, [])
+
+  const refreshPeople = useCallback<AppActions['refreshPeople']>(async () => {
+    const [us, tm] = await Promise.all([
+      fetchTable<User>('profiles', 'created_at'),
+      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
+    ])
+    setUsers(us)
+    setTeamRows(tm)
   }, [])
 
   const refreshSyncedData = useCallback<AppActions['refreshSyncedData']>(async () => {
@@ -1709,6 +1724,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       removeUserLocal,
       addTeam,
       updateTeam,
+      refreshPeople,
       deleteTeam,
       dismissToast,
       setTarget,
@@ -1769,6 +1785,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       removeUserLocal,
       addTeam,
       updateTeam,
+      refreshPeople,
       deleteTeam,
       dismissToast,
       setTarget,

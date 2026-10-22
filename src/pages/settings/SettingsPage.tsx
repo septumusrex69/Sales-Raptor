@@ -16,7 +16,7 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { byDepartment, matchesPerson, teamsForRole } from '../../lib/departments'
+import { byDepartment, guessTeamKind, matchesPerson, teamKindForRole, teamsForRole } from '../../lib/departments'
 import { canLeadCollections } from '../../lib/permissions'
 import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
@@ -795,7 +795,10 @@ function AdminSignatureModal({ user, onClose, onSave }: { user: User; onClose: (
 function AdminEmailConnectModal({ user, accessToken, onClose }: { user: User; accessToken: string; onClose: () => void }) {
   const [status, setStatus] = useState<EmailStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [form, setForm] = useState({ email: user.email, password: '', smtpHost: '', smtpPort: '587', imapHost: '', imapPort: '993' })
+  /* The firm's own mail host guessed from the address -- mail.<domain> is what ConsoleH gives every
+     mailbox -- so a new colleague's box needs a password and little else. Still editable. */
+  const guessHost = user.email?.includes('@') ? `mail.${user.email.split('@')[1]}` : ''
+  const [form, setForm] = useState({ email: user.email, password: '', smtpHost: guessHost, smtpPort: '587', imapHost: guessHost, imapPort: '993' })
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -1038,6 +1041,11 @@ function EditUserModal({
             placeholder="Only if it differs from the number above"
             onChange={(e) => setWhatsapp(e.target.value)} />
         </FormField>
+        {/* On the person, where the firm looks for it, as well as under Integrations. Saved as it is
+            picked, like the Integrations list does. */}
+        <FormField label="BuzzBox extension">
+          <BuzzBoxExtensionField userId={user.id} />
+        </FormField>
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
@@ -1135,6 +1143,10 @@ export const ASSIGNABLE_ROLES: UserRole[] = [
 ]
 
 function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string; teams: Team[]; onClose: () => void }) {
+  const { refreshPeople } = useAppStore()
+  const [newUserId, setNewUserId] = useState<string | null>(null)
+  /* The mailbox box, opened from the "sent" step: set up in one sitting, not hunted for later. */
+  const [connecting, setConnecting] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<UserRole>('Sales Representative')
@@ -1189,6 +1201,11 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
        * they cannot see them. An invitation does not: that person appears when they accept.
        */
       if (hasLeft) { window.location.reload(); return }
+      /* SHOWN AT ONCE. The profile row exists the moment the invitation is sent (handle_new_user),
+         so the list re-reads now rather than "once they accept" -- the firm, 22 Oct: "it doesn't
+         show immediately that there's a user. You need to refresh." */
+      setNewUserId(typeof body.userId === 'string' ? body.userId : null)
+      void refreshPeople()
       setSent(true)
     } catch {
       setError('Could not reach the server. Please try again.')
@@ -1197,13 +1214,47 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
     }
   }
 
+  if (sent && connecting && newUserId) {
+    return (
+      <AdminEmailConnectModal
+        user={{ id: newUserId, name: name.trim() || email, email } as User}
+        accessToken={accessToken}
+        onClose={() => setConnecting(false)}
+      />
+    )
+  }
+
   if (sent) {
     return (
-      <Modal title="Add User" onClose={onClose} width={420}>
+      <Modal title="Add User" onClose={onClose} width={460}>
         <p className="text-sm text-slate-600 leading-relaxed">
-          Invite sent to <span className="font-medium text-slate-800">{email}</span>. They'll get an email to set their password, and will appear in this
-          list with the role{teamId ? ' and team' : ''} you just set once they accept.
+          Invite sent to <span className="font-medium text-slate-800">{email}</span>. They are on the list
+          now, with the role{teamId ? ' and team' : ''} you chose, and get an email to set their password.
         </p>
+        {/*
+          THE REST OF THEIR SET-UP, IN THE SAME SITTING. The firm: "when you're loading a person on
+          as a user, it should immediately ask you for the email address settings ... the same
+          question for the BuzzBox stuff, like what is the extension." Both optional -- a person can
+          be added before their mailbox exists -- and both are on their row later as well.
+        */}
+        {newUserId && (
+          <div className="mt-4 space-y-3 border-t border-slate-100 pt-3" data-testid="invite-next-steps">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-700">Their mailbox</p>
+                <p className="text-xs text-slate-400">So mail they send and receive lands on the right accounts.</p>
+              </div>
+              <button type="button" onClick={() => setConnecting(true)} data-testid="invite-connect-mailbox"
+                className="shrink-0 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                Connect mailbox
+              </button>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-700 mb-1">BuzzBox extension</p>
+              <BuzzBoxExtensionField userId={newUserId} />
+            </div>
+          </div>
+        )}
         <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
           <button onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             Done
@@ -1269,6 +1320,14 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
               </option>
             ))}
           </select>
+          {/* WHY THE LIST IS EMPTY, said. Staging, 22 Oct: every team had been made as a Sales team,
+              so a pre-legal agent was offered nothing and nobody could tell why. */}
+          {teamKindForRole(role) && teamsForRole(role, teams).length === 0 && (
+            <p className="text-[11px] text-slate-400 mt-1" data-testid="invite-no-team">
+              A {role} can only join a {teamKindForRole(role)} team, and there is none yet. Make one under
+              Teams, or change an existing team's kind to {teamKindForRole(role)}.
+            </p>
+          )}
         </FormField>
         )}
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
@@ -1468,7 +1527,14 @@ function TeamsTab() {
   const { currentUser } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [name, setName] = useState('')
-  const [kind, setKind] = useState<TeamKind>('Sales')
+  /*
+   * NO DEFAULT KIND. It was 'Sales', in a small box beside the name, and on 22 Oct every team on
+   * staging -- "Call Centre" included -- had been made as a Sales team; the database then refused
+   * every pre-legal agent put in it, and the screen did not say why. The kind is guessed from the
+   * name as it is typed (guessTeamKind) and must be there before the team can be added.
+   */
+  const [kind, setKind] = useState<TeamKind | ''>('')
+  const [kindTouched, setKindTouched] = useState(false)
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [removingTeam, setRemovingTeam] = useState<{ id: string; name: string } | null>(null)
@@ -1481,7 +1547,12 @@ function TeamsTab() {
           members as small chips under it. */}
       <div className="divide-y divide-slate-100 border-y border-slate-100 text-[12.5px]">
         {teams.map((t) => {
-          const unassigned = users.filter((u) => u.teamId !== t.id)
+          /* Only people whose role may be in this kind of team -- the database refuses the rest
+             ("Pre-legal Agent works in Call centre, so they cannot be in a Sales team"), and a
+             picker that offers a choice and then refuses it is the bug the firm hit. */
+          const notHere = users.filter((u) => u.teamId !== t.id && u.status === 'Active')
+          const unassigned = notHere.filter((u) => teamsForRole(u.role, [t]).length > 0)
+          const cannotJoin = notHere.length - unassigned.length
           return (
             <div key={t.id} className="py-1.5 px-1">
               <div className="flex items-center justify-between gap-3 whitespace-nowrap">
@@ -1577,6 +1648,12 @@ function TeamsTab() {
                   ))}
                 </select>
               )}
+              {isAdmin && cannotJoin > 0 && (
+                <p className="text-[11px] text-slate-400 mt-1" data-testid="team-cannot-join">
+                  {cannotJoin} {cannotJoin === 1 ? 'person' : 'people'} can't join a {t.kind} team because of their role
+                  {t.kind !== 'Call centre' && notHere.some((u) => teamKindForRole(u.role) === 'Call centre') && ' — collectors go in a Call centre team'}.
+                </p>
+              )}
             </div>
           )
         })}
@@ -1585,22 +1662,27 @@ function TeamsTab() {
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (!name.trim()) return
+            if (!name.trim() || !kind) return
             addTeam({ name, kind })
             setName('')
-            setKind('Sales')
+            setKind('')
+            setKindTouched(false)
           }}
           className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
         >
           {/* flex-1 min-w-0: the name is the field that should take the slack, and min-w-0 is
               what lets a flex child actually narrow rather than hold its content's width. */}
           <input className={`${controlClass} flex-1 min-w-0`} placeholder="New team name"
-            value={name} onChange={(e) => setName(e.target.value)} />
+            value={name} onChange={(e) => {
+              setName(e.target.value)
+              if (!kindTouched) setKind(guessTeamKind(e.target.value) ?? '')
+            }} />
           {/* controlClass, NOT inputClass: the latter carries w-full, which beats the w-40 below
               in the generated stylesheet however they are ordered here. See Modal.tsx. */}
-          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)}
-            aria-label="What kind of team"
+          <select value={kind} onChange={(e) => { setKind(e.target.value as TeamKind | ''); setKindTouched(true) }}
+            aria-label="What kind of team" data-testid="new-team-kind"
             className={`${controlClass} w-40 shrink-0`}>
+            <option value="">What kind of team?</option>
             {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
           {/*
@@ -1608,8 +1690,8 @@ function TeamsTab() {
             which is right -- and it did it without a word, so pressing the button looked exactly
             like a feature that does not work. A button that cannot act says so by being unpressable.
           */}
-          <button type="submit" disabled={!name.trim()}
-            title={name.trim() ? 'Add this team' : 'Give the team a name first'}
+          <button type="submit" disabled={!name.trim() || !kind}
+            title={!name.trim() ? 'Give the team a name first' : !kind ? 'Choose what kind of team it is' : 'Add this team'}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
               bg-brand-600 text-white hover:bg-brand-700 shrink-0
               disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
@@ -2263,6 +2345,40 @@ function ExtensionPicker({ value, options, saving, onChange }: { value?: string;
         </option>
       ))}
     </select>
+  )
+}
+
+/**
+ * ONE PERSON'S BUZZBOX EXTENSION, wherever a person is set up: the Add User box once the invitation
+ * has gone, and Edit User. The Integrations list is the same field for everybody at once.
+ * Saved as it is picked. Without BuzzBox connected it says so rather than offering a box that
+ * would dial nothing.
+ */
+function BuzzBoxExtensionField({ userId }: { userId: string }) {
+  const { session } = useAuth()
+  const { users, updateUser } = useAppStore()
+  const { status } = useBuzzBox()
+  const [options, setOptions] = useState<BuzzBoxExtension[]>([])
+  const [saved, setSaved] = useState(false)
+  const value = users.find((u) => u.id === userId)?.buzzboxExtension
+  const connected = !!status?.connected
+  useEffect(() => {
+    if (!connected || !session?.access_token) return
+    let live = true
+    fetch('/api/buzzbox/extensions', { headers: { Authorization: `Bearer ${session.access_token}` } })
+      .then((r) => r.json()).then((b) => { if (live && Array.isArray(b.extensions)) setOptions(b.extensions) })
+      .catch(() => { /* the free-text box below still works */ })
+    return () => { live = false }
+  }, [connected, session?.access_token])
+  if (!connected) {
+    return <p className="text-xs text-slate-400" data-testid="buzzbox-not-connected">BuzzBox isn't connected for the firm yet (Settings → Integrations).</p>
+  }
+  return (
+    <div data-testid="buzzbox-extension-field">
+      <ExtensionPicker value={value} options={options} saving={false}
+        onChange={(extension) => { updateUser(userId, { buzzboxExtension: extension || undefined }); setSaved(true) }} />
+      {saved && <p className="text-[11px] text-slate-400 mt-1">Saved.</p>}
+    </div>
   )
 }
 
