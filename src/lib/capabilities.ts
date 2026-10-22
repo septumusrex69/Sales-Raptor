@@ -69,6 +69,7 @@ export type Capability =
   | 'finance.view'
   | 'business.view'
   | 'business.income'
+  | 'people.pay'
   | 'payment.record'
   | 'payment.approve'
   | 'payment.reverse'
@@ -172,6 +173,22 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     label: 'See what the firm earned',
     blurb: 'Commission, interest, Annexure B fees and client charges, client by client. In no '
       + 'role by default, not even the Administrator’s — the firm: "not even for an administrator".',
+    group: 'Money',
+    inDatabase: true,
+  },
+  /*
+   * PAY: SALARIES, AND THE CLERKS' COLLECTION COMMISSION -- the People workspace (22 Oct 2026).
+   *
+   * THE FIRM DECIDED WHO BY NAME, NOT BY ROLE: Stephan and Camille, "not even all Administrators".
+   * So it is the second tick in NO_ROLE_CAPABILITIES below and is granted person by person, the
+   * way business.income is. Salaries are personal information under POPIA; the boundary is the
+   * database -- every People table's policies and both pay functions ask has_capability('people.pay')
+   * -- and the menu item is only the courtesy on top of it.
+   */
+  'people.pay': {
+    label: 'See and set pay',
+    blurb: 'Salaries, employee profiles and the clerks’ collection commission, person by person. '
+      + 'In no role by default, not even the Administrator’s — the firm named who sees pay.',
     group: 'Money',
     inDatabase: true,
   },
@@ -336,7 +353,7 @@ export const CAPABILITY_ORDER = Object.keys(CAPABILITIES) as Capability[]
  * against it by check-capabilities -- because a tick outside all_capabilities is unknown to
  * has_capability and therefore ungrantable to anybody, silently.
  */
-export const NO_ROLE_CAPABILITIES: Capability[] = ['business.income']
+export const NO_ROLE_CAPABILITIES: Capability[] = ['business.income', 'people.pay']
 
 /**
  * WHAT EACH ROLE GETS BEFORE ANYBODY CHANGES ANYTHING -- Swordfish's "template", written out.

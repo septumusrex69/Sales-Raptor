@@ -48751,3 +48751,498 @@ begin
 end $$;
 revoke all on function public.recovery_reopen(uuid, text) from public, anon;
 grant execute on function public.recovery_reopen(uuid, text) to authenticated;
+
+-- ============================================================================================
+-- PEOPLE: EMPLOYEE PROFILES, PAY, AND THE CLERKS' COLLECTION COMMISSION (22 Oct 2026)
+--
+-- THE FIRM (Stephan, 22 Oct): "start building ... salaries. Like an employee, basically an employee
+-- profile and an HR type of function. What each person's performance metrics are, what their
+-- salaries are. For example, the commissions for the clerks, they work on a 4,000 rand basic, plus
+-- then there's a variation in collection commission for all of them."
+--
+-- WHO SEES IT: Stephan and Camille, by name -- "not by role, not even all Administrators". So a new
+-- tick, people.pay, that NO role is born with (all_capabilities below), granted person by person.
+-- Salaries are personal information under POPIA, so every table and function here asks the
+-- database, not the screen: RLS on each table and has_capability('people.pay') in each function.
+--
+-- NOTHING IS STORED THAT CAN BE DERIVED. The profile, its history and the overrides are stored;
+-- every commission figure is worked out on the fly from the payments, the desk history and the
+-- client's ledger (src/lib/clerkCommission.ts is the arithmetic, held by check-clerk-commission).
+-- A stored pay figure is a second copy of the trust's numbers that has to be kept in step.
+--
+-- Applied to staging as migration people_pay_and_clerk_commission. The MCP tool hangs on the word in
+-- "on ... cascade / set null", so there the seven foreign keys below were added in a do-block by
+-- execute; they are the same keys, written inline here.
+-- ============================================================================================
+
+-- ---------- the tick ----------
+-- In NO role -- the Administrator's template included -- so it lives with business.income in the
+-- list all_capabilities adds to the Administrator's template. A tick outside all_capabilities is
+-- unknown to has_capability and therefore ungrantable to anybody, silently.
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator') || array['business.income', 'people.pay']
+$$;
+
+-- ---------- the employee profile ----------
+-- One row a person, keyed on the login. pay_basis null means "what the role's department says"
+-- (src/lib/departments.ts decides, in the browser, so the default is never written down twice).
+-- NO ID NUMBER AND NO BANK DETAILS YET, at the firm's instruction: what is not stored cannot leak.
+create table if not exists public.employee_profiles (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  job_title text,
+  started_on date,
+  pay_basis text check (pay_basis is null or pay_basis in ('collections', 'sales', 'communications', 'other')),
+  basic_salary numeric(12, 2) check (basic_salary is null or basic_salary >= 0),
+  notes text,
+  updated_by uuid references public.profiles (id) on delete set null,
+  updated_at timestamptz not null default public.raptor_now()
+);
+
+-- EVERY CHANGE, WHO AND WHEN AND FROM WHAT. A salary that changed with nothing saying so is an
+-- argument at the next review. Written by the trigger only; nobody may write it from the browser.
+create table if not exists public.employee_profile_history (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  field text not null,
+  old_value text,
+  new_value text,
+  changed_by uuid references public.profiles (id) on delete set null,
+  changed_at timestamptz not null default public.raptor_now()
+);
+create index if not exists employee_profile_history_user_idx
+  on public.employee_profile_history (user_id, changed_at desc);
+
+create or replace function public.employee_profile_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  k text;
+  o jsonb;
+  n jsonb;
+begin
+  if tg_op = 'UPDATE' and new.user_id is distinct from old.user_id then
+    raise exception 'A profile belongs to one person and cannot be moved to another.' using errcode = '22023';
+  end if;
+  new.updated_by := auth.uid();
+  new.updated_at := public.raptor_now();
+  o := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  n := to_jsonb(new);
+  -- coalesce to JSON null on both sides, or a field left empty on a new profile reads as a change.
+  foreach k in array array['job_title', 'started_on', 'pay_basis', 'basic_salary', 'notes'] loop
+    if coalesce(o -> k, 'null'::jsonb) is distinct from coalesce(n -> k, 'null'::jsonb) then
+      insert into public.employee_profile_history (user_id, field, old_value, new_value, changed_by, changed_at)
+      values (new.user_id, k, o ->> k, n ->> k, auth.uid(), public.raptor_now());
+    end if;
+  end loop;
+  return new;
+end $$;
+
+create trigger employee_profile_stamp
+  before insert or update on public.employee_profiles
+  for each row execute function public.employee_profile_stamp();
+
+alter table public.employee_profiles enable row level security;
+alter table public.employee_profile_history enable row level security;
+
+-- READ AND WRITE WITH THE TICK, AND NOTHING ELSE. No removal policy at all: a person who leaves
+-- keeps their record (the history is the point), and Postgres refuses what no policy allows.
+create policy "employee_profiles_select" on public.employee_profiles
+  for select using (public.has_capability('people.pay'));
+create policy "employee_profiles_insert" on public.employee_profiles
+  for insert with check (public.has_capability('people.pay'));
+create policy "employee_profiles_update" on public.employee_profiles
+  for update using (public.has_capability('people.pay')) with check (public.has_capability('people.pay'));
+create policy "employee_profile_history_select" on public.employee_profile_history
+  for select using (public.has_capability('people.pay'));
+
+revoke all on table public.employee_profiles from anon;
+revoke all on table public.employee_profile_history from anon;
+
+-- ---------- the exceptions to the clerks' rate ----------
+-- THE FIRM: "there might be an exception ... we should be able to lower or higher the specific
+-- commission percentage on a specific client that we pay to the clerks or on a specific account."
+-- An ACCOUNT override beats a CLIENT override beats the rule (clerkCommission.ts).
+--
+-- APPEND-ONLY, ONE ROW A DECISION. The override in force for a payment is the latest row for its
+-- account (or client) whose effective_from is on or before the PAYMENT's day -- so a month already
+-- paid does not change when somebody changes the rate next month. rate null is a decision too:
+-- "back to the rule from this day". Who, when and why are on every row and none can be edited.
+--
+-- CAPPED AT 10% OF WHAT WAS COLLECTED: the rule's highest is 3%, and a figure past ten is a typed
+-- 30 where 3 was meant -- on money the firm then pays out of its own pocket.
+create table if not exists public.clerk_commission_overrides (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references public.companies (id) on delete cascade,
+  account_id uuid references public.debtor_accounts (id) on delete cascade,
+  rate numeric(7, 6) check (rate is null or (rate >= 0 and rate <= 0.1)),
+  effective_from date not null,
+  reason text not null check (length(btrim(reason)) >= 3),
+  set_by uuid references public.profiles (id) on delete set null,
+  set_at timestamptz not null default public.raptor_now(),
+  constraint clerk_commission_override_one_target check ((company_id is null) <> (account_id is null))
+);
+create index if not exists clerk_commission_overrides_account_idx
+  on public.clerk_commission_overrides (account_id, effective_from desc) where account_id is not null;
+create index if not exists clerk_commission_overrides_company_idx
+  on public.clerk_commission_overrides (company_id, effective_from desc) where company_id is not null;
+
+-- WHO AND WHEN ARE THE DATABASE'S TO WRITE, not the browser's: a backdated set_at, or somebody
+-- else's name on a pay decision, would make the record say something that did not happen.
+create or replace function public.clerk_commission_override_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  new.set_by := auth.uid();
+  new.set_at := public.raptor_now();
+  new.reason := btrim(new.reason);
+  return new;
+end $$;
+
+create trigger clerk_commission_override_stamp
+  before insert on public.clerk_commission_overrides
+  for each row execute function public.clerk_commission_override_stamp();
+
+alter table public.clerk_commission_overrides enable row level security;
+-- No update and no removal policy: a changed decision is a new row, so the old one stays readable.
+create policy "clerk_commission_overrides_select" on public.clerk_commission_overrides
+  for select using (public.has_capability('people.pay'));
+create policy "clerk_commission_overrides_insert" on public.clerk_commission_overrides
+  for insert with check (public.has_capability('people.pay'));
+revoke all on table public.clerk_commission_overrides from anon;
+
+-- ---------- what counts as collected: the floor's figure, and the commission, read alike ----------
+-- THE COMMISSION AND THE FLOOR'S COLLECTED FIGURE MUST NOT DISAGREE, so all three readers carry the
+-- same predicate: not a moved overpayment (counted where it first landed), not REJECTED (the firm's
+-- own word for "this is not a payment at all" -- reject_payment), and not DEMO data. The floor
+-- counted the last two until now; neither was ever money in. check-clerk-commission holds the three
+-- to the one predicate. A REVERSAL is read differently on purpose: the floor leaves a reversed
+-- payment out of every period, while pay cannot -- a month already paid stays paid, and the reversal
+-- is a negative line in the month it happened (clerkCommission.ts).
+create or replace function public.collector_performance(p_from timestamptz, p_to timestamptz)
+returns table(user_id uuid, in_play_accounts integer, in_play_value numeric, collected numeric, payments integer, calls integer, calls_answered integer, emails_sent integer, sms_sent integer, notes_written integer, promises_made integer, promises_kept integer, promises_broken integer, accounts_touched integer, traces_pulled integer, trace_leads integer, traces_worked integer, traces_verified integer)
+language sql
+stable
+set search_path to 'public'
+as $$
+  with book as (
+    select assigned_to as uid,
+           count(*) filter (where status ilike 'Active%')::integer as in_play,
+           coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0) as value
+      from public.debtor_accounts
+     where assigned_to is not null
+     group by assigned_to
+  ),
+  paid as (
+    select h.user_id as uid,
+           coalesce(sum(p.amount), 0) as collected,
+           count(*)::integer as payments
+      from public.account_payments p
+      cross join lateral (
+        select dh.user_id
+          from public.account_desk_history dh
+         where dh.account_id = p.account_id
+           and dh.effective_from <= p.received_at
+         order by dh.effective_from desc
+         limit 1
+      ) h
+     where p.reversed_at is null
+       and p.received_at >= p_from and p.received_at < p_to and p.source <> 'moved' and p.rejected_at is null and not p.is_demo
+       and h.user_id is not null
+     group by h.user_id
+  ),
+  rang as (
+    select placed_by as uid,
+           count(*)::integer as calls,
+           count(*) filter (where answered_at is not null)::integer as answered
+      from public.account_calls
+     where placed_by is not null and placed_at >= p_from and placed_at < p_to
+     group by placed_by
+  ),
+  mailed as (
+    select sent_by as uid, count(*)::integer as emails
+      from public.account_emails
+     where sent_by is not null and direction = 'out'
+       and occurred_at >= p_from and occurred_at < p_to
+     group by sent_by
+  ),
+  texted as (
+    select created_by as uid, count(*)::integer as sms
+      from public.sms_messages
+     where created_by is not null and account_id is not null and direction = 'outbound'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  wrote as (
+    select created_by as uid, count(*)::integer as notes
+      from public.account_notes
+     where created_by is not null and source = 'manual'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  promised as (
+    select created_by as uid,
+           count(*)::integer as made,
+           count(*) filter (where status = 'kept')::integer as kept,
+           count(*) filter (where status = 'broken')::integer as broken
+      from public.promises_to_pay
+     where created_by is not null
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  touched as (
+    select uid, count(distinct account_id)::integer as accounts
+      from (
+        select placed_by as uid, account_id from public.account_calls
+         where placed_by is not null and placed_at >= p_from and placed_at < p_to
+        union all
+        select sent_by, account_id from public.account_emails
+         where sent_by is not null and direction = 'out'
+           and occurred_at >= p_from and occurred_at < p_to
+        union all
+        select created_by, account_id from public.account_notes
+         where created_by is not null and source = 'manual'
+           and created_at >= p_from and created_at < p_to
+      ) t
+     group by uid
+  ),
+  -- Traces this person pulled, and what those traces gave them to work with.
+  traced as (
+    select t.pulled_by as uid,
+           count(distinct t.id)::integer as traces,
+           count(i.id)::integer as leads
+      from public.account_traces t
+      left join public.account_trace_items i on i.trace_id = t.id
+     where t.pulled_by is not null
+       and t.created_at >= p_from and t.created_at < p_to
+     group by t.pulled_by
+  ),
+  -- Findings this person actually tried, whoever pulled the trace. Counted on the day the outcome
+  -- was recorded, because that is the day the work happened -- a trace bought in August and worked
+  -- in September is September's effort.
+  trace_work as (
+    select outcome_by as uid,
+           count(*)::integer as worked,
+           count(*) filter (where outcome = 'verified')::integer as verified
+      from public.account_trace_items
+     where outcome_by is not null
+       and outcome_at >= p_from and outcome_at < p_to
+     group by outcome_by
+  )
+  select
+    pr.id, coalesce(b.in_play, 0), coalesce(b.value, 0),
+    coalesce(pd.collected, 0), coalesce(pd.payments, 0),
+    coalesce(r.calls, 0), coalesce(r.answered, 0),
+    coalesce(m.emails, 0), coalesce(tx.sms, 0), coalesce(w.notes, 0),
+    coalesce(pm.made, 0), coalesce(pm.kept, 0), coalesce(pm.broken, 0),
+    coalesce(tc.accounts, 0),
+    coalesce(tr.traces, 0), coalesce(tr.leads, 0),
+    coalesce(tw.worked, 0), coalesce(tw.verified, 0)
+  from public.profiles pr
+  left join book b on b.uid = pr.id
+  left join paid pd on pd.uid = pr.id
+  left join rang r on r.uid = pr.id
+  left join mailed m on m.uid = pr.id
+  left join texted tx on tx.uid = pr.id
+  left join wrote w on w.uid = pr.id
+  left join promised pm on pm.uid = pr.id
+  left join touched tc on tc.uid = pr.id
+  left join traced tr on tr.uid = pr.id
+  left join trace_work tw on tw.uid = pr.id
+  where pr.collector_grade is not null or b.in_play > 0 or pd.payments > 0
+  -- MONEY NOBODY HELD THE DESK FOR, AS ONE ROW WITH NO USER. The firm, 8 Oct: money that arrives
+  -- before anyone has the account "goes to the firm". Every figure on the company dashboard is the
+  -- sum of these rows, so without this one a payment on an unheld account vanished from the FIRM'S
+  -- total too, not only from everybody's own. Only the money columns: it is nobody's work.
+  union all
+  select null::uuid, 0, 0::numeric, coalesce(sum(p.amount), 0), count(*)::integer,
+         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    from public.account_payments p
+    left join lateral (
+      select dh.user_id
+        from public.account_desk_history dh
+       where dh.account_id = p.account_id
+         and dh.effective_from <= p.received_at
+       order by dh.effective_from desc
+       limit 1
+    ) h on true
+   where p.reversed_at is null
+     and p.received_at >= p_from and p.received_at < p_to and p.source <> 'moved' and p.rejected_at is null and not p.is_demo
+     and h.user_id is null
+  having count(*) > 0;
+$$;
+
+create or replace function public.collector_daily(
+  p_user uuid, p_from timestamptz, p_to timestamptz
+)
+returns table (on_day date, collected numeric, payments integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- THE FIRM'S OWN DAY, not UTC. A payment at half past one in the morning in Johannesburg is
+    -- still yesterday in UTC, and a day's total that disagrees with the bank statement by one
+    -- payment is a day's total nobody will trust again.
+    (p.received_at at time zone 'Africa/Johannesburg')::date as on_day,
+    sum(p.amount) as collected,
+    count(*)::integer as payments
+  from public.account_payments p
+  cross join lateral (
+    select dh.user_id
+      from public.account_desk_history dh
+     where dh.account_id = p.account_id
+       and dh.effective_from <= p.received_at
+     order by dh.effective_from desc
+     limit 1
+  ) h
+  where p.reversed_at is null
+    and p.received_at >= p_from and p.received_at < p_to and p.source <> 'moved' and p.rejected_at is null and not p.is_demo
+    and h.user_id is not null
+    and (p_user is null or h.user_id = p_user)
+  group by 1
+  order by 1;
+$$;
+
+-- ---------- the payments a clerk's pay is worked out from ----------
+-- ONE ROW A PAYMENT, with everything the arithmetic needs and nothing decided. clerkCommission.ts
+-- turns these into the statement; this only gathers.
+--
+--   * WHO EARNED IT: whoever held the account ON THE PAYMENT DAY -- the latest account_desk_history
+--     row at or before received_at, the very lookup collector_performance makes. Its source comes
+--     back too: 'backfill' is the reconstruction made when that table began (the holder on that day
+--     assumed to have held it since handover), and the screen says so beside the payment.
+--   * THE CLIENT'S RATE AS IT WAS CHARGED: the rate stamped on the receipt's own allocation, which is
+--     what the client was billed (and, for imported history, what was imported -- frozen). Before a
+--     receipt is approved it has no allocation, so the account's rate as allocate_payment would read
+--     it (account_commission_rate) stands in, marked 'account'.
+--   * THE OVERRIDES IN FORCE ON THE PAYMENT DAY, account and client, latest decision first.
+--
+-- WHICH PAYMENTS: trust receipts received in the period, any payment REVERSED in the period
+-- (wherever it was received -- the clawback), and every PTC received up to the period's end, because
+-- a PTC's commission waits for the client to owe the firm nothing and may be released months later.
+create or replace function public.clerk_commission_lines(p_from date, p_to date, p_user uuid default null)
+returns table (
+  payment_id uuid, account_id uuid, case_number text, debtor text, company_id uuid, client text,
+  received_on date, approved_on date, reversed_on date, amount numeric, paid_to_client boolean,
+  holder_id uuid, holder_source text,
+  client_rate numeric, client_rate_source text,
+  account_override numeric, account_override_set boolean, account_override_reason text,
+  client_override numeric, client_override_set boolean, client_override_reason text
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_from timestamptz := p_from::timestamp at time zone 'Africa/Johannesburg';
+  v_to timestamptz := (p_to + 1)::timestamp at time zone 'Africa/Johannesburg';
+begin
+  if not public.has_capability('people.pay') then
+    raise exception 'Pay is not yours to see.' using errcode = '42501';
+  end if;
+  return query
+  select p.id, p.account_id, d.case_number,
+         nullif(btrim(concat_ws(' ', d.debtor_first_name, d.debtor_surname)), ''),
+         d.company_id, co.name,
+         (p.received_at at time zone 'Africa/Johannesburg')::date,
+         (p.approved_at at time zone 'Africa/Johannesburg')::date,
+         (p.reversed_at at time zone 'Africa/Johannesburg')::date,
+         p.amount, coalesce(p.paid_to_client, false),
+         h.user_id, h.source,
+         coalesce(al.commission_rate, public.account_commission_rate(p.account_id)),
+         case when al.commission_rate is not null then 'receipt'
+              when public.account_commission_rate(p.account_id) is not null then 'account' end,
+         ao.rate, coalesce(ao.rate is not null, false), ao.reason,
+         cov.rate, coalesce(cov.rate is not null, false), cov.reason
+    from public.account_payments p
+    join public.debtor_accounts d on d.id = p.account_id
+    left join public.companies co on co.id = d.company_id
+    left join lateral (
+      select dh.user_id, dh.source
+        from public.account_desk_history dh
+       where dh.account_id = p.account_id
+         and dh.effective_from <= p.received_at
+       order by dh.effective_from desc
+       limit 1
+    ) h on true
+    left join lateral (
+      select a.commission_rate
+        from public.payment_allocations a
+       where a.payment_id = p.id and a.commission_rate is not null
+       order by a.computed_at desc
+       limit 1
+    ) al on true
+    left join lateral (
+      select o.rate, o.reason
+        from public.clerk_commission_overrides o
+       where o.account_id = p.account_id
+         and o.effective_from <= (p.received_at at time zone 'Africa/Johannesburg')::date
+       order by o.effective_from desc, o.set_at desc
+       limit 1
+    ) ao on true
+    left join lateral (
+      select o.rate, o.reason
+        from public.clerk_commission_overrides o
+       where o.company_id = d.company_id
+         and o.effective_from <= (p.received_at at time zone 'Africa/Johannesburg')::date
+       order by o.effective_from desc, o.set_at desc
+       limit 1
+    ) cov on true
+   where p.source <> 'moved' and p.rejected_at is null and not p.is_demo
+     and p.received_at < v_to
+     and (p.received_at >= v_from
+          or coalesce(p.paid_to_client, false)
+          or (p.reversed_at >= v_from and p.reversed_at < v_to))
+     and (p_user is null or h.user_id = p_user)
+   order by p.received_at, p.id;
+end $$;
+
+revoke all on function public.clerk_commission_lines(date, date, uuid) from public, anon;
+grant execute on function public.clerk_commission_lines(date, date, uuid) to authenticated;
+
+-- ---------- what a client owes the firm, for the PTC hold ----------
+-- THE FIRM: "we can't pay the clerk commission if a client is owing us money ... if the client
+-- doesn't owe us money at all, there's a zero balance for the client, then we can start paying out
+-- the clerks." What a client owes the firm is ALREADY worked out, once: client_ledger, the client's
+-- running statement (positive: we owe them; negative: they owe us). This reads it and adds nothing,
+-- so pay and the client's own statement cannot disagree about whether the client is clear.
+--
+-- IT FAILS CLOSED. client_ledger answers only somebody holding the trust or business tick; a person
+-- with people.pay and neither would be told every client owes nothing and every held commission
+-- released. So it refuses instead, and the screen keeps all PTC commission pending.
+create or replace function public.clerk_commission_ledgers(p_companies uuid[])
+returns table (company_id uuid, entry_on date, amount numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+begin
+  if not public.has_capability('people.pay') then
+    raise exception 'Pay is not yours to see.' using errcode = '42501';
+  end if;
+  if not (public.has_capability('finance.view') or public.has_capability('business.view')) then
+    raise exception 'What a client owes the firm is read from the trust or business books, and you hold neither tick.'
+      using errcode = '42501';
+  end if;
+  return query
+  select c, l.entry_on, l.amount
+    from unnest(p_companies) as c
+    cross join lateral public.client_ledger(c) l;
+end $$;
+
+revoke all on function public.clerk_commission_ledgers(uuid[]) from public, anon;
+grant execute on function public.clerk_commission_ledgers(uuid[]) to authenticated;

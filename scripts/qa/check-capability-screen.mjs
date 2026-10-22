@@ -155,7 +155,9 @@ check('the ones marked as enforced are the ones the database really checks',
   ['business.view', 'finance.view', 'library.edit', 'mail.refile', 'payment.approve',
     'payment.move', 'payment.record', 'payment.reverse', 'settlement.approve', 'business.income',
     /* S10: the marketing tables' policies ask for it. */
-    'marketing.send'].sort())
+    'marketing.send',
+    /* 22 Oct: every People table's policies and both pay functions ask for it. */
+    'people.pay'].sort())
 /*
  * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
  *

@@ -29,7 +29,7 @@ import {
   canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canViewLibrary, canEditLibrary, mayPoolDisputes,
   canViewTrust, canViewBusiness, canSendMarketing,
-  canRunCampaigns,
+  canRunCampaigns, canViewPay,
 } from '../../src/lib/permissions.ts'
 
 let pass = 0
@@ -143,12 +143,16 @@ const EXPECTED = {
   canViewLibrary: ROLES,
   /* NEWS & CAMPAIGNS (S10): the sales side's managers and the liaison manager, nobody else by role. */
   canSendMarketing: ['Administrator', 'Sales Manager', 'Liaison Manager'],
+  /* PAY (22 Oct): NOBODY by role, the Administrator included. The firm named the two people who see
+     salaries, and they are given it one at a time; a role that picked it up would be a payroll
+     shown to everybody who is ever made an Administrator. */
+  canViewPay: [],
 }
 const FN = {
   canViewFinance, canViewTrust, canViewBusiness, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canEditLibrary, mayPoolDisputes, canViewLibrary,
   canSendMarketing,
-  canRunCampaigns,
+  canRunCampaigns, canViewPay,
 }
 for (const [name, allowed] of Object.entries(EXPECTED)) {
   for (const role of ROLES) {
@@ -168,7 +172,7 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 20)
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 21)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:
@@ -250,6 +254,9 @@ check('the database knows exactly the roles the app does', [...rolesInSql].sort(
  */
 check('an administrator has every capability there is, bar the ones no role is born with',
   [...ROLE_CAPABILITIES.Administrator, ...NO_ROLE_CAPABILITIES].sort(), [...CAPABILITY_ORDER].sort())
+check('people.pay is one of them, beside business.income', [...NO_ROLE_CAPABILITIES].sort(), ['business.income', 'people.pay'])
+check('...and a grant reaches it', canViewPay(asUser('Administrator', ['people.pay'])), true)
+check('...which a revoke takes back', canViewPay(asUser('Administrator', ['people.pay'], ['people.pay'])), false)
 check('...and no role at all is born with those',
   ROLES.filter((r) => ROLE_CAPABILITIES[r].some((c) => NO_ROLE_CAPABILITIES.includes(c))), [])
 const allFn = liveFn('all_capabilities')

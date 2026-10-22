@@ -18,6 +18,7 @@ import { RequireClientAccess } from './components/auth/RequireClientAccess'
 import { RequireFinance } from './components/auth/RequireFinance'
 import { RequireBusiness } from './components/auth/RequireBusiness'
 import { RequireIncome } from './components/auth/RequireIncome'
+import { RequirePay } from './components/auth/RequirePay'
 
 import { CollectorDashboard } from './pages/CollectorDashboard'
 /*
@@ -66,6 +67,11 @@ const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').
 const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
 const BusinessIncome = lazy(() => import('./pages/business/BusinessIncome').then((m) => ({ default: m.BusinessIncome })))
 const BusinessDrawings = lazy(() => import('./pages/business/BusinessDrawings').then((m) => ({ default: m.BusinessDrawings })))
+const PeopleLayout = lazy(() => import('./pages/people/PeopleLayout').then((m) => ({ default: m.PeopleLayout })))
+const PeopleList = lazy(() => import('./pages/people/PeopleList').then((m) => ({ default: m.PeopleList })))
+const PersonPay = lazy(() => import('./pages/people/PersonPay').then((m) => ({ default: m.PersonPay })))
+const PeopleMonth = lazy(() => import('./pages/people/PeopleMonth').then((m) => ({ default: m.PeopleMonth })))
+const CommissionRules = lazy(() => import('./pages/people/CommissionRules').then((m) => ({ default: m.CommissionRules })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -231,6 +237,16 @@ function App() {
                 <Route path="expenses" element={<BusinessExpenses />} handle={{ title: 'Expenses' }} />
                 <Route path="drawings" element={<BusinessDrawings />} handle={{ title: 'Drawings' }} />
                 <Route path="back-office" element={<BackOffice />} handle={{ title: 'Back office' }} />
+              </Route>
+
+              {/* PEOPLE (22 Oct): profiles, pay and the clerks' commission, behind people.pay -- which no
+                  role has; the firm named the two people who see pay. RequirePay is the courtesy, the
+                  tables' policies and the pay functions are the boundary. */}
+              <Route path="/people" element={<RequirePay><PeopleLayout /></RequirePay>}>
+                <Route index element={<PeopleList />} handle={{ title: 'People' }} />
+                <Route path="month" element={<PeopleMonth />} handle={{ title: 'Month summary' }} />
+                <Route path="commission" element={<CommissionRules />} handle={{ title: 'Commission rules' }} />
+                <Route path=":userId" element={<PersonPay />} handle={{ title: 'Person' }} />
               </Route>
 
               {/* The old addresses. Every one of them, so nothing anybody saved goes dead. */}
