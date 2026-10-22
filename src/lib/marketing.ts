@@ -633,6 +633,23 @@ export function isFirmMainDomain(address: string | null | undefined): boolean {
 
 export type SenderChoice = { from: string; replyTo: string | null } | { error: string }
 
+/**
+ * WHERE A REPLY TO NEWS GOES, BY WHO IT WENT TO (22 Oct). The firm: "If leads respond, it should go
+ * to info@ ... If a current client responds, it should go to reports@." A recipient on a client's
+ * record (a company or one of its contacts) is a client; a lead with no company is a lead. Each
+ * falls back to the campaign's own reply-to, so an unset address never means "no reply possible".
+ * Only NEWS uses this: a prospect email is personal, and its replies go to the marketer who sent it.
+ */
+export function replyToFor(
+  row: { lead_id: string | null; company_id: string | null; contact_id: string | null },
+  addresses: { leads: string | null; clients: string | null },
+  fallback: string | null,
+): string | null {
+  const isClient = !!row.company_id || !!row.contact_id
+  const chosen = isClient ? addresses.clients : row.lead_id ? addresses.leads : null
+  return (chosen ?? '').trim() || fallback
+}
+
 /** The news sender: MARKETING_FROM, refused if it is unset, not an address, or on the firm's own mail domain. */
 export function newsSender(marketingFrom: string | null | undefined, replyTo: string | null | undefined): SenderChoice {
   const from = (marketingFrom ?? '').trim()

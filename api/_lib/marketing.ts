@@ -6,7 +6,7 @@ import { fetchAllRows } from '../../src/lib/fetchAll.js'
 import {
   DEFAULT_WARMUP_CEILING, LEAD_AUDIENCES, PROSPECT_SENDER_ENV, RESEND_BATCH_MAX, RESEND_MIN_GAP_MS, SENDER_ENV,
   isProspectKind, isSendableEmail, newsSender, newsletterActivitySubject, normaliseEmail, parseAudience, parseKind,
-  prospectSender, renderCampaignEmail, resolveAudience, sendBlockReason, warmupDailyCap, warmupWeek,
+  prospectSender, renderCampaignEmail, replyToFor, resolveAudience, sendBlockReason, warmupDailyCap, warmupWeek,
   type AudienceResult, type CampaignKind, type Recipient, type SenderChoice,
 } from '../../src/lib/marketing.js'
 
@@ -584,7 +584,17 @@ export async function drainMarketing(
     return {
       from: sender.from,
       to: [row.email],
-      ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
+      /* News answers to info@ from a lead and reports@ from a client (replyToFor); a prospect email
+         keeps the marketer's own address. */
+      ...((() => {
+        const to = campaign.kind === 'news'
+          ? replyToFor(row, {
+            leads: process.env.MARKETING_REPLY_TO_LEADS?.trim() || null,
+            clients: process.env.MARKETING_REPLY_TO_CLIENTS?.trim() || null,
+          }, sender.replyTo)
+          : sender.replyTo
+        return to ? { reply_to: to } : {}
+      })()),
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,

@@ -22,8 +22,15 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    at the user's request; DNS records given to the user (DKIM TXT resend._domainkey, MX + SPF TXT on
    `send`, CNAME `rsend`, plus a DMARC `_dmarc` p=none). Vercel now has `RESEND_API_KEY` (a SEND-ONLY
    key restricted to bfnews.co.za, "Raptor news (Vercel)") and `MARKETING_FROM` = "Bredell Ferreira
-   News <news@bfnews.co.za>", Production + Preview. Not set yet: `MARKETING_REPLY_TO`, the webhook
-   (+ `RESEND_WEBHOOK_SECRET`), and the prospect domain (`MARKETING_PROSPECT_DOMAIN`, bredell-ferreira).
+   News <news@bfnews.co.za>", Production + Preview. ALSO SET (later the same day): replies to news by
+   recipient -- a lead's to `MARKETING_REPLY_TO_LEADS` = info@bredellferreira.co.za, a client's
+   (company or contact) to `MARKETING_REPLY_TO_CLIENTS` = reports@bredellferreira.co.za (`replyToFor`;
+   news only, a prospect email still answers to its marketer); the Resend WEBHOOK, seven events, to
+   the STAGING preview URL's /api/email/resend-webhook, with `RESEND_WEBHOOK_SECRET` in Vercel --
+   **repoint it at the production URL at go-live**. Bounces never reach an inbox (they return to
+   Resend's send. subdomain); the News page's "Didn't arrive" card lists every undeliverable or
+   spam-flagged address with the reason and the record to fix (check-news-replies). Not set yet: the
+   prospect domain (`MARKETING_PROSPECT_DOMAIN`, bredell-ferreira).
    Open/click tracking was switched on through the API; check it shows on in Resend's domain page.
 000000000000. **S10, 22 Oct: A MARKETER ON GITHUB (Reno).** `.github/CODEOWNERS` (on both branches): everything is
    @septumusrex69's except leads, deals, contacts, reps, the sales Dashboard and the News page, which

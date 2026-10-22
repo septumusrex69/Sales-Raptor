@@ -21,6 +21,7 @@ import {
   type SenderConfig,
 } from '../../lib/marketingApi'
 import { ImportListCard } from './ImportListCard'
+import { UndeliveredCard } from './UndeliveredCard'
 import type { LeadStatus } from '../../types'
 import { clockNow } from '../../lib/clock'
 
@@ -149,6 +150,7 @@ function CampaignList() {
         </Button>
       </div>
       <ImportListCard />
+      <UndeliveredCard />
       {error && <p className="text-sm text-red-600">{error}</p>}
       <Card padded={false}>
         {rows === null ? (
