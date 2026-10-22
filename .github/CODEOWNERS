@@ -1,0 +1,32 @@
+# WHO MUST APPROVE A CHANGE, BY FOLDER (22 Oct).
+#
+# The firm: a marketer may change "things that are relevant for marketing and sales", and must not
+# touch "the finances and the data side, the people owing money, the collection side ... the bank,
+# and the settings". GitHub cannot stop a collaborator editing a file; it can stop the change
+# reaching a protected branch. With the branch rule "Require review from Code Owners":
+#   - a file owned below needs the owner's approval before it can merge;
+#   - a file with NO owner (the sales lines further down) needs nobody's -- a marketer can ship it.
+#
+# THE LAST MATCHING LINE WINS, which is why the sales area un-owns itself after the catch-all, and
+# the money and consent exceptions inside it are owned again at the very end.
+
+# Everything, by default: the book, the diary, collections, trust, business, settings, the database,
+# the serverless functions, the checks, and this file itself.
+*                                   @septumusrex69
+
+# THE SALES AND MARKETING AREA -- no owner, so no approval needed.
+/src/pages/leads/
+/src/components/leads/
+/src/pages/deals/
+/src/pages/contacts/
+/src/components/contacts/
+/src/pages/reps/
+/src/pages/news/
+/src/pages/Dashboard.tsx
+
+# INSIDE IT, STILL OWNED: anything that sets money terms or records consent.
+/src/components/leads/ConvertLeadModal.tsx    @septumusrex69
+/src/components/leads/SendMandateModal.tsx    @septumusrex69
+/src/pages/news/OptInPage.tsx                 @septumusrex69
+/src/pages/news/UnsubscribePage.tsx           @septumusrex69
+/.github/                                     @septumusrex69
