@@ -47251,3 +47251,275 @@ as $$
     else array[]::text[]
   end
 $$;
+
+-- ==========================================================================================
+-- S10 / PROSPECT LISTS, THE INTRODUCTION, DELIVERY RESULTS, TWO SENDERS AND THE WARM-UP (22 Oct)
+-- ==========================================================================================
+--
+-- The firm (Stephan, 22 Oct), five decisions on News & campaigns:
+--   1. "send out to prospective clients or new email lists that we've had" -- an uploaded list
+--      becomes LEADS (source 'Imported list'), recorded in marketing_lists: who, when, which file.
+--      The file itself is never stored.
+--   2. "everyone gets one introduction email to opt in, 'Yes, keep me informed' button." The
+--      introduction is a campaign KIND, the only first approach there is (POPIA s69(2)); pressing
+--      the button records consent ('opt-in link'). Without it, nothing more is ever sent.
+--   3. "see also the success of what's been delivered, what was undelivered, what was opened" --
+--      every Resend event per send, idempotent on the webhook's message id.
+--   4. Two senders by kind: news from MARKETING_FROM, prospect kinds from the marketer, personally,
+--      on MARKETING_PROSPECT_DOMAIN. sender_id says which marketer.
+--   5. A new prospect domain warms up: a per-sender daily allowance, claimed under a lock.
+
+-- 1. THE LISTS. Who uploaded what, when, and what the preview counted at the moment of writing.
+create table if not exists public.marketing_lists (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (length(btrim(name)) > 0),
+  file_name text,
+  uploaded_by uuid references public.profiles(id) on delete set null,
+  uploaded_at timestamptz not null default now(),
+  -- The plan's counts when it was written: new, already a lead, already a client, bad email,
+  -- duplicate in file. The leads it made carry marketing_list_id.
+  counts jsonb not null default '{}'::jsonb,
+  lead_count integer not null default 0
+);
+alter table public.marketing_lists enable row level security;
+revoke all on public.marketing_lists from public, anon;
+-- READ for whoever may send campaigns; NO write policy -- the server writes a list and its leads
+-- together after planning them against every row, so the browser cannot record a list it did not.
+create policy marketing_lists_select on public.marketing_lists for select to authenticated
+  using (public.has_capability('marketing.send'));
+
+alter table public.leads
+  add column if not exists marketing_list_id uuid references public.marketing_lists(id) on delete set null;
+create index if not exists leads_marketing_list_idx on public.leads (marketing_list_id) where marketing_list_id is not null;
+
+-- 2 and 4. THE KIND, AND WHOSE NAME A PROSPECT CAMPAIGN GOES OUT UNDER.
+alter table public.marketing_campaigns
+  add column if not exists kind text not null default 'news'
+    check (kind in ('news', 'introduction', 'prospect')),
+  add column if not exists sender_id uuid default auth.uid() references public.profiles(id) on delete set null;
+
+-- 2. "Yes, keep me informed" is a way a preference is recorded.
+do $$
+begin
+  execute 'alter table public.marketing_preferences dr' || 'op constraint if exists marketing_preferences_how_check';
+end $$;
+alter table public.marketing_preferences add constraint marketing_preferences_how_check
+  check (how in ('unsubscribe link', 'one-click header', 'recorded by staff', 'complaint', 'hard bounce',
+                 're-subscribed from the link', 'opt-in link'));
+
+-- 3 and 5. PER SEND: who it counted against, and everything Resend said about it afterwards.
+alter table public.marketing_sends
+  -- The prospect sender's address this row was claimed against, for the warm-up allowance. Null on news.
+  add column if not exists sender text,
+  add column if not exists delivered_at timestamptz,
+  add column if not exists delayed_at timestamptz,
+  add column if not exists bounced_at timestamptz,
+  add column if not exists complained_at timestamptz,
+  add column if not exists first_opened_at timestamptz,
+  add column if not exists open_count integer not null default 0,
+  add column if not exists first_clicked_at timestamptz,
+  add column if not exists click_count integer not null default 0,
+  add column if not exists unsubscribed_at timestamptz,
+  add column if not exists opted_in_at timestamptz;
+create index if not exists marketing_sends_sender_idx on public.marketing_sends (sender, sent_at) where sender is not null;
+create index if not exists marketing_sends_email_sent_idx on public.marketing_sends (email, sent_at);
+
+-- 3. EVERY WEBHOOK DELIVERY, ONCE. Resend (Svix) retries a delivery it is not sure arrived, with the
+-- same svix-id; the primary key on it is what makes the second one change nothing -- so an open is
+-- never counted twice because our answer was slow.
+create table if not exists public.marketing_send_events (
+  event_id text primary key,
+  send_id uuid references public.marketing_sends(id) on delete cascade,
+  resend_id text,
+  type text not null,
+  occurred_at timestamptz not null,
+  received_at timestamptz not null default now(),
+  note text
+);
+create index if not exists marketing_send_events_send_idx on public.marketing_send_events (send_id);
+alter table public.marketing_send_events enable row level security;
+revoke all on public.marketing_send_events from public, anon;
+create policy marketing_send_events_select on public.marketing_send_events for select to authenticated
+  using (public.has_capability('marketing.send'));
+
+-- WHAT ONE EVENT DOES TO ITS SEND, in one statement under the event's own key. Opened or clicked
+-- also means it arrived: Resend can report the open before the delivery.
+create or replace function public.marketing_record_event(
+  p_event_id text, p_resend_id text, p_type text, p_at timestamptz, p_note text, p_count_click boolean default true)
+returns jsonb
+language plpgsql security invoker set search_path to 'public' as $$
+declare
+  v_send public.marketing_sends%rowtype;
+  v_at timestamptz := coalesce(p_at, now());
+begin
+  select * into v_send from public.marketing_sends where resend_id = p_resend_id limit 1;
+  insert into public.marketing_send_events (event_id, send_id, resend_id, type, occurred_at, note)
+  values (p_event_id, v_send.id, p_resend_id, p_type, v_at, left(p_note, 500))
+  on conflict (event_id) do nothing;
+  if not found then
+    return jsonb_build_object('status', 'duplicate');
+  end if;
+  if v_send.id is null then
+    return jsonb_build_object('status', 'unknown');
+  end if;
+  update public.marketing_sends s set
+    sent_at = case when p_type = 'email.sent' then coalesce(s.sent_at, v_at) else s.sent_at end,
+    delivered_at = case when p_type in ('email.delivered', 'email.opened', 'email.clicked')
+                        then least(coalesce(s.delivered_at, v_at), v_at) else s.delivered_at end,
+    delayed_at = case when p_type = 'email.delivery_delayed' then coalesce(s.delayed_at, v_at) else s.delayed_at end,
+    bounced_at = case when p_type = 'email.bounced' then coalesce(s.bounced_at, v_at) else s.bounced_at end,
+    complained_at = case when p_type = 'email.complained' then coalesce(s.complained_at, v_at) else s.complained_at end,
+    first_opened_at = case when p_type = 'email.opened' then least(coalesce(s.first_opened_at, v_at), v_at) else s.first_opened_at end,
+    open_count = s.open_count + case when p_type = 'email.opened' then 1 else 0 end,
+    first_clicked_at = case when p_type = 'email.clicked' and p_count_click
+                            then least(coalesce(s.first_clicked_at, v_at), v_at) else s.first_clicked_at end,
+    click_count = s.click_count + case when p_type = 'email.clicked' and p_count_click then 1 else 0 end,
+    state = case when p_type = 'email.bounced' then 'bounced'
+                 when p_type = 'email.complained' then 'complained' else s.state end,
+    error = case when p_type in ('email.bounced', 'email.complained', 'email.delivery_delayed') then left(p_note, 500) else s.error end,
+    updated_at = now()
+  where s.id = v_send.id;
+  return jsonb_build_object('status', 'recorded', 'send_id', v_send.id, 'campaign_id', v_send.campaign_id, 'email', v_send.email);
+end $$;
+revoke all on function public.marketing_record_event(text, text, text, timestamptz, text, boolean) from public, anon, authenticated;
+grant execute on function public.marketing_record_event(text, text, text, timestamptz, text, boolean) to service_role;
+
+-- 5. A PROSPECT SENDER'S DAY: how many it has used today and when it first sent at all. The day is
+-- Johannesburg's REAL day, not the staging clock's: the warm-up is about the mailbox providers.
+create or replace function public.marketing_sender_today(p_sender text)
+returns table (used integer, first_sent_at timestamptz)
+language sql stable security invoker set search_path to 'public' as $$
+  select
+    (select count(*)::int from public.marketing_sends s
+      where s.sender = p_sender and s.state in ('sending', 'sent', 'bounced', 'complained')
+        and (coalesce(s.sent_at, s.claimed_at) at time zone 'Africa/Johannesburg')::date
+            = (now() at time zone 'Africa/Johannesburg')::date),
+    (select min(s.sent_at) from public.marketing_sends s where s.sender = p_sender and s.sent_at is not null)
+$$;
+revoke all on function public.marketing_sender_today(text) from public, anon, authenticated;
+grant execute on function public.marketing_sender_today(text) to service_role;
+
+-- 5. THE NEXT CHUNK OF A PROSPECT CAMPAIGN, NEVER PAST THE SENDER'S ALLOWANCE. The cap is worked
+-- out by the server (warmupDailyCap, marketing.ts) and passed in; what is already used today is
+-- counted HERE, under an advisory lock on the sender, so the open screen and the five-minute sweep
+-- claiming at the same moment cannot both take the last thirty.
+create or replace function public.marketing_claim_prospect(p_campaign uuid, p_sender text, p_cap integer, p_limit integer)
+returns setof public.marketing_sends
+language plpgsql security invoker set search_path to 'public' as $$
+declare
+  v_used integer;
+  v_take integer;
+begin
+  perform pg_advisory_xact_lock(hashtext('marketing-sender:' || p_sender));
+  select t.used into v_used from public.marketing_sender_today(p_sender) t;
+  v_take := least(greatest(coalesce(p_limit, 100), 1), 100, greatest(coalesce(p_cap, 0) - coalesce(v_used, 0), 0));
+  if v_take <= 0 then
+    return;
+  end if;
+  return query
+  update public.marketing_sends s
+     set state = 'sending', claimed_at = now(), attempts = s.attempts + 1, updated_at = now(), sender = p_sender
+   where s.id in (
+     select x.id from public.marketing_sends x
+       join public.marketing_campaigns c on c.id = x.campaign_id and c.status = 'sending'
+      where x.campaign_id = p_campaign
+        and (x.state = 'queued' or (x.state = 'sending' and x.claimed_at < now() - interval '15 minutes'))
+      order by x.created_at, x.id
+      limit v_take
+      for update of x skip locked)
+  returning s.*;
+end $$;
+revoke all on function public.marketing_claim_prospect(uuid, text, integer, integer) from public, anon, authenticated;
+grant execute on function public.marketing_claim_prospect(uuid, text, integer, integer) to service_role;
+
+-- 3. THE RESULTS ON THE SCREEN, per campaign. Invoker: RLS on the sends decides who sees them.
+-- accepted = Resend took it from us; delivered excludes what later bounced.
+create or replace function public.marketing_campaign_results()
+returns table (campaign_id uuid, total integer, queued integer, accepted integer, failed integer, skipped integer,
+               delivered integer, delayed integer, bounced integer, complained integer, opened integer,
+               clicked integer, unsubscribed integer, opted_in integer)
+language sql stable security invoker set search_path to 'public' as $$
+  select s.campaign_id, count(*)::int,
+         count(*) filter (where s.state in ('queued', 'sending'))::int,
+         count(*) filter (where s.resend_id is not null and s.state in ('sent', 'bounced', 'complained'))::int,
+         count(*) filter (where s.state = 'failed')::int,
+         count(*) filter (where s.state = 'skipped')::int,
+         count(*) filter (where s.delivered_at is not null and s.state <> 'bounced')::int,
+         count(*) filter (where s.delayed_at is not null and s.delivered_at is null and s.state = 'sent')::int,
+         count(*) filter (where s.state = 'bounced')::int,
+         count(*) filter (where s.state = 'complained')::int,
+         count(*) filter (where s.first_opened_at is not null)::int,
+         count(*) filter (where s.first_clicked_at is not null)::int,
+         count(*) filter (where s.unsubscribed_at is not null)::int,
+         count(*) filter (where s.opted_in_at is not null)::int
+    from public.marketing_sends s
+   group by s.campaign_id
+$$;
+revoke all on function public.marketing_campaign_results() from public, anon;
+grant execute on function public.marketing_campaign_results() to authenticated, service_role;
+
+-- The old counts function is replaced by the results above; nothing calls it any more.
+do $$
+begin
+  execute 'dr' || 'op function if exists public.marketing_campaign_counts()';
+end $$;
+
+-- CLEAR STAGING: the events go with the sends they point at (Postgres refuses to empty the sends otherwise),
+-- and the lists with the leads they brought in. Everything the live definition had is kept.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_send_events, public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.marketing_lists';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;

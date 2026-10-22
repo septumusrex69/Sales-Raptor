@@ -129,7 +129,7 @@ function LeadConsent({ lead }: { lead: Lead }) {
   }
   return (
     <div className="mb-3 text-sm" data-testid="news-consent">
-      <p className="text-slate-500">No consent to news recorded. Campaigns reach this lead only as a once-only first approach.</p>
+      <p className="text-slate-500">No consent to news recorded. Campaigns reach this lead only through one introduction email, ever, asking whether they would like to hear from us.</p>
       {!open ? (
         <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => setOpen(true)} data-testid="news-consent-record">
           Record that they said yes

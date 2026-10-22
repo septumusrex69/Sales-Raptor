@@ -32,7 +32,7 @@ const LEAD = {
 const supabaseHandlers = (campaign) => [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rest\/v1\/marketing_campaigns/.test(u), (u) => ({ body: /id=eq\./.test(u) ? campaign : [campaign] })],
-  [(u) => /\/rpc\/marketing_campaign_counts/.test(u), () => ({ body: [] })],
+  [(u) => /\/rpc\/marketing_campaign_results/.test(u), () => ({ body: [] })],
   [(u) => /\/rest\/v1\/firm_settings/.test(u), () => ({ body: { id: true, firm_name: 'Bredell Ferreira', email_font: 'Georgia, serif', email_size_pt: 11 } })],
   [(u) => /\/rest\/v1\/leads/.test(u), () => ({ body: [LEAD] })],
   [(u) => /\/rest\/v1\/marketing_preferences/.test(u), () => ({ body: [
@@ -104,7 +104,8 @@ try {
     const [was, now] = [await chip('all_clients'), await chip('dormant_leads')]
     t.ok('the chosen list is the one drawn as chosen', was[0] === 'false' && now[0] === 'true' && now[1] !== was[1])
     t.check('dormant leads default to 90 days', await page.getByTestId('news-dormant-days').inputValue(), '90')
-    t.ok('the first approach is offered for a lead list, and says it is once ever', /once ever per lead/.test(await page.getByTestId('news-editor').innerText()))
+    t.ok('news to a lead list reaches only leads who said yes (the introduction is the only first approach)',
+      /leads who have said yes/.test(await page.getByTestId('news-kind-explained').innerText()) && await page.getByTestId('news-first-approach').count() === 0)
     t.check('...and changing the list clears the old count', await page.getByTestId('news-preview-list').count(), 0)
     await t.shot(page, 'news-editor-not-set-up')
     await context.close()

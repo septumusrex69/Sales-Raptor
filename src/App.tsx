@@ -11,6 +11,7 @@ import { LoginPage } from './pages/auth/LoginPage'
    in the bundle a collector downloads every morning. */
 const SignPage = lazy(() => import('./pages/sign/SignPage'))
 const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
+const OptInPage = lazy(() => import('./pages/news/OptInPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -134,6 +135,9 @@ function App() {
             {/* THE SECOND ROUTE OUTSIDE THE FIRM (S10): the unsubscribe link in every newsletter.
                 Whoever clicks it has no login; the signed token in the path is the authority. */}
             <Route path="/unsubscribe/:token" element={<UnsubscribePage />} />
+            {/* THE THIRD (S10, 22 Oct): "Yes, keep me informed" in an introduction email. No login;
+                the signed token names the send that asked, and the page records the yes. */}
+            <Route path="/opt-in/:token" element={<OptInPage />} />
             <Route
               element={
                 <RequireAuth>

@@ -10,14 +10,17 @@ import { MultiSelectChips } from '../../components/ui/MultiSelectChips'
 import { leadSources, services as SERVICES } from '../../data/mockData'
 import { fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
 import {
-  ACTIVE_LEAD_STATUSES, AUDIENCE_LABELS, DEFAULT_DORMANT_DAYS, MERGE_FIELDS, SENDER_SETUP_STEPS, describeAudience,
-  renderCampaignEmail, unknownMergeFields, type Audience,
+  ACTIVE_LEAD_STATUSES, AUDIENCE_LABELS, CAMPAIGN_KIND_LABELS, DEFAULT_DORMANT_DAYS, LEAD_AUDIENCES, MERGE_FIELDS,
+  OPENS_ARE_APPROXIMATE, PROSPECT_SETUP_STEPS, SENDER_SETUP_STEPS, describeAudience, isProspectKind, prospectSender,
+  renderCampaignEmail, resultRates, unknownMergeFields, type Audience, type CampaignKind, type CampaignResults,
 } from '../../lib/marketing.ts'
 import {
-  cancelCampaign, createCampaign, drainCampaign, getCampaign, listCampaigns, previewAudience, queueCampaign,
-  saveCampaign, sendTest, senderConfig, type AudiencePreview, type CampaignCounts, type CampaignDraft, type CampaignRow,
+  RECIPIENT_PAGE, campaignRecipients, campaignResults, cancelCampaign, createCampaign, drainCampaign, getCampaign,
+  listCampaigns, listLists, previewAudience, queueCampaign, saveCampaign, sendTest, senderConfig,
+  type Allowance, type AudiencePreview, type CampaignDraft, type CampaignRow, type MarketingList, type RecipientRow,
   type SenderConfig,
 } from '../../lib/marketingApi'
+import { ImportListCard } from './ImportListCard'
 import type { LeadStatus } from '../../types'
 import { clockNow } from '../../lib/clock'
 
@@ -60,16 +63,34 @@ function useSenderConfig() {
   return { config, error }
 }
 
-function SenderSetup({ config, error }: { config: SenderConfig | null; error: string | null }) {
+/** Whether a campaign of this kind can be sent with the sender as it is set up. */
+function kindReady(config: SenderConfig | null, kind: CampaignKind): boolean {
+  if (!config) return false
+  return isProspectKind(kind) ? !!config.prospect?.ready && !config.missing.includes('RESEND_API_KEY') : config.ready
+}
+
+/**
+ * WHAT THE FIRM MUST DO BEFORE THIS KIND CAN GO -- news and the prospect kinds have different
+ * senders (marketing.ts: three domains), so each names its own missing setting.
+ */
+function SenderSetup({ config, error, kind = 'news' }: { config: SenderConfig | null; error: string | null; kind?: CampaignKind }) {
   if (error) return <Card className="border-red-200 bg-red-50"><p className="text-sm text-red-700">The sender could not be checked: {error}</p></Card>
-  if (!config || config.ready) return null
+  if (!config || kindReady(config, kind)) return null
+  const prospect = isProspectKind(kind)
+  const missing = prospect
+    ? [...(config.missing.includes('RESEND_API_KEY') ? ['RESEND_API_KEY'] : []), ...(config.prospect?.missing ?? []).filter((m) => m !== 'RESEND_API_KEY')]
+    : config.missing
+  const problem = prospect ? config.prospect?.problem : config.problem
   return (
     <Card className="border-gold-300 bg-gold-50/60">
-      <div data-testid="sender-setup">
-        <CardHeader title="Sending is not set up yet"
-          subtitle={`Nothing will be sent until ${config.missing.join(' and ')} ${config.missing.length === 1 ? 'is' : 'are'} set. You can write and save campaigns in the meantime.`} />
+      <div data-testid={prospect ? 'prospect-setup' : 'sender-setup'}>
+        <CardHeader title={prospect ? 'Prospect sending is not set up yet' : 'Sending is not set up yet'}
+          subtitle={missing.length
+            ? `Nothing will be sent until ${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} set. You can write and save campaigns in the meantime.`
+            : problem ?? ''} />
+        {missing.length > 0 && problem && <p className="text-sm text-red-700 mb-2">{problem}</p>}
         <ol className="list-decimal pl-5 space-y-1.5 text-sm text-slate-700">
-          {SENDER_SETUP_STEPS.map((s) => <li key={s}>{s}</li>)}
+          {(prospect ? PROSPECT_SETUP_STEPS : SENDER_SETUP_STEPS).map((s) => <li key={s}>{s}</li>)}
         </ol>
       </div>
     </Card>
@@ -88,7 +109,7 @@ function CampaignList() {
   const navigate = useNavigate()
   const { config, error: configError } = useSenderConfig()
   const [rows, setRows] = useState<CampaignRow[] | null>(null)
-  const [counts, setCounts] = useState<Map<string, CampaignCounts>>(new Map())
+  const [counts, setCounts] = useState<Map<string, CampaignResults>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -97,10 +118,12 @@ function CampaignList() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  async function newCampaign() {
+  async function newCampaign(kind: CampaignKind) {
     setBusy(true)
     try {
-      const c = await createCampaign(`Newsletter ${clockNow().toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`)
+      const month = clockNow().toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })
+      const name = kind === 'news' ? `Newsletter ${month}` : kind === 'introduction' ? `Introduction ${month}` : `Prospects ${month}`
+      const c = await createCampaign(name, kind)
       navigate(`/news/${c.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -115,10 +138,17 @@ function CampaignList() {
         <p className="text-sm text-slate-500 flex-1 min-w-[16rem]">
           News for clients and leads, sent from the firm’s own records. Statements, reports and remittance advices are never sent from here, and an unsubscribe here does not stop them.
         </p>
-        <Button variant="primary" icon={<Plus size={15} />} onClick={() => void newCampaign()} disabled={busy} data-testid="news-new">
-          New campaign
+        <Button variant="primary" icon={<Plus size={15} />} onClick={() => void newCampaign('news')} disabled={busy} data-testid="news-new">
+          New news campaign
+        </Button>
+        <Button icon={<Plus size={15} />} onClick={() => void newCampaign('introduction')} disabled={busy} data-testid="news-new-introduction">
+          New introduction
+        </Button>
+        <Button icon={<Plus size={15} />} onClick={() => void newCampaign('prospect')} disabled={busy} data-testid="news-new-prospect">
+          New prospect campaign
         </Button>
       </div>
+      <ImportListCard />
       {error && <p className="text-sm text-red-600">{error}</p>}
       <Card padded={false}>
         {rows === null ? (
@@ -137,6 +167,8 @@ function CampaignList() {
                   <th className="px-4 py-2.5 font-medium">Goes to</th>
                   <th className="px-4 py-2.5 font-medium">Where it stands</th>
                   <th className="px-4 py-2.5 font-medium text-right">Sent</th>
+                  <th className="px-4 py-2.5 font-medium text-right">Delivered</th>
+                  <th className="px-4 py-2.5 font-medium text-right">Opened</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,16 +178,20 @@ function CampaignList() {
                     <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50/60">
                       <td className="px-4 py-2.5">
                         <Link to={`/news/${c.id}`} className="font-medium text-slate-800 hover:text-brand-700">{c.name}</Link>
-                        {c.subject && <div className="text-xs text-slate-400 truncate max-w-[22rem]">{c.subject}</div>}
+                        <div className="text-xs text-slate-400 truncate max-w-[22rem]">
+                          {CAMPAIGN_KIND_LABELS[c.kind ?? 'news']}{c.subject ? ` · ${c.subject}` : ''}
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">{describeAudience(c.audience)}</td>
                       <td className="px-4 py-2.5 text-slate-600">{STATUS_WORDS[c.status]}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
-                        {n ? `${n.sent} of ${n.total}` : '—'}
+                        {n ? `${n.accepted} of ${n.total}` : '—'}
                         {n && (n.bounced + n.complained + n.failed) > 0 && (
-                          <div className="text-xs text-slate-400">{[n.failed && `${n.failed} failed`, n.bounced && `${n.bounced} bounced`, n.complained && `${n.complained} spam reports`].filter(Boolean).join(' · ')}</div>
+                          <div className="text-xs text-slate-400">{[n.failed && `${n.failed} failed`, n.bounced && `${n.bounced} didn’t arrive`, n.complained && `${n.complained} spam reports`].filter(Boolean).join(' · ')}</div>
                         )}
                       </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{n && n.accepted ? withRate(n.delivered, resultRates(n).delivered) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{n && n.delivered ? withRate(n.opened, resultRates(n).opened) : '—'}</td>
                     </tr>
                   )
                 })}
@@ -173,9 +209,18 @@ function CampaignList() {
  * ---------------------------------------------------------------------------------------------- */
 
 const EXCLUSION_ORDER = ['unsubscribed', 'undeliverable', 'no consent recorded', 'already approached once',
-  'no address', 'address does not look right', 'on the list twice'] as const
+  'already said yes', 'already a client', 'no address', 'address does not look right', 'on the list twice'] as const
 
-const isLeadAudience = (a: Audience) => ['active_leads', 'dormant_leads', 'leads_by', 'manual'].includes(a.kind)
+/** "12 (40%)": a count with its rate, or the count alone while there is nothing to divide by. */
+function withRate(n: number, rate: number | null): string {
+  return rate === null ? String(n) : `${n} (${rate}%)`
+}
+
+const KIND_EXPLAINED: Record<CampaignKind, string> = {
+  news: 'News goes to clients (unless they unsubscribed) and to leads who have said yes, from the news address.',
+  introduction: 'One email to leads who have never been asked, with a “Yes, keep me informed” button. Each lead gets an introduction once, ever. Anybody who does not press it is never sent marketing again. It goes from the marketer below, on the separate marketing domain.',
+  prospect: 'Marketing to leads who pressed “Yes, keep me informed” (or whose yes is recorded on their lead). From the marketer below, on the separate marketing domain.',
+}
 
 function CampaignEditor({ id }: { id: string }) {
   const { currentUser } = useAuth()
@@ -188,14 +233,21 @@ function CampaignEditor({ id }: { id: string }) {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [progress, setProgress] = useState<{ sent: number; remaining: number; stoppedFor: string | null } | null>(null)
+  const [progress, setProgress] = useState<{
+    sent: number; remaining: number; stoppedFor: string | null; waitingForTomorrow?: number; allowance?: Allowance | null
+  } | null>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const sending = useRef(false)
 
   const load = useCallback(async () => {
     const c = await getCampaign(id)
     setRow(c)
-    if (c) setDraft({ name: c.name, subject: c.subject, preheader: c.preheader, body: c.body, image_url: c.image_url, audience: c.audience, first_approach: c.first_approach })
+    if (c) {
+      setDraft({
+        name: c.name, subject: c.subject, preheader: c.preheader, body: c.body, image_url: c.image_url, audience: c.audience,
+        first_approach: c.kind === 'introduction', kind: c.kind ?? 'news', sender_id: c.sender_id ?? c.created_by,
+      })
+    }
   }, [id])
 
   useEffect(() => {
@@ -205,9 +257,10 @@ function CampaignEditor({ id }: { id: string }) {
 
   const locked = !!row && row.status !== 'draft'
   const edit = (patch: Partial<CampaignDraft>) => {
-    setDraft((d) => (d ? { ...d, ...patch } : d))
+    /* The stored first-approach flag follows the kind: the introduction is the only first approach. */
+    setDraft((d) => (d ? { ...d, ...patch, first_approach: (patch.kind ?? d.kind) === 'introduction' } : d))
     setDirty(true)
-    if ('audience' in patch || 'first_approach' in patch) setPreview(null)
+    if ('audience' in patch || 'kind' in patch) setPreview(null)
   }
 
   async function save(): Promise<boolean> {
@@ -229,7 +282,7 @@ function CampaignEditor({ id }: { id: string }) {
 
   const checkList = () => run('preview', async () => {
     if (!draft) return
-    setPreview(await previewAudience(draft.audience, draft.first_approach))
+    setPreview(await previewAudience(draft.audience, draft.kind))
   })
 
   const test = () => run('test', async () => {
@@ -246,8 +299,13 @@ function CampaignEditor({ id }: { id: string }) {
     try {
       for (let i = 0; i < 500; i += 1) {
         const r = await drainCampaign(id)
-        setProgress((p) => ({ sent: (p?.sent ?? 0) + r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor }))
+        setProgress((p) => ({
+          sent: (p?.sent ?? 0) + r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor,
+          waitingForTomorrow: r.waitingForTomorrow, allowance: r.allowance,
+        }))
         if (r.remaining === 0) break
+        /* A sender at today's allowance: the rest go tomorrow from the sweep. Nothing to wait for here. */
+        if ((r.waitingForTomorrow ?? 0) > 0 && r.sent === 0) break
         if (r.stoppedFor) await new Promise((res) => setTimeout(res, 20_000))
       }
       await load()
@@ -259,20 +317,30 @@ function CampaignEditor({ id }: { id: string }) {
   const send = () => run('send', async () => {
     if (!draft || !preview) return
     if (!(await save())) return
-    const what = preview.firstApproaches
-      ? `${preview.count} people, ${preview.firstApproaches} of them leads being approached for the first and only time`
-      : `${preview.count} people`
+    const what = draft.kind === 'introduction'
+      ? `${preview.count} people, each for the first and only time`
+      : preview.firstApproaches
+        ? `${preview.count} people, ${preview.firstApproaches} of them leads being approached for the first and only time`
+        : `${preview.count} people`
     if (!window.confirm(`Send “${draft.subject}” to ${what}? This cannot be called back once it has gone.`)) return
     const r = await queueCampaign(id)
-    setProgress({ sent: r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor })
+    setProgress({ sent: r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor, waitingForTomorrow: r.waitingForTomorrow, allowance: r.allowance })
     await load()
     void drainLoop()
   })
 
   /* A campaign already sending when the page opens: carry on driving it. */
+  const ready = !!draft && kindReady(config, draft.kind)
   useEffect(() => {
-    if (row?.status === 'sending' && config?.ready) void drainLoop()
-  }, [row?.status, config?.ready, drainLoop])
+    if (row?.status === 'sending' && ready) void drainLoop()
+  }, [row?.status, ready, drainLoop])
+
+  const { users } = useAppStore()
+  const marketer = users.find((u) => u.id === draft?.sender_id) ?? null
+  /* The From a prospect campaign will carry, worked out by the very function the server sends with. */
+  const prospectFrom = draft && isProspectKind(draft.kind) && config?.prospect?.domain
+    ? prospectSender(config.prospect.domain, marketer ? { name: marketer.name, email: marketer.email ?? null } : null)
+    : null
 
   const myFirstName = currentUser?.name?.split(' ')[0] ?? null
   const sampleRecipient = useMemo(
@@ -288,7 +356,8 @@ function CampaignEditor({ id }: { id: string }) {
         unsubscribeUrl: `${window.location.origin}/unsubscribe/preview`, firmName: firm?.firmName ?? 'Bredell Ferreira',
         face: { emailFont: firm?.emailFont ?? 'Georgia, serif', emailSizePt: firm?.emailSizePt ?? 11 },
         firmAddress: firm?.postalAddress ?? firm?.physicalAddress ?? null,
-        basis: draft.audience.kind.includes('lead') ? 'lead' : 'client',
+        basis: draft.kind === 'introduction' ? 'introduction' : LEAD_AUDIENCES.includes(draft.audience.kind) && draft.audience.kind !== 'manual' ? 'lead' : 'client',
+        optInUrl: draft.kind === 'introduction' ? `${window.location.origin}/opt-in/preview` : null,
       },
     )
   }, [draft, firm, sampleRecipient])
@@ -304,20 +373,27 @@ function CampaignEditor({ id }: { id: string }) {
     const at = el.selectionStart ?? draft.body.length
     edit({ body: draft.body.slice(0, at) + token + draft.body.slice(el.selectionEnd ?? at) })
   }
-  const canSend = !locked && !!config?.ready && !!preview && preview.count > 0 && !!draft.subject.trim() && !!draft.body.trim() && unknown.length === 0
+  const senderProblem = prospectFrom && 'error' in prospectFrom ? prospectFrom.error : null
+  const canSend = !locked && ready && !senderProblem && !!preview && preview.count > 0 && !!draft.subject.trim() && !!draft.body.trim() && unknown.length === 0
 
   return (
     <div className="space-y-4" data-testid="news-editor">
       <Link to="/news" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft size={14} /> All campaigns</Link>
-      <SenderSetup config={config} error={configError} />
+      <SenderSetup config={config} error={configError} kind={draft.kind} />
       {locked && (
         <Card className="bg-slate-50">
           <p className="text-sm text-slate-600" data-testid="news-locked">
             {row.status === 'sending' ? 'Sending now.' : row.status === 'sent' ? 'Sent.' : 'Cancelled.'}{' '}
             {row.recipient_count ? `${row.recipient_count} on the list. ` : ''}A campaign that has gone out is a record of what was sent and cannot be edited.
             {progress && ` ${progress.sent} sent so far${progress.remaining ? `, ${progress.remaining} still to go` : ''}.`}
-            {progress?.stoppedFor && ` Paused: ${progress.stoppedFor}`}
+            {progress?.stoppedFor && !progress.waitingForTomorrow && ` Paused: ${progress.stoppedFor}`}
           </p>
+          {progress?.allowance && (
+            <p className="text-sm text-slate-600 mt-1" data-testid="news-allowance">
+              {progress.allowance.sender} is in week {progress.allowance.week} of its warm-up: {progress.allowance.used} of {progress.allowance.cap} sent today.
+              {(progress.waitingForTomorrow ?? 0) > 0 && <> <b>{progress.waitingForTomorrow} waiting for tomorrow’s allowance.</b> They go on their own.</>}
+            </p>
+          )}
           {row.status === 'sending' && (
             <Button size="sm" variant="danger" className="mt-2" onClick={() => void run('cancel', async () => { await cancelCampaign(id); await load() })}>
               Stop what has not gone yet
@@ -330,6 +406,36 @@ function CampaignEditor({ id }: { id: string }) {
         <Card>
           <CardHeader title="The message" subtitle="A blank line starts a new paragraph. **Two asterisks** make bold. [Words](https://…) or a bare https:// address make a link." />
           <fieldset disabled={locked} className="space-y-3">
+            <Field label="Kind">
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Kind">
+                {(Object.keys(CAMPAIGN_KIND_LABELS) as CampaignKind[]).map((k) => (
+                  <button key={k} type="button" role="radio" aria-checked={draft.kind === k} data-testid={`news-kind-${k}`}
+                    onClick={() => edit({
+                      kind: k,
+                      /* A prospect kind goes to leads only: a client list is swapped for an imported one. */
+                      ...(isProspectKind(k) && !LEAD_AUDIENCES.includes(draft.audience.kind) ? { audience: { kind: 'imported_list', listIds: [] } } : {}),
+                    })}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${draft.kind === k ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                    {CAMPAIGN_KIND_LABELS[k]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500 mt-1.5" data-testid="news-kind-explained">{KIND_EXPLAINED[draft.kind]}</p>
+            </Field>
+            {isProspectKind(draft.kind) && (
+              <Field label="From (the marketer who runs it — replies go to their own inbox)">
+                <select className={INPUT} value={draft.sender_id ?? ''} onChange={(e) => edit({ sender_id: e.target.value || null })} data-testid="news-sender">
+                  {users.filter((u) => u.status === 'Active' || u.id === draft.sender_id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+                <p className="text-xs mt-1" data-testid="news-from">
+                  {!prospectFrom
+                    ? <span className="text-slate-500">The address appears here once MARKETING_PROSPECT_DOMAIN is set.</span>
+                    : 'error' in prospectFrom
+                      ? <span className="text-red-600">{prospectFrom.error}</span>
+                      : <span className="text-slate-600">{prospectFrom.from} · replies to {prospectFrom.replyTo}</span>}
+                </p>
+              </Field>
+            )}
             <Field label="Campaign name (for us, never shown)">
               <input className={INPUT} value={draft.name} onChange={(e) => edit({ name: e.target.value })} />
             </Field>
@@ -362,7 +468,7 @@ function CampaignEditor({ id }: { id: string }) {
           {!locked && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button onClick={() => void run('save', async () => { if (await save()) setMessage('Saved.') })} disabled={!dirty || !!busy}>Save draft</Button>
-              <Button onClick={() => void test()} disabled={!config?.ready || !!busy} data-testid="news-test">Send a test to me</Button>
+              <Button onClick={() => void test()} disabled={!ready || !!senderProblem || !!busy} data-testid="news-test">Send a test to me</Button>
             </div>
           )}
         </Card>
@@ -381,15 +487,7 @@ function CampaignEditor({ id }: { id: string }) {
       <Card>
         <CardHeader title="Who it goes to" subtitle="Drawn from Raptor’s own clients, contacts and leads when it is sent. Anybody who has unsubscribed is left out, always." />
         <fieldset disabled={locked}>
-          <AudiencePicker audience={draft.audience} onChange={(audience) => edit({ audience })} />
-          {isLeadAudience(draft.audience) && (
-            <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
-              <input type="checkbox" className="mt-1" checked={draft.first_approach} onChange={(e) => edit({ first_approach: e.target.checked })} data-testid="news-first-approach" />
-              <span>
-                <b>First approach.</b> Leads who have not said yes to our news may be written to once, to ask (POPIA s69). With this ticked, leads with no consent recorded are included — once ever per lead. Without it, only leads whose consent is on their record.
-              </span>
-            </label>
-          )}
+          <AudiencePicker audience={draft.audience} onChange={(audience) => edit({ audience })} leadsOnly={isProspectKind(draft.kind)} />
         </fieldset>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button onClick={() => void checkList()} disabled={!!busy} data-testid="news-check">{busy === 'preview' ? 'Counting…' : 'Count who gets it'}</Button>
@@ -399,8 +497,10 @@ function CampaignEditor({ id }: { id: string }) {
             </Button>
           )}
         </div>
-        {preview && <PreviewList preview={preview} />}
+        {preview && <PreviewList preview={preview} kind={draft.kind} />}
       </Card>
+
+      {locked && <ResultsPanel campaignId={id} kind={draft.kind} live={row.status === 'sending'} />}
 
       {message && <p className="text-sm text-emerald-700" data-testid="news-message">{message}</p>}
       {error && <p className="text-sm text-red-600" data-testid="news-error">{error}</p>}
@@ -419,14 +519,23 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function PreviewList({ preview }: { preview: AudiencePreview }) {
+function PreviewList({ preview, kind }: { preview: AudiencePreview; kind: CampaignKind }) {
   const left = EXCLUSION_ORDER.filter((k) => preview.excluded[k])
   return (
     <div className="mt-4 space-y-3" data-testid="news-preview-list">
       <p className="text-sm text-slate-700">
         <b data-testid="news-count">{preview.count}</b> {preview.count === 1 ? 'address' : 'addresses'}, each once
-        {preview.firstApproaches > 0 && <>, of which {preview.firstApproaches} {preview.firstApproaches === 1 ? 'is a lead' : 'are leads'} being approached for the first and only time</>}.
+        {kind !== 'introduction' && preview.firstApproaches > 0 && <>, of which {preview.firstApproaches} {preview.firstApproaches === 1 ? 'is a lead' : 'are leads'} being approached for the first and only time</>}.
       </p>
+      {kind === 'introduction' && preview.count > 0 && (
+        <p className="text-sm text-slate-700 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2" data-testid="news-never-again">
+          This is the one email each of these {preview.count} will ever get from us unasked. Anybody who does not press
+          “Yes, keep me informed” will <b>never be sent another marketing email</b> — Raptor refuses them on every later list, and again at the moment of sending.
+        </p>
+      )}
+      {kind === 'prospect' && (
+        <p className="text-xs text-slate-500">Only leads who said yes. Everybody who had an introduction and did not press the button is left out, always.</p>
+      )}
       {left.length > 0 && (
         <p className="text-xs text-slate-500" data-testid="news-excluded">
           Left out: {left.map((k) => `${preview.excluded[k]} ${k}`).join(' · ')}
@@ -454,7 +563,7 @@ function PreviewList({ preview }: { preview: AudiencePreview }) {
 
 const STATUSES: LeadStatus[] = ['No Contact Yet', 'Interested', 'Hot Lead', 'Rejected']
 
-function AudiencePicker({ audience, onChange }: { audience: Audience; onChange: (a: Audience) => void }) {
+function AudiencePicker({ audience, onChange, leadsOnly = false }: { audience: Audience; onChange: (a: Audience) => void; leadsOnly?: boolean }) {
   const pick = (kind: Audience['kind']) => {
     switch (kind) {
       case 'all_clients': onChange({ kind }); break
@@ -463,12 +572,14 @@ function AudiencePicker({ audience, onChange }: { audience: Audience; onChange: 
       case 'dormant_leads': onChange({ kind, days: DEFAULT_DORMANT_DAYS, includeLost: true }); break
       case 'leads_by': onChange({ kind, statuses: [...ACTIVE_LEAD_STATUSES], sources: [] }); break
       case 'manual': onChange({ kind, picks: [] }); break
+      case 'imported_list': onChange({ kind, listIds: [] }); break
     }
   }
+  const kinds = (Object.keys(AUDIENCE_LABELS) as Audience['kind'][]).filter((k) => !leadsOnly || LEAD_AUDIENCES.includes(k))
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="List">
-        {(Object.keys(AUDIENCE_LABELS) as Audience['kind'][]).map((k) => (
+        {kinds.map((k) => (
           <button key={k} type="button" role="radio" aria-checked={audience.kind === k} onClick={() => pick(k)}
             data-testid={`news-audience-${k}`}
             className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${audience.kind === k ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
@@ -503,6 +614,7 @@ function AudiencePicker({ audience, onChange }: { audience: Audience; onChange: 
         </div>
       )}
       {audience.kind === 'manual' && <ManualPicker audience={audience} onChange={onChange} />}
+      {audience.kind === 'imported_list' && <ListPicker audience={audience} onChange={onChange} />}
     </div>
   )
 }
@@ -545,5 +657,126 @@ function ManualPicker({ audience, onChange }: { audience: Extract<Audience, { ki
       </div>
       <p className="text-xs text-slate-500">A lead picked by hand still needs consent, or the first-approach box below.</p>
     </div>
+  )
+}
+
+function ListPicker({ audience, onChange }: { audience: Extract<Audience, { kind: 'imported_list' }>; onChange: (a: Audience) => void }) {
+  const [lists, setLists] = useState<MarketingList[] | null>(null)
+  useEffect(() => { listLists().then(setLists).catch(() => setLists([])) }, [])
+  if (lists === null) return <p className="text-xs text-slate-400">Loading lists…</p>
+  if (!lists.length) return <p className="text-xs text-slate-500">No list has been imported yet. Import one on the campaigns page.</p>
+  const picked = new Set(audience.listIds)
+  return (
+    <div className="space-y-1" data-testid="news-list-picker">
+      {lists.map((l) => (
+        <label key={l.id} className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={picked.has(l.id)}
+            onChange={(e) => onChange({ ...audience, listIds: e.target.checked ? [...audience.listIds, l.id] : audience.listIds.filter((x) => x !== l.id) })} />
+          {l.name} <span className="text-xs text-slate-400">{l.lead_count} leads · {new Date(l.uploaded_at).toLocaleDateString('en-ZA')}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Results -- "the success of what's been delivered, what was undelivered, what was opened"
+ * ---------------------------------------------------------------------------------------------- */
+
+const STATE_WORDS: Record<RecipientRow['state'], string> = {
+  queued: 'Waiting', sending: 'Sending', sent: 'Sent', failed: 'Failed', skipped: 'Not sent', bounced: 'Didn’t arrive', complained: 'Marked as spam',
+}
+
+type RecipientFilter = 'all' | 'undelivered' | 'opened' | 'unopened' | 'clicked'
+
+function ResultsPanel({ campaignId, kind, live }: { campaignId: string; kind: CampaignKind; live: boolean }) {
+  const [results, setResults] = useState<CampaignResults | null>(null)
+  const [rows, setRows] = useState<RecipientRow[] | null>(null)
+  const [filter, setFilter] = useState<RecipientFilter>('all')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () => Promise.all([campaignResults(campaignId), campaignRecipients(campaignId)])
+      .then(([r, list]) => { if (alive) { setResults(r); setRows(list) } })
+      .catch((e: unknown) => { if (alive) setError(e instanceof Error ? e.message : String(e)) })
+    void load()
+    /* While it is sending, and for a while after, the webhook keeps filling these in. */
+    const t = live ? window.setInterval(() => void load(), 15_000) : undefined
+    return () => { alive = false; if (t) window.clearInterval(t) }
+  }, [campaignId, live])
+  if (error) return <Card><p className="text-sm text-red-600">{error}</p></Card>
+  if (!results || !rows) return <Card><p className="text-sm text-slate-400">Loading results…</p></Card>
+  const rates = resultRates(results)
+  const tiles: { label: string; value: number; rate: number | null; testid: string; of?: string }[] = [
+    { label: 'Sent', value: results.accepted, rate: null, testid: 'sent' },
+    { label: 'Delivered', value: results.delivered, rate: rates.delivered, testid: 'delivered', of: 'of sent' },
+    { label: 'Didn’t arrive', value: results.bounced, rate: rates.bounced, testid: 'bounced', of: 'of sent' },
+    { label: 'Opened', value: results.opened, rate: rates.opened, testid: 'opened', of: 'of delivered' },
+    { label: 'Clicked', value: results.clicked, rate: rates.clicked, testid: 'clicked', of: 'of delivered' },
+    { label: 'Unsubscribed', value: results.unsubscribed, rate: rates.unsubscribed, testid: 'unsubscribed', of: 'of delivered' },
+    { label: 'Marked as spam', value: results.complained, rate: rates.complained, testid: 'complained', of: 'of delivered' },
+    ...(kind === 'introduction' ? [{ label: 'Opted in', value: results.opted_in, rate: rates.optedIn, testid: 'opted-in', of: 'of delivered' }] : []),
+  ]
+  const shown = rows.filter((r) => filter === 'all'
+    || (filter === 'undelivered' && ['bounced', 'failed', 'skipped'].includes(r.state))
+    || (filter === 'opened' && !!r.first_opened_at)
+    || (filter === 'unopened' && !r.first_opened_at && r.state === 'sent')
+    || (filter === 'clicked' && !!r.first_clicked_at))
+  const day = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
+  return (
+    <Card>
+      <div data-testid="news-results">
+        <CardHeader title="What happened to it" subtitle={`Of ${results.total} on the list${results.queued ? `, ${results.queued} not sent yet` : ''}${results.skipped ? `, ${results.skipped} not sent (unsubscribed or no longer allowed)` : ''}${results.failed ? `, ${results.failed} failed` : ''}.`} />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {tiles.map((t) => (
+            <div key={t.testid} className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2" data-testid={`news-result-${t.testid}`}>
+              <div className="text-xs text-slate-500">{t.label}</div>
+              <div className="text-lg font-semibold tabular-nums text-slate-800">{t.value}</div>
+              <div className="text-xs text-slate-400">{t.rate === null ? (t.of ? '—' : '\u00a0') : `${t.rate}% ${t.of}`}</div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-slate-500" data-testid="news-opens-note">{OPENS_ARE_APPROXIMATE}</p>
+        {results.delayed > 0 && <p className="mt-1 text-xs text-slate-500">{results.delayed} delayed: the receiving server has not taken them yet, and Resend is still trying.</p>}
+        <div className="mt-4 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Show">
+          {([['all', 'Everybody'], ['undelivered', 'Not delivered'], ['opened', 'Opened'], ['unopened', 'Not opened'], ['clicked', 'Clicked']] as [RecipientFilter, string][]).map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={filter === k} onClick={() => setFilter(k)} data-testid={`news-recipients-${k}`}
+              className={`text-xs px-2.5 py-1 rounded-md border ${filter === k ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-sm" data-testid="news-recipients">
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                <th className="px-2 py-1.5 font-medium">Who</th>
+                <th className="px-2 py-1.5 font-medium">Where it stands</th>
+                <th className="px-2 py-1.5 font-medium">Delivered</th>
+                <th className="px-2 py-1.5 font-medium">Opened</th>
+                <th className="px-2 py-1.5 font-medium">Clicked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.id} className="border-b border-slate-50">
+                  <td className="px-2 py-1.5"><div className="text-slate-800">{r.email}</div><div className="text-xs text-slate-400">{[r.first_name, r.company_name].filter(Boolean).join(' · ')}</div></td>
+                  <td className="px-2 py-1.5 text-slate-600">
+                    {STATE_WORDS[r.state]}
+                    {r.opted_in_at && <span className="ml-1 text-xs text-emerald-700">· said yes</span>}
+                    {r.unsubscribed_at && <span className="ml-1 text-xs text-slate-500">· unsubscribed</span>}
+                    {r.error && r.state !== 'sent' && <div className="text-xs text-slate-400">{r.error}</div>}
+                  </td>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">{day(r.delivered_at)}</td>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">{r.first_opened_at ? `${day(r.first_opened_at)}${r.open_count > 1 ? ` · ${r.open_count}×` : ''}` : ''}</td>
+                  <td className="px-2 py-1.5 text-xs text-slate-500">{r.first_clicked_at ? `${day(r.first_clicked_at)}${r.click_count > 1 ? ` · ${r.click_count}×` : ''}` : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length >= RECIPIENT_PAGE && <p className="text-xs text-slate-400 mt-1">The first {RECIPIENT_PAGE} by address. The counts above are the whole campaign.</p>}
+        </div>
+      </div>
+    </Card>
   )
 }

@@ -106,7 +106,12 @@ check('only the named audit and real-world functions read the real clock', still
      moment a person said stop are all the real world's -- an email goes out today whatever date
      staging's clock reads, and a fifteen-minute lease must not last a month. A lead's status date is
      NOT among them: dormancy is a business date and leads_stamp_status_change reads raptor_now(). */
-  'marketing_claim_sends', 'marketing_preferences_stamp', 'marketing_record_results',
+  /* ...and (22 Oct) the warm-up and the delivery results: a sender's day is Johannesburg's REAL day,
+     because the mailbox providers' memory runs on the calendar and a staging clock moved a month on
+     has warmed nothing up (marketing_claim_prospect, marketing_sender_today); and when Resend says
+     an email was delivered or opened is the real world's (marketing_record_event). */
+  'marketing_claim_prospect', 'marketing_claim_sends', 'marketing_preferences_stamp', 'marketing_record_event',
+  'marketing_record_results', 'marketing_sender_today',
   'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
   'protect_swordfish_import_run',
   'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',

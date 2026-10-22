@@ -234,7 +234,8 @@ function fakeAdmin(db) {
       maybeSingle: () => Promise.resolve({ data: table === 'marketing_campaigns' ? db.campaign : table === 'firm_settings' ? { firm_name: 'Bredell Ferreira' } : null }),
       then: (res) => res(table === 'marketing_preferences'
         ? { data: db.prefs.filter((p) => (q.filters.find((f) => f[0] === 'in')?.[2] ?? []).includes(p.email)) }
-        : table === 'marketing_sends' ? { count: db.queue.length } : { data: [] }),
+        : table === 'marketing_sends' ? { count: db.queue.length }
+          : table === 'marketing_campaigns' ? { data: db.campaign ? [db.campaign] : [] } : { data: [] }),
     }
     return b
   }
@@ -317,7 +318,8 @@ const apiFiles = (await import('node:fs')).readdirSync(new URL('../../api', impo
 check('api/ is still twelve functions or fewer', apiFiles.length <= 12, true)
 const mk = code('api/_lib/email/marketing.ts')
 ok('the sender asks for marketing.send itself', /can\([\s\S]{0,140}'marketing\.send'\)/.test(mk))
-ok('...and refuses to send on a half-set-up sender', mk.indexOf("if (!config.ready)") > 0 && mk.indexOf("if (!config.ready)") < mk.indexOf("body.step === 'queue'"))
+ok('...and refuses to send on a half-set-up sender, for the campaign\'s own kind',
+  mk.indexOf('kindNotReady(config, current.kind)') > 0 && mk.indexOf('kindNotReady(config, current.kind)') < mk.indexOf("body.step === 'queue'"))
 const unsub = code('api/_lib/email/unsubscribe.ts')
 ok('the public unsubscribe needs no session', !/requireCaller/.test(unsub))
 ok('...only the signed token', /readUnsubscribeToken\(token\)/.test(unsub))
@@ -366,10 +368,11 @@ const side = code('src/components/layout/Sidebar.tsx')
 ok('the menu item shows only to those who may send', /n\.to !== '\/news' \|\| canSendMarketing\(currentUser\)/.test(side))
 ok('...and sits under Clients', side.indexOf("to: '/news'") > side.indexOf("to: '/companies'") && side.indexOf("to: '/news'") < side.indexOf("to: '/accounts'"))
 const page = code('src/pages/news/NewsPage.tsx')
-ok('the screen says what the firm must set up when the sender is not', /SENDER_SETUP_STEPS\.map/.test(page))
+ok('the screen says what the firm must set up when the sender is not, per kind',
+  /\(prospect \? PROSPECT_SETUP_STEPS : SENDER_SETUP_STEPS\)\.map/.test(page))
 ok('...the steps name the two variables and the DNS step',
   M.SENDER_SETUP_STEPS.some((s) => s.includes('RESEND_API_KEY') && s.includes('MARKETING_FROM')) && M.SENDER_SETUP_STEPS.some((s) => /DNS/.test(s)))
-ok('nothing is sent before the list has been counted', /const canSend = !locked && !!config\?\.ready && !!preview && preview\.count > 0/.test(page))
+ok('nothing is sent before the list has been counted', /const canSend = !locked && ready && !senderProblem && !!preview && preview\.count > 0/.test(page))
 
 console.log(`\ncheck-marketing: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

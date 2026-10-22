@@ -67,6 +67,8 @@ export type Audience =
   | { kind: 'dormant_leads'; days: number; includeLost: boolean }
   | { kind: 'leads_by'; statuses: LeadStatus[]; sources: LeadSource[] }
   | { kind: 'manual'; picks: { type: 'company' | 'contact' | 'lead'; id: string }[] }
+  /* The leads one or more uploaded prospect lists brought in (S10, 22 Oct) -- see prospectImport.ts. */
+  | { kind: 'imported_list'; listIds: string[] }
 
 export const AUDIENCE_LABELS: Record<Audience['kind'], string> = {
   all_clients: 'All clients',
@@ -75,6 +77,43 @@ export const AUDIENCE_LABELS: Record<Audience['kind'], string> = {
   dormant_leads: 'Dormant leads',
   leads_by: 'Leads by status or source',
   manual: 'Pick people',
+  imported_list: 'An imported list',
+}
+
+/** The audiences made only of leads -- the only ones a prospect campaign may use. */
+export const LEAD_AUDIENCES: Audience['kind'][] = ['active_leads', 'dormant_leads', 'leads_by', 'imported_list', 'manual']
+
+/* ------------------------------------------------------------------------------------------------
+ * What kind of campaign -- and so who it may go to, and whose name it goes out under
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * THREE KINDS, BECAUSE THE FIRM HAS THREE THINGS TO SAY TO THREE KINDS OF PEOPLE (Stephan, 22 Oct).
+ *
+ *   news           the newsletter: clients (in by default, s69(3)) and leads who have said yes.
+ *                  From the NEWS sender, MARKETING_FROM, on a news domain of its own.
+ *   introduction   "everyone gets one introduction email to opt in, 'Yes, keep me informed'
+ *                  button." The once-only approach s69(2) allows to somebody who is not a customer:
+ *                  ONLY leads with no consent and no earlier approach. Carries the opt-in button.
+ *   prospect       later marketing to prospects -- ONLY leads who pressed that button (or whose
+ *                  yes a person recorded).
+ *
+ * The two prospect kinds go from a SEPARATE domain, personally, in the name of the marketer who runs
+ * the campaign -- see prospectSender -- and are held to the warm-up allowance; news is neither.
+ */
+export type CampaignKind = 'news' | 'introduction' | 'prospect'
+
+export const CAMPAIGN_KIND_LABELS: Record<CampaignKind, string> = {
+  news: 'News',
+  introduction: 'Introduction to prospects',
+  prospect: 'Prospect marketing',
+}
+
+export const isProspectKind = (k: CampaignKind | string | null | undefined) => k === 'introduction' || k === 'prospect'
+
+/** A stored kind, read defensively: anything unknown is news, the kind with the narrowest reach to strangers. */
+export function parseKind(raw: unknown): CampaignKind {
+  return raw === 'introduction' || raw === 'prospect' ? raw : 'news'
 }
 
 /** What an audience is, in a sentence for the campaign list. */
@@ -86,6 +125,7 @@ export function describeAudience(a: Audience): string {
     case 'dormant_leads': return `Leads untouched for ${a.days} days${a.includeLost ? ', lost ones included' : ''}`
     case 'leads_by': return `Leads${a.statuses.length ? ` · ${a.statuses.join(', ')}` : ''}${a.sources.length ? ` · from ${a.sources.join(', ')}` : ''}`
     case 'manual': return `${a.picks.length} picked by hand`
+    case 'imported_list': return a.listIds.length === 1 ? 'One imported list' : `${a.listIds.length} imported lists`
   }
 }
 
@@ -109,6 +149,7 @@ export function parseAudience(raw: unknown): Audience | null {
         && typeof (p as { id?: unknown }).id === 'string') : []
       return { kind: 'manual', picks }
     }
+    case 'imported_list': return { kind: 'imported_list', listIds: list(a.listIds) }
     default: return null
   }
 }
@@ -174,14 +215,21 @@ export interface Recipient {
 export type ExclusionReason =
   | 'no address' | 'address does not look right' | 'unsubscribed' | 'undeliverable'
   | 'no consent recorded' | 'already approached once' | 'on the list twice'
+  | 'already a client' | 'already said yes'
 
 export interface AudienceInput {
   audience: Audience
+  /**
+   * Whether leads with no consent may be included as their one first approach. The SERVER passes
+   * `kind === 'introduction'` and nothing else: the introduction is the only first approach there is.
+   */
   firstApproach: boolean
+  /** News when absent. A prospect kind never reaches a client and has its own rule for leads. */
+  kind?: CampaignKind
   companies: Pick<Company, 'id' | 'name' | 'email' | 'parentCompanyId' | 'services' | 'contactPerson'>[]
   contacts: Pick<Contact, 'id' | 'firstName' | 'email' | 'companyId' | 'leadId'>[]
   leads: (Pick<Lead, 'id' | 'firstName' | 'companyName' | 'email' | 'status' | 'source' | 'createdAt'
-    | 'lastContactAt' | 'rejectionReason'> & { statusChangedAt?: string; marketingConsentAt?: string })[]
+    | 'lastContactAt' | 'rejectionReason'> & { statusChangedAt?: string; marketingConsentAt?: string; marketingListId?: string })[]
   /** Leads' activities, for dormancy. Only those with a leadId matter. */
   activities: TouchActivity[]
   /** marketing_preferences, keyed by normalised address. Only 'subscribed' rows are absent or harmless. */
@@ -208,6 +256,8 @@ const firstWord = (s: string | null | undefined) => (s ?? '').trim().split(/\s+/
  */
 export function resolveAudience(input: AudienceInput): AudienceResult {
   const { audience: a } = input
+  const kind = input.kind ?? 'news'
+  const prospectOnly = isProspectKind(kind)
   const out: Recipient[] = []
   const seen = new Set<string>()
   const excluded: Partial<Record<ExclusionReason, number>> = {}
@@ -233,7 +283,20 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
     return c?.id
   }
 
+  /*
+   * EVERY ADDRESS THAT IS A CLIENT'S, for the prospect kinds. "An existing client is not a prospect":
+   * an introduction asking a client whether they would like to hear from us is the wrong letter, and
+   * prospect marketing in a stranger's voice from another domain is worse. A lead typed in by hand
+   * with a client's address is caught here too, not only at import.
+   */
+  const clientEmails = new Set<string>()
+  if (prospectOnly) {
+    for (const c of input.companies) if (c.email) clientEmails.add(normaliseEmail(c.email))
+    for (const p of input.contacts) if (p.companyId && p.email) clientEmails.add(normaliseEmail(p.email))
+  }
+
   const clientFamilies = (keep: (topId: string) => boolean) => {
+    if (prospectOnly) { skip('already a client'); return }
     const tops = input.companies.filter((c) => !c.parentCompanyId && keep(c.id))
     const topIds = new Set(tops.map((c) => c.id))
     for (const c of tops) {
@@ -256,6 +319,10 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
    */
   const offerLead = (l: AudienceInput['leads'][number]) => {
     const consented = !!l.marketingConsentAt
+    if (prospectOnly && clientEmails.has(normaliseEmail(l.email))) { skip('already a client'); return }
+    /* The introduction asks a question; somebody who has already answered yes is not asked again. */
+    if (kind === 'introduction' && consented) { skip('already said yes'); return }
+    if (kind === 'prospect' && !consented) { skip('no consent recorded'); return }
     if (!consented) {
       if (!input.firstApproach) { skip('no consent recorded'); return }
       if (input.approachedLeads.has(l.id)) { skip('already approached once'); return }
@@ -315,6 +382,7 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
       const contactById = new Map(input.contacts.map((c) => [c.id, c]))
       for (const p of a.picks) {
         if (p.type === 'company') {
+          if (prospectOnly) { skip('already a client'); continue }
           const c = companyById.get(p.id)
           if (c) offer(c.email, { firstName: firstWord(c.contactPerson), companyName: c.name, companyId: c.id, firstApproach: false, via: 'client' })
         } else if (p.type === 'contact') {
@@ -327,6 +395,7 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
             offerLead({ ...l, email: c.email, firstName: c.firstName })
             continue
           }
+          if (prospectOnly) { skip('already a client'); continue }
           offer(c.email, {
             firstName: firstWord(c.firstName), companyName: (c.companyId && companyById.get(c.companyId)?.name) || null,
             companyId: c.companyId, contactId: c.id, firstApproach: false, via: 'contact',
@@ -336,6 +405,11 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
           if (l) offerLead(l)
         }
       }
+      break
+    }
+    case 'imported_list': {
+      const want = new Set(a.listIds)
+      for (const l of input.leads) if (l.marketingListId && want.has(l.marketingListId) && reachable(l)) offerLead(l)
       break
     }
   }
@@ -414,9 +488,17 @@ export interface RenderOptions {
   face: EmailFace
   /** Shown under the sign-off; the firm's postal address, where it has one. */
   firmAddress?: string | null
-  /** Why they are getting it, in a sentence -- different for a client and a lead. */
-  basis: 'client' | 'lead'
+  /** Why they are getting it, in a sentence -- different for a client, a lead, and a stranger asked once. */
+  basis: 'client' | 'lead' | 'introduction'
+  /**
+   * THE "YES, KEEP ME INFORMED" BUTTON -- an introduction's whole purpose. A signed link to this
+   * recipient's own send (see optInToken on the server); absent on every other kind.
+   */
+  optInUrl?: string | null
 }
+
+/** The words on the button; the page it opens says the rest. The firm's own wording, 22 Oct. */
+export const OPT_IN_LABEL = 'Yes, keep me informed'
 
 /**
  * ONE RECIPIENT'S EMAIL.
@@ -438,10 +520,28 @@ export function renderCampaignEmail(
   const image = content.imageUrl && /^https:\/\/[^\s"<>]+$/.test(content.imageUrl.trim())
     ? `<p style="margin:0 0 16px"><img src="${escapeHtml(content.imageUrl.trim())}" alt="" style="max-width:100%;height:auto;border:0"></p>`
     : ''
+  /*
+   * THE INTRODUCTION SAYS WHAT IT IS, in the footer every message carries: one email, asking once,
+   * and nothing more without a yes. That is the s69(2) bargain, and saying so is what makes the one
+   * approach an honest one rather than the first of many.
+   */
   const why = opts.basis === 'client'
     ? `You are receiving this because you are a client of ${opts.firmName}.`
-    : `You are receiving this because you have been in touch with ${opts.firmName}.`
+    : opts.basis === 'introduction'
+      ? `We are writing once to ask whether you would like to hear from ${opts.firmName}. Unless you press “${OPT_IN_LABEL}”, this is the only marketing email we will send you.`
+      : `You are receiving this because you have been in touch with ${opts.firmName}.`
   const unsub = escapeHtml(opts.unsubscribeUrl)
+  const optIn = opts.optInUrl ? escapeHtml(opts.optInUrl) : ''
+  /*
+   * A TABLE, NOT A STYLED LINK ALONE: Outlook draws neither padding nor a background on an <a>, and a
+   * button that renders as a bare underlined line in half the inboxes is a button half the people
+   * never see. The cell carries the colour; the link fills it.
+   */
+  const button = optIn
+    ? '<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0"><tr><td style="background:#1e3a5f;border-radius:6px">'
+      + `<a href="${optIn}" style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:bold" data-opt-in="1">${escapeHtml(OPT_IN_LABEL)}</a>`
+      + '</td></tr></table>'
+    : ''
   const html = [
     '<!doctype html><html><body style="margin:0;padding:0;background:#ffffff">',
     /* The preheader: the line an inbox shows after the subject, hidden in the message itself. */
@@ -449,14 +549,16 @@ export function renderCampaignEmail(
     `<div style="${emailBodyStyle(opts.face)};max-width:640px;margin:0 auto;padding:16px">`,
     image,
     `<div>${linkify(emailBodyHtml(body))}</div>`,
+    button,
     '<div style="margin-top:32px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:9pt;color:#6b7280;line-height:1.5">',
     `${escapeHtml(opts.firmName)}${opts.firmAddress ? `<br>${escapeHtml(opts.firmAddress).replace(/\n/g, '<br>')}` : ''}<br>`,
-    `${escapeHtml(why)} This is our news only: statements and reports about your matters are not affected.<br>`,
+    /* A stranger has no matters with us, so the reports sentence is for clients and leads only. */
+    `${escapeHtml(why)}${opts.basis === 'introduction' ? '' : ' This is our news only: statements and reports about your matters are not affected.'}<br>`,
     `<a href="${unsub}" style="color:#6b7280">Unsubscribe from our news</a>`,
     '</div></div></body></html>',
   ].join('')
   const text = [
-    bodyText(body), '', '--', opts.firmName, ...(opts.firmAddress ? [opts.firmAddress] : []),
+    bodyText(body), ...(opts.optInUrl ? ['', `${OPT_IN_LABEL}: ${opts.optInUrl}`] : []), '', '--', opts.firmName, ...(opts.firmAddress ? [opts.firmAddress] : []),
     why, `Unsubscribe from our news: ${opts.unsubscribeUrl}`,
   ].join('\n')
   return { subject, html, text }
@@ -477,15 +579,161 @@ export function newsletterActivitySubject(subject: string): string {
  */
 export const SENDER_SETUP_STEPS = [
   'Open an account at resend.com.',
-  'Add the firm’s sending domain in Resend (Domains → Add domain) and put the DNS records Resend shows — the SPF and DKIM TXT records, and the MX record for bounces — on the domain at its DNS host. Wait until Resend marks the domain Verified.',
+  'Add the NEWS domain in Resend (Domains → Add domain). It is a domain of its own, separate from bredellferreira.co.za (the firm is choosing the name): with some 3 000 clients and 10 000 leads on the list, a newsletter is bulk mail, and bulk mail never goes from the domain the firm’s everyday mail goes from. Put the DNS records Resend shows (the SPF and DKIM TXT records, and the MX record for bounces) at that domain’s DNS host, and wait until Resend marks it Verified.',
+  'On that domain in Resend, switch ON open tracking and click tracking. Without them Raptor can say what was delivered but not what was opened or clicked.',
   'Create an API key in Resend with sending access.',
-  'In Vercel, add RESEND_API_KEY (the key) and MARKETING_FROM (for example Bredell Ferreira <news@bredellferreira.co.za>, on the verified domain) to the project’s environment variables, then redeploy.',
-  'Optional: MARKETING_REPLY_TO, if replies should go somewhere other than the firm’s general address in Library → The firm.',
-  'Optional, for bounces and complaints: in Resend add a webhook to https://<the site>/api/email/resend-webhook for email.bounced and email.complained, and put its signing secret in Vercel as RESEND_WEBHOOK_SECRET.',
+  'In Vercel, add RESEND_API_KEY (the key) and MARKETING_FROM (for example Bredell Ferreira <news@ the news domain>, never an address on bredellferreira.co.za) to the project’s environment variables, then redeploy.',
+  'Optional: MARKETING_REPLY_TO, if replies to news should go somewhere other than the firm’s general address in Library → The firm.',
+  'A new news domain has no reputation yet. Send the first newsletters to a few hundred clients at a time over the first weeks (pick people, or clients by service) before sending to everybody at once. Raptor holds prospect mail to a daily allowance; news it leaves to you.',
+  'For delivery results: in Resend add a webhook to https://<the site>/api/email/resend-webhook for email.sent, email.delivered, email.delivery_delayed, email.bounced, email.complained, email.opened and email.clicked, and put its signing secret in Vercel as RESEND_WEBHOOK_SECRET.',
 ] as const
 
-/** The env vars the sender reads, by name -- the server reports which are missing. */
+/**
+ * AND FOR INTRODUCTIONS AND PROSPECT MARKETING, which go from a SEPARATE domain (the firm's plan, 22
+ * Oct): a cold list's complaints and bounces land on that domain's reputation, never on the news
+ * domain clients rely on, and never on the firm's own mail.
+ */
+export const PROSPECT_SETUP_STEPS = [
+  'Register the separate marketing domain (the firm is confirming the name) and add it in Resend (Domains → Add domain). Put its SPF, DKIM and MX records at its DNS host and wait until Resend marks it Verified.',
+  'On that domain in Resend, switch ON open tracking and click tracking.',
+  'In Vercel, add MARKETING_PROSPECT_DOMAIN with just the domain name, then redeploy. Each prospect campaign goes from the marketer who runs it: somebody whose address is reino@bredellferreira.co.za sends as “Reino …” <reino@ the marketing domain>, and replies go back to reino@bredellferreira.co.za.',
+  'The same webhook covers this domain: Resend reports every domain on the account to it.',
+  'A new domain starts slowly. Raptor sends each marketer at most 30 a day in the first week, 60 in the second, 120 in the third and 250 in the fourth, then up to MARKETING_WARMUP_CEILING a day (500 unless set). The rest wait for the next day’s allowance and go on their own.',
+] as const
+
+/** The env vars the news sender reads, by name -- the server reports which are missing. */
 export const SENDER_ENV = ['RESEND_API_KEY', 'MARKETING_FROM'] as const
+/** ...and the prospect kinds'. MARKETING_FROM is not needed for them: they never go from the news address. */
+export const PROSPECT_SENDER_ENV = ['RESEND_API_KEY', 'MARKETING_PROSPECT_DOMAIN'] as const
+
+/**
+ * THE FIRM'S OWN MAIL DOMAIN, WHICH NO BULK MAIL -- NEWS OR PROSPECT -- MAY EVER GO FROM. Everybody's
+ * everyday mail goes from it: section 129s, letters to clients, replies to debtors. A newsletter to
+ * some 3 000 clients and 10 000 leads is bulk mail, and its spam reports and bounces on this domain
+ * would put those letters in junk folders. The firm weighed sending news from it and decided
+ * against it (22 Oct). So there are THREE domains: this one (everyday mail, never bulk), the news
+ * domain (MARKETING_FROM) and the prospect domain (MARKETING_PROSPECT_DOMAIN), each verified in
+ * Resend with its own SPF and DKIM. Neither of the last two may be this domain or a subdomain of it:
+ * the mailbox providers weigh a subdomain partly on its parent.
+ */
+export const FIRM_MAIN_MAIL_DOMAIN = 'bredellferreira.co.za'
+
+/** The domain an address -- bare, or "Name <a@b>" -- is on, lower-cased. */
+export function mailDomainOf(address: string | null | undefined): string {
+  const raw = (address ?? '').trim()
+  const inner = /<([^>]+)>\s*$/.exec(raw)?.[1] ?? raw
+  return (inner.split('@')[1] ?? '').trim().toLowerCase().replace(/\.$/, '')
+}
+
+/** On the firm's own mail domain, or any subdomain of it. */
+export function isFirmMainDomain(address: string | null | undefined): boolean {
+  const d = mailDomainOf(address)
+  return d === FIRM_MAIN_MAIL_DOMAIN || d.endsWith(`.${FIRM_MAIN_MAIL_DOMAIN}`)
+}
+
+export type SenderChoice = { from: string; replyTo: string | null } | { error: string }
+
+/** The news sender: MARKETING_FROM, refused if it is unset, not an address, or on the firm's own mail domain. */
+export function newsSender(marketingFrom: string | null | undefined, replyTo: string | null | undefined): SenderChoice {
+  const from = (marketingFrom ?? '').trim()
+  if (!from) return { error: 'MARKETING_FROM is not set.' }
+  if (!mailDomainOf(from).includes('.')) return { error: `MARKETING_FROM (${from}) is not an email address.` }
+  if (isFirmMainDomain(from)) {
+    return { error: `MARKETING_FROM is on ${mailDomainOf(from)}, the firm’s own mail domain. News is bulk mail and must go from the separate news domain, never ${FIRM_MAIN_MAIL_DOMAIN} or a subdomain of it.` }
+  }
+  return { from, replyTo: (replyTo ?? '').trim() || null }
+}
+
+/**
+ * A PROSPECT CAMPAIGN GOES FROM ITS MARKETER, PERSONALLY. The firm: from e.g. reino@<the marketing
+ * domain>, under the marketer's own name, with replies going to the marketer's real address so they
+ * land in their own inbox. A person writing to a prospect reads as a person; "news@" to somebody
+ * who never asked for news reads as a list.
+ *
+ * The local part is the marketer's main-address local part -- reino@bredellferreira.co.za sends as
+ * reino@<domain>. The domain is MARKETING_PROSPECT_DOMAIN and is never written into the code: the
+ * firm is still confirming it. It may not be the firm's own domain, for the reason above.
+ */
+export function prospectSender(
+  domain: string | null | undefined,
+  marketer: { name: string | null; email: string | null } | null,
+): SenderChoice {
+  const d = (domain ?? '').trim().toLowerCase().replace(/^@/, '').replace(/\.$/, '')
+  if (!d) return { error: 'MARKETING_PROSPECT_DOMAIN is not set.' }
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) return { error: `MARKETING_PROSPECT_DOMAIN (${d}) is not a domain.` }
+  if (isFirmMainDomain(`x@${d}`)) {
+    return { error: `MARKETING_PROSPECT_DOMAIN is ${d}, which is the firm’s own mail domain. Prospect mail must go from the separate marketing domain, never ${FIRM_MAIN_MAIL_DOMAIN} or a subdomain of it.` }
+  }
+  const real = normaliseEmail(marketer?.email)
+  const local = real.split('@')[0]
+  if (!real || !local || !isSendableEmail(real)) {
+    return { error: `${marketer?.name?.trim() || 'The marketer'} has no email address on their profile, so there is nobody for it to come from or for replies to reach.` }
+  }
+  /* The display name sits inside quotes; a quote or angle bracket typed into a name would break the header. */
+  const name = (marketer?.name ?? '').replace(/["<>\\\r\n]/g, '').trim()
+  const address = `${local}@${d}`
+  /* The second lock, on the address actually built rather than on the setting. */
+  if (isFirmMainDomain(address)) return { error: 'A prospect email may never go from the firm’s own mail domain.' }
+  return { from: name ? `"${name}" <${address}>` : address, replyTo: real }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Warm-up: a new sending domain starts slowly
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * PER SENDER, PER DAY, RISING BY THE WEEK. A domain nobody has heard of that sends five hundred
+ * emails on its first morning is what a spammer looks like, and the mailbox providers remember it
+ * for months. So each prospect sender (reino@<domain> is one, thabo@<domain> another) gets 30 a day
+ * in its first week, counted from its first prospect send, then 60, 120, 250, and from the fifth
+ * week the ceiling the firm sets. News is not held to this: it goes to people who know the firm,
+ * from its own domain with clients' engagement behind it (though a new news domain should be
+ * ramped up by hand over its first weeks too -- see HANDOFF).
+ *
+ * Weeks are counted in REAL days, not on the firm's business clock: a mailbox provider's memory runs
+ * on the calendar, and a staging clock moved a month on has not warmed anything up.
+ */
+export const WARMUP_SCHEDULE = [30, 60, 120, 250] as const
+export const DEFAULT_WARMUP_CEILING = 500
+
+/** Which week of its warm-up a sender is in, 1-based: week 1 until seven full days after the first send. */
+export function warmupWeek(firstSentAt: string | null | undefined, nowIso: string): number {
+  if (!firstSentAt) return 1
+  return Math.max(0, Math.floor(daysBetween(firstSentAt, nowIso) / 7)) + 1
+}
+
+export function warmupDailyCap(firstSentAt: string | null | undefined, nowIso: string, ceiling: number = DEFAULT_WARMUP_CEILING): number {
+  const top = Number.isFinite(ceiling) && ceiling >= 1 ? Math.floor(ceiling) : DEFAULT_WARMUP_CEILING
+  const week = warmupWeek(firstSentAt, nowIso)
+  return week <= WARMUP_SCHEDULE.length ? Math.min(WARMUP_SCHEDULE[week - 1], top) : top
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * The rule again at the moment of sending
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * WHETHER THIS ROW MAY STILL GO, read against the lead as it stands when its chunk is sent -- not as
+ * it stood when the list was drawn. The queue already applied resolveAudience; this is the second
+ * lock on the same door, because a list queued on Monday and drained on Thursday (the warm-up makes
+ * that normal) must not reach somebody whose answer changed in between.
+ *
+ *   a lead-basis row that is NOT a first approach goes only if the lead's consent is on record --
+ *     an imported prospect who did not press the button is never sent anything after the
+ *     introduction, whatever list somebody later puts them on;
+ *   a first approach (the introduction) is not sent to somebody who has already said yes;
+ *   a lead that is gone is not written to.
+ * A client or contact row is not a lead's and passes: the unsubscribe check covers those.
+ */
+export function sendBlockReason(
+  row: { leadId: string | null; companyId: string | null; firstApproach: boolean },
+  lead: { marketingConsentAt: string | null } | null | undefined,
+): string | null {
+  if (!row.leadId || row.companyId) return null
+  if (!lead) return 'The lead is gone'
+  if (row.firstApproach) return lead.marketingConsentAt ? 'Already said yes, so not asked again' : null
+  return lead.marketingConsentAt ? null : 'No consent recorded, so never sent marketing'
+}
 
 /**
  * RESEND'S LIMITS, AND HOW THIS STAYS INSIDE THEM. The batch endpoint takes a hundred emails a call
@@ -495,3 +743,61 @@ export const SENDER_ENV = ['RESEND_API_KEY', 'MARKETING_FROM'] as const
  */
 export const RESEND_BATCH_MAX = 100
 export const RESEND_MIN_GAP_MS = 600
+
+/* ------------------------------------------------------------------------------------------------
+ * Delivery results
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * WHAT HAPPENED TO A CAMPAIGN AFTER IT LEFT -- the firm: "see also the success of what's been
+ * delivered, what was undelivered, what was opened." One row of marketing_campaign_results().
+ * `accepted` is what Resend took from us; everything after it is what Resend's webhook reported.
+ */
+export interface CampaignResults {
+  campaign_id: string
+  total: number
+  queued: number
+  accepted: number
+  failed: number
+  skipped: number
+  delivered: number
+  delayed: number
+  bounced: number
+  complained: number
+  opened: number
+  clicked: number
+  unsubscribed: number
+  opted_in: number
+}
+
+export interface ResultRates {
+  delivered: number | null
+  bounced: number | null
+  opened: number | null
+  clicked: number | null
+  unsubscribed: number | null
+  complained: number | null
+  optedIn: number | null
+}
+
+/**
+ * THE RATES, EACH OVER WHAT COULD HAVE DONE IT. Delivery and bounces are out of what Resend
+ * accepted; opens, clicks, unsubscribes, spam reports and opt-ins are out of what was DELIVERED,
+ * because an email that never arrived could do none of them. Null, never 0%, when nothing could --
+ * "0% opened" on a campaign still sending is a figure that is not true yet.
+ */
+export function resultRates(r: Pick<CampaignResults, 'accepted' | 'delivered' | 'bounced' | 'opened' | 'clicked' | 'unsubscribed' | 'complained' | 'opted_in'>): ResultRates {
+  const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null)
+  return {
+    delivered: pct(r.delivered, r.accepted),
+    bounced: pct(r.bounced, r.accepted),
+    opened: pct(r.opened, r.delivered),
+    clicked: pct(r.clicked, r.delivered),
+    unsubscribed: pct(r.unsubscribed, r.delivered),
+    complained: pct(r.complained, r.delivered),
+    optedIn: pct(r.opted_in, r.delivered),
+  }
+}
+
+/** Said beside every open figure, because it is the truth about them. */
+export const OPENS_ARE_APPROXIMATE = 'Opens are approximate. Apple Mail opens every email it receives on the reader’s behalf, which counts as opened, and a reader whose mail blocks pictures is never counted. Clicks are the firmer figure.'

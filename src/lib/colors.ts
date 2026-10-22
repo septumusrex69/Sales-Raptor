@@ -29,6 +29,7 @@ export const SOURCE_COLORS: Record<LeadSource, string> = {
   ChatGPT: 'var(--c-green-muted)',
   Claude: 'var(--c-gold)',
   Gemini: 'var(--c-steel-deep)',
+  'Imported list': 'var(--c-steel-light)',
   Other: 'var(--c-grey-light)',
 }
 
