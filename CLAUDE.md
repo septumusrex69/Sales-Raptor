@@ -501,6 +501,18 @@ fails.** A check that passes on broken code is worse than none. Two traps seen h
 
 ---
 
+## Working for the sales and marketing team
+
+Some sessions work for a marketer (Reno), not for the firm's administrator. **Ask which at the start
+if it is not said.** A sales-and-marketing session changes only the sales side: `src/pages/leads`,
+`src/components/leads`, `src/pages/deals`, `src/pages/contacts`, `src/components/contacts`,
+`src/pages/reps`, `src/pages/news` and `src/pages/Dashboard.tsx` -- see `.github/CODEOWNERS`. It does
+not touch debtors, collections, the diary, trust, the bank, business, clients' money terms, settings,
+`supabase/`, `api/` or the checks, and it never writes to any database. It works on its own branch
+from `claude/sales-raptor-review-p1pzx2` and opens a pull request into it; a pull request that strays
+outside the sales area waits for the administrator's approval, by design. If the work genuinely
+needs a change outside the area, say so in the pull request rather than working round it.
+
 ## Working in parallel
 
 Sessions cannot see each other and each starts cold. **One branch per session** — two sessions on
