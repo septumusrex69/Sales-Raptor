@@ -22,7 +22,7 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    @septumusrex69's except leads, deals, contacts, reps, the sales Dashboard and the News page, which
    have NO owner -- inside those, ConvertLeadModal (commission), SendMandateModal, the opt-in and
    unsubscribe pages (POPIA consent) and `.github/` stay owned. The firm chose "approval, and tell
-   me", not a hard block. THE USER STILL HAS TO: invite Reno with Write; add a branch ruleset on
+   me", not a hard block. DONE BY THE USER 22 Oct: Reno invited with Write; rulesets "Staging" on
    `claude/sales-raptor-review-p1pzx2` (PR required, "Require review from Code Owners", 0
    approvals, bypass list = Repository admin + the Claude app, or sessions cannot push the
    preview); a second on `Main` with 1 approval. Keep Reno out of Supabase and Vercel.
