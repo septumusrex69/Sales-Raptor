@@ -18,6 +18,14 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
+import { RouteError } from './components/RouteError.tsx'
+import { reloadOnceForStaleChunk } from './lib/staleChunk.ts'
+
+/* VITE SAYS SO FIRST, for a preload it could not fetch -- before React ever sees an error. See
+   staleChunk.ts. Default prevented only when a reload is actually under way. */
+window.addEventListener('vite:preloadError', (event) => {
+  if (reloadOnceForStaleChunk()) event.preventDefault()
+})
 
 /*
  * A DATA ROUTER WRAPPING THE SAME <Routes>, and for one reason: useBlocker, which only works under
@@ -26,7 +34,9 @@ import App from './App.tsx'
  * cannot do that; stopping the navigation can (AccountDetail, leavingAccount.ts). App's routes are
  * untouched: one splat route hands every path to them, exactly as BrowserRouter did.
  */
-const router = createBrowserRouter([{ path: '*', element: <App /> }])
+/* errorElement: whatever escapes a screen lands on Raptor's own page, never the router's
+   developer notice -- which is what the firm photographed mid-call (23 Oct). */
+const router = createBrowserRouter([{ path: '*', element: <App />, errorElement: <RouteError /> }])
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

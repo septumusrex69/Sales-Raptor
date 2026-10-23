@@ -704,6 +704,18 @@ the problem to the next session rather than solved it.
 
 
 
+
+## 23 Oct (S10) — a tab that outlived a deploy reloads itself instead of breaking
+
+Seen mid-call: "Failed to fetch dynamically imported module …/CalendarPage-….js" on React Router's
+developer page for every tab clicked. A lazy screen's file is named by its hash; a deploy replaces
+it, and a tab opened earlier asks for a file Vercel no longer has. NewVersionWatcher waits while
+somebody types or has a modal open, so the tab lived on. Now: `vite:preloadError` and a router
+`errorElement` (`RouteError`) reload ONCE (sessionStorage guard, 30 s — `staleChunk.ts`); a second
+failure shows "Raptor has been updated" with a Reload button, and any other error shows Raptor's
+own screen with the message, never the developer notice. `e2e/stale-chunk` (aborts the calendar's
+module once / for good).
+
 ## 23 Oct (S10) — signing: the page reloaded under the signer at the initials
 
 Alianna and Bonnitta (testing mandates, 11:50–12:08) each lost every filled blank when they reached
