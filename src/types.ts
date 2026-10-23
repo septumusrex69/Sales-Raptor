@@ -600,6 +600,12 @@ export interface User {
   /** This person's BuzzBox PABX extension; set, click-to-dial rings it before bridging the call. */
   buzzboxExtension?: string
   /**
+   * The day they started at the firm (yyyy-mm-dd). Any Administrator sets it -- the firm, 23 Oct: "A
+   * user start date can also be asked for any administrator" -- and the People workspace reads it for
+   * a new starter's pro-rata basic. Not pay data, so it lives here and not behind people.pay.
+   */
+  startDate?: string
+  /**
    * How many accounts a working day holds for this person before the diary warns about
    * overbooking. Per agent rather than firm-wide: a phone-heavy collector and one working
    * through letters do not have the same day. Undefined means the firm default.

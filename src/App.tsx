@@ -72,6 +72,7 @@ const PeopleList = lazy(() => import('./pages/people/PeopleList').then((m) => ({
 const PersonPay = lazy(() => import('./pages/people/PersonPay').then((m) => ({ default: m.PersonPay })))
 const PeopleMonth = lazy(() => import('./pages/people/PeopleMonth').then((m) => ({ default: m.PeopleMonth })))
 const CommissionRules = lazy(() => import('./pages/people/CommissionRules').then((m) => ({ default: m.CommissionRules })))
+const CarriedOver = lazy(() => import('./pages/people/CarriedOver').then((m) => ({ default: m.CarriedOver })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -245,6 +246,7 @@ function App() {
                 <Route index element={<PeopleList />} handle={{ title: 'People' }} />
                 <Route path="month" element={<PeopleMonth />} handle={{ title: 'Month summary' }} />
                 <Route path="commission" element={<CommissionRules />} handle={{ title: 'Commission rules' }} />
+                <Route path="carried" element={<CarriedOver />} handle={{ title: 'Carried over' }} />
                 <Route path=":userId" element={<PersonPay />} handle={{ title: 'Person' }} />
               </Route>
 

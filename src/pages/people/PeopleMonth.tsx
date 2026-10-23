@@ -5,9 +5,12 @@ import { Card } from '../../components/ui/Card'
 import { PeriodStepper } from '../../components/people/PeriodStepper'
 import { useAppStore } from '../../store/AppStore'
 import {
-  clientsWithPtc, defaultPayBasis, periodForKey, periodKeyOf, periodLabel, summarise, type SummaryRow,
+  clientsWithPtc, defaultPayBasis, paydayOf, periodForKey, periodKeyOf, periodLabel, periodRange, salaryMonth, shortDay,
+  summarise, type SummaryRow,
 } from '../../lib/clerkCommission.ts'
-import { fetchClientLedgers, fetchCommissionPayments, fetchEmployeeProfiles } from '../../lib/peopleApi'
+import {
+  fetchCarried, fetchCommissionPayments, fetchCommissionStart, fetchEmployeeProfiles, fetchPayoverRuns,
+} from '../../lib/peopleApi'
 import { clockToday } from '../../lib/clock.ts'
 import { rand } from '../../lib/money'
 
@@ -32,16 +35,20 @@ export function PeopleMonth() {
     setResult(null); setError(null)
     const p = periodForKey(periodKey)
     ;(async () => {
-      const [profiles, payments] = await Promise.all([fetchEmployeeProfiles(), fetchCommissionPayments(p.start, p.end, null)])
-      const { ledgers } = await fetchClientLedgers(clientsWithPtc(payments))
+      const [profiles, payments, carried, commissionStart] = await Promise.all([
+        fetchEmployeeProfiles(), fetchCommissionPayments(p.start, p.end, null), fetchCarried(null), fetchCommissionStart(),
+      ])
+      const { runs } = await fetchPayoverRuns(clientsWithPtc(payments, carried))
       const byId = new Map(profiles.map((x) => [x.userId, x]))
       const people = users.filter((u) => u.status === 'Active' || payments.some((x) => x.holderId === u.id)).map((u) => ({
         userId: u.id,
         basis: byId.get(u.id)?.payBasis ?? defaultPayBasis(u.role),
         basic: byId.get(u.id)?.basicSalary ?? null,
+        startedOn: u.startDate ?? null,
+        endedOn: byId.get(u.id)?.endedOn ?? null,
       }))
-      const out = summarise({ periodKey, people, payments, ledgers })
-      return { ...out, unread: ledgers === null && payments.some((x) => x.paidToClient) }
+      const out = summarise({ periodKey, people, payments, runs, carried, commissionStart })
+      return { ...out, unread: runs === null && (payments.some((x) => x.paidToClient) || carried.length > 0) }
     })()
       .then((r) => { if (live) setResult(r) })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not work out the month.') })
@@ -64,10 +71,16 @@ export function PeopleMonth() {
         </div>
         <PeriodStepper value={periodKey} onChange={setPeriodKey} latest={latest} />
       </div>
+      {/* THE PAY DAY, AND THE TWO MONTHS IT PAYS FOR (the firm, 23 Oct): commission on the collections
+          month (11th to 10th), the basic on the salary month (26th to 25th), both on the 25th. */}
+      <p className="text-sm text-slate-700">
+        Paid on <span className="font-semibold" data-testid="month-payday">{shortDay(paydayOf(periodKey))}</span>
+        <span className="text-slate-500"> · commission earned {periodRange(periodKey)} · basic for {shortDay(salaryMonth(periodKey).start)} – {shortDay(salaryMonth(periodKey).end)}</span>
+      </p>
       {error && <Card className="p-4 text-sm text-negative-700 bg-negative-50 border-negative-100">{error}</Card>}
       {result?.unread && (
         <Card className="p-3 text-sm text-negative-700 bg-negative-50 border-negative-100">
-          What the clients owe the firm could not be read, so every PTC’s commission is shown as waiting.
+          The clients’ payover runs could not be read, so every PTC’s commission is shown as waiting.
         </Card>
       )}
       {result === null && !error ? (
@@ -89,7 +102,7 @@ export function PeopleMonth() {
                 {result.rows.map((r) => (
                   <tr key={r.userId} className="border-t border-slate-100">
                     <td className="px-4 py-1.5"><Link to={`/people/${r.userId}`} className="text-brand-700 hover:underline">{nameOf(r.userId)}</Link></td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(r.basic)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(r.basic)}{r.prorata && <span className="ml-1 text-[11px] text-slate-400">pro rata</span>}</td>
                     <td className="px-4 py-1.5 text-right tabular-nums">{r.scheme ? rand(r.commission) : <span className="text-slate-400">No scheme yet</span>}</td>
                     <td className="px-4 py-1.5 text-right tabular-nums font-medium">{rand(r.payable)}</td>
                     <td className="px-4 py-1.5 text-right tabular-nums text-slate-500">{r.scheme ? rand(r.pending) : ''}</td>
@@ -106,7 +119,7 @@ export function PeopleMonth() {
             </table>
           </div>
           <p className="px-4 py-2.5 text-[11px] text-slate-400 border-t border-slate-100">
-            PTC waiting is not in the total: it is paid once the client owes the firm nothing.
+            PTC waiting is not in the total: it is paid once the client’s payover run shows nothing outstanding.
             {result.unheld > 0 && ` ${rand(result.unheld)} came in on accounts nobody held on the day, which earns no commission.`}
           </p>
         </Card>

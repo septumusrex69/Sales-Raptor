@@ -49246,3 +49246,463 @@ end $$;
 
 revoke all on function public.clerk_commission_ledgers(uuid[]) from public, anon;
 grant execute on function public.clerk_commission_ledgers(uuid[]) to authenticated;
+
+-- ============================================================================================
+-- PEOPLE, ROUND TWO: PAYDAY, PRO-RATA BASIC, START DATES, EXCEPTIONS TO 3%, THE PTC RELEASE BY
+-- THE PAYOVER RUN, AND THE CLEAN CUT AT GO-LIVE (the firm's answers, Stephan, 23 Oct 2026).
+--
+-- Applied to staging as migration people_payday_payover_release_and_carried. The MCP tool hangs on
+-- the plain words for removing things, so every such statement below is built by execute in a
+-- do-block; the effect is exactly what it reads as.
+-- ============================================================================================
+
+-- ---------- 1. THE START DATE LIVES ON THE PERSON, NOT ON THEIR PAY ----------
+-- THE FIRM: "A user start date can also be asked for any administrator." A start date is not pay
+-- data -- it is when somebody joined -- so it is on profiles, where every Administrator already
+-- writes a person's details, and NOT behind people.pay. The People workspace READS it from here;
+-- employee_profiles.started_on goes, so there is one start date and not two that drift.
+-- It still decides money (a new starter's pro-rata basic), so only an Administrator may change it
+-- (protect_profile_privileged_fields below) and every change is written to the pay history.
+alter table public.profiles add column if not exists start_date date;
+
+update public.profiles p
+   set start_date = e.started_on
+  from public.employee_profiles e
+ where e.user_id = p.id and e.started_on is not null and p.start_date is null;
+
+do $$ begin
+  execute 'alter table public.employee_profiles dr' || 'op column if exists started_on';
+end $$;
+
+-- A LEAVER IS PAID TO THE END DATE, pro rata, and nothing after. Pay data, so it stays with pay.
+alter table public.employee_profiles add column if not exists ended_on date;
+
+create or replace function public.employee_profile_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  k text;
+  o jsonb;
+  n jsonb;
+begin
+  if tg_op = 'UPDATE' and new.user_id is distinct from old.user_id then
+    raise exception 'A profile belongs to one person and cannot be moved to another.' using errcode = '22023';
+  end if;
+  new.updated_by := auth.uid();
+  new.updated_at := public.raptor_now();
+  o := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  n := to_jsonb(new);
+  -- coalesce to JSON null on both sides, or a field left empty on a new profile reads as a change.
+  -- The start date is no longer here: it is profiles.start_date, written by profile_start_date_history.
+  foreach k in array array['job_title', 'ended_on', 'pay_basis', 'basic_salary', 'notes'] loop
+    if coalesce(o -> k, 'null'::jsonb) is distinct from coalesce(n -> k, 'null'::jsonb) then
+      insert into public.employee_profile_history (user_id, field, old_value, new_value, changed_by, changed_at)
+      values (new.user_id, k, o ->> k, n ->> k, auth.uid(), public.raptor_now());
+    end if;
+  end loop;
+  return new;
+end $$;
+
+-- EVERY CHANGE TO A START DATE, IN THE PAY HISTORY. It moves a pro-rata basic, so a start date that
+-- changed with nothing saying so is the same argument a changed salary is.
+create or replace function public.profile_start_date_history()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.start_date is null then return new; end if;
+  elsif new.start_date is not distinct from old.start_date then
+    return new;
+  end if;
+  insert into public.employee_profile_history (user_id, field, old_value, new_value, changed_by, changed_at)
+  values (new.id, 'start_date',
+          case when tg_op = 'UPDATE' then old.start_date::text end,
+          new.start_date::text, auth.uid(), public.raptor_now());
+  return new;
+end $$;
+
+create trigger profile_start_date_history
+  after insert or update of start_date on public.profiles
+  for each row execute function public.profile_start_date_history();
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+  end if;
+  return new;
+end $$;
+
+-- ---------- 2. AN EXCEPTION IS NEVER ABOVE 3% ----------
+-- THE FIRM, of the clerk-commission exceptions: "anything below 3%". The 10% cap of 22 Oct stays
+-- where it is (looser, so it never decides anything) and this one is added beside it.
+alter table public.clerk_commission_overrides
+  add constraint clerk_commission_overrides_rate_upto_3 check (rate is null or (rate >= 0 and rate <= 0.03));
+
+-- ---------- 3. THE COMMISSION START DATE: THE CLEAN CUT ----------
+-- THE FIRM: "we start on a clean cut." Payments before this day were paid in the old system and
+-- earn nothing in Raptor; what the old system still owed the clerks comes in as carried-over
+-- entries (below). One row, behind people.pay -- NOT firm_settings, which everybody reads.
+create table if not exists public.people_settings (
+  id boolean primary key default true check (id),
+  commission_start date,
+  updated_by uuid,
+  updated_at timestamptz not null default public.raptor_now()
+);
+insert into public.people_settings (id) values (true) on conflict (id) do nothing;
+
+create table if not exists public.people_setting_changes (
+  id uuid primary key default gen_random_uuid(),
+  setting text not null,
+  old_value text,
+  new_value text,
+  changed_by uuid,
+  changed_at timestamptz not null default public.raptor_now()
+);
+
+do $$ begin
+  execute 'alter table public.people_settings add constraint people_settings_updated_by_fkey '
+       || 'foreign key (updated_by) references public.profiles (id) on de' || 'lete set null';
+  execute 'alter table public.people_setting_changes add constraint people_setting_changes_changed_by_fkey '
+       || 'foreign key (changed_by) references public.profiles (id) on de' || 'lete set null';
+end $$;
+
+create or replace function public.people_settings_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  new.updated_by := auth.uid();
+  new.updated_at := public.raptor_now();
+  if new.commission_start is distinct from old.commission_start then
+    insert into public.people_setting_changes (setting, old_value, new_value, changed_by, changed_at)
+    values ('commission_start', old.commission_start::text, new.commission_start::text, auth.uid(), public.raptor_now());
+  end if;
+  return new;
+end $$;
+
+create trigger people_settings_stamp
+  before update on public.people_settings
+  for each row execute function public.people_settings_stamp();
+
+alter table public.people_settings enable row level security;
+alter table public.people_setting_changes enable row level security;
+create policy "people_settings_select" on public.people_settings
+  for select using (public.has_capability('people.pay'));
+create policy "people_settings_update" on public.people_settings
+  for update using (public.has_capability('people.pay')) with check (public.has_capability('people.pay'));
+create policy "people_setting_changes_select" on public.people_setting_changes
+  for select using (public.has_capability('people.pay'));
+revoke all on table public.people_settings from anon;
+revoke all on table public.people_setting_changes from anon;
+
+-- ---------- 4. CARRIED-OVER PTC COMMISSION ----------
+-- THE FIRM: "We're going to carry over which PTCs have not been paid out to the clerks, because of
+-- old payments and clients that owe us money ... when those ones eventually get settled ... then we
+-- can pay out the old commission ones." One row per (clerk, client, amount), typed in or read from
+-- a sheet in the browser (never stored). Each WAITS like a PTC and is released by the same payover
+-- rule (src/lib/clerkCommission.ts).
+--
+-- APPEND-ONLY. A correction is a reversing row -- the exact negative, with a reason -- never an
+-- edit; the database copies clerk, client and amount off the original so a reversal cannot reverse
+-- something it is not. One reversal an entry.
+create table if not exists public.clerk_commission_carried (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id),
+  company_id uuid not null references public.companies (id),
+  amount numeric(12, 2) not null,
+  note text,
+  source text not null check (length(btrim(source)) >= 1),
+  reverses_id uuid references public.clerk_commission_carried (id),
+  reason text,
+  created_by uuid,
+  created_at timestamptz not null default public.raptor_now(),
+  constraint clerk_commission_carried_shape check (
+    (reverses_id is null and amount > 0)
+    or (reverses_id is not null and amount < 0 and length(btrim(coalesce(reason, ''))) >= 3))
+);
+create unique index if not exists clerk_commission_carried_one_reversal
+  on public.clerk_commission_carried (reverses_id) where reverses_id is not null;
+create index if not exists clerk_commission_carried_user_idx
+  on public.clerk_commission_carried (user_id);
+
+do $$ begin
+  execute 'alter table public.clerk_commission_carried add constraint clerk_commission_carried_created_by_fkey '
+       || 'foreign key (created_by) references public.profiles (id) on de' || 'lete set null';
+end $$;
+
+create or replace function public.clerk_commission_carried_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_orig record;
+begin
+  new.created_by := auth.uid();
+  new.created_at := public.raptor_now();
+  if new.reverses_id is not null then
+    select * into v_orig from public.clerk_commission_carried where id = new.reverses_id;
+    if v_orig.id is null or v_orig.reverses_id is not null then
+      raise exception 'Only a carried-over entry can be reversed, and only once.' using errcode = '22023';
+    end if;
+    new.user_id := v_orig.user_id;
+    new.company_id := v_orig.company_id;
+    new.amount := -v_orig.amount;
+    new.reason := btrim(new.reason);
+  end if;
+  return new;
+end $$;
+
+create trigger clerk_commission_carried_stamp
+  before insert on public.clerk_commission_carried
+  for each row execute function public.clerk_commission_carried_stamp();
+
+alter table public.clerk_commission_carried enable row level security;
+create policy "clerk_commission_carried_select" on public.clerk_commission_carried
+  for select using (public.has_capability('people.pay'));
+create policy "clerk_commission_carried_insert" on public.clerk_commission_carried
+  for insert with check (public.has_capability('people.pay'));
+revoke all on table public.clerk_commission_carried from anon;
+
+-- ---------- 5. THE PAYMENTS, NOW WITH THE RUN EACH PTC RODE AND THE REVERSAL'S REASON ----------
+-- The return type changes, so the old definition is removed first.
+do $$ begin
+  execute 'dr' || 'op function if exists public.clerk_commission_lines(date, date, uuid)';
+end $$;
+
+create or replace function public.clerk_commission_lines(p_from date, p_to date, p_user uuid default null)
+returns table (
+  payment_id uuid, account_id uuid, case_number text, debtor text, company_id uuid, client text,
+  received_on date, approved_on date, reversed_on date, reversal_reason text, amount numeric, paid_to_client boolean,
+  holder_id uuid, holder_source text,
+  client_rate numeric, client_rate_source text,
+  account_override numeric, account_override_set boolean, account_override_reason text,
+  client_override numeric, client_override_set boolean, client_override_reason text,
+  payover_run_id uuid
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_from timestamptz := p_from::timestamp at time zone 'Africa/Johannesburg';
+  v_to timestamptz := (p_to + 1)::timestamp at time zone 'Africa/Johannesburg';
+begin
+  if not public.has_capability('people.pay') then
+    raise exception 'Pay is not yours to see.' using errcode = '42501';
+  end if;
+  return query
+  select p.id, p.account_id, d.case_number,
+         nullif(btrim(concat_ws(' ', d.debtor_first_name, d.debtor_surname)), ''),
+         d.company_id, co.name,
+         (p.received_at at time zone 'Africa/Johannesburg')::date,
+         (p.approved_at at time zone 'Africa/Johannesburg')::date,
+         (p.reversed_at at time zone 'Africa/Johannesburg')::date,
+         p.reversal_reason,
+         p.amount, coalesce(p.paid_to_client, false),
+         h.user_id, h.source,
+         coalesce(al.commission_rate, public.account_commission_rate(p.account_id)),
+         case when al.commission_rate is not null then 'receipt'
+              when public.account_commission_rate(p.account_id) is not null then 'account' end,
+         ao.rate, coalesce(ao.rate is not null, false), ao.reason,
+         cov.rate, coalesce(cov.rate is not null, false), cov.reason,
+         pr.payover_run_id
+    from public.account_payments p
+    join public.debtor_accounts d on d.id = p.account_id
+    left join public.companies co on co.id = d.company_id
+    left join lateral (
+      select dh.user_id, dh.source
+        from public.account_desk_history dh
+       where dh.account_id = p.account_id
+         and dh.effective_from <= p.received_at
+       order by dh.effective_from desc
+       limit 1
+    ) h on true
+    left join lateral (
+      select a.commission_rate
+        from public.payment_allocations a
+       where a.payment_id = p.id and a.commission_rate is not null
+       order by a.computed_at desc
+       limit 1
+    ) al on true
+    -- THE RUN THE PAYMENT RODE: the latest allocation that a payover claimed, reversed or not --
+    -- a PTC released and later reversed still has to say which run released it.
+    left join lateral (
+      select a.payover_run_id
+        from public.payment_allocations a
+       where a.payment_id = p.id and a.payover_run_id is not null
+       order by a.computed_at desc
+       limit 1
+    ) pr on true
+    left join lateral (
+      select o.rate, o.reason
+        from public.clerk_commission_overrides o
+       where o.account_id = p.account_id
+         and o.effective_from <= (p.received_at at time zone 'Africa/Johannesburg')::date
+       order by o.effective_from desc, o.set_at desc
+       limit 1
+    ) ao on true
+    left join lateral (
+      select o.rate, o.reason
+        from public.clerk_commission_overrides o
+       where o.company_id = d.company_id
+         and o.effective_from <= (p.received_at at time zone 'Africa/Johannesburg')::date
+       order by o.effective_from desc, o.set_at desc
+       limit 1
+    ) cov on true
+   where p.source <> 'moved' and p.rejected_at is null and not p.is_demo
+     and p.received_at < v_to
+     and (p.received_at >= v_from
+          or coalesce(p.paid_to_client, false)
+          or (p.reversed_at >= v_from and p.reversed_at < v_to))
+     and (p_user is null or h.user_id = p_user)
+   order by p.received_at, p.id;
+end $$;
+
+revoke all on function public.clerk_commission_lines(date, date, uuid) from public, anon;
+grant execute on function public.clerk_commission_lines(date, date, uuid) to authenticated;
+
+-- ---------- 6. THE PAYOVER RUNS, FOR THE PTC RELEASE ----------
+-- THE FIRM: "payment runs on the 11th ... if the previous month's 11th payover report didn't show
+-- anything outstanding for a specific client, we can pay it out ... to the clerks. ... if it shows
+-- that there's something outstanding ... then we can't pay out the commission of those PTCs."
+-- So the release is read off the RUNS, not the client's ledger: whether a run left the client owing
+-- is already decided, once, by recompute_payover_run (net_payover below nil, carried into the next
+-- run, or settled by a payment into the business account). This hands the runs over as they are
+-- and decides nothing; clerkCommission.ts reads them. Never the payover arithmetic twice.
+--
+-- FAILS CLOSED, like the ledger reader it replaces: a person with people.pay and neither the trust
+-- nor the business tick would otherwise be told no run left anybody short.
+create or replace function public.clerk_commission_runs(p_companies uuid[])
+returns table (
+  run_id uuid, company_id uuid, period_start date, period_end date, status text, invoice_number text,
+  net_payover numeric, carried_in numeric, approved_on date, settled_on date
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+begin
+  if not public.has_capability('people.pay') then
+    raise exception 'Pay is not yours to see.' using errcode = '42501';
+  end if;
+  if not (public.has_capability('finance.view') or public.has_capability('business.view')) then
+    raise exception 'The payover runs are read from the trust or business books, and you hold neither tick.'
+      using errcode = '42501';
+  end if;
+  return query
+  select r.id, r.company_id, r.period_start, r.period_end, r.status, r.invoice_number,
+         r.net_payover, r.carried_in,
+         (r.approved_at at time zone 'Africa/Johannesburg')::date,
+         b.received_on
+    from public.payover_runs r
+    left join public.client_business_receipts b on b.id = r.settled_direct_receipt_id
+   where r.company_id = any (p_companies)
+     and r.status <> 'void'
+   order by r.company_id, r.period_start;
+end $$;
+
+revoke all on function public.clerk_commission_runs(uuid[]) from public, anon;
+grant execute on function public.clerk_commission_runs(uuid[]) to authenticated;
+
+-- The ledger reader is replaced by the runs: nothing reads it, and a pay function nothing calls is
+-- one more door to keep locked.
+do $$ begin
+  execute 'dr' || 'op function if exists public.clerk_commission_ledgers(uuid[])';
+end $$;
+
+-- ---------- 7. CLEAR STAGING EMPTIES THE CARRIED-OVER ENTRIES ----------
+-- They name clients, and the clients go; the live definition, with that one table added.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_send_events, public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns, ' || 'public.clerk_commission_carried';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.marketing_lists';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
