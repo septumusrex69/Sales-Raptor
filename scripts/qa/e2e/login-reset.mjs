@@ -33,6 +33,28 @@ try {
   t.ok('the message says to open only the newest', await page.getByText(/Open only the\s+newest one/).isVisible())
   await t.shot(page, 'login-reset-sent')
   await context.close()
+
+  /* THE DOOR IS ALWAYS RAPTOR'S: a browser that remembers somebody else's skin still shows the
+     firm's photograph at sign-in. */
+  for (const skin of ['glass-mountain', 'desert', 'ocean', 'original']) {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    await c.addInitScript((s) => { try { localStorage.setItem('crm.theme', s) } catch { /* ignore */ } }, skin)
+    const p = await c.newPage()
+    await stubSupabase(p, [])
+    await p.goto(`http://localhost:${PORT}/login`)
+    await p.getByRole('button', { name: 'Sign In' }).waitFor()
+    t.check(`a browser on ${skin}: sign-in wears raptor`, await p.evaluate(() => document.documentElement.getAttribute('data-theme')), 'raptor')
+    t.ok(`a browser on ${skin}: the Raptor photograph`, /raptor-login/.test(await p.evaluate(() =>
+      getComputedStyle(document.querySelector('.login-photo')).backgroundImage)))
+    /* AND NOTHING DRAWN OVER IT: a fixed backdrop paints above an unpositioned page, so the shell
+       has to make its own stacking layer above z-index auto. */
+    t.ok(`a browser on ${skin}: the page sits above any skin backdrop`, await p.evaluate(() => {
+      const shell = getComputedStyle(document.querySelector('[data-testid="auth-shell"]'))
+      return shell.position !== 'static' && Number(shell.zIndex) >= 1
+    }))
+    if (skin === 'glass-mountain') await t.shot(p, 'login-on-glass-mountain')
+    await c.close()
+  }
 } finally {
   await browser.close()
   stopServer(server)

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useLayoutEffect, type ReactNode } from 'react'
+import { applyTheme, DEFAULT_THEME } from '../../lib/themes'
 
 /**
  * The frame every signed-out page sits in.
@@ -30,8 +31,31 @@ export function AuthShell({ title, subtitle, children, footer }: {
   /** Anything below the card. Sign-in uses it for the invite note; set-a-password has none. */
   footer?: ReactNode
 }) {
+  /*
+   * THE DOOR IS ALWAYS RAPTOR'S (23 Oct). The firm, at Alianna's first sign-in on an office laptop:
+   * "it doesn't show the picture from Raptor for the initial sign-in ... Nicole got that one though,
+   * but Aliana didn't." A skin is remembered PER BROWSER, not per person -- so this page wore
+   * whatever skin the last person on that machine chose (glass mountain draws no photograph here
+   * at all), and somebody signing in for the first time met somebody else's taste. Nobody is known
+   * yet on this page, so it wears the firm's default; the remembered skin comes back the moment
+   * they are through. Layout effect, so the wrong photograph never paints first.
+   */
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const before = root.getAttribute('data-theme')
+    applyTheme(DEFAULT_THEME)
+    return () => {
+      if (before === null) root.removeAttribute('data-theme')
+      else root.setAttribute('data-theme', before)
+    }
+  }, [])
+
   return (
-    <div className="h-dvh w-full flex bg-[#f7f8fa]">
+    /* ABOVE THE GLASS-MOUNTAIN BACKDROP. ThemeProvider still holds the remembered skin and draws
+       that skin's photograph as a position:fixed layer; a fixed layer paints over any page that is
+       not positioned itself, so the Raptor photograph sat underneath it. `relative z-[1]` and the
+       door is the door. */
+    <div className="relative z-[1] h-dvh w-full flex bg-[#f7f8fa]" data-testid="auth-shell">
       {/*
         The photograph is decorative and heavy, so it's hidden below large screens rather than
         stacked above the form — a login is one thing, and on a phone that thing is the fields.
