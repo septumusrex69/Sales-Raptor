@@ -39,7 +39,7 @@ check('closed: nothing', leavingAsk({ ...base, closed: true }), 'none')
 check('a diary run books its own next date: nothing', leavingAsk({ ...base, inDiaryRun: true }), 'none')
 
 const main = strip(read('src/main.tsx'))
-ok('a data router, or nothing can be stopped', /createBrowserRouter\(\[\{ path: '\*', element: <App \/> \}\]\)/.test(main) && /<RouterProvider router=\{router\} \/>/.test(main) && !/<BrowserRouter>/.test(main))
+ok('a data router, or nothing can be stopped', /createBrowserRouter\(\[\{ path: '\*', element: <App \/>(, errorElement: <RouteError \/>)? \}\]\)/.test(main) && /<RouterProvider router=\{router\} \/>/.test(main) && !/<BrowserRouter>/.test(main))
 
 const page = strip(read('src/pages/accounts/AccountDetail.tsx'))
 ok('one page life per account', /return <AccountPage key=\{id\} \/>/.test(page))

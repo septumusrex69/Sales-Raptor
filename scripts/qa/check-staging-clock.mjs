@@ -247,6 +247,9 @@ const ALLOWED = new Set([
   /* S9: a TIME BUDGET, not a date -- how long the balance catch-up may run before the list sorts
      anyway. The day the balances are struck on is passed in (firmToday). */
   'src/lib/accountBook.ts', 'src/lib/storedBalance.ts',
+  /* S10, 23 Oct: a reload GUARD -- "did this tab reload for a missing chunk in the last 30 s" --
+     wall time between two page loads, never a date. */
+  'src/lib/staleChunk.ts',
 ])
 const walk = (dir) => readdirSync(new URL(dir, root)).flatMap((n) => {
   const p = join(dir, n)
@@ -257,10 +260,11 @@ const offenders = walk('src').filter((f) => !ALLOWED.has(f)
 check('no other file reads the machine\'s clock', offenders, [])
 /* The allowed files' remaining reads are the real-world ones, counted so a new one is looked at.
    51 since 22 Oct: AccountDetail's visit start, compared with a diary entry's created_at -- both
-   wall time, so a jumped staging clock must not make every booking look older than the visit. */
+   wall time, so a jumped staging clock must not make every booking look older than the visit.
+   52 since 23 Oct: staleChunk.ts's reload guard. */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 51)
+check('...and the allowed files keep exactly their real-world reads', realReads, 52)
 
 /* ---------- 7. the arithmetic ---------- */
 
