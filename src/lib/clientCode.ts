@@ -20,8 +20,12 @@
  * LEGAL FORMS AND ARTICLES ONLY. A longer list was tried first and it lost real signal: with
  * "property" in it, Adowa Property Managers came out ADO instead of the APM the firm actually
  * uses. "Property", "Services", "Trading" are parts of a trading name; (Pty) Ltd is not.
+ *
+ * WRITTEN TWICE, ON PURPOSE: `propose_client_code()` in the database proposes the code for a client
+ * that becomes one there (a mandate signed online, a deal moved to Won -- the trigger
+ * `deals_won_client_code`). check-client-code holds this list against that function's.
  */
-const NOISE = new Set([
+export const NOISE = new Set([
   'the', 'and', 'of', 'for', 'a', 'pty', 'ltd', 'limited', 'inc', 'cc', 'rf', 'sa',
 ])
 

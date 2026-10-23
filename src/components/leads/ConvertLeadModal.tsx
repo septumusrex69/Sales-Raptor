@@ -11,6 +11,8 @@ import { scheduleProblems } from '../../lib/commission.ts'
 import { clockToday } from '../../lib/clock.ts'
 import { supabase } from '../../lib/supabase'
 import { quotedCommissionDefault, standingMandate, type QuotedDefault } from '../../lib/quotedCommission.ts'
+import { codeProblem, proposeClientCode } from '../../lib/clientCode.ts'
+import { useAppStore } from '../../store/AppStore'
 
 const OUTCOMES: { value: ConvertDealOutcome; label: string; hint: string }[] = [
   { value: 'signed', label: 'Signed', hint: 'Confirmed and won at the values below' },
@@ -89,6 +91,24 @@ export function ConvertLeadModal({
   onConfirm: (confirmation: ConvertConfirmation) => void
 }) {
   const [startDate, setStartDate] = useState(() => clockToday())
+  /*
+   * THE CLIENT'S CODE, PROPOSED AS IT BECOMES ONE (23 Oct; the firm: "I thought Raptor creates a code
+   * by itself for a client"). Only the Add client form did, so every converted client came out with
+   * none -- and the first import onto it had nothing to number its accounts from (suggestReference
+   * builds them in the client's series). The same proposal and the same validation as Add client:
+   * shown, editable, refused if another client has it. A client that ALREADY has a code keeps it and
+   * is not asked -- a code on paperwork is not ours to change.
+   */
+  const { companies } = useAppStore()
+  const ownCompany = lead.companyId ? companies.find((c) => c.id === lead.companyId) : undefined
+  const existingCode = ownCompany?.code?.trim() || ''
+  const takenCodes = useMemo(() => companies.filter((c) => c.id !== lead.companyId)
+    .map((c) => c.code ?? '').filter(Boolean), [companies, lead.companyId])
+  const [typedCode, setTypedCode] = useState<string | null>(null)
+  const proposedCode = useMemo(() => proposeClientCode(ownCompany?.name || lead.companyName, takenCodes),
+    [ownCompany?.name, lead.companyName, takenCodes])
+  const code = (typedCode ?? proposedCode).trim().toUpperCase()
+  const codeTrouble = existingCode ? null : codeProblem(code, takenCodes)
   const [rows, setRows] = useState<Row[]>(() => initialRows(lead, openDeals))
   /*
    * THE CLIENT'S TERMS, ASKED AT THE MOMENT IT BECOMES ONE (S10, prompt 13 items 2 and 5). The firm:
@@ -147,7 +167,7 @@ export function ConvertLeadModal({
         : asFraction(rate) > 1 ? 'A commission rate above 100% would bill more than the debt.' : null)
       : (scheduleProblems(bands)[0] ?? null)
   const noLiaison = !liaisonId
-  const blocked = signed.length === 0 || missingReason || noLiaison || !!commissionProblem
+  const blocked = signed.length === 0 || missingReason || noLiaison || !!commissionProblem || !!codeTrouble
 
   return (
     <Modal title="Convert to Client" onClose={onClose} width={560}>
@@ -158,6 +178,7 @@ export function ConvertLeadModal({
           onConfirm({
             startDate: new Date(startDate).toISOString(),
             liaisonId: liaisonId as ID,
+            ...(existingCode ? {} : { code }),
             ...(collecting
               ? {
                   commission: kind === 'fixed'
@@ -315,6 +336,24 @@ export function ConvertLeadModal({
           </div>
         </div>
 
+        {/* ---------- the client's code ---------- */}
+        <div className="mt-4">
+          <FormField label="Client code" required>
+            {existingCode ? (
+              <p className="font-mono text-sm text-slate-700 py-2" data-testid="convert-code-existing">{existingCode}</p>
+            ) : (
+              <input className={`${inputClass} font-mono uppercase`} value={typedCode ?? proposedCode}
+                onChange={(e) => setTypedCode(e.target.value.toUpperCase())} aria-label="Client code"
+                data-testid="convert-code" maxLength={8} />
+            )}
+            <span className="block text-[11px] text-slate-400 mt-1">
+              {existingCode
+                ? 'Already theirs: their account numbers are built on it.'
+                : codeTrouble ?? 'Proposed from the name. Their account numbers are built on it: change it now if the firm uses another.'}
+            </span>
+          </FormField>
+        </div>
+
         {/* ---------- who looks after them ---------- */}
         <div className="mt-4">
           <FormField label="Client liaison" required>
@@ -326,7 +365,7 @@ export function ConvertLeadModal({
             <span className="block text-[11px] text-slate-400 mt-1">
               {liaisons.length === 0
                 ? 'A Liaison or Liaison Manager. Set somebody\u2019s role in Settings \u2192 Users.'
-                : 'The welcome email goes from her, and a welcome call goes on her list.'}
+                : 'She is told, and two tasks go on her list: send the welcome email, and the welcome call.'}
             </span>
           </FormField>
         </div>
@@ -378,7 +417,7 @@ export function ConvertLeadModal({
                 ? 'Give a reason for each rejected deal.'
                 : noLiaison
                   ? 'Choose who looks after this client — a client cannot be saved without a liaison.'
-                  : commissionProblem}
+                  : commissionProblem ?? codeTrouble}
           </p>
         )}
 

@@ -11,7 +11,8 @@
  * order bills every account under the top boundary at the first tier's rate and nothing reports
  * it.
  */
-import { codeProblem, proposeClientCode, stemFor } from '../../src/lib/clientCode.ts'
+import { readFileSync } from 'node:fs'
+import { NOISE, codeProblem, proposeClientCode, stemFor } from '../../src/lib/clientCode.ts'
 import { rateForCapital, scheduleProblems } from '../../src/lib/commission.ts'
 
 let pass = 0
@@ -131,6 +132,79 @@ ok('two "and above" tiers are reported',
 ok('an "and above" tier that is not last is reported',
   scheduleProblems([{ upTo: null, rate: 0.3 }, { upTo: 100000, rate: 0.2 }])
     .some((p) => /has to be the last one/.test(p)))
+
+/* ---------------------------------------------------------------- 4. every way a client is made gives it a code */
+
+/*
+ * 23 OCT: "I thought Raptor creates a code by itself for a client." Only Add client did. A converted
+ * lead and a mandate signed online both came out with none, and the first import onto one could not
+ * number its accounts. So: the conversion form proposes one (as Add client does), and the database
+ * gives one to any company the moment a deal on it is Won -- which is what a mandate signed online
+ * does, and what moving a deal to Won on the pipeline does.
+ */
+const readSrc = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+const sqlAll = readSrc('supabase/schema.sql')
+const lastFn = (name) => {
+  const at = sqlAll.lastIndexOf(`create or replace function public.${name}(`)
+  if (at < 0) return ''
+  const open = sqlAll.indexOf('$$', at)
+  const close = sqlAll.indexOf('$$;', open + 2)
+  return open > 0 && close > open ? sqlAll.slice(at, close + 3) : ''
+}
+const proposer = lastFn('propose_client_code')
+const onWon = lastFn('client_code_on_won')
+ok('propose_client_code is in schema.sql, whole', proposer.length > 300 && /security invoker/.test(proposer))
+
+/* THE TWO PROPOSERS AGREE: the noise list, the three shapes, the count from 2. */
+const sqlNoise = (/lower\(x\) <> all \(array\[([^\]]*)\]\)/.exec(proposer)?.[1] ?? '')
+  .split(',').map((w) => w.trim().replace(/^'|'$/g, '')).filter(Boolean).sort()
+check('the database ignores exactly the words the browser ignores', sqlNoise, [...NOISE].sort())
+ok('...brackets taken out first, as the browser does', /regexp_replace\(coalesce\(p_name, ''\), '\\\(\.\*\?\\\)', ' ', 'g'\)/.test(proposer))
+ok('...split on anything not a letter or digit', /'\[\^A-Za-z0-9\]\+'/.test(proposer))
+ok('three words or more: the initials', /when cardinality\(w\) >= 3 then left\(w\[1\], 1\) \|\| left\(w\[2\], 1\) \|\| left\(w\[3\], 1\)/.test(proposer))
+ok('two words: two and one', /when cardinality\(w\) = 2 then left\(w\[1\], 2\) \|\| left\(w\[2\], 1\)/.test(proposer))
+ok('one word: its first three', /else left\(w\[1\], 3\) end/.test(proposer))
+ok('the bare stem first, then from 2 (AUF, AUF2), up to 99 as the browser', /for n in 1\.\.99 loop/.test(proposer) && /case when n = 1 then v_stem else v_stem \|\| n end/.test(proposer))
+ok('...compared trimmed and in capitals, as the browser compares', /upper\(btrim\(code\)\) = v_try/.test(proposer))
+ok('...and a name that yields nothing proposes nothing', /if cardinality\(w\) = 0 then return null/.test(proposer))
+
+/*
+ * AND THEY WERE RUN SIDE BY SIDE. propose_client_code on staging, 23 Oct, for these names (staging
+ * then held only ALL and STC, neither in the way): what it answered is written here, and the
+ * browser's proposer has to answer the same. Numbering was probed in a rolled-back transaction
+ * with AUF, " auf2 " and AUF4 taken: AUF3, as below.
+ */
+const STAGING_ANSWERED = [
+  ['Alpha Upgrade Fund (Pty) Ltd', 'AUF'], ['ABSTO Industrial Supplies (Pty)Ltd', 'AIS'],
+  ['Adowa Property Managers (Pty) Ltd', 'APM'], ['Namco-SA', 'NAM'], ['Accelerate Fitness', 'ACF'],
+  ['Bonnitta Pharmacy', 'BOP'], ['Alianna Pharmacy', 'ALP'], ['Dr Alianna Labuschagne', 'DAL'],
+  ['The (Pty) Ltd', ''], ['Smit & Seun CC', 'SMS'], ['a', ''], ['X1 Y2', 'X1Y'],
+  ['Probe Traders (Pty) Ltd', 'PRT'], ["O'Brien Holdings", 'OBH'],
+  ['Growthpoint Student Accommodation Holdings (RF) Ltd', 'GSA'],
+]
+for (const [name, sql] of STAGING_ANSWERED) check(`the browser proposes what the database did: ${name}`, proposeClientCode(name, ['ALL', 'STC']), sql)
+check('...and numbers as it did', proposeClientCode('Alpha Upgrade Fund', ['AUF', ' auf2 ', 'AUF4']), 'AUF3')
+
+/* THE TRIGGER: on the fact that makes a client, filling only an empty code on a top-level client. */
+ok('client_code_on_won is in schema.sql, security definer for its stated reason', onWon.length > 100 && /security definer/.test(onWon) && /SECURITY DEFINER, and the reason/.test(sqlAll))
+ok('...it codes a company when a deal on it is Won', /if new\.stage = 'Won' and new\.company_id is not null then/.test(onWon) && /set code = public\.propose_client_code\(c\.name, c\.id\)/.test(onWon))
+ok('...ONLY where it has no code, and only a top-level client (an existing code is never touched)', /c\.code is null and c\.parent_company_id is null/.test(onWon))
+const trig = sqlAll.slice(sqlAll.lastIndexOf('create trigger deals_won_client_code'))
+ok('...fired when a deal is inserted or its stage or client changes', /after insert or update of stage, company_id on public\.deals/.test(trig) && /execute function public\.client_code_on_won\(\)/.test(trig))
+/* A mandate signed online is covered BECAUSE it wins a deal: if that ever stops, so does its code. */
+const mandate = lastFn('mandate_on_signed')
+ok('a mandate signed online wins (or inserts a Won) deal, so the trigger codes its client',
+  /update public\.deals set stage = 'Won'/.test(mandate) && /insert into public\.deals[\s\S]*?'Won'/.test(mandate))
+
+/* THE CONVERSION FORM proposes one, shown and editable, and refuses a taken one -- as Add client does. */
+const convert = readSrc('src/components/leads/ConvertLeadModal.tsx')
+ok('Convert to Client proposes the code from the client\'s name', /proposeClientCode\(ownCompany\?\.name \|\| lead\.companyName, takenCodes\)/.test(convert))
+ok('...in a box that can be changed', /data-testid="convert-code"/.test(convert) && /setTypedCode\(/.test(convert))
+ok('...validated as Add client validates it, and it blocks', /codeProblem\(code, takenCodes\)/.test(convert) && /\|\| !!codeTrouble/.test(convert))
+ok('...a client that already has a code keeps it and is not asked', /existingCode \? \{\} : \{ code \}/.test(convert))
+const storeSrc = readSrc('src/store/AppStore.tsx')
+ok('the conversion writes the code with the client\'s terms, only where it has none', /\.\.\.\(confirm\.code && !ownCode \? \{ code: confirm\.code \} : \{\}\)/.test(storeSrc))
+ok('Add client still proposes and validates its own', /proposeClientCode\(name, takenCodes\)/.test(readSrc('src/components/companies/AddClientModal.tsx')))
 
 /* ---------------------------------------------------------------- report */
 

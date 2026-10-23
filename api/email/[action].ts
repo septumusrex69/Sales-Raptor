@@ -9,6 +9,7 @@ import status from '../_lib/email/status.js'
 import sync from '../_lib/email/sync.js'
 import syncAll from '../_lib/email/sync-all.js'
 import welcome from '../_lib/email/welcome.js'
+import assignLiaison from '../_lib/email/assignLiaison.js'
 import loginCode from '../_lib/email/loginCode.js'
 import marketing from '../_lib/email/marketing.js'
 import unsubscribe from '../_lib/email/unsubscribe.js'
@@ -42,8 +43,11 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* ANONYMOUS, and the token is the authority -- see signedCopy for why nothing else it is
      sent is trusted. */
   'signed-copy': signedCopy,
-  /* Assign a new client's liaison and send the welcome from her (S8). */
+  /* The welcome email, sent when the liaison presses Send on the client's Welcome card (23 Oct;
+     it used to go by itself on assignment, S8). */
   welcome,
+  /* Give a new client its liaison: hers, two tasks, her notice, the notes. SENDS NOTHING (23 Oct). */
+  'assign-liaison': assignLiaison,
   /* An Administrator's code on a new device (S10). Here because it is an email the server sends,
      and api/ has no function to spare. */
   'login-code': loginCode,

@@ -405,6 +405,12 @@ export interface Company {
   /** When the liaison's welcome email went to the client. */
   welcomeSentAt?: string
   /**
+   * Who pressed Send on the welcome (23 Oct). The welcome is the liaison's task, never automatic, and
+   * the card says "sent on <date> by <name>" so it is not sent twice by somebody who thinks it is
+   * still to do. Undefined on an old welcome nobody could trace.
+   */
+  welcomeSentBy?: string | null
+  /**
    * Set on a client the Swordfish import created -- the run that brought it across. Such a client
    * takes handovers without a mandate date (prompt 10); see mandateRule.ts.
    */

@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026** (Liaisons load their department's clients, at the top of Start here; before that Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (A client code on every client, and the welcome as the liaison's task, at the top of Start here; before that Liaisons load their department's clients, at the top of Start here; before that Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 Last updated: **23 October 2026** (The organogram, at the top of Start here; before that Users, departments and teams in one place; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
@@ -19,6 +19,51 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+000000000000000000. **23 Oct: A CLIENT CODE ON EVERY CLIENT; THE WELCOME IS THE LIAISON'S TASK, NOT AUTOMATIC**
+   (Stephan; migration `client_code_on_won_and_welcome_sent_by`, staging only; end of schema.sql).
+   - **Client code** ("I thought Raptor creates a code by itself for a client"): only Add client did, so
+     converted and signed-online clients had `code` null and an import onto one could not number accounts.
+     Now (a) **Convert to Client** proposes the code (`proposeClientCode`, shown, editable, `codeProblem`
+     against taken codes, blocks like Add client; a client that already has a code keeps it, not asked) and
+     the store writes it with the terms, only where none; (b) the database: `propose_client_code(name, self)`
+     (security invoker) is proposeClientCode rule for rule, and trigger **`deals_won_client_code`** on deals
+     (`client_code_on_won()`, security definer -- the rep winning the deal may not edit the client row) fills
+     a NULL code on a top-level client the moment a deal on it is Won. That covers a mandate signed online
+     (mandate_on_signed wins/inserts the deal) and a deal moved to Won on the pipeline, without copying the
+     250-line mandate function. Existing codes are never touched (imported history frozen).
+   - **Staging data fixed**: Bonnitta Pharmacy -> BOP, Alianna Pharmacy -> ALP, Dr Alianna Labuschagne -> DAL
+     (the only three clients with a won deal/mandate and no code). **Production**: a preview + fill block is
+     in schema.sql, COMMENTED OUT, marked "PRODUCTION, AT GO-LIVE, WITH THE FIRM'S EYE" -- real codes go on
+     paperwork, and the firm has chosen codes no rule reaches (DAK, AID1, GPS1), so they should read the
+     preview first.
+   - **The welcome** (Nicole: the welcome went in her name at 11:55:58 when Camille assigned her; later told to
+     send it, she thought it had not gone). The firm: "it becomes a task that they have to send a welcome
+     letter and that they have to do an introductory call." Now:
+     - **Assigning sends nothing.** New route `/api/email/assign-liaison` (`api/_lib/email/assignLiaison.ts`,
+       on the existing email dispatcher -- api/ still 12 functions): the client is hers, TWO tasks due the next
+       working day ("Send welcome email: <client>", type Email; "Welcome call: <client>", type Call), her
+       `client.assigned` notification, the assignment in the client's notes. Used by the Welcome card's
+       **Assign** (was "Assign and welcome") and by conversion (`assignOnConversion`, was welcomeOnConversion).
+       Same when the assigner IS the liaison (nothing in the old code made that case special except the cc).
+     - **She sends from the client's Welcome card** ("Send welcome email"): `/api/email/welcome` now ONLY
+       sends -- the sending code unchanged (her mailbox, fallback to the presser's, cc rules) -- then stamps
+       `welcome_sent_at` + **`welcome_sent_by`** (new column: the presser), completes her "Send welcome email"
+       task, notes the email. May press: the client's liaison, a Liaison Manager, an Administrator (not Sales).
+     - **Never twice by accident**: already sent -> 409 unless `again: true`; the card shows "Welcome email
+       sent on <date> by <name>" and "Send it again" only behind an inline confirm. Old welcomes' sender was
+       backfilled from their Email activity (the mailbox it went from).
+     - welcomeSteps: the email step carries "(waiting for the liaison to send it)" until it is sent.
+   - QA: check-client-code +36 (SQL/TS proposer parity: noise list, shapes, numbering, plus the 15 names run
+     on staging; trigger only-null/top-level/on-Won; conversion proposes/validates/keeps; 8 breaks each fail),
+     check-welcome rewritten (53; 9 breaks each fail), check-client-terms updated, e2e/client-welcome rewritten
+     (24: Sales converts -> code saved, assign asked, NO welcome request; Sales assigns on the card -> same;
+     the liaison sends once -> "sent on 18/10/2026 by Ruan Venter", again only on confirm; 3 breaks each fail).
+   - **Open (§4)**: (i) when an Administrator/Liaison Manager presses Send for the liaison, the email (unchanged
+     builder) says she is "taking over from <presser>" -- it used to be the closer; should it name the closer
+     (the person who assigned) instead? (ii) Production needs the migration and, with the firm, the code fill.
+   - **Concurrent work**: another session is adding a handover-sheet attachment to the welcome email
+     (welcomeEmail.ts / welcome.ts / SendMandateModal). This change touched only WHO/WHEN in welcome.ts; the
+     welcomeEmail(...) call and both sendAsUser(...) calls are textually unchanged, so a merge is local.
 000000000000000000. **23 Oct: LIAISONS LOAD THEIR DEPARTMENT'S CLIENTS -- A BATCH OR ONE ACCOUNT, OUTSIDE SETTINGS**
    (Stephan; migration `handover_upload_for_liaisons`, staging only). The firm: "any person in the client
    liaison department can upload a handover sheet" -- both roads, the sheet (a batch) and Add debtor.
@@ -1648,6 +1693,10 @@ The four that stood here at the start of the fifth session were answered by the 
 
 Do not guess these. Each one changes money.
 
+00000. **THE WELCOME AND CLIENT CODES (23 Oct, built -- see Start here).** Open: (i) when an Administrator or
+   Liaison Manager presses Send for the liaison, the welcome says she is "taking over from <presser>" (the
+   unchanged builder's closerName) -- name the closer who assigned her instead, or nobody? (ii) production's
+   code fill for clients with none: the firm reads the preview and overrides any proposal first.
 0000. **DEPARTMENTS AND TEAMS (23 Oct, built -- see Start here).** Open:
    (i) **Heads**: only Sales got one (Felicia). Administration, Communications and Call centre have none --
    choose them on Departments & teams.
@@ -1819,6 +1868,12 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **Client codes and the welcome (23 Oct, `client_code_on_won_and_welcome_sent_by`, the very end of
+  schema.sql; staging only)**: `companies.welcome_sent_by` (uuid -> profiles, set null; backfilled from the
+  welcome's Email activity), `propose_client_code(text, uuid)` (security invoker, granted to authenticated),
+  `client_code_on_won()` (security definer, stated reason) and trigger `deals_won_client_code` (after insert or
+  update of stage, company_id on deals). **Production needs it**, and then the commented go-live code fill below
+  it, run with the firm reading the preview. Staging data fix (by hand): BOP, ALP, DAL.
 - **Loading accounts (23 Oct, `handover_upload_for_liaisons`, the very end of schema.sql; staging only)**:
   `role_capabilities` (+ `handover.upload` for Administrator, Liaison Manager, Liaison; live definition read
   first), `departments_duties_known` replaced (+ `load_handovers`), `duty_grantable()` (+ handover.upload),
