@@ -231,3 +231,38 @@ export function leadSources(input: {
   return [...rows].map(([source, r]) => ({ source, ...r, rate: r.leads > 0 ? Math.round((r.mandates / r.leads) * 100) : null }))
     .sort((a, b) => b.mandates - a.mandates || (b.rate ?? -1) - (a.rate ?? -1) || b.leads - a.leads || a.source.localeCompare(b.source))
 }
+
+/* ------------------------------------------------------------------ the first three months */
+
+/**
+ * WHAT A NEW CLIENT ACTUALLY HANDED OVER (the firm, 23 Oct, of Convert to Client: the handover
+ * amount and the number of accounts "should be ... actual data ... seen when we hand over in the
+ * first 3 months"). NEW is the first three months of handovers counted from the client's FIRST
+ * account (agreed 18 Oct) -- the window `company_intake_by_day` cuts with `first_day + interval
+ * '3 months'`, mirrored here: the same calendar day three months on, clamped to that month's last
+ * day (31 January runs to 30 April), the end EXCLUSIVE. If the firm moves that window it moves in
+ * both places, and check-lead-form-order holds the two to the same three months.
+ *
+ * Rows are one client's handovers by day (client_intake_by_day), in any order. Null with nothing
+ * handed over: there is no window until the first account arrives.
+ */
+export function firstThreeMonths(rows: { day: string; accounts: number; capital?: number }[]): {
+  from: string; until: string; accounts: number; capital: number; complete: (todayIso: string) => boolean
+} | null {
+  const days = rows.filter((r) => r.accounts > 0).map((r) => r.day.slice(0, 10)).sort()
+  if (days.length === 0) return null
+  const from = days[0]
+  const [y, m, d] = from.split('-').map(Number)
+  const target = new Date(Date.UTC(y, m - 1 + 3, 1))
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()
+  target.setUTCDate(Math.min(d, last))
+  const until = target.toISOString().slice(0, 10)
+  const inside = rows.filter((r) => r.day.slice(0, 10) >= from && r.day.slice(0, 10) < until)
+  return {
+    from,
+    until,
+    accounts: inside.reduce((s, r) => s + r.accounts, 0),
+    capital: inside.reduce((s, r) => s + (r.capital ?? 0), 0),
+    complete: (todayIso) => todayIso >= until,
+  }
+}

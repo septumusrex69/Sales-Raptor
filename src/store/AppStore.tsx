@@ -249,6 +249,9 @@ export interface ConvertDealConfirmation {
   rejectionNote?: string
 }
 
+/** One further contact person at a company lead, as the Add Lead form takes them. */
+export interface LeadContactPerson { firstName: string; lastName: string; jobTitle?: string; phone?: string; email?: string }
+
 export interface ConvertConfirmation {
   /** Service commencement date, applied to every deal confirmed in this conversion. */
   startDate: string
@@ -260,7 +263,14 @@ export interface ConvertConfirmation {
 }
 
 interface AppActions {
-  addLead: (input: Partial<Lead> & { firstName: string; lastName: string; companyName: string }) => Lead
+  /**
+   * `contactPersons` are the company's FURTHER contact people, said on the Add Lead form (23 Oct:
+   * "what is the client name and who is the contact persons"). The first contact person is the
+   * lead's own name, phone and email, as it always was; the rest are `contacts` rows with `lead_id`
+   * -- the shape the lead page's Contact persons card and the conversion already read. Inserted
+   * only after the lead lands, because lead_id is a foreign key on it.
+   */
+  addLead: (input: Partial<Lead> & { firstName: string; lastName: string; companyName: string }, contactPersons?: LeadContactPerson[]) => Lead
   updateLead: (id: ID, patch: Partial<Lead>) => void
   /**
    * Turns a won lead into a real client: creates the Company (if there isn't one yet), carries
@@ -685,7 +695,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   )
 
   const addLead = useCallback<AppActions['addLead']>(
-    (input) => {
+    (input, contactPersons = []) => {
       const id = crypto.randomUUID()
       const optimisticLeadNumber = leads.reduce((max, l) => Math.max(max, l.leadNumber), 0) + 1
       const draft: Lead = {
@@ -737,8 +747,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         leadId: id,
       }))
 
+      const contactsToCreate: Contact[] = contactPersons.map((p) => ({
+        id: crypto.randomUUID(),
+        firstName: p.firstName,
+        lastName: p.lastName,
+        jobTitle: p.jobTitle,
+        phone: p.phone,
+        email: p.email,
+        leadId: id,
+        ownerId: lead.ownerId,
+        createdAt: nowIso(),
+      }))
+
       setLeads((prev) => [lead, ...prev])
       if (dealsToCreate.length > 0) setDeals((prev) => [...dealsToCreate, ...prev])
+      if (contactsToCreate.length > 0) setContacts((prev) => [...contactsToCreate, ...prev])
 
       const row = appToRow(lead)
       delete row.lead_number // DB identity column assigns the real, gap-free number
@@ -752,6 +775,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const rollback = () => {
           setLeads((prev) => prev.filter((l) => l.id !== id))
           setDeals((prev) => prev.filter((d) => d.leadId !== id))
+          setContacts((prev) => prev.filter((c) => c.leadId !== id))
           if (newCompany) setCompanies((prev) => prev.filter((c) => c.id !== newCompany.id))
         }
 
@@ -776,6 +800,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
 
         addActivity({ type: 'Note', subject: `New lead created: ${lead.firstName} ${lead.lastName}`, leadId: id, companyId })
+
+        /* After the lead, never beside it: contacts.lead_id is a foreign key on the row just written. */
+        for (const contact of contactsToCreate) {
+          void insertRow('contacts', contact, 'addLead:contact', (message) => {
+            setContacts((prev) => prev.filter((c) => c.id !== contact.id))
+            showError(message)
+          })
+        }
 
         const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'addLead:deal')))
         const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)

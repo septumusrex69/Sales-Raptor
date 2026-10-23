@@ -53,7 +53,7 @@ ok('...and will not convert without one', /const noLiaison = !liaisonId/.test(co
 ok('...saying so', /a client cannot be saved without a liaison/.test(conv))
 ok('conversion asks for the commission where debt collection was signed',
   /const collecting = signed\.some\(\(r\) => r\.isDebtCollection\)/.test(conv) && /\{collecting && \(\s+<div[^>]*data-testid="convert-commission"/.test(conv))
-ok('...a rate or a scale, through the shared scale editor', /<CommissionScaleEditor tiers=\{tiers\} onTiers=\{setTiers\}/.test(conv))
+ok("...a rate or a scale, through the shared scale editor", /<CommissionScaleEditor tiers=\{tiers\} onTiers=\{(setTiers|\(t\) => \{ touch\(\); setTiers\(t\) \})\}/.test(conv))
 ok('...checked the way Add client checks it', /scheduleProblems\(bands\)/.test(conv) && /asFraction\(rate\) > 1/.test(conv))
 ok('...and handed over with the liaison', /liaisonId: liaisonId as ID,/.test(conv) && /commission: kind === 'fixed'/.test(conv))
 ok('the submit itself refuses while blocked', /if \(blocked\) return\s+onConfirm\(/.test(conv))

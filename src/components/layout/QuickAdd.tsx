@@ -12,6 +12,7 @@ import type { Lead, LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
 import { isAssignableOwner } from '../../lib/permissions'
 import { clockNow } from '../../lib/clock.ts'
+import { clientNameFor, emptyContactPerson, furtherContacts, type ContactPersonDraft } from '../../lib/leadParty.ts'
 
 type QuickAddType = 'lead' | 'contact' | 'company' | 'deal' | 'task' | 'meeting' | 'note'
 
@@ -124,83 +125,183 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
   const [form, setForm] = useState({
     firstName: initial?.firstName ?? '',
     lastName: initial?.lastName ?? '',
+    jobTitle: '',
     companyName: initial?.companyName ?? '',
-    party: 'company' as 'company' | 'individual',
     phone: initial?.phone ?? '',
     email: initial?.email ?? '',
     source: initial?.source ?? ('Website' as LeadSource),
     ownerId: currentUser?.id ?? '',
   })
+  /*
+   * ASKED FIRST, AND NOT GUESSED (the firm, 23 Oct: "the first thing it should ask is it a company or
+   * an individual?"). Nothing else is drawn until it is answered, because it decides what the next
+   * two questions mean. The one exception is a prefill that already names a company -- the mailbox
+   * reads one off the sender's domain or the website form -- where "a company" is what the message
+   * said, and the choice stays at the top to be changed.
+   */
+  const [party, setParty] = useState<'company' | 'individual' | null>(initial?.companyName ? 'company' : null)
+  const [others, setOthers] = useState<ContactPersonDraft[]>([])
   const [opportunity, setOpportunity] = useState(emptyLeadOpportunityValue())
+  const clientName = party ? clientNameFor(party, form) : ''
+  const further = party === 'company' ? furtherContacts(others) : { save: [], problem: null }
+  const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch })
+  const setOther = (i: number, patch: Partial<ContactPersonDraft>) =>
+    setOthers((prev) => prev.map((o, j) => (j === i ? { ...o, ...patch } : o)))
   return (
     <Modal title={title} onClose={onClose} width={560}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (!form.firstName || !form.companyName || (!form.phone && !form.email)) return
+          if (!party || !form.firstName || !clientName || (!form.phone && !form.email) || further.problem) return
           const lead = store.addLead({
-            firstName: form.firstName,
-            lastName: form.lastName,
-            companyName: form.companyName,
-            party: form.party,
+            firstName: form.firstName.trim(),
+            lastName: form.lastName.trim(),
+            jobTitle: party === 'company' ? form.jobTitle.trim() || undefined : undefined,
+            companyName: clientName,
+            party,
             phone: form.phone || undefined,
             email: form.email || undefined,
             source: form.source,
             ownerId: form.ownerId || undefined,
             ...leadOpportunityPatch(opportunity),
-          })
+          }, further.save)
           if (onCreated) { onCreated(lead); return }
           onClose()
           navigate(`/leads/${lead.id}`)
         }}
       >
         {intro}
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="First Name" required>
-            <input className={inputClass} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
-          </FormField>
-          <FormField label="Last Name">
-            <input className={inputClass} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
-          </FormField>
-        </div>
-        {/* COMPANY OR INDIVIDUAL, SAID HERE (the firm, 18 Oct: "when we add the lead, we should already
-            say if it's a company or an individual"). The mandate opens on it and only confirms it. */}
-        <div className="mb-3 inline-flex rounded-lg border border-slate-200 p-0.5 text-sm" role="radiogroup" aria-label="The client is">
-          {([['company', 'A company'], ['individual', 'An individual']] as const).map(([v, label]) => (
-            <button key={v} type="button" role="radio" aria-checked={form.party === v} data-testid={`lead-party-${v}`}
-              onClick={() => setForm({ ...form, party: v })}
-              className={`rounded-md px-3 py-1 ${form.party === v ? 'bg-navy-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}>{label}</button>
-          ))}
-        </div>
-        <FormField label={form.party === 'company' ? 'Company' : 'Client name (the individual)'} required>
-          <input className={inputClass} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required
-            placeholder={form.party === 'individual' ? 'As it will appear on the mandate' : undefined} />
-        </FormField>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Phone">
-            <input className={inputClass} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          </FormField>
-          <FormField label="Email">
-            <input type="email" className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          </FormField>
-        </div>
-        <FormField label="Lead Source" required>
-          <select className={inputClass} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value as LeadSource })}>
-            {leadSources.map((s) => (
-              <option key={s}>{s}</option>
+        {/* 1. COMPANY OR INDIVIDUAL. Said here (18 Oct: "when we add the lead, we should already say if
+            it's a company or an individual"), and since 23 Oct said FIRST. The mandate opens on it. */}
+        <div className="mb-4" data-testid="lead-party">
+          <p className="mb-1.5 text-xs font-medium text-slate-500">Is the client a company or an individual?<span className="text-red-500 ml-0.5">*</span></p>
+          <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-sm" role="radiogroup" aria-label="The client is">
+            {([['company', 'A company'], ['individual', 'An individual']] as const).map(([v, label]) => (
+              <button key={v} type="button" role="radio" aria-checked={party === v} data-testid={`lead-party-${v}`}
+                onClick={() => setParty(v)}
+                className={`rounded-md px-3 py-1 ${party === v ? 'bg-navy-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}>{label}</button>
             ))}
-          </select>
-        </FormField>
-        <FormField label="Owner">
-          <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
-            {reps.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
+          </div>
+        </div>
+
+        {party === null && (
+          <p className="mb-4 text-sm text-slate-400" data-testid="lead-party-first">Choose one to start: it decides what the client&rsquo;s name is and who you speak to there.</p>
+        )}
+
+        {party === 'company' && (
+          <>
+            {/* 2. THE CLIENT'S NAME: the company's. */}
+            <FormField label="Client name" required>
+              <input className={inputClass} value={form.companyName} onChange={(e) => set({ companyName: e.target.value })} required
+                placeholder="The company, as it will appear on the mandate" data-testid="lead-client-name" />
+            </FormField>
+            {/* 3. WHO WE SPEAK TO THERE. The first is the lead's own name, phone and email -- the
+                stored shape is unchanged; further people become contacts on the lead. */}
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400" data-testid="lead-contact-heading">
+              {others.length > 0 ? 'Contact persons' : 'Contact person'}
+            </p>
+            <div className="mb-3 rounded-lg border border-slate-200 p-3 pb-0" data-testid="lead-contact-0">
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="First Name" required>
+                  <input className={inputClass} value={form.firstName} onChange={(e) => set({ firstName: e.target.value })} required />
+                </FormField>
+                <FormField label="Last Name">
+                  <input className={inputClass} value={form.lastName} onChange={(e) => set({ lastName: e.target.value })} />
+                </FormField>
+                <FormField label="Phone">
+                  <input className={inputClass} value={form.phone} onChange={(e) => set({ phone: e.target.value })} />
+                </FormField>
+                <FormField label="Email">
+                  <input type="email" className={inputClass} value={form.email} onChange={(e) => set({ email: e.target.value })} />
+                </FormField>
+              </div>
+              <FormField label="Role">
+                <input className={inputClass} value={form.jobTitle} onChange={(e) => set({ jobTitle: e.target.value })} placeholder="e.g. Financial manager" />
+              </FormField>
+            </div>
+            {others.map((o, i) => (
+              <div key={i} className="mb-3 rounded-lg border border-slate-200 p-3 pb-0" data-testid={`lead-contact-${i + 1}`}>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Contact person {i + 2}</span>
+                  <button type="button" className="text-xs text-slate-500 hover:text-red-600"
+                    onClick={() => setOthers((prev) => prev.filter((_, j) => j !== i))}>Remove</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="First Name" required>
+                    <input className={inputClass} value={o.firstName} onChange={(e) => setOther(i, { firstName: e.target.value })} />
+                  </FormField>
+                  <FormField label="Last Name">
+                    <input className={inputClass} value={o.lastName} onChange={(e) => setOther(i, { lastName: e.target.value })} />
+                  </FormField>
+                  <FormField label="Phone">
+                    <input className={inputClass} value={o.phone} onChange={(e) => setOther(i, { phone: e.target.value })} />
+                  </FormField>
+                  <FormField label="Email">
+                    <input type="email" className={inputClass} value={o.email} onChange={(e) => setOther(i, { email: e.target.value })} />
+                  </FormField>
+                </div>
+                <FormField label="Role">
+                  <input className={inputClass} value={o.jobTitle} onChange={(e) => setOther(i, { jobTitle: e.target.value })} />
+                </FormField>
+              </div>
             ))}
-          </select>
-        </FormField>
-        <LeadOpportunityFields value={opportunity} onChange={setOpportunity} />
+            <button type="button" onClick={() => setOthers((prev) => [...prev, emptyContactPerson()])}
+              className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700" data-testid="lead-add-contact">
+              <Plus size={14} /> Add another contact person
+            </button>
+            {further.problem && <p className="-mt-2 mb-3 text-[12px] text-[var(--c-rust-deep)]">{further.problem}</p>}
+          </>
+        )}
+
+        {party === 'individual' && (
+          <>
+            {/* 2. THE CLIENT'S NAME IS THE PERSON'S. 3. Their own phone and email are the contact
+                details -- there is nobody else to ask for, so the form does not ask twice. */}
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400" data-testid="lead-individual-name">Client name</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="First Name" required>
+                <input className={inputClass} value={form.firstName} onChange={(e) => set({ firstName: e.target.value })} required />
+              </FormField>
+              <FormField label="Last Name">
+                <input className={inputClass} value={form.lastName} onChange={(e) => set({ lastName: e.target.value })} />
+              </FormField>
+            </div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Their contact details</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Phone">
+                <input className={inputClass} value={form.phone} onChange={(e) => set({ phone: e.target.value })} />
+              </FormField>
+              <FormField label="Email">
+                <input type="email" className={inputClass} value={form.email} onChange={(e) => set({ email: e.target.value })} />
+              </FormField>
+            </div>
+          </>
+        )}
+
+        {party !== null && (
+          <>
+            {!form.phone && !form.email && (
+              <p className="-mt-1 mb-3 text-[12px] text-slate-400">A phone number or an email address is needed to save the lead.</p>
+            )}
+            <FormField label="Lead Source" required>
+              <select className={inputClass} value={form.source} onChange={(e) => set({ source: e.target.value as LeadSource })}>
+                {leadSources.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Owner">
+              <select className={inputClass} value={form.ownerId} onChange={(e) => set({ ownerId: e.target.value })}>
+                {reps.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <LeadOpportunityFields value={opportunity} onChange={setOpportunity} />
+          </>
+        )}
         <SubmitRow onClose={onClose} label={title} />
       </form>
     </Modal>
