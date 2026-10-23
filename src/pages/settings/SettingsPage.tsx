@@ -9,6 +9,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
 import { DepartmentsTeamsTab } from '../../components/settings/DepartmentsTeams'
+import { OrganogramTab } from '../../components/settings/Organogram'
 import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
 import { CapabilitiesModal } from '../../components/settings/CapabilitiesModal'
 import { TrustedDevicesList, TrustedDevicesModal } from '../../components/settings/TrustedDevices'
@@ -82,7 +83,7 @@ export function SettingsPage() {
     /* The client only means anything to Data Import; carrying it onto Teams would put a stale
        company in the URL of a screen that has never heard of one. */
     if (next !== 'Data Import') keep.delete('client')
-    if (next !== 'Users') keep.delete('users')
+    if (next !== 'Users') { keep.delete('users'); keep.delete('dept'); keep.delete('team') }
     setParams(keep, { replace: true })
   }
 
@@ -367,23 +368,31 @@ function DepartmentGroup({ group, columns, renderRow, forceOpen = false }: {
  *
  * THE TAB IS IN THE URL (?users=departments), like the Settings tab above it, so a link can land on
  * it -- and so the retired ?tab=Teams can be sent here.
+ *
+ * ORGANOGRAM (?users=organogram, 23 Oct) is the same structure DRAWN, read-only: "like you see all
+ * users, departments and team, and then organogram." Its ?dept= and ?team= belong to it alone, so
+ * leaving the tab drops them rather than carrying a focus onto a screen that has none.
  */
 const USERS_TABS = [
   { id: 'all', label: 'All users' },
   { id: 'departments', label: 'Departments & teams' },
+  { id: 'organogram', label: 'Organogram' },
 ] as const
+type UsersSectionId = (typeof USERS_TABS)[number]['id']
 
 function UsersSection() {
   const [params, setParams] = useSearchParams()
-  const section = params.get('users') === 'departments' ? 'departments' : 'all'
+  const asked = params.get('users')
+  const section: UsersSectionId = USERS_TABS.find((t) => t.id === asked)?.id ?? 'all'
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="Users" className="flex gap-1 border-b border-slate-200">
+      <div role="tablist" aria-label="Users" className="flex gap-1 border-b border-slate-200 overflow-x-auto">
         {USERS_TABS.map((t) => (
           <button key={t.id} type="button" role="tab" aria-selected={section === t.id}
             onClick={() => {
               const keep = new URLSearchParams(params)
               if (t.id === 'all') keep.delete('users'); else keep.set('users', t.id)
+              if (t.id !== 'organogram') { keep.delete('dept'); keep.delete('team') }
               setParams(keep, { replace: true })
             }}
             className={`px-3 py-2 -mb-px text-sm font-medium whitespace-nowrap border-b-2 ${section === t.id
@@ -392,7 +401,9 @@ function UsersSection() {
           </button>
         ))}
       </div>
-      {section === 'all' ? <UsersTab /> : <DepartmentsTeamsTab />}
+      {section === 'all' && <UsersTab />}
+      {section === 'departments' && <DepartmentsTeamsTab />}
+      {section === 'organogram' && <OrganogramTab />}
     </div>
   )
 }

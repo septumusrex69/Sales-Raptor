@@ -11,6 +11,7 @@ change often; this file is the moving part. It says what shipped, what the firm 
 decided, what is still open, and which tools lie to you in this repo.
 
 Last updated: **23 October 2026** (Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (The organogram, at the top of Start here; before that Users, departments and teams in one place; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -49,6 +50,31 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    - **Open (§4)**: (i) should a contact person on an individual lead ever be someone else (an executor,
      a spouse)? Not built; (ii) should the conversion PREFILL the liaison (e.g. the lead owner's team's
      liaison) or keep "chosen, not defaulted" (S10 item 5)? Kept chosen.
+000000000000000000. **23 Oct: THE ORGANOGRAM** (Stephan; no migration). The firm: "it should show ... an
+   organogram, like of the departments, maybe of the company ... like you see all users, departments and team,
+   and then organogram ... if you go to the call center and you say view organogram."
+   - **Settings -> Users has a third tab, Organogram** (`?users=organogram`; `&dept=<id>` draws one department,
+     `&team=<id>` lights one team). Same visibility as the Users settings today -- nothing widened.
+   - **Company view**: the firm (its name off `firm_settings`, "Bredell Ferreira" until/unless it loads) on top,
+     departments side by side under it, each department's head (avatar, name, role), then its teams down a spine,
+     each team's lead and the team's people under the lead (folded past eight: seven and "+N more", never "+1
+     more"), then "Without a team"; "Not in a department" is its own column. Vacant posts are dashed boxes ("No
+     head yet" / "No lead yet"); a head or lead who has LEFT is a vacant post. Inactive people are not on it.
+     The head is drawn ONCE (not again among a team's people) but stays as a team's lead where they hold it.
+   - **Width**: the company scrolls sideways INSIDE ITS OWN BOX (never the page) and, when it does, the firm node
+     anchors over the first department so it is on screen; departments fold. One department is the same subtree
+     at the screen's width (people in columns as they fit), so it fits on an iPad.
+   - **"View organogram"** on a department's pane (that department) and on a team's pane (its department, team lit
+     and scrolled to); on the company view each department node has it too. The picker ("Whole company" / each
+     department) sits at the top of the tab.
+   - **Read-only, and a person is not a link**: an All users row opens nothing, so neither does a node. Nothing on
+     the tab writes (check-organogram asserts the source has no store write or Supabase call).
+   - Logic in `src/lib/organogram.ts` (`buildOrganogram`, `foldPeople`); drawing in
+     `src/components/settings/Organogram.tsx` (plain HTML/CSS connectors, slate tokens, no new dependency).
+   - QA: check-organogram (49, every lib rule break-tested), e2e/settings-users +24 (tab, every head drawn, vacant
+     posts, head once, leavers absent, iPad: page does not scroll / box does, fold, View organogram from a
+     department and from a team). **e2e ports 5461-5465 were held by another session's Vite servers** -- Vite
+     moves up a port silently and the suite then tests THEIR code; run on a free port (5489 here).
 00000000000000000. **23 Oct: USERS, DEPARTMENTS AND TEAMS IN ONE PLACE** (Stephan; migration in §5, open questions §4 0000).
    The firm: "There's two different tabs for users and designing teams ... this should live in the same
    environment ... every department has a head, and then every team has a lead ... reception, which is just
