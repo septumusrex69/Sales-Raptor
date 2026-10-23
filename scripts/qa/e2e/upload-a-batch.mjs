@@ -304,12 +304,15 @@ try {
     await page.getByRole('button', { name: 'Record a batch' }).count(), 0)
 
   await upload.click()
-  await page.waitForURL(/\/settings\?/, { timeout: 10000 })
+  /*
+   * OUTSIDE SETTINGS SINCE 23 OCT: the client's own road, so a liaison -- who has no business in
+   * Settings -- reaches it too (e2e/liaison-upload.mjs). Settings -> Data Import is still the
+   * Administrator's, and every visit below goes there directly to prove it still works.
+   */
+  await page.waitForURL(/\/upload$/, { timeout: 10000 })
 
   const url = new URL(page.url())
-  t.check('it goes to Settings', url.pathname, '/settings')
-  t.check('...naming the tab', url.searchParams.get('tab'), 'Data Import')
-  t.check('...and the client', url.searchParams.get('client'), COMPANY_ID)
+  t.check('it goes to the client\u2019s own upload page', url.pathname, `/companies/${COMPANY_ID}/upload`)
 
   /*
    * THE PART THAT WAS BROKEN. The URL was already right before this fix; what it landed on was

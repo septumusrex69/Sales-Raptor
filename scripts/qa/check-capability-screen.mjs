@@ -159,7 +159,10 @@ check('the ones marked as enforced are the ones the database really checks',
     /* 22 Oct: every People table's policies and both pay functions ask for it. */
     'people.pay',
     /* 23 Oct: leave_visible() and may_record_leave() ask for it, and leave_records' policies ask them. */
-    'people.leave'].sort())
+    'people.leave',
+    /* 23 Oct: may_load_accounts() asks for it, and the insert policies on handovers, handover_drafts,
+       handover_draft_rows and debtor_accounts ask that. */
+    'handover.upload'].sort())
 /*
  * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
  *

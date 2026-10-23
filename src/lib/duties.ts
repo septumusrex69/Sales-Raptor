@@ -22,7 +22,7 @@ import type { Capability } from './capabilities.js'
  * receptionist who could see the trust account because somebody ticked a box on a department would
  * be a permission nobody could find.
  */
-export type Duty = 'transfer_calls' | 'reassign_accounts'
+export type Duty = 'transfer_calls' | 'reassign_accounts' | 'load_handovers'
 
 export interface DutyMeta {
   label: string
@@ -40,6 +40,14 @@ export const DUTIES: Record<Duty, DutyMeta> = {
     label: 'Moves accounts to people',
     blurb: 'Can put an account on somebody’s desk — the same hand-out a team leader has — whatever their role.',
   },
+  /* THE FIRM (23 Oct): "any person in the client liaison department can upload a handover sheet."
+     Both liaison roles have it by template already; this is what reaches somebody placed in that
+     department under another role. Ticked on Communications by the migration of 23 Oct. */
+  load_handovers: {
+    label: 'Loads clients’ accounts',
+    blurb: 'Can upload a client’s handover sheet or add a single account — for clients whose liaison is in this '
+      + 'department — whatever their role.',
+  },
 }
 
 export const DUTY_ORDER = Object.keys(DUTIES) as Duty[]
@@ -48,7 +56,7 @@ export const DUTY_ORDER = Object.keys(DUTIES) as Duty[]
  * THE ONLY CAPABILITIES A DUTY MAY EVER GIVE. Mirrors duty_grantable() in the database. Widening it
  * is a decision, and check-departments-teams refuses anything from the Money group here.
  */
-export const DUTY_MAY_GRANT: readonly Capability[] = ['book.hand_out']
+export const DUTY_MAY_GRANT: readonly Capability[] = ['book.hand_out', 'handover.upload']
 
 /**
  * What each duty gives. Mirrors duty_capabilities() in the database.
@@ -61,6 +69,7 @@ export const DUTY_MAY_GRANT: readonly Capability[] = ['book.hand_out']
 export const DUTY_CAPABILITIES: Record<Duty, Capability[]> = {
   transfer_calls: [],
   reassign_accounts: ['book.hand_out'],
+  load_handovers: ['handover.upload'],
 }
 
 export function isDuty(v: string): v is Duty {

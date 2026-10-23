@@ -64,6 +64,7 @@ import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
 import { canBeClientLiaison, canEditOwned, canViewTrust } from '../../lib/permissions'
+import { mayLoadAccountsFor, uploadPathFor } from '../../lib/handoverUpload'
 import { ClientAccountPanel } from '../../components/companies/ClientAccountPanel'
 import { ClientSettlements } from '../../components/companies/ClientSettlements'
 import { ClientPayoversPanel } from '../../components/companies/ClientPayoversPanel'
@@ -189,6 +190,10 @@ export function CompanyDetail() {
      offered greyed, with the reason and the way to fix it under the row. The database refuses the
      same (client_work_refusal), so this is the explanation, not the guard. */
   const termsBlock = isClient ? workBlock(company) : null
+  /* WHO MAY LOAD THIS CLIENT'S ACCOUNTS (23 Oct): an Administrator, or somebody holding
+     handover.upload in the department of the client's liaison -- both buttons below, one rule
+     (handoverUpload.ts), and may_load_accounts() refuses the same people underneath. */
+  const mayLoad = isClient && mayLoadAccountsFor(currentUser, company, users)
   /* The link from a refusal lands on the commission and mandate card. React Router does not scroll
      to a hash on its own, so this does, once the card is drawn. */
   const { hash } = useLocation()
@@ -880,12 +885,14 @@ export function CompanyDetail() {
               a batch is now created by APPROVING an uploaded handover, with a capital figure
               added up from the accounts rather than keyed by somebody.
             */}
-            {isClient && (
+            {/* OUTSIDE SETTINGS (23 Oct), which is Administrator territory: a liaison loads their
+                department's clients from here. Settings -> Data Import still has it for an Administrator. */}
+            {mayLoad && (
               <RecordAction icon={Upload} label="Upload a batch" primary
-                onClick={termsBlock ? undefined : () => navigate(`/settings?tab=Data+Import&client=${company.id}`)}
+                onClick={termsBlock ? undefined : () => navigate(uploadPathFor(company.id))}
                 title={termsBlock ?? 'Read a handover sheet and its PDFs, and check it before anything is written'} />
             )}
-            {isClient && (
+            {mayLoad && (
               <RecordAction icon={UserPlus} label="Add debtor"
                 title={termsBlock ?? 'The single account a client phones in'}
                 onClick={termsBlock ? undefined : async () => {
@@ -1024,7 +1031,7 @@ export function CompanyDetail() {
               {/* The new client's welcome (S8): assign a liaison, then the four steps ticked. */}
               <WelcomeCard company={company} />
               <HandoverBook company={company}
-                onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
+                onUpload={mayLoad ? () => navigate(uploadPathFor(company.id)) : undefined} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
                   asking. Here they are capped at five with a "show more"; the tab is where you
                   go for the lot. */}
@@ -1164,7 +1171,7 @@ export function CompanyDetail() {
           onSave={(text) => addActivity({ type: 'Courtesy Call', subject: `Courtesy call — ${company.name}`, notes: text || undefined, companyId: company.id })}
         />
       )}
-      {debtorOpen && (
+      {debtorOpen && mayLoad && (
         <AddDebtorModal
           companyName={company.name}
           existingReferences={debtorRefs}

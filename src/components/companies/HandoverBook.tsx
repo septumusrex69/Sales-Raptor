@@ -27,7 +27,9 @@ function daysSince(iso: string): number {
  * A batch now exists only because a handover sheet was read and approved, and its capital is
  * added up from the accounts that arrived in it.
  */
-export function HandoverBook({ company, onUpload }: { company: Company; onUpload: () => void }) {
+/* onUpload is absent for somebody who may not load this client's accounts (handoverUpload.ts), and
+   then the link is not drawn -- the same rule as the button on the client page. */
+export function HandoverBook({ company, onUpload }: { company: Company; onUpload?: () => void }) {
   const { handovers, deals } = useAppStore()
 
   const rows = handovers
@@ -77,11 +79,11 @@ export function HandoverBook({ company, onUpload }: { company: Company; onUpload
         title="Handover Book"
         subtitle={`${live.length === 1 ? '1 batch' : `${live.length} batches`} received`
           + (discarded > 0 ? ` \u00b7 ${discarded} discarded` : '')}
-        action={
+        action={onUpload && (
           <button onClick={onUpload} className="text-xs font-medium text-brand-600 hover:underline">
             Upload a batch
           </button>
-        }
+        )}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 mb-4">

@@ -125,10 +125,12 @@ const lastFn = (name) => {
   return open < 0 || close < 0 ? '' : schema.slice(at, close + 2)
 }
 
-check('the duties are the two the firm named', [...DUTY_ORDER].sort(), ['reassign_accounts', 'transfer_calls'])
+/* load_handovers (23 Oct): "any person in the client liaison department can upload a handover sheet". */
+check('the duties are the three the firm named', [...DUTY_ORDER].sort(), ['load_handovers', 'reassign_accounts', 'transfer_calls'])
 ok('...each with a label and a sentence', DUTY_ORDER.every((d) => DUTIES[d].label && DUTIES[d].blurb.length > 30))
 
-const known = /departments_duties_known check \(duties <@ array\[([^\]]+)\]/.exec(schema)
+/* THE LAST ONE: the constraint is replaced each time a duty arrives, and schema.sql is append-only. */
+const known = [...schema.matchAll(/departments_duties_known\s+check \(duties <@ array\[([^\]]+)\]/g)].at(-1)
 ok('the database holds the duties closed', !!known)
 check('...to exactly the same list, both directions',
   [...(known?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort(), [...DUTY_ORDER].sort())

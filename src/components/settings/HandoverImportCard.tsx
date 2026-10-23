@@ -27,6 +27,7 @@ import {
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
 import { canDiscardHandover } from '../../lib/permissions.ts'
+import { loadableClients } from '../../lib/handoverUpload.ts'
 import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts'
 import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
@@ -156,7 +157,7 @@ async function readSheet(file: File): Promise<(string | null)[][]> {
  * a row for something already fixed.
  */
 export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | null } = {}) {
-  const { companies, deals } = useAppStore()
+  const { companies, deals, users } = useAppStore()
   const navigate = useNavigate()
   /* The approver's own session, so the corrections email goes out on their mailbox. */
   const { session, currentUser } = useAuth()
@@ -165,11 +166,17 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const canDiscard = canDiscardHandover(currentUser)
   /* A CLIENT IS ONE WITH A CODE OR A WON DEAL, which is how CompanyDetail decides it too. A list
      of every company would offer the prospects a handover cannot come from. */
+  /*
+   * AND ONLY THE CLIENTS THIS PERSON MAY LOAD FOR (23 Oct): an Administrator any, a liaison their own
+   * and their department colleagues' -- handoverUpload.ts, and may_load_accounts() refuses the rest
+   * underneath. A picker that offered a client and then had Postgres refuse the hold is worse than
+   * one that never offered it.
+   */
   const clients = useMemo(() => {
     const won = new Set(deals.filter((d) => d.stage === 'Won').map((d) => d.companyId))
-    return companies.filter((c) => !!c.code || won.has(c.id))
+    return loadableClients(currentUser, companies.filter((c) => !!c.code || won.has(c.id)), users)
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [companies, deals])
+  }, [companies, deals, currentUser, users])
 
   /*
    * THE CLIENT CAN ARRIVE WITH THE PERSON, from "Upload a batch" on that client's own page.
@@ -266,12 +273,19 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   /** The batch whose Discard has been pressed, and the word typed into it. */
   const [discarding, setDiscarding] = useState<DiscardableBatch | null>(null)
   const [typed, setTyped] = useState('')
+  /* THE QUEUES ARE THE FIRM'S, THE SCREEN IS THIS PERSON'S: a liaison is shown the drafts and the
+     unallocated batches of the clients they may load for, not a colleague in another department's.
+     Filtered here rather than in the query so an Administrator's view is exactly what it was. */
+  const isAdmin = currentUser?.role === 'Administrator'
+  /* For an Administrator, nothing to filter by -- and no re-read every time the client list moves. */
+  const loadable = useMemo(() => (isAdmin ? null : new Set(clients.map((c) => c.id))), [isAdmin, clients])
   const refreshDrafts = useCallback(async () => {
-    setOpenDrafts(await fetchOpenDrafts().catch(() => []))
+    const mine = (id: string | null) => !loadable || (!!id && loadable.has(id))
+    setOpenDrafts((await fetchOpenDrafts().catch(() => [])).filter((d) => mine(d.companyId)))
     /* Never fatal: a screen that will not render because a warning could not be counted is worse
        than the warning being missing. */
-    setUnallocated(await fetchUnallocatedBatches().catch(() => []))
-  }, [])
+    setUnallocated((await fetchUnallocatedBatches().catch(() => [])).filter((b) => mine(b.companyId)))
+  }, [loadable])
   useEffect(() => { void refreshDrafts() }, [refreshDrafts])
 
   /* Re-read whenever the client changes AND after an import or a discard, so the list is never
