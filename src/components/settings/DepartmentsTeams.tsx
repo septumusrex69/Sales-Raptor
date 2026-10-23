@@ -240,7 +240,6 @@ function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteD
   const whyNot = whyNotRemoveDepartment(dept, teams, users)
   const others = users.filter((u) => u.status !== 'Inactive' && u.departmentId !== dept.id)
     .sort((a, b) => a.name.localeCompare(b.name))
-  const teamName = (u: User) => teams.find((t) => t.id === u.teamId)?.name ?? null
   const [confirming, setConfirming] = useState(false)
 
   return (
@@ -260,28 +259,67 @@ function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteD
           <Plus size={13} /> Team
         </button>
       ) : undefined}>
-        {dTeams.length === 0 ? <p className="text-[12.5px] text-slate-400">No teams. People can sit in a department without one.</p> : (
-          <div className="flex flex-wrap gap-1.5">
-            {dTeams.map((t) => (
-              <button key={t.id} type="button" onClick={() => onSelectTeam(t.id)}
-                className="text-left text-[12.5px] px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-brand-500/50 hover:bg-slate-50">
-                <span className="font-medium text-slate-700">{t.name}</span>
-                <span className="text-slate-400"> · {countOf(t.memberIds.length, 'member')}</span>
-                <span className="block text-[11px] text-slate-400">
-                  {users.find((u) => u.id === t.leadId)?.name ? `Lead: ${users.find((u) => u.id === t.leadId)?.name}` : 'No lead yet'}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        {/* The teams themselves are listed under People below, each with its lead and members. */}
+        {dTeams.length === 0 && <p className="text-[12.5px] text-slate-400">No teams. People can sit in a department without one.</p>}
       </Section>
 
+      {/*
+        READ AS THE FIRM RUNS IT: HEAD, THEN EACH TEAM UNDER ITS LEAD, THEN WHOEVER HAS NO TEAM YET.
+        The firm, 23 Oct: "it should be call center head, team leaders, and then the teams and
+        everybody ... arranged according to their team." A flat list with the team as a grey word
+        on the right made the call centre read as fourteen people rather than three teams, and
+        moving somebody meant going to the team they were leaving. Each row moves them from here.
+      */}
       <Section title={`People · ${members.length}`}>
-        <PeopleList people={members} teamName={teamName} render={(u) => isAdmin && u.id !== dept.headId ? (
-          <button type="button" title={`Take ${u.name} out of ${dept.name}`} aria-label={`Take ${u.name} out of ${dept.name}`}
-            onClick={() => updateUser(u.id, placeInDepartment(undefined))}
-            className="text-slate-400 hover:text-[var(--c-rust-deep)]"><X size={13} /></button>
-        ) : null} />
+        <div className="space-y-3" data-testid="department-people">
+          {[...dTeams.map((t) => ({
+            key: t.id, title: t.name, team: t as Team | undefined,
+            lead: users.find((u) => u.id === t.leadId),
+            people: membersOfTeam(t.id, members).filter((u) => u.id !== dept.headId)
+              .sort((a, b) => Number(b.id === t.leadId) - Number(a.id === t.leadId) || a.name.localeCompare(b.name)),
+          })), {
+            key: 'none', title: 'Without a team', team: undefined as Team | undefined, lead: undefined as User | undefined,
+            people: withoutTeam(dept.id, members).filter((u) => u.id !== dept.headId),
+          }].filter((g) => g.team || g.people.length > 0).map((g) => (
+            <div key={g.key} data-testid={`department-group-${g.title}`}>
+              <div className="flex items-baseline gap-2 mb-1">
+                {g.team ? (
+                  <button type="button" onClick={() => onSelectTeam(g.team!.id)}
+                    className="text-[12.5px] font-semibold text-slate-700 hover:text-brand-700">{g.title}</button>
+                ) : <span className="text-[12.5px] font-semibold italic text-slate-500">{g.title}</span>}
+                <span className="text-[11.5px] text-slate-400">
+                  {g.team ? (g.lead ? `Lead: ${g.lead.name}` : 'No lead yet') : ''}
+                  {` · ${countOf(g.people.length, 'person', 'people')}`}
+                </span>
+              </div>
+              <PeopleList people={g.people} render={(u) => {
+                if (!isAdmin) return null
+                const isLead = !!g.team && u.id === g.team.leadId
+                const choices = teamsForRole(u.role, dTeams)
+                return (
+                  <>
+                    {isLead && <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Lead</span>}
+                    {/* A LEAD STAYS PUT UNTIL SOMEBODY ELSE LEADS -- the database refuses it too. */}
+                    {!isLead && choices.length > 0 && (
+                      <select className={smallSelect} value={u.teamId ?? ''} aria-label={`Team for ${u.name}`}
+                        onChange={(e) => updateUser(u.id, e.target.value
+                          ? placeInTeam(dTeams.find((t) => t.id === e.target.value), u)
+                          : placeInDepartment(dept.id))}>
+                        <option value="">No team</option>
+                        {choices.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    )}
+                    {!isLead && (
+                      <button type="button" title={`Take ${u.name} out of ${dept.name}`} aria-label={`Take ${u.name} out of ${dept.name}`}
+                        onClick={() => updateUser(u.id, placeInDepartment(undefined))}
+                        className="text-slate-400 hover:text-[var(--c-rust-deep)]"><X size={13} /></button>
+                    )}
+                  </>
+                )
+              }} />
+            </div>
+          ))}
+        </div>
         {isAdmin && others.length > 0 && (
           <select className={`${smallSelect} mt-2`} value="" aria-label={`Add somebody to ${dept.name}`}
             onChange={(e) => e.target.value && updateUser(e.target.value, placeInDepartment(dept.id))}>

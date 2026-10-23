@@ -50416,3 +50416,43 @@ revoke all on function public.team_lead_of(uuid) from public, anon;
 grant execute on function public.team_lead_of(uuid) to authenticated;
 revoke all on function public.department_head_of(uuid) from public, anon;
 grant execute on function public.department_head_of(uuid) to authenticated;
+
+-- =====================================================================================
+-- departments_heads_from_managers (S10, 23 Oct)
+--
+-- THE MANAGER'S ROLE ALREADY NAMES THE HEAD. The firm, looking at the new Departments & teams:
+-- "here's the call center manager. And it says no head. And same with communications ... Sales head
+-- is Felicia ... That should be like that." The seed set a team's lead from the role and never a
+-- department's head, so two departments with a manager in them read "No head yet". A department
+-- with no head takes the one active holder of its manager role; two holders is the firm's call,
+-- and Administration has no manager role -- its head is chosen on the screen.
+--
+-- And a person with no department is placed by their role, as the seed did: people added between
+-- the seed and the screen (Add User asked for no department then) landed outside every department
+-- and did not appear under the call centre at all.
+-- =====================================================================================
+do $$
+begin
+  -- The privileged-fields guard reads the caller; a migration has none, so it runs as the first
+  -- Administrator, the way every staging data fix here does.
+  perform set_config('request.jwt.claims', json_build_object(
+    'sub', (select id from public.profiles where role = 'Administrator' and status = 'Active' order by created_at limit 1),
+    'role', 'authenticated')::text, true);
+
+  update public.profiles p
+     set department_id = (select d.id from public.departments d where d.name = public.role_department(p.role))
+   where p.department_id is null and p.team_id is null and p.status = 'Active';
+
+  update public.departments d
+     set head_id = (select p.id from public.profiles p
+                     where p.department_id = d.id and p.status = 'Active'
+                       and p.role = case d.name when 'Call centre' then 'Call Centre Manager'
+                                                when 'Communications' then 'Liaison Manager'
+                                                when 'Sales' then 'Sales Manager' end)
+   where d.head_id is null
+     and (select count(*) from public.profiles p
+           where p.department_id = d.id and p.status = 'Active'
+             and p.role = case d.name when 'Call centre' then 'Call Centre Manager'
+                                      when 'Communications' then 'Liaison Manager'
+                                      when 'Sales' then 'Sales Manager' end) = 1;
+end $$;

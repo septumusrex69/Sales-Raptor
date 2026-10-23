@@ -644,6 +644,19 @@ the problem to the next session rather than solved it.
 ---
 
 
+
+## 23 Oct (S10) — department heads from the managers; the department reads head → teams → people
+
+The firm, on the new Departments & teams: the call centre and communications said "No head" with
+a manager in each, and the call centre read as one list. Migration `departments_heads_from_managers`
+(staging; **production needs it after `departments_and_teams`**) gives a headless department the
+one active holder of its manager role (Call Centre Manager, Liaison Manager, Sales Manager) and
+places anybody active with no department by their role. The department pane now lists each team
+under its lead, then "Without a team", with a team picker on every row.
+**Staging data set by hand at the firm's word:** Stephan heads Administration; Vusi (the head) is
+out of every team; Kea leads Line Breakers; Zanele leads the team still called "Call Centre" —
+the firm should rename it and sort the agents into teams.
+
 ## 23 Oct (S10) — mail already read in the mailbox arrives read
 
 The firm: a new user's mailbox synced and everything showed unread. `emailSync.ts` never fetched
