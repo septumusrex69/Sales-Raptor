@@ -65,7 +65,7 @@ removed.forEach((t, i) => {
 check('every key into a removed table lets it go', blocked, [])
 
 // 3. What the firm keeps.
-const KEPT = ['profiles', 'teams', 'user_emails', 'calendar_events', 'email_connections', 'message_templates',
+const KEPT = ['profiles', 'teams', 'departments', 'user_emails', 'calendar_events', 'email_connections', 'message_templates',
   'workflows', 'workflow_versions', 'workflow_nodes', 'workflow_phases', 'workflow_connections',
   'firm_settings', 'finance_setting_changes', 'staging_clock', 'deployment', 'mail_blocks',
   'mail_sender_rules', 'mail_recipient_hidden', 'buzzbox_settings']

@@ -5,9 +5,10 @@ import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapse
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound, MonitorSmartphone } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
-import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
+import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
+import { DepartmentsTeamsTab } from '../../components/settings/DepartmentsTeams'
 import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
 import { CapabilitiesModal } from '../../components/settings/CapabilitiesModal'
 import { TrustedDevicesList, TrustedDevicesModal } from '../../components/settings/TrustedDevices'
@@ -16,7 +17,8 @@ import { customFields as initialCustomFields, industries, leadSources as initial
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
-import { byDepartment, guessTeamKind, matchesPerson, teamKindForRole, teamsForRole } from '../../lib/departments'
+import { byDepartment, departmentOf, matchesPerson, teamKindForRole, teamsForRole } from '../../lib/departments'
+import { groupByStoredDepartment, placeInDepartment, placeInTeam, sortDepartments, teamsIn } from '../../lib/orgStructure'
 import { canLeadCollections } from '../../lib/permissions'
 import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
@@ -25,7 +27,7 @@ import { THEMES } from '../../lib/themes'
 import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
 import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
-import type { CustomField, CustomFieldType, Team, TeamKind, User, UserRole } from '../../types'
+import type { CustomField, CustomFieldType, Team, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
 import type { Target, TargetMetric } from '../../types'
 import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
@@ -36,7 +38,12 @@ import { saveStartDate } from '../../lib/peopleApi'
 /* Workflows left this list at the firm's instruction -- a workflow is not a setting, it is
    content somebody writes and publishes a version of, and it lives in the library beside the
    wording it sends. See src/pages/library/LibraryWorkflows.tsx. */
-const TABS = ['Profile', 'Appearance', 'Users', 'Teams', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
+/*
+ * NO 'Teams' TAB (23 Oct). The firm: "There's two different tabs for users and designing teams ...
+ * this should live in the same environment." Teams are under Users -> Departments & teams now, and an
+ * old ?tab=Teams link lands there (see SettingsPage) rather than on Profile.
+ */
+const TABS = ['Profile', 'Appearance', 'Users', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
 const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
@@ -56,7 +63,16 @@ export function SettingsPage() {
   const [navCollapsed, toggleNav] = useSettingsNavCollapsed()
   const [params, setParams] = useSearchParams()
   const fromUrl = params.get('tab')
-  const tab: Tab = isTab(fromUrl) ? fromUrl : 'Profile'
+  /* The old Teams tab, folded into Users: its links and bookmarks still arrive. */
+  const wasTeams = fromUrl === 'Teams'
+  const tab: Tab = wasTeams ? 'Users' : isTab(fromUrl) ? fromUrl : 'Profile'
+  useEffect(() => {
+    if (!wasTeams) return
+    const keep = new URLSearchParams(params)
+    keep.set('tab', 'Users')
+    keep.set('users', 'departments')
+    setParams(keep, { replace: true })
+  }, [wasTeams, params, setParams])
 
   /* Clicking a tab REPLACES rather than pushes: twelve tabs clicked in a row should not mean
      twelve taps of Back to leave the page. Arriving by link keeps its own history entry. */
@@ -66,6 +82,7 @@ export function SettingsPage() {
     /* The client only means anything to Data Import; carrying it onto Teams would put a stale
        company in the URL of a screen that has never heard of one. */
     if (next !== 'Data Import') keep.delete('client')
+    if (next !== 'Users') keep.delete('users')
     setParams(keep, { replace: true })
   }
 
@@ -120,8 +137,7 @@ export function SettingsPage() {
         )}
         {tab === 'Profile' && <ProfileTab />}
         {tab === 'Appearance' && <AppearanceTab />}
-        {tab === 'Users' && <UsersTab />}
-        {tab === 'Teams' && <TeamsTab />}
+        {tab === 'Users' && <UsersSection />}
         {tab === 'Targets' && <TargetsTab />}
         {tab === 'Pipelines' && <PipelinesTab />}
         {tab === 'Custom Fields' && <CustomFieldsTab />}
@@ -296,22 +312,6 @@ function ProfileTab() {
   )
 }
 
-/*
- * THE KINDS A TEAM CAN BE, in one place and drawn from the type.
- *
- * Written out twice as a pair of <option>s, 'Call centre' would have been added to one and
- * forgotten in the other -- which is exactly how 'Pre-legal Team Leader' came to be missing from
- * the invite box while the row dropdown had it.
- */
-const TEAM_KINDS: TeamKind[] = ['Sales', 'Communications', 'Call centre']
-
-/** A tint each, so the department a team belongs to is legible at a glance. */
-const TEAM_KIND_TINT: Record<TeamKind, string> = {
-  Sales: 'bg-[var(--tint-gold)] text-[var(--c-gold-deep)]',
-  Communications: 'bg-[var(--tint-steel)] text-[var(--c-navy)]',
-  'Call centre': 'bg-[var(--tint-green)] text-[var(--c-green)]',
-}
-
 /**
  * One department, foldable.
  *
@@ -354,8 +354,52 @@ function DepartmentGroup({ group, columns, renderRow, forceOpen = false }: {
   )
 }
 
+/**
+ * SETTINGS -> USERS, IN TWO TABS (23 Oct).
+ *
+ * THE FIRM (Stephan): "I'm not happy with how the users and the teams thing works ... There's two
+ * different tabs for users and designing teams ... this should live in the same environment." And:
+ * "We have all users, which is all of our staff. Then we have departments, then we have teams."
+ *
+ * ALL USERS is the list it always was, with each person's department and team on their row -- an
+ * Administrator places somebody there. DEPARTMENTS & TEAMS is where a department or a team is MADE,
+ * given a head or a lead, and given duties; nothing is created from the All users rows.
+ *
+ * THE TAB IS IN THE URL (?users=departments), like the Settings tab above it, so a link can land on
+ * it -- and so the retired ?tab=Teams can be sent here.
+ */
+const USERS_TABS = [
+  { id: 'all', label: 'All users' },
+  { id: 'departments', label: 'Departments & teams' },
+] as const
+
+function UsersSection() {
+  const [params, setParams] = useSearchParams()
+  const section = params.get('users') === 'departments' ? 'departments' : 'all'
+  return (
+    <div className="space-y-4">
+      <div role="tablist" aria-label="Users" className="flex gap-1 border-b border-slate-200">
+        {USERS_TABS.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={section === t.id}
+            onClick={() => {
+              const keep = new URLSearchParams(params)
+              if (t.id === 'all') keep.delete('users'); else keep.set('users', t.id)
+              setParams(keep, { replace: true })
+            }}
+            className={`px-3 py-2 -mb-px text-sm font-medium whitespace-nowrap border-b-2 ${section === t.id
+              ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {section === 'all' ? <UsersTab /> : <DepartmentsTeamsTab />}
+    </div>
+  )
+}
+
 function UsersTab() {
-  const { users, teams, updateUser, removeUserLocal } = useAppStore()
+  const { users, teams, departments, updateUser, removeUserLocal } = useAppStore()
+  const sortedDepartments = useMemo(() => sortDepartments(departments), [departments])
   const { currentUser, session } = useAuth()
   const isAdmin = currentUser?.role === 'Administrator'
   const [addOpen, setAddOpen] = useState(false)
@@ -420,7 +464,16 @@ function UsersTab() {
     () => users.filter((u) => matchesPerson(u, teamName(u.teamId), search)),
     [users, search, teamName],
   )
-  const grouped = useMemo(() => byDepartment(found), [found])
+  /*
+   * GROUPED BY THE DEPARTMENT THEY SIT IN (23 Oct), the one the firm draws on Departments & teams --
+   * and by the role's reading only where there are no departments at all, so a table that did not
+   * load is not a hundred people under "Not in a department".
+   */
+  const grouped = useMemo(
+    () => groupByStoredDepartment(found, departments, (id) => users.find((u) => u.id === id)?.name)
+      ?? byDepartment(found),
+    [found, departments, users],
+  )
   /*
    * A SEARCH IGNORES THE FOLDS. Somebody who folded the call centre away and then typed a name
    * would be told there is nobody by that name, which is the worst possible answer: it is wrong,
@@ -428,7 +481,7 @@ function UsersTab() {
    */
   const searching = search.trim().length > 0
   /* The heading rows span the table, and the table is two columns wider for an administrator. */
-  const columns = isAdmin ? 7 : 5
+  const columns = isAdmin ? 8 : 6
 
   /* The row exactly as it was, lifted so the groups below can each draw their own people. */
   const renderRow = (u: User) => (
@@ -440,36 +493,45 @@ function UsersTab() {
                     <span className="font-medium text-slate-700 max-w-[14rem] truncate" title={u.name}>{u.name}</span>
                   </div>
                 </td>
+                {/*
+                  * WHERE THEY SIT: DEPARTMENT, THEN TEAM (23 Oct). "We have all users ... Then we have
+                  * departments, then we have teams. In the departments." An Administrator places a
+                  * person here; departments and teams are MADE on the other tab, never from a row.
+                  *
+                  * A NEW DEPARTMENT DROPS THE TEAM, which was in the old one; a team brings its
+                  * department with it. Both written together (placeInDepartment / placeInTeam), so
+                  * the row shows what the database will hold rather than half of it.
+                */}
                 <td className="px-2 py-1.5">
-                  {isAdmin ? (
+                  {isAdmin && sortedDepartments.length > 0 ? (
                     <select
-                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
-                      value={u.role}
-                      onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none max-w-[11rem]"
+                      value={u.departmentId ?? ''} aria-label={`Department for ${u.name}`}
+                      onChange={(e) => updateUser(u.id, placeInDepartment(e.target.value || undefined))}
                     >
-                      {ASSIGNABLE_ROLES.map((r) => (
-                        <option key={r}>{r}</option>
-                      ))}
+                      <option value="">No department</option>
+                      {sortedDepartments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   ) : (
-                    <span className="text-slate-500">{u.role}</span>
+                    <span className="text-slate-500">{departments.find((d) => d.id === u.departmentId)?.name ?? '—'}</span>
                   )}
                 </td>
                 <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <select
-                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
-                      value={u.teamId ?? ''}
-                      onChange={(e) => updateUser(u.id, { teamId: e.target.value || undefined })}
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none max-w-[11rem]"
+                      value={u.teamId ?? ''} aria-label={`Team for ${u.name}`}
+                      onChange={(e) => updateUser(u.id, placeInTeam(teams.find((t) => t.id === e.target.value), u))}
                     >
-                      <option value="">No team</option>
+                      <option value="">{u.departmentId ? 'Without a team' : 'No team'}</option>
                       {/*
-                        * ONLY THE TEAMS THIS ROLE MAY BE IN. The firm: "a pre-legal agent can't be
-                        * in a team that is for communications." Offering a team and then having
-                        * the database refuse it is worse than never offering it -- the person
-                        * reads the refusal as a fault rather than as the rule.
+                        * ONLY THE TEAMS IN THEIR DEPARTMENT THAT THEIR ROLE MAY BE IN. The firm: "a
+                        * pre-legal agent can't be in a team that is for communications." Offering a
+                        * team and then having the database refuse it is worse than never offering
+                        * it. With no departments at all (a table that did not load) every team the
+                        * role allows, as before.
                       */}
-                      {teamsForRole(u.role, teams).map((t) => (
+                      {teamsForRole(u.role, sortedDepartments.length > 0 && u.departmentId ? teamsIn(u.departmentId, teams) : teams).map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.name}
                         </option>
@@ -523,6 +585,22 @@ function UsersTab() {
                       </button>
                     )
                   })()}
+                </td>
+                {/* THE ROLE, after where they sit: it is what they may DO, and the department is not. */}
+                <td className="px-2 py-1.5">
+                  {isAdmin ? (
+                    <select
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
+                      value={u.role} aria-label={`Role for ${u.name}`}
+                      onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
+                    >
+                      {ASSIGNABLE_ROLES.map((r) => (
+                        <option key={r}>{r}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-slate-500">{u.role}</span>
+                  )}
                 </td>
                 <td className="px-2 py-1.5 text-slate-500 max-w-[16rem] truncate" title={u.email}>{u.email}</td>
                 <td className="px-2 py-1.5">
@@ -664,8 +742,9 @@ function UsersTab() {
           <thead>
             <tr className="text-left border-y border-slate-100 text-slate-400">
               <th className="font-medium px-3 py-2">User</th>
-              <th className="font-medium px-2 py-2">Role</th>
+              <th className="font-medium px-2 py-2">Department</th>
               <th className="font-medium px-2 py-2">Team</th>
+              <th className="font-medium px-2 py-2">Role</th>
               <th className="font-medium px-2 py-2">Email</th>
               <th className="font-medium px-2 py-2">Status</th>
               {isAdmin && <th className="font-medium px-2 py-2">Login</th>}
@@ -1181,13 +1260,25 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
   const [startError, setStartError] = useState<string | null>(null)
   const [teamId, setTeamId] = useState('')
   /*
-   * A TEAM CHOSEN BEFORE THE ROLE CHANGED IS DROPPED. Pick a sales team, then change the role to
-   * Pre-legal Agent, and the box would still be holding a team the database refuses -- the
-   * picker no longer offers it, so it is invisible and the invite fails on submit.
+   * THE DEPARTMENT THEY WILL SIT IN (23 Oct). Offered as the department the role reads as -- a sales
+   * rep in Sales -- until somebody chooses; a team chosen below brings its own department anyway.
+   */
+  const { departments } = useAppStore()
+  const [departmentTouched, setDepartmentTouched] = useState('')
+  const roleDepartment = departments.find((d) => d.name === departmentOf(role))?.id ?? ''
+  const departmentId = departmentTouched || roleDepartment
+  const teamChoices = useMemo(
+    () => teamsForRole(role, departmentId ? teamsIn(departmentId, teams) : teams),
+    [role, departmentId, teams],
+  )
+  /*
+   * A TEAM CHOSEN BEFORE THE ROLE (OR DEPARTMENT) CHANGED IS DROPPED. Pick a sales team, then change
+   * the role to Pre-legal Agent, and the box would still be holding a team the database refuses --
+   * the picker no longer offers it, so it is invisible and the invite fails on submit.
    */
   useEffect(() => {
-    if (teamId && !teamsForRole(role, teams).some((t) => t.id === teamId)) setTeamId('')
-  }, [role, teamId, teams])
+    if (teamId && !teamChoices.some((t) => t.id === teamId)) setTeamId('')
+  }, [teamId, teamChoices])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
@@ -1227,6 +1318,10 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
       if (id && startDate) {
         await saveStartDate(id, startDate).catch((e: unknown) =>
           setStartError(e instanceof Error ? e.message : 'The start date was not saved.'))
+      }
+      /* A department without a team is written here; with a team the database sets it from the team. */
+      if (id && departmentId && !teamId) {
+        await supabase.from('profiles').update({ department_id: departmentId }).eq('id', id)
       }
       void refreshPeople()
       setSent(true)
@@ -1344,13 +1439,23 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
             </p>
           </FormField>
         )}
+        {!hasLeft && departments.length > 0 && (
+          <FormField label="Department">
+            <select className={inputClass} value={departmentId} data-testid="invite-department"
+              onChange={(e) => { setDepartmentTouched(e.target.value); setTeamId('') }}>
+              <option value="">No department</option>
+              {sortDepartments(departments).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </FormField>
+        )}
         {!hasLeft && (
         <FormField label="Team (optional)">
           <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
             <option value="">No team</option>
-            {/* Follows the role chosen above: pick Pre-legal Agent and the communications teams
-                stop being offered, because the database will not accept that pairing. */}
-            {teamsForRole(role, teams).map((t) => (
+            {/* Follows the role and the department chosen above: pick Pre-legal Agent and the
+                communications teams stop being offered, because the database will not accept that
+                pairing; a team in another department would move them out of the one chosen. */}
+            {teamChoices.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
@@ -1358,10 +1463,10 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
           </select>
           {/* WHY THE LIST IS EMPTY, said. Staging, 22 Oct: every team had been made as a Sales team,
               so a pre-legal agent was offered nothing and nobody could tell why. */}
-          {teamKindForRole(role) && teamsForRole(role, teams).length === 0 && (
+          {teamKindForRole(role) && teamChoices.length === 0 && (
             <p className="text-[11px] text-slate-400 mt-1" data-testid="invite-no-team">
-              A {role} can only join a {teamKindForRole(role)} team, and there is none yet. Make one under
-              Teams, or change an existing team's kind to {teamKindForRole(role)}.
+              A {role} can only join a {teamKindForRole(role)} team, and there is none here yet. Make one under
+              Users → Departments &amp; teams, or choose another department.
             </p>
           )}
         </FormField>
@@ -1555,208 +1660,6 @@ function TargetRow({
       />
       <input type="hidden" value={metricId} readOnly />
     </div>
-  )
-}
-
-function TeamsTab() {
-  const { teams, users, addTeam, updateTeam, deleteTeam, updateUser } = useAppStore()
-  const { currentUser } = useAuth()
-  const isAdmin = currentUser?.role === 'Administrator'
-  const [name, setName] = useState('')
-  /*
-   * NO DEFAULT KIND. It was 'Sales', in a small box beside the name, and on 22 Oct every team on
-   * staging -- "Call Centre" included -- had been made as a Sales team; the database then refused
-   * every pre-legal agent put in it, and the screen did not say why. The kind is guessed from the
-   * name as it is typed (guessTeamKind) and must be there before the team can be added.
-   */
-  const [kind, setKind] = useState<TeamKind | ''>('')
-  const [kindTouched, setKindTouched] = useState(false)
-  const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-  const [removingTeam, setRemovingTeam] = useState<{ id: string; name: string } | null>(null)
-
-  return (
-    <Card>
-      <CardHeader title="Teams" subtitle="Group salespeople into teams" />
-      {/* The checking-list look, as on every list the firm reads down: a thin rule between teams
-          rather than a boxed card each, the name, kind and head count on one line, and the
-          members as small chips under it. */}
-      <div className="divide-y divide-slate-100 border-y border-slate-100 text-[12.5px]">
-        {teams.map((t) => {
-          /* Only people whose role may be in this kind of team -- the database refuses the rest
-             ("Pre-legal Agent works in Call centre, so they cannot be in a Sales team"), and a
-             picker that offers a choice and then refuses it is the bug the firm hit. */
-          const notHere = users.filter((u) => u.teamId !== t.id && u.status === 'Active')
-          const unassigned = notHere.filter((u) => teamsForRole(u.role, [t]).length > 0)
-          const cannotJoin = notHere.length - unassigned.length
-          return (
-            <div key={t.id} className="py-1.5 px-1">
-              <div className="flex items-center justify-between gap-3 whitespace-nowrap">
-                {editingTeamId === t.id ? (
-                  <form
-                    className="flex items-center gap-2 flex-1"
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      if (!editingName.trim()) return
-                      updateTeam(t.id, { name: editingName.trim() })
-                      setEditingTeamId(null)
-                    }}
-                  >
-                    <input
-                      autoFocus
-                      className={`${inputClass} text-sm py-1`}
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                    />
-                    <button type="submit" className="text-brand-600 hover:text-brand-700" title="Save">
-                      <Check size={16} />
-                    </button>
-                    <button type="button" onClick={() => setEditingTeamId(null)} className="text-slate-400 hover:text-slate-600" title="Cancel">
-                      <X size={16} />
-                    </button>
-                  </form>
-                ) : (
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <p className="font-semibold text-slate-700 truncate" title={t.name}>{t.name}</p>
-                    <span
-                      className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${TEAM_KIND_TINT[t.kind] ?? TEAM_KIND_TINT.Sales}`}
-                    >
-                      {t.kind}
-                    </span>
-                    <p className="shrink-0 text-slate-400">&middot; {t.memberIds.length} members</p>
-                  </div>
-                )}
-                {isAdmin && editingTeamId !== t.id && (
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <select
-                      value={t.kind}
-                      onChange={(e) => updateTeam(t.id, { kind: e.target.value as TeamKind })}
-                      className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
-                      title="Which dashboard this team's members land on"
-                    >
-                      {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-                    </select>
-                    <button
-                      onClick={() => {
-                        setEditingTeamId(t.id)
-                        setEditingName(t.name)
-                      }}
-                      className="text-slate-400 hover:text-brand-600"
-                      title="Rename team"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button onClick={() => setRemovingTeam({ id: t.id, name: t.name })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Delete team">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-1 mt-1">
-                {t.memberIds.map((id) => {
-                  const member = users.find((u) => u.id === id)
-                  return (
-                    <div key={id} className="flex items-center gap-1 bg-slate-50 rounded-full pl-0.5 pr-1.5 py-0.5">
-                      <UserAvatar userId={id} size={16} />
-                      <span className="text-[11px] text-slate-600 whitespace-nowrap">{member?.name ?? 'Unknown'}</span>
-                      {isAdmin && (
-                        <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove from team">
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-              {isAdmin && unassigned.length > 0 && (
-                <select
-                  className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none mt-1"
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) updateUser(e.target.value, { teamId: t.id })
-                  }}
-                >
-                  <option value="">+ Add member…</option>
-                  {unassigned.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {isAdmin && cannotJoin > 0 && (
-                <p className="text-[11px] text-slate-400 mt-1" data-testid="team-cannot-join">
-                  {cannotJoin} {cannotJoin === 1 ? 'person' : 'people'} can't join a {t.kind} team because of their role
-                  {t.kind !== 'Call centre' && notHere.some((u) => teamKindForRole(u.role) === 'Call centre') && ' — collectors go in a Call centre team'}.
-                </p>
-              )}
-            </div>
-          )
-        })}
-      </div>
-      {isAdmin && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!name.trim() || !kind) return
-            addTeam({ name, kind })
-            setName('')
-            setKind('')
-            setKindTouched(false)
-          }}
-          className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
-        >
-          {/* flex-1 min-w-0: the name is the field that should take the slack, and min-w-0 is
-              what lets a flex child actually narrow rather than hold its content's width. */}
-          <input className={`${controlClass} flex-1 min-w-0`} placeholder="New team name"
-            value={name} onChange={(e) => {
-              setName(e.target.value)
-              if (!kindTouched) setKind(guessTeamKind(e.target.value) ?? '')
-            }} />
-          {/* controlClass, NOT inputClass: the latter carries w-full, which beats the w-40 below
-              in the generated stylesheet however they are ordered here. See Modal.tsx. */}
-          <select value={kind} onChange={(e) => { setKind(e.target.value as TeamKind | ''); setKindTouched(true) }}
-            aria-label="What kind of team" data-testid="new-team-kind"
-            className={`${controlClass} w-40 shrink-0`}>
-            <option value="">What kind of team?</option>
-            {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
-          {/*
-            REFUSED VISIBLY RATHER THAN SILENTLY. The submit handler returns early on a blank name,
-            which is right -- and it did it without a word, so pressing the button looked exactly
-            like a feature that does not work. A button that cannot act says so by being unpressable.
-          */}
-          <button type="submit" disabled={!name.trim() || !kind}
-            title={!name.trim() ? 'Give the team a name first' : !kind ? 'Choose what kind of team it is' : 'Add this team'}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
-              bg-brand-600 text-white hover:bg-brand-700 shrink-0
-              disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
-            <Plus size={15} /> Add Team
-          </button>
-        </form>
-      )}
-      {removingTeam && (
-        <Modal title="Remove team" onClose={() => setRemovingTeam(null)}>
-          <p className="text-sm text-slate-600">
-            Remove <span className="font-medium text-slate-800">{removingTeam.name}</span>? Its members won't be deleted, they'll just no longer belong to a team. This can't be undone.
-          </p>
-          <div className="flex justify-end gap-2 mt-5">
-            <button onClick={() => setRemovingTeam(null)} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                deleteTeam(removingTeam.id)
-                setRemovingTeam(null)
-              }}
-              className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:bg-[var(--c-rust-hover)]"
-            >
-              Remove
-            </button>
-          </div>
-        </Modal>
-      )}
-    </Card>
   )
 }
 

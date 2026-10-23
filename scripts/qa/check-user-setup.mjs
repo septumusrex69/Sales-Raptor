@@ -35,11 +35,18 @@ check('a name that says nothing is asked, not guessed', guessTeamKind('Admin'), 
 check('a pre-legal agent fits only a call centre team',
   teamsForRole('Pre-legal Agent', [{ kind: 'Sales' }, { kind: 'Call centre' }]).map((t) => t.kind), ['Call centre'])
 
-ok('a new team has no default kind', /useState<TeamKind \| ''>\(''\)/.test(page))
-ok('...the button waits for one', /disabled=\{!name\.trim\(\) \|\| !kind\}/.test(page))
-ok('...and the name suggests it until somebody picks', /if \(!kindTouched\) setKind\(guessTeamKind\(e\.target\.value\) \?\? ''\)/.test(page))
-ok('"Add member" offers only those the database accepts', /const unassigned = notHere\.filter\(\(u\) => teamsForRole\(u\.role, \[t\]\)\.length > 0\)/.test(page))
-ok('...and says why about the rest', /data-testid="team-cannot-join"/.test(page))
+/*
+ * 23 OCT: teams are made and filled on Users -> Departments & teams (DepartmentsTeams.tsx), so the
+ * same four promises are held there. The kind is offered from the department's other teams and the
+ * names (suggestedKind -> guessTeamKind) until somebody picks, and never defaults to Sales.
+ */
+const org = strip(readFileSync(new URL('../../src/components/settings/DepartmentsTeams.tsx', import.meta.url), 'utf8'))
+ok('a new team has no default kind', /useState<TeamKind \| ''>\(''\)/.test(org))
+ok('...the button waits for one', /disabled=\{!name\.trim\(\) \|\| !departmentId \|\| !offered\}/.test(org))
+ok('...and the name suggests it until somebody picks',
+  /const offered = kindTouched \? kind : \(suggestedKind\(departmentId, deptName, name, teams\) \?\? ''\)/.test(org))
+ok('"Add member" offers only those the database accepts', /\.filter\(\(u\) => teamsForRole\(u\.role, \[team\]\)\.length > 0\)/.test(org))
+ok('...and says why about the rest', /data-testid="team-cannot-join"/.test(org))
 ok('the invite box says why no team is offered', /data-testid="invite-no-team"/.test(page))
 ok('the people are re-read after an invitation', /void refreshPeople\(\)\s*setSent\(true\)/.test(page))
 ok('...the invite goes on to the mailbox', /data-testid="invite-connect-mailbox"/.test(page) && /<AdminEmailConnectModal\s+user=\{\{ id: newUserId/.test(page))

@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026** (Leave and the SimplePay export, at the top of Start here; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -18,6 +18,49 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+00000000000000000. **23 Oct: USERS, DEPARTMENTS AND TEAMS IN ONE PLACE** (Stephan; migration in §5, open questions §4 0000).
+   The firm: "There's two different tabs for users and designing teams ... this should live in the same
+   environment ... every department has a head, and then every team has a lead ... reception, which is just
+   one person. But they have other certain functionalities."
+   - **Settings -> Users has two tabs: All users and Departments & teams** (`?users=departments`). The
+     **Teams** item is gone; `?tab=Teams` (bookmarks, old links) lands on Departments & teams.
+   - **All users**: columns User, Department, Team, Role. An Administrator places a person by choosing a
+     department and then a team; the team list is the department's teams the ROLE may join. A new
+     department drops the team; a team brings its department (`placeInDepartment` / `placeInTeam`). Grouped
+     by the STORED department (heading names the head), "Not in a department" last; with no departments
+     loaded it falls back to the role's grouping (byDepartment). Add User asks the department too.
+   - **Departments & teams**: a tree (department, head, count; its teams with lead and count; "Without a
+     team") and a pane. Department pane: head + Change, its teams, its people (add / take out), duties,
+     rename, remove only when empty. Team pane: department + Move to (its people move with it), lead +
+     Change (members only), members (add / take out; the lead cannot be taken out), who may join (the kind),
+     rename, remove only when empty. Tree and pane stack under 1024px (iPad).
+   - **Data**: `departments` (name unique, head_id, duties text[], sort), `teams.department_id` (not null),
+     `teams.lead_id`, `profiles.department_id`. Rules held IN THE DATABASE: a person's department follows
+     their team; moving a team moves its people; a lead is a member; a head is in the department; a lead or
+     head cannot leave their post's team/department until somebody else holds it; a team or department is
+     removed only empty. Probed rolled back with Stephan, Ryno (sales rep) and Antoinette (agent).
+   - **Seeded on staging**: Administration (4), Sales (3, head Felicia Thobejane), Communications (0), Call
+     centre (8). Teams: "Admin" -> **Administration** (its two members are Administrators -- the seed puts
+     a team where all its members' roles agree, else by kind; filing two Administrators under Sales would
+     have been the seed inventing a mistake), "Client Services" and "Marketing" -> Sales, "Call Centre" and
+     "Line Breakers" -> Call centre. Marketing's lead: Felicia (the only leader-role member). **Nothing was
+     deleted**: the firm tidies "Admin", "Client Services" and "Marketing" themselves.
+   - **PERMISSIONS STAY ROLE-BASED.** `departmentOf(role)` / ROLE_DEPARTMENTS still decide dashboards,
+     collectors and which kind of team a role joins; teams.kind and `profiles_team_matches_role` unchanged.
+   - **Duties** (`src/lib/duties.ts`, closed; `departments_duties_known` in the DB): **transfer_calls**
+     (shown, grants nothing -- call transfer is not built) and **reassign_accounts** = `book.hand_out`, the
+     same tick `canHandOutAccounts` reads; `has_capability()` now reads department duties too (revoke still
+     last). NOT `book.reassign` (leads/deals RLS decides that by role). A duty can only grant what
+     `DUTY_MAY_GRANT` / `duty_grantable()` allow (book.hand_out only) -- never money/trust/pay/settings.
+     `protect_profile_privileged_fields` now also keeps a non-Administrator from changing their own
+     `department_id`. AuthContext reads the department's duties onto `currentUser.duties`; the people list
+     never carries duties (CapabilitiesModal would save them back as grants).
+   - **Note**: account hand-out is enforced in the BROWSER only today -- `debtor_accounts_update` lets any
+     signed-in user write `assigned_to`. The duty therefore opens the hand-out buttons; it did not need a
+     new RLS gate because there is none for anybody. Closing that is a separate decision (§4 0000 iv).
+   - QA: check-departments-teams (106, every rule break-tested), check-departments/field-widths/user-setup/
+     row-mappers updated for the move, e2e/settings-users (61: create department, team in it, member, lead,
+     allocate from All users, Teams tab gone, iPad stacking). e2e run on port 5451.
 0000000000000000. **23 Oct: LEAVE, AND THE EXPORT FOR SIMPLEPAY** (Stephan; migration in §5, open questions §4 000).
    - **Leave** (People -> **Leave**, `/people/leave`, `/people/leave/:userId`). The firm: "Me and Camille
      and any administrator can see the leave. Team leaders can also see the leave of their teams. Leaves
@@ -1463,6 +1506,22 @@ The four that stood here at the start of the fifth session were answered by the 
 
 Do not guess these. Each one changes money.
 
+0000. **DEPARTMENTS AND TEAMS (23 Oct, built -- see Start here).** Open:
+   (i) **Heads**: only Sales got one (Felicia). Administration, Communications and Call centre have none --
+   choose them on Departments & teams.
+   (ii) **Tidy the stand-in teams**: "Admin" (now under Administration), "Client Services" and "Marketing"
+   (Sales). Remove only when empty; move people first.
+   (iii) **Leave should follow the structure at merge**: `leave_visible()` / `leaveVisibleTo` (the leave
+   session, not touched here) still read a team leader off the ROLE. `team_lead_of(user)` and
+   `department_head_of(user)` (SQL) and `teamLeadOf` / `departmentHeadOf` (orgStructure.ts) answer it off the
+   lead and head the firm now sets. Switch leave to them when the two branches meet (and decide whether a
+   department head sees the whole department's leave).
+   (iv) **Account hand-out has no database gate for anybody** (`debtor_accounts_update` is any signed-in
+   user). The duty widens the browser gate only, as the role does. Say if the hand-out should be enforced
+   in the database (a trigger on `assigned_to` asking `has_capability('book.hand_out')`).
+   (v) **Should a duty ever grant more?** Today only `book.hand_out`. Widening `DUTY_MAY_GRANT` and
+   `duty_grantable()` is a deliberate change with a check holding both.
+
 000. **LEAVE AND SIMPLEPAY (23 Oct, built -- see Start here).** Open:
    (i) **Annual accrual**: built as 1.25 days per COMPLETED month (15/yr). The BCEA's alternative is 1 day
    per 17 days worked (about 14.7/yr); `annualByDaysWorked` exists if the firm prefers it.
@@ -1618,6 +1677,19 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **Departments and teams (23 Oct, `departments_and_teams`, the very end of schema.sql; staging only)**:
+  `departments` (+ unique lower(name), duties closed by `departments_duties_known`) + RLS (select signed-in,
+  write Administrator); `teams.department_id` (not null, restrict) + `teams.lead_id` (set null);
+  `profiles.department_id` (restrict); `departments.head_id` (set null); seed (4 departments, teams by
+  members' agreed role-department else kind, profiles by team else role, one lead, one head);
+  `role_department(text)`; triggers `protect_profile_team_department` (department follows team; a lead/head
+  cannot leave the post), `teams_lead_is_member`, `teams_department_moves_members`,
+  `departments_head_is_member`, `teams_removed_only_when_empty` / `departments_removed_only_when_empty`
+  (`refuse_removing_occupied`); `protect_profile_privileged_fields` (+ department_id; live definition read
+  first); `duty_grantable()`, `duty_capabilities(text)`, `has_capability(text)` (+ duties, revoke last);
+  `team_lead_of(uuid)`, `department_head_of(uuid)`. Probed in a rolled-back transaction first. **Not in
+  clear_staging** -- it is configuration, like teams (check-clear-staging's KEPT list now names it).
+  **Production needs it** (its seed reads production's own people and teams).
 - **Leave (23 Oct, `leave_and_employee_number` then `leave_opening_quarter_days`, the very end of
   schema.sql; staging only)**: `role_capabilities` (Administrator + `people.leave`; the live definition
   read first), `leave_visible(uuid)` and `may_record_leave()` (security invoker), `leave_records` + trigger

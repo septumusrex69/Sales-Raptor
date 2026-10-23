@@ -1,4 +1,5 @@
 import type { User, UserRole } from '../types'
+import { dutyCapabilities } from './duties.js'
 
 /**
  * WHAT A PERSON MAY DO, AS A THING YOU CAN GIVE SOMEBODY.
@@ -426,14 +427,27 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
  * Postgres and a capability removed from the code leaves rows behind; a stale name must not stop
  * somebody signing in, and `check-capabilities` is what keeps the columns tidy.
  */
+/*
+ * AND WHAT THEIR DEPARTMENT ADDS (23 Oct). `duties` is read off the person's department -- AuthContext
+ * fills it for the signed-in person -- and passes through dutyCapabilities, which can only ever give
+ * what DUTY_MAY_GRANT allows: book work, never money or settings (see duties.ts). Added BEFORE the
+ * revokes, so a hand-out taken from one person stays taken even in a department that moves accounts.
+ * has_capability() in the database reads the same three sources in the same order.
+ *
+ * Absent on the people list on purpose: CapabilitiesModal edits a person's own grants from
+ * capabilitiesOf(user), and a duty counted there would be saved back as a grant.
+ */
+export type CapabilityHolder = Pick<User, 'role' | 'grants' | 'revokes'> & { duties?: readonly string[] }
+
 export function capabilitiesOf(
-  user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined,
+  user: CapabilityHolder | null | undefined,
 ): Set<Capability> {
   if (!user) return new Set()
   const known = (list: string[] | undefined) =>
     (list ?? []).filter((c): c is Capability => c in CAPABILITIES)
   const out = new Set<Capability>(ROLE_CAPABILITIES[user.role] ?? [])
   for (const c of known(user.grants)) out.add(c)
+  for (const c of dutyCapabilities(user.duties)) out.add(c)
   for (const c of known(user.revokes)) out.delete(c)
   return out
 }
@@ -450,7 +464,7 @@ export function capabilitiesOf(
  * must draw the refusing version rather than briefly offering a button.
  */
 export function can(
-  user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined,
+  user: CapabilityHolder | null | undefined,
   capability: Capability,
 ): boolean {
   if (!user) return false

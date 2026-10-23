@@ -10,6 +10,7 @@ interface ProfileRow {
   email: string
   role: UserRole
   team_id: string | null
+  department_id: string | null
   whatsapp: string | null
   status: 'Active' | 'Inactive'
   phone: string | null
@@ -29,13 +30,21 @@ interface ProfileRow {
   start_date: string | null
 }
 
-function mapProfileRow(row: ProfileRow): User {
+function mapProfileRow(row: ProfileRow, departmentDuties: string[] = []): User {
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     role: row.role,
     teamId: row.team_id ?? undefined,
+    /* The department they sit in (23 Oct). By hand, like everything here. */
+    departmentId: row.department_id ?? undefined,
+    /*
+     * WHAT THEIR DEPARTMENT ADDS -- read off the department row by loadProfile below, not off the
+     * profile. Missing here, a receptionist whose department moves accounts would be refused the
+     * hand-out in the browser while the database let her do it.
+     */
+    duties: departmentDuties,
     status: row.status,
     phone: row.phone ?? undefined,
     whatsapp: row.whatsapp ?? undefined,
@@ -136,7 +145,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle<ProfileRow>()
         if (!active) return
         if (data) {
-          setCurrentUser(mapProfileRow(data))
+          /* The department's duties, a second read. A failure here costs the person a duty (the
+             narrower answer), never a sign-in -- has_capability() still decides in the database. */
+          let duties: string[] = []
+          if (data.department_id) {
+            const { data: dept } = await supabase.from('departments').select('duties')
+              .eq('id', data.department_id).maybeSingle<{ duties: string[] | null }>()
+            if (!active) return
+            duties = dept?.duties ?? []
+          }
+          setCurrentUser(mapProfileRow(data, duties))
           setProfileError(null)
           inFlightFor = null
           return
