@@ -27,6 +27,20 @@ async function deployedBundleUrl(): Promise<string | null> {
  * Someone is mid-task if a modal is open or they're typing. Reloading then would throw away
  * a half-written email, so in that case the banner waits for them instead.
  */
+/*
+ * NEVER UNDER SOMEBODY SIGNING (23 Oct). The firm: a client "tried to put in her initials, it closed
+ * everything, and she had to refill" the whole document -- twice, two signers, while a deploy went
+ * out. Drawing on the pad lets go of the focused box (SignaturePad blurs it so the keyboard drops),
+ * so the page looked idle to the test below and the new version reloaded it, taking every blank
+ * they had filled in. A signing page is one sitting by somebody outside the firm who cannot be told
+ * to save first; it simply never reloads, and the next page they open is the new version anyway.
+ */
+const NEVER_RELOAD_UNDER = ['/sign/']
+
+export function holdsReload(pathname: string): boolean {
+  return NEVER_RELOAD_UNDER.some((p) => pathname.startsWith(p))
+}
+
 function safeToReloadNow(): boolean {
   if (document.querySelector('[data-modal-open]')) return false
   const el = document.activeElement
@@ -70,6 +84,8 @@ export function NewVersionWatcher() {
 
     async function check() {
       if (cancelled || document.hidden) return
+      /* No banner either: a debtor has no use for "a new version of Raptor". */
+      if (holdsReload(window.location.pathname)) return
       try {
         const deployed = await deployedBundleUrl()
         if (cancelled) return

@@ -646,6 +646,17 @@ the problem to the next session rather than solved it.
 
 
 
+
+## 23 Oct (S10) — signing: the page reloaded under the signer at the initials
+
+Alianna and Bonnitta (testing mandates, 11:50–12:08) each lost every filled blank when they reached
+the initials, and both later signed. Cause: `NewVersionWatcher` reloads when a new deploy is live
+and the page looks idle (no modal, no focused input). `SignaturePad` blurs the focused box on the
+first stroke so the iPad keyboard drops — so the signing page looked idle the moment they drew,
+and deploys were going out at that hour. Fix: the watcher never checks on `/sign/*` (no reload, no
+banner). `check-sign-no-reload`. Same risk remains on any staff page with typed-but-unsaved work
+outside a modal and with nothing focused; not seen yet.
+
 ## 23 Oct (S10) — password reset: why Nicole's links failed
 
 Auth log, staging: Nicole pressed "Forgot password?" at 12:04:59, 12:06:39 and 12:07:53; each link
