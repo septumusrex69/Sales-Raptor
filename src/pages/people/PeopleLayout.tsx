@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router-dom'
-import { CalendarRange, Percent, Users } from 'lucide-react'
+import { CalendarRange, History, Percent, Users } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
 /**
@@ -22,6 +22,7 @@ const ITEMS: RailItem[] = [
   { to: '/people', label: 'People', icon: Users, end: true },
   { to: '/people/month', label: 'Month summary', icon: CalendarRange },
   { to: '/people/commission', label: 'Commission rules', icon: Percent },
+  { to: '/people/carried', label: 'Carried over', icon: History },
 ]
 
 export function PeopleLayout() {

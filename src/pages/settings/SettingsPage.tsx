@@ -31,6 +31,7 @@ import type { Target, TargetMetric } from '../../types'
 import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
 import { getCurrentSalesMonth } from '../../lib/salesMonth'
 import { formatCurrency, TODAY } from '../../data/mockData'
+import { saveStartDate } from '../../lib/peopleApi'
 
 /* Workflows left this list at the firm's instruction -- a workflow is not a setting, it is
    content somebody writes and publishes a version of, and it lives in the library beside the
@@ -969,13 +970,14 @@ function EditUserModal({
   accessToken: string
   onClose: () => void
   onSaveName: (name: string) => void
-  /** Phone and WhatsApp, written straight to the profile like the name is. */
-  onSaveDetails: (patch: { phone?: string; whatsapp?: string }) => void
+  /** Phone, WhatsApp and the start date, written straight to the profile like the name is. */
+  onSaveDetails: (patch: { phone?: string; whatsapp?: string; startDate?: string }) => void
 }) {
   const [name, setName] = useState(user.name)
   const [email, setEmail] = useState(user.email)
   const [phone, setPhone] = useState(user.phone ?? '')
   const [whatsapp, setWhatsapp] = useState(user.whatsapp ?? '')
+  const [startDate, setStartDate] = useState(user.startDate ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -987,9 +989,10 @@ function EditUserModal({
     if (name.trim() !== user.name) onSaveName(name.trim())
     /* Only what changed, and `undefined` where a field was cleared — updateUser patches the row,
        so sending an empty string would write one rather than emptying the column. */
-    const details: { phone?: string; whatsapp?: string } = {}
+    const details: { phone?: string; whatsapp?: string; startDate?: string } = {}
     if (phone.trim() !== (user.phone ?? '')) details.phone = phone.trim() || undefined
     if (whatsapp.trim() !== (user.whatsapp ?? '')) details.whatsapp = whatsapp.trim() || undefined
+    if (startDate !== (user.startDate ?? '')) details.startDate = startDate || undefined
     if (Object.keys(details).length > 0) onSaveDetails(details)
     if (email.trim() !== user.email) {
       try {
@@ -1040,6 +1043,13 @@ function EditUserModal({
           <input className={inputClass} value={whatsapp}
             placeholder="Only if it differs from the number above"
             onChange={(e) => setWhatsapp(e.target.value)} />
+        </FormField>
+        {/* THE START DATE, editable by any Administrator (the firm, 23 Oct). It moves a starter's
+            pro-rata basic, so the database keeps it to Administrators and writes every change to the
+            pay history. */}
+        <FormField label="Start date">
+          <input type="date" className={inputClass} value={startDate}
+            onChange={(e) => setStartDate(e.target.value)} data-testid="edit-start-date" />
         </FormField>
         {/* On the person, where the firm looks for it, as well as under Integrations. Saved as it is
             picked, like the Integrations list does. */}
@@ -1161,6 +1171,14 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
    * stay theirs.
    */
   const [hasLeft, setHasLeft] = useState(false)
+  /*
+   * THE START DATE, ASKED AT THE DOOR. The firm, 23 Oct: "A user start date can also be asked for any
+   * administrator" -- it decides a new starter's pro-rata basic, so it is asked when the person is
+   * added rather than hunted for later. On the PROFILE (profiles.start_date), not the pay record: it
+   * is not pay data, and every Administrator adding people may set it.
+   */
+  const [startDate, setStartDate] = useState('')
+  const [startError, setStartError] = useState<string | null>(null)
   const [teamId, setTeamId] = useState('')
   /*
    * A TEAM CHOSEN BEFORE THE ROLE CHANGED IS DROPPED. Pick a sales team, then change the role to
@@ -1204,7 +1222,12 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
       /* SHOWN AT ONCE. The profile row exists the moment the invitation is sent (handle_new_user),
          so the list re-reads now rather than "once they accept" -- the firm, 22 Oct: "it doesn't
          show immediately that there's a user. You need to refresh." */
-      setNewUserId(typeof body.userId === 'string' ? body.userId : null)
+      const id = typeof body.userId === 'string' ? body.userId : null
+      setNewUserId(id)
+      if (id && startDate) {
+        await saveStartDate(id, startDate).catch((e: unknown) =>
+          setStartError(e instanceof Error ? e.message : 'The start date was not saved.'))
+      }
       void refreshPeople()
       setSent(true)
     } catch {
@@ -1231,6 +1254,10 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
           Invite sent to <span className="font-medium text-slate-800">{email}</span>. They are on the list
           now, with the role{teamId ? ' and team' : ''} you chose, and get an email to set their password.
         </p>
+        {startDate && !startError && (
+          <p className="text-xs text-slate-500 mt-2" data-testid="invite-start-saved">Start date: {startDate}.</p>
+        )}
+        {startError && <p className="text-xs text-[var(--c-rust-deep)] mt-2">{startError} Set it on Edit User.</p>}
         {/*
           THE REST OF THEIR SET-UP, IN THE SAME SITTING. The firm: "when you're loading a person on
           as a user, it should immediately ask you for the email address settings ... the same
@@ -1308,6 +1335,15 @@ function InviteUserModal({ accessToken, teams, onClose }: { accessToken: string;
           * a department -- byDepartment keeps them out of the headcounts on purpose -- so a team
           * on the record would be a field that changes nothing anybody can see.
         */}
+        {!hasLeft && (
+          <FormField label="Start date">
+            <input type="date" className={inputClass} value={startDate}
+              onChange={(e) => setStartDate(e.target.value)} data-testid="invite-start-date" />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Their first working day. A starter is paid the basic pro rata from this day to the 25th.
+            </p>
+          </FormField>
+        )}
         {!hasLeft && (
         <FormField label="Team (optional)">
           <select className={inputClass} value={teamId} onChange={(e) => setTeamId(e.target.value)}>

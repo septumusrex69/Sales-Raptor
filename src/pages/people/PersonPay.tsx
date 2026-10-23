@@ -13,8 +13,8 @@ import {
   periodKeyOf, periodLabel, shortDay, type PayBasis, type PayStatement,
 } from '../../lib/clerkCommission.ts'
 import {
-  fetchClientLedgers, fetchCommissionPayments, fetchEmployeeProfiles, fetchProfileHistory, saveEmployeeProfile,
-  type EmployeeProfile, type ProfileChange,
+  fetchCarried, fetchCommissionPayments, fetchCommissionStart, fetchEmployeeProfiles, fetchPayoverRuns, fetchProfileHistory,
+  saveEmployeeProfile, type EmployeeProfile, type ProfileChange,
 } from '../../lib/peopleApi'
 import { fetchCollectorPerformance } from '../../lib/collectorStats.ts'
 import type { CollectorStats } from '../../lib/collectorScore.ts'
@@ -22,7 +22,7 @@ import { clockToday } from '../../lib/clock.ts'
 import { rand } from '../../lib/money'
 
 const FIELD_LABEL: Record<string, string> = {
-  job_title: 'Job title', started_on: 'Start date', pay_basis: 'Pay basis', basic_salary: 'Basic salary', notes: 'Notes',
+  job_title: 'Job title', start_date: 'Start date', started_on: 'Start date', ended_on: 'End date', pay_basis: 'Pay basis', basic_salary: 'Basic salary', notes: 'Notes',
 }
 
 /** "From midnight on the 11th to the end of the 10th", as the floor asks collector_performance. */
@@ -75,14 +75,21 @@ export function PersonPay() {
     setStatement(null); setStError(null)
     const p = periodForKey(periodKey)
     ;(async () => {
-      const payments = hasCommissionScheme(basis) ? await fetchCommissionPayments(p.start, p.end, userId) : []
-      const { ledgers } = await fetchClientLedgers(clientsWithPtc(payments))
-      return buildStatement({ periodKey, basis, basic: profile?.basicSalary ?? null, payments, ledgers })
+      const scheme = hasCommissionScheme(basis)
+      const [payments, carried, commissionStart] = scheme
+        ? await Promise.all([fetchCommissionPayments(p.start, p.end, userId), fetchCarried(userId), fetchCommissionStart()])
+        : [[], [], null]
+      const { runs } = await fetchPayoverRuns(clientsWithPtc(payments, carried))
+      return buildStatement({
+        periodKey, basis, basic: profile?.basicSalary ?? null,
+        startedOn: person?.startDate ?? null, endedOn: profile?.endedOn ?? null,
+        payments, runs, carried, commissionStart,
+      })
     })()
       .then((s) => { if (live) setStatement(s) })
       .catch((e) => { if (live) setStError(e instanceof Error ? e.message : 'Could not work out the pay.') })
     return () => { live = false }
-  }, [loaded, periodKey, basis, profile?.basicSalary, userId])
+  }, [loaded, periodKey, basis, profile?.basicSalary, profile?.endedOn, person?.startDate, userId])
 
   /* ---------------- the floor's figures ---------------- */
   const [perf, setPerf] = useState<CollectorStats | null>(null)
@@ -107,7 +114,7 @@ export function PersonPay() {
       </div>
       {error && <Card className="p-4 text-sm text-negative-700 bg-negative-50 border-negative-100">{error}</Card>}
 
-      {loaded && <ProfileForm key={profile?.updatedAt ?? 'new'} userId={userId} profile={profile} defaultBasis={defaultPayBasis(person.role)} onSaved={loadProfile} />}
+      {loaded && <ProfileForm key={profile?.updatedAt ?? 'new'} userId={userId} profile={profile} startDate={person.startDate ?? null} defaultBasis={defaultPayBasis(person.role)} onSaved={loadProfile} />}
 
       <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
         <h2 className="text-lg font-semibold tracking-tight text-slate-800">Pay</h2>
@@ -165,14 +172,16 @@ export function PersonPay() {
   )
 }
 
-function ProfileForm({ userId, profile, defaultBasis, onSaved }: {
+function ProfileForm({ userId, profile, startDate, defaultBasis, onSaved }: {
   userId: string
   profile: EmployeeProfile | null
+  /** profiles.start_date: any Administrator sets it on the user, so it is shown here, not edited. */
+  startDate: string | null
   defaultBasis: PayBasis
   onSaved: () => Promise<void>
 }) {
   const [jobTitle, setJobTitle] = useState(profile?.jobTitle ?? '')
-  const [startedOn, setStartedOn] = useState(profile?.startedOn ?? '')
+  const [endedOn, setEndedOn] = useState(profile?.endedOn ?? '')
   const [payBasis, setPayBasis] = useState<string>(profile?.payBasis ?? '')
   const [basic, setBasic] = useState(profile?.basicSalary === null || profile?.basicSalary === undefined ? '' : String(profile.basicSalary))
   const [notes, setNotes] = useState(profile?.notes ?? '')
@@ -182,9 +191,9 @@ function ProfileForm({ userId, profile, defaultBasis, onSaved }: {
   const basicValue = basic.trim() === '' ? null : Number(basic.replace(/[\s,]/g, ''))
   const bad = basicValue !== null && (!Number.isFinite(basicValue) || basicValue < 0)
   const dirty = useMemo(() => (
-    jobTitle !== (profile?.jobTitle ?? '') || startedOn !== (profile?.startedOn ?? '')
+    jobTitle !== (profile?.jobTitle ?? '') || endedOn !== (profile?.endedOn ?? '')
     || payBasis !== (profile?.payBasis ?? '') || basicValue !== (profile?.basicSalary ?? null) || notes !== (profile?.notes ?? '')
-  ), [jobTitle, startedOn, payBasis, basicValue, notes, profile])
+  ), [jobTitle, endedOn, payBasis, basicValue, notes, profile])
 
   async function save() {
     setBusy(true); setMsg(null)
@@ -192,7 +201,7 @@ function ProfileForm({ userId, profile, defaultBasis, onSaved }: {
       await saveEmployeeProfile({
         userId,
         jobTitle: jobTitle.trim() || null,
-        startedOn: startedOn || null,
+        endedOn: endedOn || null,
         payBasis: (payBasis || null) as PayBasis | null,
         basicSalary: basicValue,
         notes: notes.trim() || null,
@@ -210,8 +219,15 @@ function ProfileForm({ userId, profile, defaultBasis, onSaved }: {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 text-sm">
         <label className="space-y-1"><span className="text-slate-500 text-[12px]">Job title</span>
           <input className={inputClass} value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} /></label>
-        <label className="space-y-1"><span className="text-slate-500 text-[12px]">Start date</span>
-          <input type="date" className={inputClass} value={startedOn} onChange={(e) => setStartedOn(e.target.value)} /></label>
+        {/* THE START DATE IS ON THE USER, where any Administrator sets it (the firm, 23 Oct), and only
+            read here -- one start date, not a second copy in the pay record that drifts. */}
+        <div className="space-y-1"><span className="text-slate-500 text-[12px]">Start date</span>
+          <div className="py-1.5 text-slate-700" data-testid="start-date">
+            {startDate ? shortDay(startDate) : <span className="text-slate-400">Not set</span>}
+            <span className="block text-[11px] text-slate-400">Set under Settings → Users (Edit user).</span>
+          </div></div>
+        <label className="space-y-1"><span className="text-slate-500 text-[12px]">End date (a leaver: paid to this day)</span>
+          <input type="date" className={inputClass} value={endedOn} onChange={(e) => setEndedOn(e.target.value)} data-testid="ended-on" /></label>
         <label className="space-y-1"><span className="text-slate-500 text-[12px]">Pay basis</span>
           <select className={inputClass} value={payBasis} onChange={(e) => setPayBasis(e.target.value)} data-testid="pay-basis">
             <option value="">From their role: {PAY_BASIS_LABEL[defaultBasis].split(' (')[0]}</option>

@@ -26,6 +26,7 @@ interface ProfileRow {
   diary_reserve: number | null
   grants: string[] | null
   revokes: string[] | null
+  start_date: string | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -69,6 +70,8 @@ function mapProfileRow(row: ProfileRow): User {
      */
     grants: row.grants ?? undefined,
     revokes: row.revokes ?? undefined,
+    /* Listed by hand like everything above, or currentUser.startDate reads undefined for ever. */
+    startDate: row.start_date ?? undefined,
   }
 }
 

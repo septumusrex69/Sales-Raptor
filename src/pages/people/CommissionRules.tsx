@@ -4,7 +4,7 @@ import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
-import { FULL_CLERK_RATE, FULL_RATE_FROM, shortDay } from '../../lib/clerkCommission.ts'
+import { EXCEPTION_MAX, exceptionRateOk, FULL_CLERK_RATE, FULL_RATE_FROM, shortDay } from '../../lib/clerkCommission.ts'
 import { addOverride, fetchOverrides, findAccountByCase, type CommissionOverride } from '../../lib/peopleApi'
 import { clockToday } from '../../lib/clock.ts'
 
@@ -62,10 +62,14 @@ export function CommissionRules() {
           {FULL_RATE_FROM * 100}% or more the share is {FULL_CLERK_RATE * 100}%; below that it is a tenth of the client’s rate —
           20% gives 2%, 15% gives 1.5%.
         </p>
-        <p>An exception on an account comes first, then one on the client, then the rule.</p>
+        {/* THE FIRM'S WORD IS "EXCEPTIONS", and the firm's ceiling (23 Oct): "anything below 3%". */}
+        <p data-testid="exception-explainer">
+          An <b>exception</b> is a different clerk commission for one client or one account, instead of the standard rule; never
+          above {EXCEPTION_MAX * 100}%. An exception on an account comes first, then one on the client, then the rule.
+        </p>
         <p>
-          A payment made straight to the client (a PTC) earns the same, but it is paid only once that client owes the firm nothing,
-          in full, in the month that happens.
+          A payment made straight to the client (a PTC) earns the same, but it is paid only once that client’s payover run shows
+          nothing outstanding after set-off — in full, on the next pay day (the 25th).
         </p>
       </Card>
 
@@ -78,7 +82,7 @@ export function CommissionRules() {
         <>
           <h2 className="text-lg font-semibold tracking-tight text-slate-800 pt-2">In force today</h2>
           {current.length === 0
-            ? <Card className="p-4 text-sm text-slate-500">No exceptions. Every payment is on the rule.</Card>
+            ? <Card className="p-4 text-sm text-slate-500">No exceptions. Every payment is on the standard rule.</Card>
             : <OverrideTable rows={current} nameOf={(id) => userById(id ?? undefined)?.name ?? ''} testid="overrides-current" />}
           {rows.length > 0 && (
             <>
@@ -135,7 +139,8 @@ function OverrideForm({ companies, onSaved }: { companies: { id: string; name: s
   const [msg, setMsg] = useState<string | null>(null)
 
   const rateValue = toRule ? null : Number(rate.replace(',', '.'))
-  const rateBad = !toRule && (rate.trim() === '' || !Number.isFinite(rateValue) || (rateValue as number) < 0 || (rateValue as number) > 10)
+  /* Typed as a percentage, held as a fraction: 2.5 is 0.025. Never above 3% (EXCEPTION_MAX). */
+  const rateBad = !toRule && (rate.trim() === '' || !Number.isFinite(rateValue) || !exceptionRateOk((rateValue as number) / 100))
   const ready = !rateBad && reason.trim().length >= 3 && !!from && (on === 'client' ? !!companyId : caseNumber.trim() !== '')
 
   async function save() {
@@ -183,7 +188,7 @@ function OverrideForm({ companies, onSaved }: { companies: { id: string; name: s
         )}
         <label className="space-y-1"><span className="text-slate-500 text-[12px]">Clerk’s rate (%)</span>
           <input className={inputClass} inputMode="decimal" value={toRule ? '' : rate} disabled={toRule}
-            onChange={(e) => setRate(e.target.value)} placeholder="e.g. 2.5" data-testid="override-rate" />
+            onChange={(e) => setRate(e.target.value)} placeholder="0 to 3, e.g. 2.5" data-testid="override-rate" />
           <span className="flex items-center gap-1.5 text-[12px] text-slate-500">
             <input type="checkbox" checked={toRule} onChange={(e) => setToRule(e.target.checked)} /> Back to the rule
           </span></label>
@@ -194,7 +199,7 @@ function OverrideForm({ companies, onSaved }: { companies: { id: string; name: s
       </div>
       <div className="mt-3 flex items-center gap-3">
         <Button variant="primary" onClick={() => void save()} disabled={busy || !ready}>Save exception</Button>
-        {!toRule && rate.trim() !== '' && rateBad && <span className="text-[12px] text-negative-700">A rate from 0% to 10%.</span>}
+        {!toRule && rate.trim() !== '' && rateBad && <span className="text-[12px] text-negative-700" data-testid="override-rate-bad">A rate from 0% to {EXCEPTION_MAX * 100}%.</span>}
         {msg && <span className="text-[12px] text-slate-500">{msg}</span>}
       </div>
     </Card>

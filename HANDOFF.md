@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **22 October 2026** (People and pay added at the top of Start here); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -21,6 +21,48 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 00000000000000. **S10, 22 Oct: THE OPT-IN NOW NEEDS A SECOND PRESS** (the firm agreed). The /opt-in page asks 'status' on
    opening and records the yes only on "Confirm — keep me informed", so a mail system's link scanner
    cannot leave a consent nobody gave. e2e/news-prospects holds it (opening records nothing).
+000000000000000. **23 Oct: PEOPLE, ROUND TWO -- THE FIRM'S ANSWERS** (Stephan, 23 Oct; migration in §5). All
+   in `src/lib/clerkCommission.ts` (pure) + check-clerk-commission (247) + e2e/people (23).
+   - **Pay day the 25th.** Commission earned 11th-10th, paid on the 25th of the month the period ends
+     (11 Sep-10 Oct -> 25 Oct); the basic for the salary month 26th-25th, the same day. On every
+     statement and on the Month summary (`paydayOf`, `salaryMonth`).
+   - **Pro-rata basic** (`basicFor`): basic x working days worked (both ends counted) / working days in
+     the whole salary month 26th-25th, SA public holidays out (workingDays.ts). The firm's example holds
+     (start Mon 23 Nov 2026, the 25th a Wednesday -> 3 of 23). Start after the 25th -> nothing this
+     month. A leaver: optional **end date** on the pay profile, paid to it, nothing after. Statement
+     says "Pro rata: 3 of 23 working days ...". **The divisor is the assumption to confirm (§4 00).**
+   - **Start date asked when a user is added -- by EVERY Administrator** (the firm changed this mid-
+     task: "A user start date can also be asked for any administrator"). It is not pay data, so it is
+     `profiles.start_date` (any Administrator writes it; `protect_profile_privileged_fields` reverts it
+     for anyone else; every change is written to the pay history), asked in Add User (not for a
+     has-left record) and editable on Edit User. People reads it from there; the pay record's own
+     start date was removed. AuthContext.mapProfileRow carries it.
+   - **Reversals** read "Reversed: <date>, <case>, <amount> -- commission taken back. Paid 25 Oct 2026
+     (October 2026). Reason: ..." (reason from `account_payments.reversal_reason`), negative, in the
+     month of reversal. A PTC released and later reversed says the pay day it was released on.
+   - **PTC release by the PAYOVER RUN, not the ledger** (`releaseOf`). Each PTC now carries the run it
+     rode (`clerk_commission_lines.payover_run_id`: the latest allocation a run claimed). Released when
+     that run is APPROVED (approved/sent/paid) with `net_payover >= 0` -- nothing outstanding after set-
+     off -- on the first 25th on or after the approval (a run approved on the 11th pays that month's
+     25th; on the 27th, next month's). A run below nil (the "Client owes us" carry) holds it; it is
+     released at the first LATER run for that client with net >= 0, or when that shortfall was paid into
+     the business account (`settled_direct_receipt_id`'s `received_on`). Not on a run / run not approved
+     -> waiting. The waiting client says "The payover X (cycle to 10 Oct) left R600 outstanding; owing
+     since payover Y". Read off `clerk_commission_runs` (the runs as recompute_payover_run left them,
+     void left out; refuses without people.pay and without the trust or business tick -> everything
+     held, said on the page). `clerk_commission_ledgers` is gone.
+   - **Exceptions 0-3%** (the firm: "anything below 3%") in the database and the screen, with the
+     sentence on Commission rules: "a different clerk commission for one client or one account, instead
+     of the standard rule; never above 3%". The screen already said "exception"; nothing said override.
+   - **Clean cut** (People -> **Carried over**): a firm-wide **commission start date**
+     (`people_settings`, people.pay only, changes logged) -- payments before it earn nothing and their
+     reversals take nothing back. **Carried-over PTC commission**: (clerk, client, amount, note, source)
+     typed in or imported from .csv/.xlsx (Clerk = name or email, Client = name or code, Amount, optional
+     Note; matched exactly else a person picks; preview before Add; the file is never stored).
+     Append-only; a correction is a reversing entry with a reason. Each waits like a PTC and is released
+     by the same run rule starting at the first run for that client whose cycle ends on or after the
+     commission start date; drawn as "Carried over" in the PTC sections.
+   - Rounding unchanged (confirmed).
 00000000000000. **22 Oct: PEOPLE -- PROFILES, PAY AND THE CLERKS' COLLECTION COMMISSION** (the firm, Stephan:
    "start building ... salaries ... an employee profile and an HR type of function"). A new workspace
    **People** at `/people` (People list, a person's profile + pay statement, Month summary, Commission
@@ -1378,15 +1420,31 @@ The four that stood here at the start of the fifth session were answered by the 
 
 Do not guess these. Each one changes money.
 
-00. **PEOPLE / THE CLERKS' COMMISSION (22 Oct, built as stated, each easy to turn).**
+00. **PEOPLE / THE CLERKS' COMMISSION (22 Oct; most answered 23 Oct -- see Start here).**
+   **Still open after the 23 Oct answers:**
+   (i) **THE PRO-RATA DIVISOR -- the one assumption to confirm.** Built as: basic x (working days from
+   the start date to the 25th, both counted) / (working days in that whole salary month, 26th-25th),
+   weekends and SA public holidays out. The firm's example (start Mon 23rd, 25th a Wednesday -> 3 days)
+   fixes the numerator; the divisor could instead be calendar days, or a flat 21.67. Same for a leaver.
+   (ii) **Pay day on a weekend**: shown as the 25th as written. Say if it moves to the Friday before.
+   (iii) **Which runs count for carried-over commission**: the first run whose CYCLE ENDS on or after
+   the commission start date (so a run for a cycle that ended before go-live never releases it).
+   (iv) **A short run settled by a payment into the business account** releases the held PTC on the
+   next 25th after that payment -- the payover treats it as settled; confirm.
+   (v) **A run approved after the 25th** releases on the NEXT month's 25th (the release is read on the
+   first pay day on or after the approval, so a month already paid never changes).
+   (vi) Sales / communications schemes and the KPIs, as before.
+   **Answered 23 Oct, kept here for the record:** reversal as a negative line in the month of reversal
+   (confirmed and now labelled with the pay day it was paid), rounding (confirmed), the release (now by
+   the payover run, not the ledger), exceptions capped at 3%.
    (a) **A reversed payment** is a NEGATIVE line in the pay period it is reversed in (clawback); the
-   month the money came in is left as it was paid. Firm to confirm. (The floor's collected figure, by
+   month the money came in is left as it was paid. Confirmed 23 Oct. (The floor's collected figure, by
    contrast, drops a reversed payment from every month, so for a past month the two differ by exactly
    the reversals -- said on the profile.) A receipt REJECTED after a month was paid simply disappears
    (rejection happens before approval, normally the same day); say if that ever needs a clawback too.
    (b) **Rounding**: each payment's commission to the cent, half away from zero; totals are the sum of
    the printed lines.
-   (c) **The PTC release**: the first pay period (11th-10th), from the PTC's own onwards, at whose
+   (c) **The PTC release** (SUPERSEDED 23 Oct: now by the payover run): the first pay period (11th-10th), from the PTC's own onwards, at whose
    CLOSE the PTC is approved, not reversed, and the client's ledger (`client_ledger`, the client's
    running statement) is nought or in the client's favour. So money the trust holds for the client
    counts against what they owe -- a client the firm owes on balance releases at once. Whole, never
@@ -1395,7 +1453,7 @@ Do not guess these. Each one changes money.
    account since handover; such lines say "Holder reconstructed".
    (e) **The period**: the collections month, 11th to 10th, the same as the floor and the payover
    cycle, not the calendar month. Payroll on a calendar month would show two "October"s.
-   (f) **Override cap**: an exception may be 0% to 10% of what was collected.
+   (f) **Exception cap**: 0% to 3% since 23 Oct (was 10%).
    (g) **Still to come from the firm**: the sales and communications commission schemes and the
    KPIs ("I'll share that with you later"). Those people show basic only.
 0. **WHAT COUNTS AS "A PTP MADE" FROM A CAMPAIGN (22 Oct, built as stated, easy to turn).** A promise on
@@ -1502,6 +1560,24 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **People round two (23 Oct, `people_payday_payover_release_and_carried`, the very end of schema.sql;
+  staging only)**: `profiles.start_date` (copied from `employee_profiles.started_on`, which is then
+  REMOVED -- one start date) + trigger `profile_start_date_history` (writes `start_date` changes into
+  `employee_profile_history`); `employee_profiles.ended_on`; `employee_profile_stamp` (history fields now
+  job_title, ended_on, pay_basis, basic_salary, notes); `protect_profile_privileged_fields` (+ `start_date`
+  for non-Administrators -- the live definition read first, everything kept); constraint
+  `clerk_commission_overrides_rate_upto_3` (0-3%; the old 0-10% check is left in place and decides
+  nothing); `people_settings` (one row, `commission_start`) + `people_setting_changes` + trigger
+  `people_settings_stamp`; `clerk_commission_carried` + trigger `clerk_commission_carried_stamp` + one-
+  reversal index; `clerk_commission_lines` REMOVED AND RECREATED (return type: + `reversal_reason`,
+  + `payover_run_id`); new `clerk_commission_runs(uuid[])`; `clerk_commission_ledgers` REMOVED (nothing
+  reads it); `clear_staging` (the live definition + `clerk_commission_carried` in the truncate). The
+  set-null foreign keys and the removals went in by `execute` in do-blocks (the MCP tool hangs on the
+  words). Probed on staging, rolled back: carried entry + reversal (exact negative, clerk copied), a
+  second reversal refused, a 3.5% exception refused and 3% accepted, the start-date change written to
+  history, an Administrator without people.pay sees 0 settings rows and is refused the carried insert
+  and the runs function. **No commission start date is set on staging** -- the firm sets it on
+  People -> Carried over. Production has none of this.
 - **People migration (22 Oct, `people_pay_and_clerk_commission`, the very end of schema.sql; staging
   only)**: `all_capabilities` (+ `people.pay`), `employee_profiles` + `employee_profile_history` +
   trigger `employee_profile_stamp`, `clerk_commission_overrides` + trigger
