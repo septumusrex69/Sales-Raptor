@@ -17,7 +17,13 @@ export type EmailView =
   /** Outlook's shape: the list down the left, the message you picked beside it. */
   | 'reading'
 
-const KEY = 'raptor.email.view'
+/*
+ * A NEW KEY, SO EVERYBODY STARTS IN THE READING PANE (23 Oct). The firm: "put it in default for
+ * every user ... the second pane." A changed default alone reaches only browsers that never chose;
+ * the old key also held every 'list' somebody clicked once while the pane was new. Renaming the
+ * key starts everyone on 'reading' once, and what they choose after this is kept as before.
+ */
+const KEY = 'raptor.email.view.v2'
 
 /**
  * The event that keeps two switchers in step.
@@ -32,7 +38,7 @@ export function storedEmailView(): EmailView {
     const saved = localStorage.getItem(KEY)
     if (saved === 'list' || saved === 'reading') return saved
   } catch { /* private window, or storage switched off. The default is fine. */ }
-  return 'list'
+  return 'reading'
 }
 
 export function useEmailView(): [EmailView, (next: EmailView) => void] {
