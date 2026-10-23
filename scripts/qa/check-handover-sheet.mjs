@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { HANDOVER_COLUMNS, aliasIndex, headingKey } from '../../src/lib/handoverSheet.ts'
+import { OLD_HANDOVER_HEADINGS } from '../../src/lib/handoverTemplate.ts'
 
 let pass = 0
 const failures = []
@@ -150,24 +151,10 @@ check('no heading is claimed by two different columns',
 
 /* ---------- 3. the old sheet, every heading of it ---------- */
 
-/** Exactly as they appear in the file the firm sent, in order. */
-const OLD_SHEET = [
-  'Amount', 'Interruptor Before Handover Date', 'Date of Default', 'Capital on Default',
-  'Interest Rate', 'Interest Date', 'Percentage', 'Swordfish Reference', 'Client Division',
-  'Client Prefix', 'Client Reference', 'Debtor ID', 'Debtor Firstname', 'Debtor Second Name',
-  'Debtor Surname', 'Debtor Initials', 'Debtor Title',
-  'Home Phone 1', 'Home Phone 2', 'Home Phone 3', 'Home Phone 4',
-  'Cell Phone 1', 'Cell Phone 2', 'Cell Phone 3', 'Cell Phone 4',
-  'Work Phone 1', 'Work Phone 2', 'Work Phone 3', 'Work Phone 4',
-  'Fax Number 1', 'Fax Number 2', 'Fax Number 3',
-  'Email 1', 'Email 2', 'Email 3', 'Email 4',
-  'Postal Address line 1', 'Postal Address line 2', 'Postal Address line 3',
-  'Postal Address line 4', 'Postal code',
-  'Street Address line 1', 'Street Address line 2', 'Street Address line 3',
-  'Street Address line 4', 'Street postal code',
-  'Occupation', 'Nationality', 'Passport number', 'Gender', 'Marital Status',
-  'Number of Children', 'Next of Kin Number 1', 'Next of Kin Number 2', 'Next of Kin Number 3',
-]
+/** Exactly as they appear in the file the firm sent, in order. Kept in handoverTemplate.ts since
+ *  the firm asked to download an empty copy of it: the list the check holds and the file handed
+ *  out are one list. */
+const OLD_SHEET = OLD_HANDOVER_HEADINGS
 check('the old sheet is written down in full', OLD_SHEET.length, 55)
 
 /**

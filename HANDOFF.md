@@ -19,6 +19,35 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+0000000000000000000. **23 Oct: THE HANDOVER SHEET, HANDED OUT** (Stephan; no migration, no new api/ file).
+   The firm: "Give me a copy of the handover template ... That should go out on the welcome letter as well. And
+   it should go out with the mandate as well ... Export the new handover sheet or export the old handover sheet."
+   - **One writer**: `src/lib/handoverTemplate.ts` (`newHandoverSheet`, `oldHandoverSheet`, `handoverSheetFilename`,
+     `handoverSheetAttachment`). It is the old `scripts/handover-template.mjs` body moved into src/lib; the script is
+     now a thin CLI over it (`--rows` conversion unchanged, new `--old`). Zipping is `zipDeflated` in `xlsxWrite.ts`
+     (CompressionStream 'deflate-raw', in browsers and Node 18+; stored if missing) -- the new sheet is ~47 kB
+     deflated vs ~400 kB stored, which matters on an email. Worked example on the notes sheet now uses the current
+     labels ("Handover amount"; the stale "Interest rate" row is gone).
+   - **Download** (`HandoverSheetDownload`, one line in `HandoverImportCard`): "New handover sheet (recommended)" /
+     "Old handover sheet" -> "Bredell Ferreira handover sheet.xlsx" / "... (old format).xlsx" (firm name off
+     firm_settings). Every door to HandoverImportCard has it (Settings -> Data Import, "Upload a batch",
+     /companies/:id/upload).
+   - **Mandate** (`SendMandateModal`): the new sheet is a second attachment in the composer beside the PDF (removable
+     there like any file), and the code-owned default body gains one line about it. **Welcome** (`WelcomeCard` ->
+     `api/_lib/email/welcome.ts`): drawn in the browser, posted as base64 (one .xlsx, <= 1 MB, both sendAsUser calls);
+     the card shows the filename with an X to take it off for that send ("Attach it again"); `welcomeEmail` mentions
+     the sheet only when `handoverSheetAttached`. Both texts are code defaults, not stored templates. No Annexure B
+     charge anywhere (sales/client correspondence).
+   - **The old sheet's fidelity**: its 55 headings are exactly the order recorded from the firm's own file
+     (`OLD_HANDOVER_HEADINGS`, moved out of check-handover-sheet, which now imports it). Headings only; the original's
+     sheet name and cell formats were never recorded, so it is one sheet called "Handover", bold headings, and digit
+     columns text-formatted / date columns dd/mm/yyyy (the one improvement over the original).
+   - QA: check-handover-template (66; 16 breaks each failing), e2e/handover-sheet (19, port 5641; mandate and welcome
+     breaks fail it), check-handover-sheet and e2e/client-welcome adjusted.
+   - **Open (§4)**: "Client Division" on the old sheet is neither mapped nor in NOT_COLLECTED, so an old sheet we hand
+     out still draws one "not recognised" line on import. Decide: add it to NOT_COLLECTED ("the client is chosen when
+     the batch is uploaded") or leave it as the honest question it is. The check names it as the only exception.
+
 000000000000000000. **23 Oct: ADD LEAD IN THE FIRM'S ORDER; CONVERT ON THE QUOTED RATE** (Stephan; no migration).
    - **Add Lead** (`LeadForm` in `QuickAdd.tsx`, the ONE lead form: top bar, Leads page, mailbox). The firm:
      "the first thing it should ask is it a company or an individual? And then what is the client name and

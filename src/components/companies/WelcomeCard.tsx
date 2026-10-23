@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Check, Loader2, UserCheck } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, Loader2, Paperclip, UserCheck, X } from 'lucide-react'
 import clsx from 'clsx'
 import { Card, CardHeader } from '../ui/Card'
 import { useAppStore } from '../../store/AppStore'
@@ -7,6 +7,8 @@ import { useAuth } from '../../store/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { clockNow } from '../../lib/clock'
 import { welcomeSteps, isLiaisonRole } from '../../lib/welcome'
+import { fetchFirmSettings } from '../../lib/firmSettings'
+import { handoverSheetAttachment, handoverSheetFilename } from '../../lib/handoverTemplate'
 import type { Company } from '../../types'
 
 /**
@@ -27,6 +29,20 @@ export function WelcomeCard({ company }: { company: Company }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * THE HANDOVER SHEET GOES WITH THE WELCOME (the firm, 23 Oct: "That should go out on the welcome
+   * letter as well"). On by default and shown by name, so whoever presses Assign sees what the
+   * client is sent -- and can take it off for this one send, the way a file comes off a composed
+   * email. The letter mentions the sheet only when it goes (welcomeEmail.handoverSheetAttached).
+   */
+  const [withSheet, setWithSheet] = useState(true)
+  const [firmName, setFirmName] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchFirmSettings().then((s) => { if (live) setFirmName(s.firmName) }).catch(() => {})
+    return () => { live = false }
+  }, [])
+  const sheetName = handoverSheetFilename('new', firmName)
 
   const steps = welcomeSteps(company, activities)
   const mayAssign = !!currentUser && (currentUser.role === 'Administrator' || currentUser.role.includes('Sales') || currentUser.role === 'Liaison Manager')
@@ -36,10 +52,15 @@ export function WelcomeCard({ company }: { company: Company }) {
     setBusy(true); setError(null); setResult(null)
     try {
       const { data } = await supabase.auth.getSession()
+      /* Drawn here, not on the server: the writer is handoverTemplate.ts and api/ is at its limit. */
+      const sheet = withSheet ? await handoverSheetAttachment(firmName) : null
       const res = await fetch('/api/email/welcome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session?.access_token ?? ''}` },
-        body: JSON.stringify({ companyId: company.id, liaisonId: pick }),
+        body: JSON.stringify({
+          companyId: company.id, liaisonId: pick,
+          ...(sheet ? { attachments: [{ filename: sheet.filename, contentType: sheet.contentType, content: sheet.content }] } : {}),
+        }),
       })
       const body = await res.json().catch(() => ({})) as { error?: string; sent?: boolean; fromLiaison?: boolean }
       if (!res.ok) throw new Error(body.error ?? `The assignment did not go through (${res.status}).`)
@@ -76,6 +97,20 @@ export function WelcomeCard({ company }: { company: Company }) {
                 className="inline-flex items-center gap-2 rounded-lg bg-navy-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />} Assign and welcome
               </button>
+              <div className="basis-full text-xs text-slate-500" data-testid="welcome-attachment">
+                {withSheet ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-600">
+                    <Paperclip size={11} className="shrink-0 text-slate-400" />
+                    <span className="truncate">{sheetName}</span>
+                    <span className="shrink-0 text-slate-400">goes with the welcome</span>
+                    <button type="button" aria-label={`Remove ${sheetName}`} onClick={() => setWithSheet(false)}
+                      className="shrink-0 text-slate-400 hover:text-negative-700"><X size={12} /></button>
+                  </span>
+                ) : (
+                  <span>No handover sheet with this welcome. <button type="button" onClick={() => setWithSheet(true)}
+                    className="font-medium text-brand-700 hover:underline">Attach it again</button></span>
+                )}
+              </div>
             </div>
           ) : <p className="text-sm text-slate-500">Sales assigns the liaison.</p>
         )}

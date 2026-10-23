@@ -31,6 +31,7 @@ import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts
 import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
+import { HandoverSheetDownload } from './HandoverSheetDownload'
 import {
   fetchClientCommission, fetchExistingAccounts, fetchUnallocatedBatches,
   type UnallocatedBatch,
@@ -672,6 +673,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
         </div>
       )}
 
+      <HandoverSheetDownload />
 
       <div className="space-y-3">
         <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">

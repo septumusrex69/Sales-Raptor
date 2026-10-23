@@ -32,8 +32,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const caller = await requireCaller(req, admin)
   if (!caller) { res.status(401).json({ error: 'Invalid or expired session.' }); return }
 
-  const { companyId, liaisonId } = (req.body ?? {}) as { companyId?: string; liaisonId?: string }
+  const { companyId, liaisonId, attachments: given } = (req.body ?? {}) as {
+    companyId?: string; liaisonId?: string
+    attachments?: { filename?: string; contentType?: string; content?: string }[]
+  }
   if (!companyId || !liaisonId) { res.status(400).json({ error: 'Choose the client and the liaison.' }); return }
+
+  /*
+   * THE HANDOVER SHEET, drawn in the browser and carried here as base64 (the firm, 23 Oct: "That
+   * should go out on the welcome letter as well"). Drawn there because the writer is
+   * src/lib/handoverTemplate.ts and api/ is at Vercel Hobby's twelve functions; the server only
+   * passes it on. Narrow on purpose -- ONE spreadsheet, under a megabyte -- because this route sends
+   * from the LIAISON'S mailbox, and it is not a general way to put any file in her outbox.
+   */
+  const sheets = (given ?? []).filter((f) => f?.filename && f?.content
+    && /\.xlsx$/i.test(f.filename) && f.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .slice(0, 1)
+    .map((f) => ({ filename: String(f.filename), contentType: String(f.contentType), content: Buffer.from(String(f.content), 'base64') }))
+  if (sheets.some((f) => f.content.length > 1024 * 1024)) {
+    res.status(400).json({ error: 'The handover sheet is too large to attach.' }); return
+  }
 
   const [{ data: me }, { data: liaison }, { data: company }, { data: clock }] = await Promise.all([
     admin.from('profiles').select('id, name, role').eq('id', caller.id).maybeSingle(),
@@ -75,15 +93,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     liaison: { name: String(liaison.name), email: (liaison.email as string | null) ?? null, phone: (liaison.phone as string | null) ?? null, whatsapp: (liaison.whatsapp as string | null) ?? null },
     closerName: liaisonId === caller.id ? null : String(me?.name ?? '') || null,
     bannerUrl: `${origin}/brand/email/welcome.jpg`,
+    handoverSheetAttached: sheets.length > 0,
   })
   let sent: { ok: boolean; from?: string; error?: string } = { ok: false, error: 'The client has no email address.' }
   let sentBy: string | null = null
   if (to) {
     const cc = liaisonId === caller.id ? null : ((await admin.from('profiles').select('email').eq('id', caller.id).maybeSingle()).data?.email as string | null) ?? null
-    const asLiaison = await sendAsUser(admin, liaisonId, { to, cc, subject: mail.subject, bodyHtml: mail.html })
+    const asLiaison = await sendAsUser(admin, liaisonId, { to, cc, subject: mail.subject, bodyHtml: mail.html, attachments: sheets })
     if (asLiaison.ok) { sent = asLiaison; sentBy = liaisonId }
     else {
-      const asCaller = await sendAsUser(admin, caller.id, { to, cc: (liaison.email as string | null) ?? null, subject: mail.subject, bodyHtml: mail.html })
+      const asCaller = await sendAsUser(admin, caller.id, { to, cc: (liaison.email as string | null) ?? null, subject: mail.subject, bodyHtml: mail.html, attachments: sheets })
       sent = asCaller.ok ? asCaller : { ok: false, error: asLiaison.error }
       sentBy = asCaller.ok ? caller.id : null
     }

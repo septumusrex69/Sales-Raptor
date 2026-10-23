@@ -25,6 +25,12 @@ export interface WelcomeInput {
   closerName: string | null
   /** Absolute URL of the banner (public/brand/email/welcome.jpg on the deployed site). */
   bannerUrl: string
+  /**
+   * The handover sheet is attached (the firm, 23 Oct: "That should go out on the welcome letter as
+   * well"). Said in the body only when it is true: the sender can take it off for one send, and a
+   * letter pointing at an attachment that is not there is the first thing a new client queries.
+   */
+  handoverSheetAttached?: boolean
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -42,6 +48,7 @@ export function welcomeEmail(w: WelcomeInput): { subject: string; text: string; 
     + `My name is ${w.liaison.name} and I will be your client liaison${w.closerName ? `, taking over from ${w.closerName.split(' ')[0]} now that the agreement is signed` : ''}. `
     + `I am your first point of contact for anything to do with your accounts: sending us new handovers, questions about a debtor, payments and our reports to you.\n\n`
     + `I will give you a call shortly to introduce myself and to talk through how you would like to send us your first handover.\n\n`
+    + (w.handoverSheetAttached ? `I have attached our handover sheet. Fill in one row per account and send it back to me, and we load your accounts straight from it.\n\n` : '')
     + (reach.length ? `You can reach me directly:\n${reach.join('\n')}\n\n` : '')
     + `We look forward to working with you.\n\n`
     + `Kind regards\n${first}`

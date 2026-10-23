@@ -43,7 +43,8 @@ try {
   await card.locator('select').selectOption('u-bonita')
   await page.getByTestId('welcome-assign').click()
   await card.getByRole('status').waitFor({ timeout: 10000 })
-  t.check('it asks the welcome route for this client and this liaison', JSON.stringify(posted[0]), JSON.stringify({ companyId: COMPANY_ID, liaisonId: 'u-bonita' }))
+  /* The handover sheet rides along too (23 Oct); e2e/handover-sheet holds that half. */
+  t.check('it asks the welcome route for this client and this liaison', JSON.stringify([posted[0]?.companyId, posted[0]?.liaisonId]), JSON.stringify([COMPANY_ID, 'u-bonita']))
   t.ok('...says what happened, in words', /Bonita Mahlangu now looks after Abc Cricket. The welcome email went from her mailbox/.test(await card.innerText()))
   const ticks = await page.getByTestId('welcome-steps').locator('li').evaluateAll((lis) => lis.map((li) => li.querySelector('span')?.className.includes('bg-emerald') ?? false))
   t.check('...and the steps tick: signed, assigned, emailed, not yet called', JSON.stringify(ticks), '[true,true,true,false]')

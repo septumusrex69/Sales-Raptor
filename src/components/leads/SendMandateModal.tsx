@@ -12,6 +12,8 @@ import { letterToPdf, letterFilename, toBase64 } from '../../lib/letterPdf'
 import { fetchCharter, isCharter } from '../../lib/charter'
 import { withFilled } from '../../lib/signingBlanks'
 import { createSigningRequest, signingButtonHtml, signingLink } from '../../lib/signing'
+import { fetchFirmSettings } from '../../lib/firmSettings'
+import { handoverSheetAttachment } from '../../lib/handoverTemplate'
 import {
   STANDARD_RATE, STANDARD_SCALE, commissionLine, commissionProblems, mandateBlanks, mandateDocument,
   pct, type MandateBand, type MandateCommission, type MandateParty, type MandateTerms,
@@ -55,7 +57,8 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
     () => STANDARD_SCALE.map((b) => ({ upTo: b.upTo === null ? '' : String(b.upTo), rate: String(b.rate * 100) })))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [compose, setCompose] = useState<{ subject: string; body: string; html: string; file: { filename: string; contentType: string; size: number; content: string } } | null>(null)
+  type Attached = { filename: string; contentType: string; size: number; content: string }
+  const [compose, setCompose] = useState<{ subject: string; body: string; html: string; file: Attached; sheet: Attached | null } | null>(null)
 
   const commission: MandateCommission = useMemo(() => kind === 'rate'
     ? { kind: 'rate', rate: Number(rate) / 100 }
@@ -108,6 +111,15 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
         charter: isCharter(doc.defaults.font) ? charter : null, signed: null,
       })
       const filename = letterFilename('Debt collection agreement', name.trim())
+      /*
+       * THE HANDOVER SHEET GOES WITH THE MANDATE (the firm, 23 Oct: "When we send out a mandate,
+       * that they have a copy of the ... handover import sheet, so that we can import clients
+       * directly from that"). Attached in the composer like the PDF, so the salesperson sees
+       * "Bredell Ferreira handover sheet.xlsx" before Send and can take it off for this one send.
+       * A sheet that fails to draw does not hold the mandate up: the agreement is what matters today.
+       */
+      const sheetFile = await fetchFirmSettings().catch(() => null)
+        .then((s) => handoverSheetAttachment(s?.firmName)).catch(() => null)
       const url = signingLink(token, window.location.origin)
       const greeting = contactName ? `Dear ${contactName.split(' ')[0]}` : 'Good day'
       setCompose({
@@ -117,9 +129,11 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
           + `on a contingency basis: no collection, no fee. Commission: ${commissionLine(commission)}${kind === 'scale' ? ', as set out in clause 2' : ' of the capital collected'}.\n\n`
           + 'You can complete and sign it online in a few minutes, on your phone or computer: press the button below, fill in your details and banking, and sign. '
           + 'A signed copy comes straight back to you.\n\n'
+          + (sheetFile ? 'Also attached is our handover sheet. When you are ready to hand accounts over, fill in one row per account and send it back to us: we load your accounts straight from it.\n\n' : '')
           + 'Kind regards',
         html: signingButtonHtml(url, 'Sign the agreement online'),
         file: { filename, contentType: 'application/pdf', size: bytes.length, content: toBase64(bytes) },
+        sheet: sheetFile,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -135,7 +149,7 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
         to={email ?? undefined}
         initialSubject={compose.subject}
         initialBody={compose.body}
-        initialAttachments={[compose.file]}
+        initialAttachments={compose.sheet ? [compose.file, compose.sheet] : [compose.file]}
         appendHtml={compose.html}
         appendNote="The Sign online button goes under your message."
         onClose={onClose}

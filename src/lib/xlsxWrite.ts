@@ -9,14 +9,15 @@
  *
  * NO LIBRARY, for the same reason zip.ts has none: an .xlsx is a zip of XML and this is forty
  * lines of header-writing against a dependency that would have to be kept current for the life
- * of the project. scripts/handover-template.mjs already writes one this way in Node; what stops
- * that being shared is `Buffer` and `zlib` — neither exists here — so the shapes match and the
- * plumbing does not.
+ * of the project. scripts/handover-template.mjs used to write its own zip with `Buffer` and
+ * `zlib`; it now goes through zipDeflated here (via handoverTemplate.ts), so the sheet a client is
+ * emailed and the sheet the script writes are one writer rather than two that look alike.
  *
  * STORED, NOT DEFLATED. The browser can deflate, through CompressionStream, but only
  * asynchronously and in a stream — which would make every caller async to save a few kilobytes
  * on a file that is a handful of rows. Method 0 is in the spec, every reader accepts it, and
- * zip.ts on the way back in already names it.
+ * zip.ts on the way back in already names it. (The handover TEMPLATE is the exception, and
+ * zipDeflated below says why: it is hundreds of formatted rows, and it rides on an email.)
  *
  * EVERY CELL IS AN INLINE STRING, including the numbers. That is deliberate and it is the same
  * decision the generated template makes: a cell Excel reads as a number is a cell Excel may
@@ -54,7 +55,13 @@ function crc32(bytes: Uint8Array): number {
   return (c ^ 0xffffffff) >>> 0
 }
 
-interface Entry { name: string; bytes: Uint8Array }
+interface Entry {
+  name: string
+  /** The file as it reads, which is what the CRC and the uncompressed size are taken over. */
+  bytes: Uint8Array
+  /** The same bytes deflated, when they were; absent means stored (method 0). */
+  deflated?: Uint8Array
+}
 
 function zip(files: Entry[]): Uint8Array {
   const local: Uint8Array[] = []
@@ -63,32 +70,34 @@ function zip(files: Entry[]): Uint8Array {
   for (const f of files) {
     const nameBytes = enc.encode(f.name)
     const crc = crc32(f.bytes)
+    const body = f.deflated ?? f.bytes
+    const method = f.deflated ? 8 : 0
 
     const head = new DataView(new ArrayBuffer(30))
     head.setUint32(0, 0x04034b50, true)
     head.setUint16(4, 20, true)   // version needed
     head.setUint16(6, 0, true)    // flags
-    head.setUint16(8, 0, true)    // 0 = stored. See the note at the top.
+    head.setUint16(8, method, true) // 0 = stored, 8 = deflate. See the note at the top.
     head.setUint32(10, 0, true)   // time + date, fixed so the same rows make the same file
     head.setUint32(14, crc, true)
-    head.setUint32(18, f.bytes.length, true)
+    head.setUint32(18, body.length, true)
     head.setUint32(22, f.bytes.length, true)
     head.setUint16(26, nameBytes.length, true)
-    local.push(new Uint8Array(head.buffer), nameBytes, f.bytes)
+    local.push(new Uint8Array(head.buffer), nameBytes, body)
 
     const dir = new DataView(new ArrayBuffer(46))
     dir.setUint32(0, 0x02014b50, true)
     dir.setUint16(4, 20, true)
     dir.setUint16(6, 20, true)
-    dir.setUint16(10, 0, true)
+    dir.setUint16(10, method, true)
     dir.setUint32(16, crc, true)
-    dir.setUint32(20, f.bytes.length, true)
+    dir.setUint32(20, body.length, true)
     dir.setUint32(24, f.bytes.length, true)
     dir.setUint16(28, nameBytes.length, true)
     dir.setUint32(42, offset, true)
     central.push(new Uint8Array(dir.buffer), nameBytes)
 
-    offset += 30 + nameBytes.length + f.bytes.length
+    offset += 30 + nameBytes.length + body.length
   }
 
   const dirBytes = central.reduce((n, c) => n + c.length, 0)
@@ -104,6 +113,38 @@ function zip(files: Entry[]): Uint8Array {
   let at = 0
   for (const p of parts) { out.set(p, at); at += p.length }
   return out
+}
+
+/**
+ * A whole workbook, from its parts as text, DEFLATED where the platform can.
+ *
+ * WHY THIS AND NOT buildXlsx. The handover sheet the firm sends a client is not a handful of rows:
+ * it is five hundred empty rows that each CARRY a cell format, because a column format alone does
+ * not stop every Excel eating a leading zero once a cell is typed into. That is about 400 kB of XML
+ * stored, and it goes out attached to a mandate and a welcome letter -- deflated it is a few dozen
+ * kilobytes. So this one is async and pays for it, and buildXlsx (a few rejected rows) stays sync.
+ *
+ * CompressionStream('deflate-raw') is in every browser the firm uses (Safari 16.4+) and in Node 18+,
+ * which is what lets scripts/handover-template.mjs and the browser write THE SAME BYTES through one
+ * function. Where it is missing the parts are stored instead -- a larger file, never a broken one.
+ */
+export async function zipDeflated(parts: { name: string; text: string }[]): Promise<Uint8Array> {
+  const entries: Entry[] = []
+  for (const p of parts) {
+    const bytes = enc.encode(p.text)
+    entries.push({ name: p.name, bytes, deflated: await deflateRaw(bytes) })
+  }
+  return zip(entries)
+}
+
+async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array | undefined> {
+  if (typeof CompressionStream === 'undefined') return undefined
+  try {
+    const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+    return new Uint8Array(await new Response(stream).arrayBuffer())
+  } catch {
+    return undefined
+  }
 }
 
 /**
