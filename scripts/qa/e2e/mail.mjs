@@ -916,7 +916,7 @@ try {
   t.check('...and the surname with it',
     await box().getByLabel('Last Name', { exact: true }).inputValue(), 'Mohlalisi')
   t.check('the company is guessed off the domain',
-    await box().getByLabel(/^Company/).inputValue(), 'Example')
+    await box().getByLabel(/^Client name/).inputValue(), 'Example')
   t.check('...and their own address is on it',
     await box().getByLabel('Email', { exact: true }).inputValue(), 'ernest@example.co.za')
   /* Annexure B prices work on debtor accounts. The sales side raises nothing, and it says so. */
@@ -964,7 +964,7 @@ try {
   t.check('the name falls back to the sender, which is where the form puts it',
     await box().getByLabel(/^First Name/).inputValue(), 'Ernest')
   t.check('...their company off the body',
-    await box().getByLabel(/^Company/).inputValue(), 'Vaal Fire Services')
+    await box().getByLabel(/^Client name/).inputValue(), 'Vaal Fire Services')
   /* The firm's own switchboard is in the footer of that same body. First match wins. */
   t.check('...and THEIR number, not the footer\u2019s',
     await box().getByLabel('Phone', { exact: true }).inputValue(), '021-555 0130')

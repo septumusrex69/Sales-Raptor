@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026** (Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -18,6 +18,37 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+000000000000000000. **23 Oct: ADD LEAD IN THE FIRM'S ORDER; CONVERT ON THE QUOTED RATE** (Stephan; no migration).
+   - **Add Lead** (`LeadForm` in `QuickAdd.tsx`, the ONE lead form: top bar, Leads page, mailbox). The firm:
+     "the first thing it should ask is it a company or an individual? And then what is the client name and
+     who is the contact persons?" Now: the question first, **nothing else drawn until it is answered**
+     (a mailbox prefill that names a company opens on "A company"); then **Client name**; then **Contact
+     person(s)**. A company: client name = company, contact person = the lead's own first/last name, phone,
+     email and now **Role** (`leads.job_title`), plus **Add another contact person** -- further people are
+     `contacts` rows with `lead_id` (the existing shape the lead page lists and conversion carries over),
+     inserted by `addLead(input, contactPersons)` AFTER the lead row (FK). An individual: their own first
+     and last name ARE the client name (`company_name` = full name), their phone/email the contact
+     details, no contact-person section. Stored shape of the lead unchanged. `src/lib/leadParty.ts`.
+   - **Convert to Client** (`ConvertLeadModal`): **no longer asks Handover amount / Number of accounts**
+     ("that should be actual data ... in the first 3 months"). The lead's estimate still rides through
+     unchanged to the deal (`handover_amount`/`accounts_count`) and the client's "Estimated at signup" --
+     the pipeline, LeadsList and Reports read those -- and is shown read-only as "Expected (the lead's
+     estimate)". **Commission defaults to the rate quoted** on the mandate sent from the lead (newest
+     `signing_requests` row for the lead with `mandate`, not cancelled; flat rate or scale), labelled
+     "Commission (as quoted: X%)", editable; never overwrites what somebody already typed; nothing quoted =
+     empty and required as before. `src/lib/quotedCommission.ts`. Liaison still required (unchanged).
+     "Signed total" now shows only where a non-collection service was signed (it read R 0 otherwise).
+   - **Client record: "First three months: N accounts, R X handed over"** (`FirstThreeMonths`), from
+     `client_intake_by_day` (existing RPC, no endpoint), window = first account + 3 months exclusive,
+     clamped as Postgres clamps it (`firstThreeMonths` in clientBook.ts, held to `company_intake_by_day`'s
+     `interval '3 months'` by the check). Top-level clients only.
+   - QA: check-lead-form-order (58, 14 breaks each failing), e2e/lead-form-order (33, port 5461; two breaks
+     fail it), check-client-terms and e2e/mail updated for the new labels. **Worktree note**: with
+     node_modules symlinked from the main checkout, e2e/mail's "no console errors" sees five 403s for the
+     Inter font (Vite `@fs` outside the worktree root) -- environment, not code; it passes in the main checkout.
+   - **Open (§4)**: (i) should a contact person on an individual lead ever be someone else (an executor,
+     a spouse)? Not built; (ii) should the conversion PREFILL the liaison (e.g. the lead owner's team's
+     liaison) or keep "chosen, not defaulted" (S10 item 5)? Kept chosen.
 00000000000000000. **23 Oct: USERS, DEPARTMENTS AND TEAMS IN ONE PLACE** (Stephan; migration in §5, open questions §4 0000).
    The firm: "There's two different tabs for users and designing teams ... this should live in the same
    environment ... every department has a head, and then every team has a lead ... reception, which is just

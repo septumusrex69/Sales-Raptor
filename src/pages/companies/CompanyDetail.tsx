@@ -72,6 +72,7 @@ import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
 import { clockNow } from '../../lib/clock.ts'
 import { NewsPreferenceCard } from '../../components/record/NewsPreferenceCard'
+import { FirstThreeMonths } from '../../components/companies/FirstThreeMonths'
 
 /*
  * ACCOUNT IS A TAB, NOT A PANEL ON THE OVERVIEW, and it is gated separately from the rest of the
@@ -236,6 +237,8 @@ export function CompanyDetail() {
   const nonEmailActivities = useMemo(() => companyActivities.filter((a) => a.type !== 'Email'), [companyActivities])
   const companyTasks = useMemo(() => tasks.filter((t) => t.companyId === id), [tasks, id])
   const lifetimeValue = wonDeals.reduce((s, d) => s + d.value, 0)
+  /* Top-level clients with something on the book: client_intake_by_day counts a client with its sub-accounts. */
+  const showFirstThree = !!company && !company.parentCompanyId && (company.accountCount ?? 0) > 0
   // Paid-to-date vs. handover amount. Can exceed 100% — payments here include
   // fees on top of the handover amount, which this system deliberately never
   // discloses, so the ratio isn't meant to cap at 100.
@@ -826,6 +829,8 @@ export function CompanyDetail() {
 
       <Card>
 
+        {/* WHAT THEY ACTUALLY HANDED OVER at the start, above what they said they would (23 Oct). */}
+        {showFirstThree && <FirstThreeMonths clientId={company.id} />}
         {company.estimatedHandoverAmount != null && (
           <p className="text-xs text-slate-400 mt-3">
             Estimated at signup: {formatCurrency(company.estimatedHandoverAmount)}
@@ -837,7 +842,7 @@ export function CompanyDetail() {
 
         {/* THE RULE ABOVE THE ACTIONS ONLY WHEN THERE IS SOMETHING ABOVE IT: without the estimate
             line it drew an empty band across the top of the card (seen on the iPad, 19 Oct). */}
-        <div className={company.estimatedHandoverAmount != null ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
+        <div className={company.estimatedHandoverAmount != null || showFirstThree ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
           {/*
             The same action row as the Account and Lead pages, in the same order of thought:
             reach them first, then record what happened, then move the record on. A client page

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { formatCurrency, services } from '../../data/mockData'
 import { leadServiceValueList } from './LeadOpportunityFields'
@@ -9,6 +9,8 @@ import { CommissionScaleEditor } from '../companies/CommissionScaleEditor'
 import { asFraction, scaleTerms, tiersToBands, type Tier } from '../../lib/commissionTiers.ts'
 import { scheduleProblems } from '../../lib/commission.ts'
 import { clockToday } from '../../lib/clock.ts'
+import { supabase } from '../../lib/supabase'
+import { quotedCommissionDefault, standingMandate, type QuotedDefault } from '../../lib/quotedCommission.ts'
 
 const OUTCOMES: { value: ConvertDealOutcome; label: string; hint: string }[] = [
   { value: 'signed', label: 'Signed', hint: 'Confirmed and won at the values below' },
@@ -101,6 +103,28 @@ export function ConvertLeadModal({
   const [tiers, setTiers] = useState<Tier[]>([{ upTo: '100000', rate: '' }, { upTo: '', rate: '' }])
   const [source, setSource] = useState('')
   const bands = useMemo(() => tiersToBands(tiers), [tiers])
+  /*
+   * THE RATE THE LEAD WAS QUOTED, IN THE BOX (the firm, 23 Oct: "The commission percentage ... should
+   * go as default in about what it was sent out originally ... we should be able to change it ... We
+   * should basically just confirm it"). Read off the mandate sent from this lead (quotedCommission.ts)
+   * and put in ONLY while nobody has touched the commission -- a rate somebody typed before the read
+   * came back is theirs, not ours to overwrite. Nothing quoted: empty and required, as before.
+   */
+  const [quoted, setQuoted] = useState<QuotedDefault | null>(null)
+  const touched = useRef(false)
+  useEffect(() => {
+    let live = true
+    void supabase.from('signing_requests').select('created_at, state, mandate').eq('lead_id', lead.id)
+      .then(({ data }) => {
+        const q = quotedCommissionDefault(standingMandate((data ?? []) as { created_at: string; state: string | null; mandate: unknown }[])?.mandate)
+        if (!live || !q) return
+        setQuoted(q)
+        if (touched.current) return
+        if (q.kind === 'fixed') { setKind('fixed'); setRate(q.rate) } else { setKind('scale'); setTiers(q.tiers); setSource('As quoted on the mandate') }
+      })
+    return () => { live = false }
+  }, [lead.id])
+  const touch = () => { touched.current = true }
 
   function patchRow(key: string, patch: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)))
@@ -110,7 +134,9 @@ export function ConvertLeadModal({
   // converting with nothing signed would put a company in the Clients list on the strength of
   // a quotation they haven't answered.
   const signed = rows.filter((r) => r.outcome === 'signed')
-  const total = signed.reduce((sum, r) => sum + (r.isDebtCollection ? r.handoverAmount ?? 0 : r.value), 0)
+  /* Signed VALUE only: debt collection is worth what they actually hand over, which is not known yet
+     and is not a guess to be summed with a quotation (see the note under each collection deal). */
+  const total = signed.reduce((sum, r) => sum + (r.isDebtCollection ? 0 : r.value), 0)
   const missingReason = rows.some((r) => r.outcome === 'rejected' && !r.rejectionReason)
   /* Commission only where debt collection was SIGNED: it is a rate on what is collected, and a
      client who signed only for a credit check has nothing collected to take it from. */
@@ -205,36 +231,16 @@ export function ConvertLeadModal({
                   </FormField>
                 )}
 
-                {row.outcome === 'signed' &&
-                  (row.isDebtCollection ? (
-                    <>
-                      <FormField label="Handover Amount (R)">
-                        <input
-                          type="number"
-                          className={inputClass}
-                          value={row.handoverAmount ?? ''}
-                          onChange={(e) => patchRow(row.key, { handoverAmount: e.target.value === '' ? undefined : Number(e.target.value) })}
-                        />
-                      </FormField>
-                      <FormField label="Number of Accounts">
-                        <input
-                          type="number"
-                          className={inputClass}
-                          value={row.accountsCount ?? ''}
-                          onChange={(e) => patchRow(row.key, { accountsCount: e.target.value === '' ? undefined : Number(e.target.value) })}
-                        />
-                      </FormField>
-                    </>
-                  ) : (
-                    <FormField label="Value (R)">
-                      <input
-                        type="number"
-                        className={inputClass}
-                        value={row.value || ''}
-                        onChange={(e) => patchRow(row.key, { value: Number(e.target.value) || 0 })}
-                      />
-                    </FormField>
-                  ))}
+                {row.outcome === 'signed' && !row.isDebtCollection && (
+                  <FormField label="Value (R)">
+                    <input
+                      type="number"
+                      className={inputClass}
+                      value={row.value || ''}
+                      onChange={(e) => patchRow(row.key, { value: Number(e.target.value) || 0 })}
+                    />
+                  </FormField>
+                )}
 
                 {row.outcome === 'rejected' && (
                   <>
@@ -263,6 +269,26 @@ export function ConvertLeadModal({
                 )}
               </div>
 
+              {/*
+                NOT ASKED AT CONVERSION (the firm, 23 Oct: "it asks you what is the handover amount and
+                the number of accounts ... that should be ... actual data ... seen when we hand over in
+                the first 3 months"). Typed here, a guess was saved as if it were a fact. The real
+                figures are the client's handovers in its first three months, counted from its first
+                account -- company_intake_by_day's new_accounts / new_capital, and on the client
+                record (FirstThreeMonths). What the LEAD estimated still rides through unchanged, on
+                the deal and as "Estimated at signup" on the client, because the sales pipeline and
+                the reports read it -- labelled as the estimate it is, and not asked for again.
+              */}
+              {row.outcome === 'signed' && row.isDebtCollection && (
+                <p className="text-[12px] text-slate-500" data-testid="convert-expected">
+                  {row.handoverAmount != null || row.accountsCount != null
+                    ? <>Expected (the lead&rsquo;s estimate): {row.accountsCount != null ? `${row.accountsCount} accounts` : 'accounts not estimated'}
+                      {row.handoverAmount != null ? `, ${formatCurrency(row.handoverAmount)}` : ''}. </>
+                    : null}
+                  The real figures are what they hand over in their first three months; they show on the client as the accounts arrive.
+                </p>
+              )}
+
               {row.outcome === 'open' && (
                 <p className="text-[12px] text-slate-400">
                   {row.dealId
@@ -279,9 +305,13 @@ export function ConvertLeadModal({
             <input type="date" className={inputClass} value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
           </FormField>
           <div className="flex items-end pb-2">
-            <p className="text-sm text-slate-500">
-              Signed total: <span className="font-semibold text-slate-700">{formatCurrency(total)}</span>
-            </p>
+            {/* Only where something with a VALUE was signed: "R 0" over a signed collection mandate
+                reads as business worth nothing, when it is worth what they hand over. */}
+            {signed.some((r) => !r.isDebtCollection) && (
+              <p className="text-sm text-slate-500">
+                Signed total: <span className="font-semibold text-slate-700">{formatCurrency(total)}</span>
+              </p>
+            )}
           </div>
         </div>
 
@@ -304,10 +334,15 @@ export function ConvertLeadModal({
         {/* ---------- the commission, where debt collection was signed ---------- */}
         {collecting && (
           <div className="mt-4 rounded-lg border border-slate-200 p-3" data-testid="convert-commission">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Commission</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2" data-testid="convert-commission-label">
+              {quoted ? `Commission (as quoted: ${quoted.said})` : 'Commission'}
+            </p>
+            {quoted && (
+              <p className="-mt-1 mb-2 text-[11px] text-slate-400">What the mandate sent to them said. Confirm it, or change it if the client agreed otherwise.</p>
+            )}
             <div className="flex gap-2 mb-3">
               {(['fixed', 'scale'] as const).map((k) => (
-                <button key={k} type="button" onClick={() => setKind(k)}
+                <button key={k} type="button" onClick={() => { touch(); setKind(k) }}
                   className={`text-xs px-3 py-1.5 rounded-lg border ${kind === k
                     ? 'border-gold-500 bg-gold-100 text-navy-950 font-medium'
                     : 'border-slate-200 text-slate-500'}`}>
@@ -318,12 +353,12 @@ export function ConvertLeadModal({
             {kind === 'fixed' ? (
               <div className="flex items-center gap-2">
                 <input className={`${inputClass} max-w-[7rem]`} value={rate} aria-label="Commission rate"
-                  onChange={(e) => setRate(e.target.value)} placeholder="30" />
+                  onChange={(e) => { touch(); setRate(e.target.value) }} placeholder="30" />
                 <span className="text-sm text-slate-500">% of what is collected</span>
               </div>
             ) : (
               /* ONE EDITOR, shared with Add client and Trust settings -- see CommissionScaleEditor. */
-              <CommissionScaleEditor tiers={tiers} onTiers={setTiers} source={source} onSource={setSource} />
+              <CommissionScaleEditor tiers={tiers} onTiers={(t) => { touch(); setTiers(t) }} source={source} onSource={(v) => { touch(); setSource(v) }} />
             )}
             {/* READ BACK IN WORDS, as Add client does: a 3 typed for 30 is invisible in a box. */}
             {!commissionProblem && (
