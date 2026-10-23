@@ -1,5 +1,5 @@
 import { Outlet, useLocation } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { notePage } from '../../lib/backLink'
 import type { FirmClock } from '../../lib/clock.ts'
 import { loadClock } from '../../lib/clockLoad'
@@ -100,6 +100,22 @@ export function AppLayout() {
     return () => { live = false }
   }, [])
 
+  /*
+   * MAIN'S REAL HEIGHT, as --main-h, for the workspace rails (WorkspaceRail). The only honest
+   * source: the staging clock bar, the top bar and a phone's browser chrome all take a share of
+   * the window, and a rail sized from 100dvh by subtraction was wrong as soon as one of them was.
+   */
+  const mainRef = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const el = mainRef.current
+    if (!el) return
+    const set = () => document.documentElement.style.setProperty('--main-h', `${el.clientHeight}px`)
+    set()
+    const observer = new ResizeObserver(set)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <TitleSlotProvider>
       <div className="app-layout flex h-dvh w-full overflow-hidden">
@@ -107,7 +123,7 @@ export function AppLayout() {
         <div className="app-content flex-1 flex flex-col min-w-0">
           <StagingClockBar clock={clock} />
           <Topbar title={title} />
-          <main className="app-main flex-1 overflow-y-auto p-6">
+          <main ref={mainRef} className="app-main flex-1 overflow-y-auto p-6">
             {clockRead ? <Outlet /> : null}
           </main>
         </div>
