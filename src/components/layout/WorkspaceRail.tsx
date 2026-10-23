@@ -91,9 +91,16 @@ export function WorkspaceRail({
      * Sticky inside <main>, which is what scrolls, and as tall as the window under the top bar
      * (4rem) less main's padding (3rem), so the door and the widen button stay at its foot. And
      * 42px folded, not 48 ("take a millimeter and a half out of that").
+     *
+     * AS TALL AS MAIN ACTUALLY IS, AND ITS OWN SCROLL (the firm, 23 Oct, on a laptop: "I can't go
+     * down to narrow the pane, it's hidden there at the bottom"). `100dvh - 7rem` forgot the staging
+     * clock bar, so on a short screen the rail ran past the bottom of main and its foot -- the
+     * business door and Narrow -- sat where nobody could scroll to it. --main-h is main's real
+     * height (AppLayout measures it); the rail scrolls by itself when its items outgrow it, and
+     * overscroll-contain keeps that wheel from scrolling the page behind it.
      */
     return (
-      <nav aria-label={`${title} menu`} className="sticky top-0 self-start h-[calc(100dvh-7rem)] w-[42px] mr-3 shrink-0 flex flex-col items-center">
+      <nav aria-label={`${title} menu`} className="sticky top-0 self-start h-[calc(var(--main-h,calc(100dvh-7rem+3rem))-3rem)] overflow-y-auto overscroll-contain w-[42px] mr-3 shrink-0 flex flex-col items-center">
         <div className="w-full pb-2 mb-1 text-center text-[10.5px] font-semibold leading-tight text-slate-500">
           {title}
         </div>
@@ -133,7 +140,7 @@ export function WorkspaceRail({
   }
 
   return (
-    <nav aria-label={`${title} menu`} className="sticky top-0 self-start h-[calc(100dvh-7rem)] w-56 mr-6 shrink-0 flex flex-col">
+    <nav aria-label={`${title} menu`} className="sticky top-0 self-start h-[calc(var(--main-h,calc(100dvh-7rem+3rem))-3rem)] overflow-y-auto overscroll-contain w-56 mr-6 shrink-0 flex flex-col">
       <div className="px-3 pb-3">
         <div className="text-[15px] font-semibold text-slate-800 tracking-tight">{title}</div>
         <div className="text-[11.5px] text-slate-400 mt-0.5">{subtitle}</div>

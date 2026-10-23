@@ -87,6 +87,7 @@ const ContactsList = lazy(() => import('./pages/contacts/ContactsList').then((m)
 const ContactDetail = lazy(() => import('./pages/contacts/ContactDetail').then((m) => ({ default: m.ContactDetail })))
 const CompaniesList = lazy(() => import('./pages/companies/CompaniesList').then((m) => ({ default: m.CompaniesList })))
 const CompanyDetail = lazy(() => import('./pages/companies/CompanyDetail').then((m) => ({ default: m.CompanyDetail })))
+const ClientUpload = lazy(() => import('./pages/companies/ClientUpload').then((m) => ({ default: m.ClientUpload })))
 const AccountsList = lazy(() => import('./pages/accounts/AccountsList').then((m) => ({ default: m.AccountsList })))
 const AccountDetail = lazy(() => import('./pages/accounts/AccountDetail').then((m) => ({ default: m.AccountDetail })))
 const DisputesBoard = lazy(() => import('./pages/accounts/DisputesBoard').then((m) => ({ default: m.DisputesBoard })))
@@ -180,6 +181,9 @@ function App() {
                   on the book they are meant to be working. */}
               <Route path="/companies" element={<RequireClientAccess><CompaniesList /></RequireClientAccess>} handle={{ title: 'Clients' }} />
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
+              {/* Loading a client's accounts, outside Settings (23 Oct): the page refuses, with a
+                  sentence, anybody who may not load for this client (handoverUpload.ts). */}
+              <Route path="/companies/:id/upload" element={<RequireClientAccess><ClientUpload /></RequireClientAccess>} handle={{ title: 'Upload a batch' }} />
               {/* News & campaigns (S10). The page guards itself on marketing.send. */}
               <Route path="/news" element={<NewsPage />} handle={{ title: 'News & campaigns' }} />
               <Route path="/news/:id" element={<NewsPage />} handle={{ title: 'Campaign' }} />

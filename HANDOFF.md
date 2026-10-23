@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026** (Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (Liaisons load their department's clients, at the top of Start here; before that Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 Last updated: **23 October 2026** (The organogram, at the top of Start here; before that Users, departments and teams in one place; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
@@ -48,6 +48,40 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      out still draws one "not recognised" line on import. Decide: add it to NOT_COLLECTED ("the client is chosen when
      the batch is uploaded") or leave it as the honest question it is. The check names it as the only exception.
 
+000000000000000000. **23 Oct: LIAISONS LOAD THEIR DEPARTMENT'S CLIENTS -- A BATCH OR ONE ACCOUNT, OUTSIDE SETTINGS**
+   (Stephan; migration `handover_upload_for_liaisons`, staging only). The firm: "any person in the client
+   liaison department can upload a handover sheet" -- both roads, the sheet (a batch) and Add debtor.
+   - **New tick `handover.upload`** ("Load a client's accounts", The book, inDatabase) -- Administrator,
+     Liaison Manager, Liaison by template. **And a duty `load_handovers`**, ticked on Communications by the
+     migration, so "any person in the department" is true whatever their role (`DUTY_MAY_GRANT` /
+     `duty_grantable()` widened to it -- book work, never money). Both, because the role covers today's four
+     people and the duty is the firm's own sentence.
+   - **Scope, one rule**: `mayLoadAccountsFor` (`src/lib/handoverUpload.ts`) = the tick AND (an
+     Administrator: any client; anybody else: a client whose liaison `companies.account_owner_id` is them,
+     or sits in their STORED department `profiles.department_id`). No liaison = Administrators only; null
+     is nobody's department. Twin: `may_load_accounts(uuid)` in the database.
+   - **Screens**: the client page's Upload a batch, the Handover Book's link and Add debtor (button and
+     modal) all ask the rule; Upload a batch goes to **`/companies/:id/upload`** (`ClientUpload.tsx`), which
+     draws `HandoverImportCard` -- THE card Settings -> Data Import draws, so fees/duplicates/corrections
+     emails/notes are one code path. Its picker lists only loadable clients; its open-drafts and
+     unallocated-batch lists are filtered to them for non-Administrators. Settings -> Data Import (and the
+     Swordfish book import, the wipe, the leads workbook) stays Administrator-only, unchanged.
+   - **Database**: RESTRICTIVE insert policies asking `may_load_accounts` on `handovers`, `handover_drafts`,
+     `handover_draft_rows` (via the draft's company) and `debtor_accounts`. Until now any signed-in person
+     could insert an account from a console; a pre-legal agent now cannot. Probed rolled back as a liaison
+     (own + colleague's client pass, an Administration-owned client refused), a liaison manager (same), a
+     pre-legal agent (all refused), an Administrator (all pass), an agent moved into Communications (passes
+     by the duty, still no trust), a liaison with the tick revoked (refused).
+   - **Still open to everybody signed in, noted not redesigned (§5)**: `account_contacts`, `account_notes`
+     (insert), `account_queries`, `activities` (insert) -- what an import writes AFTER the account exists.
+     An Administrator whose `handover.upload` is revoked also loses the Swordfish import's account inserts.
+   - QA: check-handover-upload (58; five breaks each failing), check-capability-screen and
+     check-departments-teams updated (the duty constraint is read from its LAST definition now),
+     e2e/liaison-upload (23, port 5521; a department-rule break fails 5), e2e/upload-a-batch now expects
+     `/companies/:id/upload`.
+   - **Open (§4)**: (i) after approving, the import still opens `/accounts?handover=..&handout=1`; a Liaison
+     has no `book.hand_out`, so they land on the batch's list and someone else allocates -- should liaisons
+     hand out their own batches? (ii) **Production** needs the migration (it ticks Communications by name).
 000000000000000000. **23 Oct: ADD LEAD IN THE FIRM'S ORDER; CONVERT ON THE QUOTED RATE** (Stephan; no migration).
    - **Add Lead** (`LeadForm` in `QuickAdd.tsx`, the ONE lead form: top bar, Leads page, mailbox). The firm:
      "the first thing it should ask is it a company or an individual? And then what is the client name and
@@ -1814,6 +1848,15 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **Loading accounts (23 Oct, `handover_upload_for_liaisons`, the very end of schema.sql; staging only)**:
+  `role_capabilities` (+ `handover.upload` for Administrator, Liaison Manager, Liaison; live definition read
+  first), `departments_duties_known` replaced (+ `load_handovers`), `duty_grantable()` (+ handover.upload),
+  `duty_capabilities` (+ load_handovers), Communications ticked with `load_handovers`, `may_load_accounts(uuid)`
+  (security invoker; revoked from anon), and restrictive INSERT policies `*_insert_may_load` on handovers,
+  handover_drafts, handover_draft_rows, debtor_accounts. **Production needs it.** Write paths an import uses
+  that remain open to any signed-in person, deliberately not redesigned here: `account_contacts` (all),
+  `account_notes` insert, `account_queries` (all), `activities` insert, and `debtor_accounts` UPDATE/DELETE
+  (the wider hole `handover.discard`'s comment already records).
 - **Departments and teams (23 Oct, `departments_and_teams`, the very end of schema.sql; staging only)**:
   `departments` (+ unique lower(name), duties closed by `departments_duties_known`) + RLS (select signed-in,
   write Administrator); `teams.department_id` (not null, restrict) + `teams.lead_id` (set null);

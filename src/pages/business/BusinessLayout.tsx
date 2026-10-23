@@ -46,7 +46,10 @@ export function BusinessLayout() {
         items={items}
         door={{ to: '/trust', label: 'Trust account', icon: Landmark }}
       />
-      <div className="flex-1 min-w-0">
+      {/* A WIDE TABLE SCROLLS HERE, NOT THE PAGE (the firm, 23 Oct: scrolling sideways "moves the
+          trust money held in the other people to the left. That should stay"). main scrolls both
+          ways, so anything wider than this column dragged the rail with it. */}
+      <div className="flex-1 min-w-0 overflow-x-auto">
         <Outlet />
       </div>
     </div>
