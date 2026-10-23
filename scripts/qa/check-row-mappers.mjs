@@ -163,7 +163,10 @@ auditMapper({
   ifaceFile: 'src/types.ts',
   mapper: 'mapProfileRow',
   row: 'row',
-  derived: {},
+  derived: {
+    /* Read off the person's DEPARTMENT row, not the profile (23 Oct) -- see duties.ts. */
+    duties: 'read off departments.duties by loadProfile',
+  },
 })
 
 if (failures.length) {

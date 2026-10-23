@@ -286,16 +286,30 @@ ok('the database knows about a call centre team',
  * must be true is that the grouping is fed the set being displayed, whatever it is called.
  */
 ok('the users screen groups people', /byDepartment\(\w+\)/.test(settings))
-ok('...grouping what the search left, not the whole firm', /const grouped = useMemo\(\(\) => byDepartment\(found\)/.test(settings))
-/* The pickers offer only what the database will accept, in both places a team is chosen. */
-ok('the row picker offers only this role’s teams', /teamsForRole\(u\.role, teams\)/.test(settings))
-ok('the invite box follows the role chosen above it', /teamsForRole\(role, teams\)/.test(settings))
+/*
+ * 23 OCT: GROUPED BY THE STORED DEPARTMENT, and by the role's reading only when there are no
+ * departments at all (a table that did not load). Both are fed `found`, the set on screen.
+ */
+ok('...grouping what the search left, not the whole firm',
+  /groupByStoredDepartment\(found,[\s\S]{0,120}?\?\? byDepartment\(found\)/.test(settings))
+/*
+ * The pickers offer only what the database will accept, in both places a team is chosen -- the
+ * role's kind of team (profiles_team_matches_role) AND, since 23 Oct, only teams in the department
+ * chosen, because a team in another one would move the person out of it.
+ */
+ok('the row picker offers only this role’s teams, in their department',
+  /teamsForRole\(u\.role, [^)]*teamsIn\(u\.departmentId, teams\)/.test(settings))
+ok('the invite box follows the role and department chosen above it',
+  /teamsForRole\(role, departmentId \? teamsIn\(departmentId, teams\) : teams\)/.test(settings))
 ok('...and drops a team the new role cannot have', /setTeamId\(''\)/.test(settings))
-/* One list of team kinds, for the reason two lists of roles already taught this file. */
-ok('there is one list of team kinds', /const TEAM_KINDS: TeamKind\[\]/.test(settings))
-ok('...including the call centre', /'Call centre'/.test(settings))
+/* One list of team kinds, for the reason two lists of roles already taught this file -- it moved
+   with the team screen into Departments & teams. */
+const orgScreen = read('src/components/settings/DepartmentsTeams.tsx')
+ok('there is one list of team kinds', /const KINDS: TeamKind\[\] = \['Sales', 'Communications', 'Call centre'\]/.test(orgScreen))
+ok('...including the call centre', /'Call centre'/.test(orgScreen))
 check('no screen keeps its own pair of kind options',
-  [...settings.matchAll(/<option value="Communications">/g)].length, 0)
+  [...settings.matchAll(/<option value="Communications">/g)].length
+  + [...orgScreen.matchAll(/<option value="Communications">/g)].length, 0)
 ok('...and folds away the ones who have left', /grouped\.archived\.length > 0/.test(settings))
 ok('...shown only when asked for', /showArchived && grouped\.archived\.map/.test(settings))
 ok('...under the firm’s own words for it', /No longer here/.test(settings))

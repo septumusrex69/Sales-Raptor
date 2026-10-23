@@ -586,6 +586,19 @@ export interface User {
   grants?: string[]
   revokes?: string[]
   teamId?: ID
+  /**
+   * THE DEPARTMENT THEY SIT IN (23 Oct), a row in `departments` -- where they sit and who manages
+   * them, NOT what they may do (that is still the role). Follows their team when they have one; the
+   * database sets it from the team. Distinct from `departmentOf(role)`, which is the role's reading
+   * and still decides dashboards and which kind of team a role may join.
+   */
+  departmentId?: ID
+  /**
+   * WHAT THEIR DEPARTMENT ADDS TO THEIR ROLE -- read off the department, never stored on the
+   * profile. Filled for the signed-in person by AuthContext; absent on the people list, which is
+   * what keeps the capabilities screen editing the person's own grants rather than their duties.
+   */
+  duties?: string[]
   status: 'Active' | 'Inactive'
   phone?: string
   /** A number a debtor may be messaged on, which is routinely not the desk line above. */
@@ -647,7 +660,27 @@ export interface Team {
   id: ID
   name: string
   memberIds: ID[]
+  /** Which ROLES may join (the database's profiles_team_matches_role). Not the department. */
   kind: TeamKind
+  /** The department the team sits in (23 Oct). Its members are in it too. */
+  departmentId?: ID
+  /** The team's lead -- always one of its members, held by the database. */
+  leadId?: ID
+}
+
+/**
+ * A DEPARTMENT THE FIRM MADE (23 Oct): "every department has a head, and then every team has a
+ * lead." Reception is one; so are the four seeded from today's role-derived departments.
+ */
+export interface DepartmentRow {
+  id: ID
+  name: string
+  /** In the department, held by the database. */
+  headId?: ID
+  /** A closed list -- see src/lib/duties.ts. */
+  duties: string[]
+  sort: number
+  createdAt?: string
 }
 
 /**

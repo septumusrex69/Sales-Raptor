@@ -118,11 +118,17 @@ check('nothing puts w-full back on top of a width', narrow, [])
  * field that takes the slack, and min-w-0 is what lets a flex child narrow at all rather than
  * standing on its content's width.
  */
-const settings = read(join(root, 'pages/settings/SettingsPage.tsx'))
-const form = settings.slice(settings.indexOf('New team name') - 900, settings.indexOf('New team name') + 1400)
-ok('the teams form is where this check thinks it is', form.includes('New team name'))
-ok('the team name takes the slack', /\$\{controlClass\} flex-1 min-w-0/.test(form))
-ok('...and the kind keeps its own width', /\$\{controlClass\} w-40 shrink-0/.test(form))
+/*
+ * 23 OCT: THE FORM MOVED. A team is made in a box of its own on Users -> Departments & teams
+ * (NewTeamModal), its fields STACKED and each `inputClass` -- full width on its own line, so no
+ * neighbour can squeeze the name to a sliver the way the old one-line form's kind box did. What
+ * this held about that line is now held about the box.
+ */
+const orgScreen = read(join(root, 'components/settings/DepartmentsTeams.tsx'))
+const form = orgScreen.slice(orgScreen.indexOf('function NewTeamModal('), orgScreen.indexOf('function NewTeamModal(') + 4000)
+ok('the teams form is where this check thinks it is', form.includes('data-testid="new-team-name"'))
+ok('the team name takes the whole line', /<input autoFocus className=\{inputClass\}[\s\S]{0,200}?data-testid="new-team-name"/.test(form))
+ok('...and so does what it asks after it', /<select className=\{inputClass\}[\s\S]{0,200}?data-testid="new-team-department"/.test(form))
 
 /*
  * AND IT REFUSES VISIBLY. The handler returning early on a blank name is correct; doing it in
@@ -130,12 +136,11 @@ ok('...and the kind keeps its own width', /\$\{controlClass\} w-40 shrink-0/.tes
  * unpressable — which is quieter than a warning, and CLAUDE.md is clear that a warning firing when
  * nothing is wrong is worse than no warning.
  */
-/* 22 Oct: the button also waits for a kind (check-user-setup); the name half is what this holds. */
-ok('the add button is dead while the name is blank', /disabled=\{!name\.trim\(\)( \|\| !kind)?\}/.test(form))
+ok('the add button is dead while the name is blank', /disabled=\{!name\.trim\(\) \|\|/.test(form))
 ok('...and says why when somebody hovers it', /Give the team a name first/.test(form))
 /* THE GUARD STAYS TOO. The button is the courtesy; the early return is the rule, and a form can
    still be submitted with Enter from the name field. */
-ok('...while the handler still refuses a blank name', /if \(!name\.trim\(\)( \|\| !kind)?\) return/.test(form))
+ok('...while the handler still refuses a blank name', /if \(name\.trim\(\) && departmentId && offered\) onSave/.test(form))
 
 console.log(`\ncheck-field-widths: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

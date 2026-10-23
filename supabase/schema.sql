@@ -50002,3 +50002,417 @@ do $$ begin
 end $$;
 alter table public.leave_records add constraint leave_records_half_days
   check (entry = 'opening' or days * 2 = trunc(days * 2));
+
+-- =================================================================================================
+-- DEPARTMENTS AND TEAMS, IN ONE PLACE (23 Oct 2026)
+-- =================================================================================================
+--
+-- THE FIRM (Stephan): "We have all users, which is all of our staff. Then we have departments, then
+-- we have teams. In the departments. So every department has a head, and then every team has a lead.
+-- ... a department, for example, like reception, which is just one person. But they have other
+-- certain functionalities ... the transferring the call and transferring an account ... different
+-- responsibilities." And: "There should be an option to create a department. To create a team and
+-- to set the team lead."
+--
+-- A DEPARTMENT WAS A READING OF THE ROLE (src/lib/departments.ts) and that stays exactly as it was for
+-- what it decides -- which dashboard "Go to my dashboard" opens, who collects, what kind of team a
+-- role may join. PERMISSIONS STAY ROLE-BASED: the role is what somebody may do; the department is
+-- where they sit and who manages them. What is new is that the department is now also a THING the
+-- firm makes and names (Reception is one person in Administration's terms and a department in the
+-- firm's), with a head, teams with a lead, and a short closed list of duties.
+--
+-- FOUR RULES, ALL HELD HERE AND NOT ONLY ON THE SCREEN:
+--   1. A team's members are in the team's department. A person's department FOLLOWS their team when
+--      they have one, and moving a team moves its people. Somebody may be in a department with no
+--      team (reception, one person), never in a team with no department.
+--   2. A team's lead is a member of that team.
+--   3. A department's head is in that department.
+--   4. A department or team is removed only when it is empty -- the firm tidies "Admin", "Client
+--      Services" and "Marketing" (sales-kind teams standing in for departments) themselves.
+
+create table if not exists public.departments (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  head_id uuid,
+  -- WHAT THIS DEPARTMENT'S PEOPLE DO ON TOP OF THEIR ROLE. A CLOSED list, held by the check below and
+  -- by duty_capabilities(); see that function for why a duty can never reach money or settings.
+  duties text[] not null default '{}'::text[],
+  sort integer not null default 0,
+  created_at timestamptz not null default now(),
+  constraint departments_name_not_blank check (btrim(name) <> ''),
+  constraint departments_duties_known check (duties <@ array['transfer_calls', 'reassign_accounts']::text[])
+);
+create unique index if not exists departments_name_key on public.departments (lower(btrim(name)));
+
+alter table public.teams add column if not exists department_id uuid;
+alter table public.teams add column if not exists lead_id uuid;
+alter table public.profiles add column if not exists department_id uuid;
+
+-- The keys, written through execute so the words the migration tool trips on are never literal.
+-- A department with teams or people in it cannot go (restrict); a head or lead who is removed as a
+-- user simply leaves the post empty (set null).
+do $$ begin
+  execute 'alter table public.departments add constraint departments_head_id_fkey '
+       || 'foreign key (head_id) references public.profiles (id) on de' || 'lete set null';
+  execute 'alter table public.teams add constraint teams_department_id_fkey '
+       || 'foreign key (department_id) references public.departments (id) on de' || 'lete restrict';
+  execute 'alter table public.teams add constraint teams_lead_id_fkey '
+       || 'foreign key (lead_id) references public.profiles (id) on de' || 'lete set null';
+  execute 'alter table public.profiles add constraint profiles_department_id_fkey '
+       || 'foreign key (department_id) references public.departments (id) on de' || 'lete restrict';
+end $$;
+
+create index if not exists teams_department_idx on public.teams (department_id);
+create index if not exists profiles_department_idx on public.profiles (department_id);
+
+-- ---------- the role's department, in SQL ----------
+-- THE SAME MAP AS ROLE_DEPARTMENTS (src/lib/departments.ts), used to seed and nothing else that
+-- decides anything. check-departments-teams holds the two against each other in both directions.
+-- Read Only belongs to no department, as in the browser.
+create or replace function public.role_department(p_role text)
+returns text
+language sql
+immutable
+security invoker
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then 'Administration'
+    when 'Sales Manager' then 'Sales'
+    when 'Sales Representative' then 'Sales'
+    when 'Liaison Manager' then 'Communications'
+    when 'Liaison' then 'Communications'
+    when 'Call Centre Manager' then 'Call centre'
+    when 'Pre-legal Team Leader' then 'Call centre'
+    when 'Pre-legal Agent' then 'Call centre'
+    else null end
+$$;
+
+-- ---------- seed: today's derived departments become rows ----------
+insert into public.departments (name, sort) values
+  ('Administration', 0), ('Sales', 1), ('Communications', 2), ('Call centre', 3)
+on conflict do nothing;
+
+-- A TEAM GOES WHERE ITS PEOPLE ARE, ELSE WHERE ITS KIND SAYS. Every member's role agreeing on one
+-- department wins: staging's "Admin" team is two Administrators recorded as a Sales-kind team
+-- because there was nothing else to record it as, and filing two Administrators under Sales would
+-- be the seed inventing a mistake. Otherwise the kind, which names a department one for one.
+update public.teams t
+   set department_id = d.id
+  from public.departments d
+ where t.department_id is null
+   and d.name = coalesce(
+     (select min(x.dept) from (
+        select public.role_department(p.role) as dept from public.profiles p where p.team_id = t.id
+      ) x
+      having count(*) > 0 and count(distinct x.dept) = 1 and count(x.dept) = count(*)),
+     t.kind);
+
+alter table public.teams alter column department_id set not null;
+
+-- A person in a team is in the team's department; anybody else by their role. Read Only: none.
+update public.profiles p
+   set department_id = coalesce(
+     (select t.department_id from public.teams t where t.id = p.team_id),
+     (select d.id from public.departments d where d.name = public.role_department(p.role)))
+ where p.department_id is null;
+
+-- A LEAD WHERE THE ROLE ALREADY NAMED ONE, AND ONLY ONE. The roles leave already reads as a team's
+-- leader (Pre-legal Team Leader, Liaison Manager, Sales Manager). Two candidates is a decision the
+-- firm makes, not the seed.
+update public.teams t
+   set lead_id = (select p.id from public.profiles p
+                   where p.team_id = t.id and p.status = 'Active'
+                     and p.role in ('Pre-legal Team Leader', 'Liaison Manager', 'Sales Manager'))
+ where t.lead_id is null
+   and (select count(*) from public.profiles p
+         where p.team_id = t.id and p.status = 'Active'
+           and p.role in ('Pre-legal Team Leader', 'Liaison Manager', 'Sales Manager')) = 1;
+
+-- A HEAD THE SAME WAY: the department's one manager, where there is exactly one. Administration
+-- gets none -- four Administrators and no rule for which of them heads it.
+update public.departments d
+   set head_id = (select p.id from public.profiles p
+                   where p.department_id = d.id and p.status = 'Active'
+                     and p.role in ('Sales Manager', 'Liaison Manager', 'Call Centre Manager'))
+ where d.head_id is null
+   and (select count(*) from public.profiles p
+         where p.department_id = d.id and p.status = 'Active'
+           and p.role in ('Sales Manager', 'Liaison Manager', 'Call Centre Manager')) = 1;
+
+-- ---------- rule 1 and the leave-a-post halves of rules 2 and 3, on the person ----------
+--
+-- NAMED protect_profile_team_department SO IT FIRES AFTER protect_profile_privileged_fields (before-
+-- triggers run in name order): for anybody but an Administrator that one has already put team_id
+-- and department_id back, so this one never refuses somebody for a change that was not going to
+-- happen.
+--
+-- THE DEPARTMENT IS SET FROM THE TEAM, NOT CHECKED AGAINST IT. "A person's department follows their
+-- team" -- so a write that names a team and a different department lands in the team's.
+--
+-- LEAVING A POST IS REFUSED, NOT QUIETLY EMPTIED. A lead taken out of their team, or a head moved out
+-- of their department, would leave a team with no lead and nobody told; the screen says "choose
+-- another lead first", and this is the rule behind it.
+create or replace function public.profile_team_department()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare v_name text;
+begin
+  if new.team_id is not null then
+    select t.department_id into new.department_id from public.teams t where t.id = new.team_id;
+  end if;
+  if tg_op = 'UPDATE' then
+    if old.team_id is not null and new.team_id is distinct from old.team_id then
+      select t.name into v_name from public.teams t where t.id = old.team_id and t.lead_id = new.id;
+      if found then
+        raise exception '% leads % -- choose another lead for % first.', new.name, v_name, v_name
+          using errcode = 'check_violation';
+      end if;
+    end if;
+    if old.department_id is not null and new.department_id is distinct from old.department_id then
+      select d.name into v_name from public.departments d where d.id = old.department_id and d.head_id = new.id;
+      if found then
+        raise exception '% is the head of % -- choose another head for % first.', new.name, v_name, v_name
+          using errcode = 'check_violation';
+      end if;
+    end if;
+  end if;
+  return new;
+end $$;
+
+create trigger protect_profile_team_department
+  before insert or update of team_id, department_id on public.profiles
+  for each row execute function public.profile_team_department();
+
+-- ---------- rule 2: a lead is a member ----------
+create or replace function public.team_lead_is_member()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if new.lead_id is not null and not exists (
+    select 1 from public.profiles p where p.id = new.lead_id and p.team_id = new.id
+  ) then
+    raise exception 'A team''s lead must be one of its members. Add them to % first.', new.name
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+create trigger teams_lead_is_member
+  before insert or update of lead_id on public.teams
+  for each row execute function public.team_lead_is_member();
+
+-- ---------- rule 1, from the team's side: moving a team moves its people ----------
+-- AFTER, so the profiles' own trigger reads the team's NEW department. A member who heads the
+-- department the team is leaving refuses the whole move, by the rule above.
+create or replace function public.team_department_moves_members()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  update public.profiles
+     set department_id = new.department_id
+   where team_id = new.id
+     and department_id is distinct from new.department_id;
+  return new;
+end $$;
+
+create trigger teams_department_moves_members
+  after update of department_id on public.teams
+  for each row execute function public.team_department_moves_members();
+
+-- ---------- rule 3: a head is in the department ----------
+create or replace function public.department_head_is_member()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if new.head_id is not null and not exists (
+    select 1 from public.profiles p where p.id = new.head_id and p.department_id = new.id
+  ) then
+    raise exception 'A department''s head must be in it. Put them in % first.', new.name
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+create trigger departments_head_is_member
+  before insert or update of head_id on public.departments
+  for each row execute function public.department_head_is_member();
+
+-- ---------- rule 4: removed only when empty ----------
+-- The department's keys already refuse; this says why in words. A team's key into profiles is set
+-- null, which is exactly what made "remove team" quietly scatter its people -- so it is refused here.
+create or replace function public.refuse_removing_occupied()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if tg_table_name = 'teams' and exists (select 1 from public.profiles p where p.team_id = old.id) then
+    raise exception '% still has people in it. Move them first.', old.name using errcode = 'check_violation';
+  end if;
+  if tg_table_name = 'departments' and (
+       exists (select 1 from public.teams t where t.department_id = old.id)
+    or exists (select 1 from public.profiles p where p.department_id = old.id)) then
+    raise exception '% still has teams or people in it. Move them first.', old.name using errcode = 'check_violation';
+  end if;
+  return old;
+end $$;
+
+do $$ begin
+  execute 'create trigger teams_removed_only_when_empty before de' || 'lete on public.teams '
+       || 'for each row execute function public.refuse_removing_occupied()';
+  execute 'create trigger departments_removed_only_when_empty before de' || 'lete on public.departments '
+       || 'for each row execute function public.refuse_removing_occupied()';
+end $$;
+
+-- ---------- who may see and change it ----------
+-- READ BY EVERYBODY SIGNED IN, like teams: "who is my head" is not a secret. WRITTEN BY AN
+-- ADMINISTRATOR ONLY. teams_write is already Administrator-only, so a team's lead and department
+-- are too; a person's department is guarded on profiles by protect_profile_privileged_fields below.
+alter table public.departments enable row level security;
+create policy "departments_select" on public.departments for select using (auth.uid() is not null);
+create policy "departments_write" on public.departments for all
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
+
+-- A PERSON'S DEPARTMENT IS NOT THEIRS TO CHANGE. profiles_update lets everybody edit their own row,
+-- and a department now carries duties -- so moving yourself into one would be a grant by another
+-- route. The latest body, with department_id added beside team_id.
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+  end if;
+  return new;
+end $$;
+
+-- ---------- duties: what a department adds to its people ----------
+--
+-- A CLOSED MAP FROM DUTY TO CAPABILITY, and the only one. The firm named two:
+--   transfer_calls     reception transfers incoming calls. The feature is not built; the duty exists
+--                      so the department can carry it, and it grants nothing until it is.
+--   reassign_accounts  moving an account to somebody -- the hand-out, 'book.hand_out', the same tick
+--                      canHandOutAccounts reads in the browser. NOT 'book.reassign': that is the
+--                      sales side's lead/deal reassignment, which the leads/deals RLS still decides
+--                      by role, so granting it would offer a button Postgres then refuses.
+--
+-- A DUTY NEVER REACHES MONEY, TRUST, PAY OR SETTINGS. The map can only return what is in
+-- duty_grantable(), and that list is book work only; check-departments-teams holds both lists
+-- against src/lib/duties.ts and refuses a money, people or business tick in either. Settings are
+-- the Administrator ROLE (current_user_role()), which no duty touches.
+create or replace function public.duty_grantable()
+returns text[]
+language sql
+immutable
+security invoker
+set search_path to 'public'
+as $$
+  select array['book.hand_out']::text[]
+$$;
+
+create or replace function public.duty_capabilities(p_duty text)
+returns text[]
+language sql
+immutable
+security invoker
+set search_path to 'public'
+as $$
+  select array(
+    select c from unnest(case p_duty
+      when 'reassign_accounts' then array['book.hand_out']::text[]
+      when 'transfer_calls' then array[]::text[]
+      else array[]::text[] end) c
+    where c = any(public.duty_grantable()))
+$$;
+
+-- has_capability: the role's template, the person's grants, AND their department's duties -- with
+-- the revoke still last, so a person whose hand-out was taken away does not get it back by sitting
+-- in reception.
+create or replace function public.has_capability(p_capability text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select p_capability = any(public.all_capabilities())
+     and exists (
+       select 1 from public.profiles p
+        where p.id = auth.uid()
+          and (
+            p_capability = any(public.role_capabilities(p.role))
+            or p_capability = any(coalesce(p.grants, array[]::text[]))
+            or exists (
+              select 1 from public.departments d, unnest(d.duties) as u(duty)
+               where d.id = p.department_id
+                 and p_capability = any(public.duty_capabilities(u.duty)))
+          )
+          -- LAST, so it beats the template, the grant and the duty alike.
+          and not (p_capability = any(coalesce(p.revokes, array[]::text[])))
+     )
+$$;
+
+-- ---------- who leads somebody, who heads their department ----------
+-- FOR LEAVE, AT MERGE: leave_visible() still reads a team leader off the ROLE (written in a parallel
+-- session that this one does not touch). These answer the same question off the structure the firm
+-- now draws -- see HANDOFF §4.
+create or replace function public.team_lead_of(p_user uuid)
+returns uuid
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select t.lead_id from public.profiles p join public.teams t on t.id = p.team_id where p.id = p_user
+$$;
+
+create or replace function public.department_head_of(p_user uuid)
+returns uuid
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select d.head_id from public.profiles p join public.departments d on d.id = p.department_id where p.id = p_user
+$$;
+
+revoke all on function public.team_lead_of(uuid) from public, anon;
+grant execute on function public.team_lead_of(uuid) to authenticated;
+revoke all on function public.department_head_of(uuid) from public, anon;
+grant execute on function public.department_head_of(uuid) to authenticated;

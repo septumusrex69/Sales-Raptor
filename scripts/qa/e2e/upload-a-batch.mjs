@@ -1238,14 +1238,14 @@ try {
   t.check('and it comes back', await tabList.count(), 1)
 
   /* Clicking away clears the client from the URL: it means nothing to any other tab, and a stale
-     company id in the address of the Teams screen is a puzzle for whoever sees it next. */
-  await page.getByRole('button', { name: 'Teams', exact: true }).first().click()
+     company id in the address of the Targets screen is a puzzle for whoever sees it next. */
+  await page.getByRole('button', { name: 'Targets', exact: true }).first().click()
   await page.waitForFunction(() => !new URL(location.href).searchParams.get('client'), null,
     { timeout: 5000 }).catch(() => {})
   t.check('moving to another tab drops the client',
     new URL(page.url()).searchParams.get('client'), null)
   t.check('...and names the tab it moved to',
-    new URL(page.url()).searchParams.get('tab'), 'Teams')
+    new URL(page.url()).searchParams.get('tab'), 'Targets')
 } catch (e) {
   /*
    * A THROW MUST NOT SWALLOW THE FAILURES THAT CAUSED IT.

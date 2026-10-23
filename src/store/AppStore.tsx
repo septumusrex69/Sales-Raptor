@@ -10,7 +10,7 @@ import { RaptorCelebration } from '../components/ui/RaptorCelebration'
 import { celebrationForWin, type Celebration } from '../lib/celebration'
 import type {
   Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, Handover, ID, Lead,
-  ProductService, Proposal, RejectionReason, Target, TargetMetric, Task, TaskType, Team, TeamKind, User,
+  DepartmentRow, ProductService, Proposal, RejectionReason, Target, TargetMetric, Task, TaskType, Team, TeamKind, User,
 } from '../types'
 import { clockNowMs } from '../lib/clock.ts'
 
@@ -62,6 +62,15 @@ async function fetchTable<T>(table: string, orderBy: string, failed?: string[]):
     return []
   }
   return (data ?? []).map((row) => rowToApp<T>(row as Record<string, unknown>))
+}
+
+/** A team as the table holds it; `memberIds` is derived from the people. */
+type TeamRow = { id: ID; name: string; kind: TeamKind; departmentId?: ID; leadId?: ID }
+
+/* A department's duties arrive as text[]; an empty array is [] and a missing one (a fixture, an
+   older row) must be [] too, not undefined, or every `duties.includes` on the screen throws. */
+function normalizeDepartment(d: DepartmentRow): DepartmentRow {
+  return { ...d, duties: Array.isArray(d.duties) ? d.duties : [], sort: Number(d.sort ?? 0) }
 }
 
 function reportError(action: string, message: string) {
@@ -190,6 +199,8 @@ interface AppState {
   targets: Target[]
   users: User[]
   teams: Team[]
+  /** The departments the firm made (23 Oct), in no particular order -- sortDepartments() orders them. */
+  departments: DepartmentRow[]
   notifications: AppNotification[]
   dataLoading: boolean
   /** Message from the most recent failed write (e.g. permission denied). Null when nothing to show. */
@@ -313,8 +324,15 @@ interface AppActions {
   updateUser: (id: ID, patch: Partial<User>) => void
   /** Drops a user from local state after the server has actually deleted their account (via /api/delete-user) -- there's no client-side delete of auth.users, so this just syncs the UI. */
   removeUserLocal: (id: ID) => void
-  addTeam: (input: Partial<Team> & { name: string }) => Team
-  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name' | 'kind'>>) => void
+  addTeam: (input: Partial<Team> & { name: string; departmentId: ID }) => Team
+  /*
+   * A CHANGE OF DEPARTMENT RE-READS THE PEOPLE: the database moves the team's members with it
+   * (team_department_moves_members), out of this session's sight.
+   */
+  updateTeam: (id: ID, patch: Partial<Pick<Team, 'name' | 'kind' | 'departmentId' | 'leadId'>>) => void
+  addDepartment: (input: { name: string }) => DepartmentRow
+  updateDepartment: (id: ID, patch: Partial<Pick<DepartmentRow, 'name' | 'headId' | 'duties' | 'sort'>>) => void
+  deleteDepartment: (id: ID) => void
   /**
    * Re-reads the people and the teams. The firm, testing on 22 Oct: a user added "doesn't show
    * immediately ... you need to refresh". The list is loaded once at start-up, and an invitation
@@ -359,7 +377,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [handovers, setHandovers] = useState<Handover[]>([])
   const [targets, setTargets] = useState<Target[]>([])
   const [users, setUsers] = useState<User[]>([])
-  const [teamRows, setTeamRows] = useState<{ id: ID; name: string; kind: TeamKind }[]>([])
+  const [teamRows, setTeamRows] = useState<TeamRow[]>([])
+  const [departments, setDepartments] = useState<DepartmentRow[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [dataLoading, setDataLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
@@ -463,6 +482,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setHandovers([])
       setUsers([])
       setTeamRows([])
+      setDepartments([])
       setNotifications([])
       setDataLoading(false)
       return
@@ -481,11 +501,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<Proposal>('proposals', 'created_at', failed),
       fetchTable<Handover>('handovers', 'received_at', failed),
       fetchTable<User>('profiles', 'created_at', failed),
-      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at', failed),
+      fetchTable<TeamRow>('teams', 'created_at', failed),
       fetchTable<AppNotification>('notifications', 'created_at', failed),
       fetchTable<Target>('targets', 'created_at', failed),
+      fetchTable<DepartmentRow>('departments', 'created_at', failed),
     ])
-      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg]) => {
+      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg, dp]) => {
         if (!active) return
         // A row still carrying a retired stage or status would render in no column at all —
         // not last, gone — so map anything stale onto the current vocabulary on the way in.
@@ -499,6 +520,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setHandovers(hv)
         setUsers(us)
         setTeamRows(tm)
+        setDepartments(dp.map(normalizeDepartment))
         setNotifications(nt)
         setTargets(tg)
         setDataLoading(false)
@@ -542,13 +564,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshPeople = useCallback<AppActions['refreshPeople']>(async () => {
-    const [us, tm] = await Promise.all([
+    const [us, tm, dp] = await Promise.all([
       fetchTable<User>('profiles', 'created_at'),
-      fetchTable<{ id: ID; name: string; kind: TeamKind }>('teams', 'created_at'),
+      fetchTable<TeamRow>('teams', 'created_at'),
+      fetchTable<DepartmentRow>('departments', 'created_at'),
     ])
     setUsers(us)
     setTeamRows(tm)
+    setDepartments(dp.map(normalizeDepartment))
   }, [])
+
+  /* Read through a ref by updateTeam, which is declared before this hook's value is settled. */
+  const refreshPeopleRef = useRef(refreshPeople)
+  useEffect(() => { refreshPeopleRef.current = refreshPeople }, [refreshPeople])
 
   const refreshSyncedData = useCallback<AppActions['refreshSyncedData']>(async () => {
     const [ac, nt] = await Promise.all([fetchTable<Activity>('activities', 'activity_date'), fetchTable<AppNotification>('notifications', 'created_at')])
@@ -557,7 +585,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const teams = useMemo<Team[]>(
-    () => teamRows.map((t) => ({ id: t.id, name: t.name, kind: t.kind, memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id) })),
+    () => teamRows.map((t) => ({
+      id: t.id, name: t.name, kind: t.kind, departmentId: t.departmentId, leadId: t.leadId,
+      memberIds: users.filter((u) => u.teamId === t.id).map((u) => u.id),
+    })),
     [teamRows, users],
   )
 
@@ -1627,8 +1658,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     (input) => {
       const id = crypto.randomUUID()
       const team: Team = { memberIds: [], kind: 'Sales', ...input, id }
-      setTeamRows((prev) => [...prev, { id, name: team.name, kind: team.kind }])
-      insertRow('teams', { id, name: team.name, kind: team.kind }, 'addTeam', (message) => {
+      const row: TeamRow = { id, name: team.name, kind: team.kind, departmentId: input.departmentId }
+      setTeamRows((prev) => [...prev, row])
+      insertRow('teams', row, 'addTeam', (message) => {
         setTeamRows((prev) => prev.filter((t) => t.id !== id))
         showError(message)
       })
@@ -1639,13 +1671,68 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const updateTeam = useCallback<AppActions['updateTeam']>(
     (id, patch) => {
-      let previous: { id: ID; name: string; kind: TeamKind } | undefined
+      let previous: TeamRow | undefined
       setTeamRows((prev) => {
         previous = prev.find((t) => t.id === id)
         return prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
       })
+      /* Its members follow it in the database; shown at once rather than after a reload. */
+      if ('departmentId' in patch) {
+        setUsers((prev) => prev.map((u) => (u.teamId === id ? { ...u, departmentId: patch.departmentId } : u)))
+      }
       updateRow('teams', id, patch, 'updateTeam', (message) => {
         if (previous) setTeamRows((prev) => prev.map((t) => (t.id === id ? previous! : t)))
+        showError(message)
+        /* The people were moved optimistically too; the database's word puts them back. */
+        if ('departmentId' in patch) void refreshPeopleRef.current()
+      })
+    },
+    [showError],
+  )
+
+  /*
+   * DEPARTMENTS (23 Oct). Same shape as the team actions: shown at once, written, and put back with
+   * the database's own sentence if it refuses -- "Felicia is the head of Sales -- choose another head
+   * first" is an answer, "permission denied" is not.
+   */
+  const addDepartment = useCallback<AppActions['addDepartment']>(
+    (input) => {
+      const id = crypto.randomUUID()
+      const row: DepartmentRow = { id, name: input.name.trim(), duties: [], sort: 100 }
+      setDepartments((prev) => [...prev, row])
+      insertRow('departments', { id, name: row.name, sort: row.sort }, 'addDepartment', (message) => {
+        setDepartments((prev) => prev.filter((d) => d.id !== id))
+        showError(message)
+      })
+      return row
+    },
+    [showError],
+  )
+
+  const updateDepartment = useCallback<AppActions['updateDepartment']>(
+    (id, patch) => {
+      let previous: DepartmentRow | undefined
+      setDepartments((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      })
+      updateRow('departments', id, patch, 'updateDepartment', (message) => {
+        if (previous) setDepartments((prev) => prev.map((d) => (d.id === id ? previous! : d)))
+        showError(message)
+      })
+    },
+    [showError],
+  )
+
+  const deleteDepartment = useCallback<AppActions['deleteDepartment']>(
+    (id) => {
+      let previous: DepartmentRow | undefined
+      setDepartments((prev) => {
+        previous = prev.find((d) => d.id === id)
+        return prev.filter((d) => d.id !== id)
+      })
+      deleteRow('departments', id, 'deleteDepartment', (message) => {
+        if (previous) setDepartments((prev) => [...prev, previous!])
         showError(message)
       })
     },
@@ -1654,7 +1741,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const deleteTeam = useCallback<AppActions['deleteTeam']>(
     (id) => {
-      let previous: { id: ID; name: string; kind: TeamKind } | undefined
+      let previous: TeamRow | undefined
       setTeamRows((prev) => {
         previous = prev.find((t) => t.id === id)
         return prev.filter((t) => t.id !== id)
@@ -1687,6 +1774,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       targets,
       users,
       teams,
+      departments,
       notifications,
       dataLoading,
       toast,
@@ -1726,6 +1814,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateTeam,
       refreshPeople,
       deleteTeam,
+      addDepartment,
+      updateDepartment,
+      deleteDepartment,
       dismissToast,
       setTarget,
       clearTarget,
@@ -1748,6 +1839,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       targets,
       users,
       teams,
+      departments,
       notifications,
       dataLoading,
       toast,
@@ -1787,6 +1879,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateTeam,
       refreshPeople,
       deleteTeam,
+      addDepartment,
+      updateDepartment,
+      deleteDepartment,
       dismissToast,
       setTarget,
       clearTarget,
