@@ -345,7 +345,7 @@ ok('...with the sentence saying what an exception is', /a different clerk commis
 const stamp = liveFn('clerk_commission_override_stamp')
 ok('who and when are the database\'s to write', /new\.set_by := auth\.uid\(\)/.test(stamp) && /new\.set_at := public\.raptor_now\(\)/.test(stamp))
 const hist = liveFn('employee_profile_stamp')
-ok('every pay field is written to history', /array\['job_title', 'ended_on', 'pay_basis', 'basic_salary', 'notes'\]/.test(hist))
+ok('every pay field is written to history', /array\['job_title', 'ended_on', 'pay_basis', 'basic_salary', 'notes', 'employee_number'\]/.test(hist))
 
 /* The start date: on profiles, any Administrator's, history kept, nobody else may move it. */
 ok('the start date is a column on profiles', /alter table public\.profiles add column if not exists start_date date;/.test(sql))
@@ -362,7 +362,7 @@ ok('a carried-over entry is positive, a reversal negative with a reason', /\(rev
 ok('...one reversal an entry', /create unique index if not exists clerk_commission_carried_one_reversal\s+on public\.clerk_commission_carried \(reverses_id\) where reverses_id is not null;/.test(sql))
 const cstamp = liveFn('clerk_commission_carried_stamp')
 ok('...the reversal copies clerk, client and the exact negative', /new\.amount := -v_orig\.amount;/.test(cstamp) && /new\.user_id := v_orig\.user_id;/.test(cstamp))
-ok('clear_staging empties the carried-over entries', /public\.clerk_commission_carried'/.test(liveFn('clear_staging')))
+ok('clear_staging empties the carried-over entries', /public\.clerk_commission_carried[,']/.test(liveFn('clear_staging')))
 
 const lines = liveFn('clerk_commission_lines')
 const runsFn = liveFn('clerk_commission_runs')
@@ -426,8 +426,16 @@ ok('...and the query selects exactly that list', api.includes(`.select('${carrie
 
 const company = strip(read('src/pages/CompanyDashboard.tsx'))
 ok('pay is never on the company dashboard', !/clerkCommission|peopleApi|PayStatement/.test(company))
-ok('the menu item asks people.pay', /n\.to !== '\/people' \|\| canViewPay\(currentUser\)/.test(read('src/components/layout/Sidebar.tsx')))
-ok('the route is behind RequirePay', /<Route path="\/people" element=\{<RequirePay><PeopleLayout \/><\/RequirePay>\}>/.test(read('src/App.tsx')))
+/* LEAVE (23 Oct) WIDENED THE DOOR AND NOTHING ELSE: the menu item and the workspace now let in whoever
+   may see some leave, so every pay screen inside must carry RequirePay of its own -- held one by one. */
+ok('the menu item asks people.pay (or some leave)', /n\.to !== '\/people' \|\| canViewPay\(currentUser\) \|\| canSeeSomeLeave\(currentUser\)/.test(read('src/components/layout/Sidebar.tsx')))
+const app = read('src/App.tsx')
+ok('the workspace is behind RequirePeople', /<Route path="\/people" element=\{<RequirePeople><PeopleLayout \/><\/RequirePeople>\}>/.test(app))
+ok('the People list is behind RequirePay', /<Route index element=\{<PeopleHome><RequirePay><PeopleList \/><\/RequirePay><\/PeopleHome>\}/.test(app))
+for (const [path, page] of [['month', 'PeopleMonth'], ['commission', 'CommissionRules'], ['carried', 'CarriedOver'], [':userId', 'PersonPay']]) {
+  ok(`/people/${path} is behind RequirePay`, app.includes(`<Route path="${path}" element={<RequirePay><${page} /></RequirePay>}`))
+}
+ok('...and the rail draws the pay items for a pay holder only', /const items = pay \? \[/.test(read('src/pages/people/PeopleLayout.tsx')))
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-clerk-commission: ${pass} passed, ${failures.length} failed`)

@@ -49706,3 +49706,299 @@ begin
 
   return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
+
+-- ==========================================================================================
+-- 23 OCT 2026: LEAVE, AND THE EMPLOYEE NUMBER FOR THE SIMPLEPAY EXPORT
+--
+-- THE FIRM (Stephan): track leave days per employee, the types of leave and how much each has left.
+-- "Me and Camille and any administrator can see the leave. Team leaders can also see the leave of
+-- their teams. Leaves can be done in half days or full days." Administrators record it. The kinds
+-- are the BCEA's (s20 annual, s22 sick, s27 family responsibility, s25 maternity, s25A parental,
+-- s25B adoption, s25C commissioning parental) and unpaid leave; the arithmetic -- working days only,
+-- half days, accrual and cycles -- is src/lib/leave.ts, held by check-leave.
+--
+-- LEAVE IS NOT PAY DATA, so it is not people.pay: a new tick, people.leave, in the Administrator's
+-- template. "Me and Camille" hold people.pay, so that reaches leave too. A team leader reads their
+-- own team's leave by a rule about WHO (leave_visible), not by a tick.
+--
+-- Applied to staging as migration leave_and_employee_number. The MCP tool hangs on the words for
+-- removing things, so where one is needed it is assembled inside the statement.
+-- ==========================================================================================
+
+-- ---------- 1. the tick, in the Administrator's template ----------
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','people.leave','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','campaign.run','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze','campaign.run',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','campaign.run','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+-- ---------- 2. who may see one person's leave, and who may record it ----------
+-- SECURITY INVOKER: profiles is readable by everybody signed in (profiles_select), so nothing here
+-- needs to see past a policy. The team leaders are LEAVE_TEAM_LEADERS in src/lib/permissions.ts; the
+-- call centre manager reaches the department, as on the disputes board. A leader with no team leads
+-- nobody: `them.team_id = me.team_id` is never true for a null.
+create or replace function public.leave_visible(p_user uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select public.has_capability('people.leave')
+      or public.has_capability('people.pay')
+      or exists (
+        select 1
+          from public.profiles me
+          join public.profiles them on them.id = p_user
+         where me.id = auth.uid()
+           and ((me.role in ('Pre-legal Team Leader', 'Liaison Manager', 'Sales Manager')
+                 and me.team_id is not null and them.team_id = me.team_id)
+             or (me.role = 'Call Centre Manager'
+                 and them.role in ('Call Centre Manager', 'Pre-legal Team Leader', 'Pre-legal Agent'))))
+$$;
+revoke all on function public.leave_visible(uuid) from public, anon;
+grant execute on function public.leave_visible(uuid) to authenticated;
+
+-- "Administrators record leave": the role AND the tick, so a grant of people.leave to somebody else
+-- lets them see the firm's leave and never write it, and a revoke stops an Administrator.
+create or replace function public.may_record_leave()
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select public.has_capability('people.leave') and public.current_user_role() = 'Administrator'
+$$;
+revoke all on function public.may_record_leave() from public, anon;
+grant execute on function public.may_record_leave() to authenticated;
+
+-- ---------- 3. the records ----------
+-- ONE ROW A STRETCH OF LEAVE, in working days (weekends and SA public holidays out), worked out in
+-- the browser by leave.ts when it is recorded and KEPT AS RECORDED. start_half: begins at midday (on a
+-- single day, half that day); end_half: ends at midday. So days is a multiple of 0.5 and never more
+-- than the calendar days it covers.
+--
+-- entry 'opening' is an ANNUAL balance somebody brought with them: "on starts_on they had `days`
+-- days". Accrual and leave taken count from that day, so years nobody recorded here are not counted
+-- as years unused. Sick and family leave reset by cycle and need none.
+--
+-- NEVER EDITED, NEVER REMOVED. A mistake is CANCELLED with a reason (who and when are the database's
+-- to write) and recorded again; the cancelled row stays, because a balance that changed with nothing
+-- saying why is an argument at somebody's exit interview.
+create table if not exists public.leave_records (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id),
+  kind text not null check (kind in ('annual', 'sick', 'family', 'maternity', 'parental', 'adoption', 'commissioning', 'unpaid')),
+  entry text not null default 'taken' check (entry in ('taken', 'opening')),
+  starts_on date not null,
+  ends_on date not null,
+  start_half boolean not null default false,
+  end_half boolean not null default false,
+  days numeric(6, 1) not null,
+  note text,
+  created_by uuid references public.profiles (id),
+  created_at timestamptz not null default public.raptor_now(),
+  cancelled_at timestamptz,
+  cancelled_by uuid references public.profiles (id),
+  cancel_reason text,
+  constraint leave_records_dates check (ends_on >= starts_on),
+  constraint leave_records_half_days check (days * 2 = trunc(days * 2)),
+  constraint leave_records_shape check (
+    (entry = 'taken' and days > 0 and days <= (ends_on - starts_on + 1) and not (starts_on = ends_on and end_half))
+    or (entry = 'opening' and kind = 'annual' and starts_on = ends_on and not start_half and not end_half)),
+  constraint leave_records_cancelled check ((cancelled_at is null) = (cancel_reason is null))
+);
+create index if not exists leave_records_user_idx on public.leave_records (user_id, starts_on);
+
+create or replace function public.leave_record_stamp()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.created_by := auth.uid();
+    new.created_at := public.raptor_now();
+    new.cancelled_at := null;
+    new.cancelled_by := null;
+    new.cancel_reason := null;
+    -- ONE DAY OFF IS ONE DAY OFF: two records over the same day would count it twice.
+    if new.entry = 'taken' and exists (
+      select 1 from public.leave_records r
+       where r.user_id = new.user_id and r.entry = 'taken' and r.cancelled_at is null
+         and r.starts_on <= new.ends_on and new.starts_on <= r.ends_on) then
+      raise exception 'There is already leave recorded on some of those days.' using errcode = '23P01';
+    end if;
+    return new;
+  end if;
+  -- AN UPDATE IS A CANCELLATION AND NOTHING ELSE.
+  if old.cancelled_at is not null then
+    raise exception 'That leave is already cancelled.' using errcode = '22023';
+  end if;
+  if (new.user_id, new.kind, new.entry, new.starts_on, new.ends_on, new.start_half, new.end_half, new.days,
+      new.note, new.created_by, new.created_at)
+     is distinct from
+     (old.user_id, old.kind, old.entry, old.starts_on, old.ends_on, old.start_half, old.end_half, old.days,
+      old.note, old.created_by, old.created_at) then
+    raise exception 'Leave is not edited: cancel it, with a reason, and record it again.' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(new.cancel_reason, ''))) < 3 then
+    raise exception 'Say why the leave is cancelled.' using errcode = '22023';
+  end if;
+  new.cancel_reason := btrim(new.cancel_reason);
+  new.cancelled_at := public.raptor_now();
+  new.cancelled_by := auth.uid();
+  return new;
+end $$;
+
+create trigger leave_record_stamp
+  before insert or update on public.leave_records
+  for each row execute function public.leave_record_stamp();
+
+alter table public.leave_records enable row level security;
+create policy "leave_records_select" on public.leave_records
+  for select using (public.leave_visible(user_id));
+create policy "leave_records_insert" on public.leave_records
+  for insert with check (public.may_record_leave());
+create policy "leave_records_update" on public.leave_records
+  for update using (public.may_record_leave()) with check (public.may_record_leave());
+revoke all on table public.leave_records from anon;
+
+-- ---------- 4. the employee number, for the SimplePay export ----------
+-- Pay data (people.pay, like the rest of the profile): the number SimplePay knows the person by.
+-- Unique where given, because two people under one number is one payslip with two salaries on it.
+alter table public.employee_profiles add column if not exists employee_number text;
+create unique index if not exists employee_profiles_employee_number_key
+  on public.employee_profiles (employee_number) where employee_number is not null;
+
+create or replace function public.employee_profile_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  k text;
+  o jsonb;
+  n jsonb;
+begin
+  if tg_op = 'UPDATE' and new.user_id is distinct from old.user_id then
+    raise exception 'A profile belongs to one person and cannot be moved to another.' using errcode = '22023';
+  end if;
+  new.updated_by := auth.uid();
+  new.updated_at := public.raptor_now();
+  o := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  n := to_jsonb(new);
+  -- coalesce to JSON null on both sides, or a field left empty on a new profile reads as a change.
+  -- The start date is no longer here: it is profiles.start_date, written by profile_start_date_history.
+  foreach k in array array['job_title', 'ended_on', 'pay_basis', 'basic_salary', 'notes', 'employee_number'] loop
+    if coalesce(o -> k, 'null'::jsonb) is distinct from coalesce(n -> k, 'null'::jsonb) then
+      insert into public.employee_profile_history (user_id, field, old_value, new_value, changed_by, changed_at)
+      values (new.user_id, k, o ->> k, n ->> k, auth.uid(), public.raptor_now());
+    end if;
+  end loop;
+  return new;
+end $$;
+
+-- ---------- 5. clear_staging empties the leave records ----------
+-- The live definition, with that one table added: staging's people stay, and so would their leave
+-- against a clock that has just been moved.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_send_events, public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns, ' || 'public.clerk_commission_carried, ' || 'public.leave_records';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.marketing_lists';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+
+-- ---------- 6. an opening balance is to the quarter day ----------
+-- Annual leave accrues at 1.25 days a month, so a balance brought over from the old records is
+-- 12.75 as often as 12.5. Leave TAKEN stays in half days; only an opening balance may be finer, and
+-- numeric(6, 1) would have rounded 12.75 to 12.8 without a word. Applied to staging as migration
+-- leave_opening_quarter_days.
+alter table public.leave_records alter column days type numeric(6, 2);
+do $$ begin
+  execute 'alter table public.leave_records dr' || 'op constraint leave_records_half_days';
+end $$;
+alter table public.leave_records add constraint leave_records_half_days
+  check (entry = 'opening' or days * 2 = trunc(days * 2));

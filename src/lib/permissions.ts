@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { departmentOf } from './departments.ts'
 import { can } from './capabilities.ts'
-import type { User } from '../types'
+import type { User, UserRole } from '../types'
 
 /**
  * THESE ARE NOW NAMES FOR A CAPABILITY, NOT LISTS OF ROLES.
@@ -364,6 +364,58 @@ export function canViewIncome(user: Pick<User, 'role' | 'grants' | 'revokes'> | 
  */
 export function canViewPay(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
   return can(user, 'people.pay')
+}
+
+/**
+ * EVERYBODY'S LEAVE (23 Oct). The firm: "Me and Camille and any administrator can see the leave."
+ * Any Administrator is people.leave, in the Administrator's template; "me and Camille" are the
+ * people.pay holders, named by the firm, so that tick reaches leave too whatever their role. The
+ * database's leave_visible() asks the same two -- plus the team rule below, which is per person.
+ */
+export function canViewLeave(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'people.leave') || can(user, 'people.pay')
+}
+
+/**
+ * WHO RECORDS LEAVE: an Administrator holding people.leave -- the firm's "administrators record
+ * leave". Both, as may_record_leave() asks both: a grant of people.leave to somebody who is not an
+ * Administrator lets them SEE everybody's leave, never write it.
+ */
+export function canRecordLeave(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return !!user && user.role === 'Administrator' && can(user, 'people.leave')
+}
+
+/**
+ * THE ROLES THAT LEAD A TEAM, FOR LEAVE. The firm: "Team leaders can also see the leave of their
+ * teams." The pre-legal team leader, the liaison manager and the sales manager each lead a team
+ * (profiles.team_id); the call centre manager "is the manager of the team leaders" and leads every
+ * call-centre team while belonging to none, so their reach is the department -- the same shape as
+ * visibleDisputeOwners. The sales manager is INFERRED (they lead the sales team; the firm said "team
+ * leaders" and did not list roles) -- HANDOFF §4. Mirrored in leave_visible(); check-leave holds the
+ * two lists together.
+ */
+export const LEAVE_TEAM_LEADERS: UserRole[] = ['Pre-legal Team Leader', 'Liaison Manager', 'Sales Manager']
+
+/**
+ * WHOSE LEAVE THIS PERSON MAY SEE. Everybody, for canViewLeave; their team for a team leader (a
+ * leader with no team leads nobody -- matching undefined to undefined would hand every teamless
+ * leader every teamless person); the call centre for its manager; otherwise nobody.
+ */
+export function leaveVisibleTo<T extends Pick<User, 'id' | 'role' | 'teamId'>>(
+  me: (Pick<User, 'id' | 'role' | 'teamId' | 'grants' | 'revokes'>) | null | undefined,
+  everyone: T[],
+): T[] {
+  if (!me) return []
+  if (canViewLeave(me)) return everyone
+  if (me.role === 'Call Centre Manager') return everyone.filter((u) => departmentOf(u.role) === 'Call centre')
+  if (LEAVE_TEAM_LEADERS.includes(me.role) && me.teamId) return everyone.filter((u) => !!u.teamId && u.teamId === me.teamId)
+  return []
+}
+
+/** Whether there is any leave for this person to look at: the People item and the Leave page. */
+export function canSeeSomeLeave(user: Pick<User, 'role' | 'teamId' | 'grants' | 'revokes'> | null | undefined): boolean {
+  if (!user) return false
+  return canViewLeave(user) || user.role === 'Call Centre Manager' || (LEAVE_TEAM_LEADERS.includes(user.role) && !!user.teamId)
 }
 
 /**

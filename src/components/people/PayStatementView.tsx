@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '../ui/Card'
 import { rand } from '../../lib/money'
+import { leaveWords, type LeaveKind } from '../../lib/leave.ts'
 import {
   paydayOf, periodLabel, RATE_SOURCE_LABEL, shortDay, waitingWords,
   type PayoverRun, type PayStatement, type PtcGroup, type StatementLine,
@@ -155,12 +156,17 @@ function Groups({ groups, pending }: { groups: PtcGroup[]; pending: boolean }) {
   )
 }
 
-export function PayStatementView({ statement, provisional, scheme }: {
+export function PayStatementView({ statement, provisional, scheme, leave = null }: {
   statement: PayStatement
   /** The period has not closed: what is released is read against the runs approved so far. */
   provisional: boolean
   /** The words to use when the person has no commission scheme. */
   scheme: string | null
+  /**
+   * Leave taken in the salary month (26th to 25th), by kind -- INFORMATION ONLY (23 Oct). Leave is
+   * shown where pay is, because the payroll needs both; it changes nothing in the sums above it.
+   */
+  leave?: { from: string; to: string; byKind: Record<LeaveKind, number> } | null
 }) {
   const s = statement
   const bp = s.basicPay
@@ -243,6 +249,12 @@ export function PayStatementView({ statement, provisional, scheme }: {
             <span>Payable on {shortDay(s.payday)}</span>
             <span className="tabular-nums" data-testid="payable-total">{rand(s.payable)}</span>
           </div>
+          {leave && (
+            <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-2" data-testid="statement-leave">
+              Leave {shortDay(leave.from)} – {shortDay(leave.to)}: {leaveWords(leave.byKind) || 'none'}.
+              <span className="text-slate-400"> For information; it does not change the figures above.</span>
+            </p>
+          )}
           {bp.prorata && (
             <p className="text-[11px] text-slate-400">
               A starter or a leaver is paid the basic × working days worked from the 26th to the 25th ÷ working days in that

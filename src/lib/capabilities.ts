@@ -70,6 +70,7 @@ export type Capability =
   | 'business.view'
   | 'business.income'
   | 'people.pay'
+  | 'people.leave'
   | 'payment.record'
   | 'payment.approve'
   | 'payment.reverse'
@@ -189,6 +190,23 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     label: 'See and set pay',
     blurb: 'Salaries, employee profiles and the clerks’ collection commission, person by person. '
       + 'In no role by default, not even the Administrator’s — the firm named who sees pay.',
+    group: 'Money',
+    inDatabase: true,
+  },
+  /*
+   * LEAVE (23 Oct 2026): SEEING EVERYBODY'S, AND -- FOR AN ADMINISTRATOR -- RECORDING IT.
+   *
+   * THE FIRM: "Me and Camille and any administrator can see the leave. Team leaders can also see the
+   * leave of their teams." Leave is NOT pay data, so it is not people.pay: it is in the
+   * Administrator's template, and grantable to anybody else who should see the whole firm's leave.
+   * Recording is the Administrator's ("administrators record leave"), so may_record_leave asks the
+   * role as well as the tick. A team leader sees their own team's leave without any tick -- that is a
+   * rule about WHO, in leave_visible(), not a capability to hand out.
+   */
+  'people.leave': {
+    label: 'See and record leave',
+    blurb: 'Everybody’s leave and what each person has left. An Administrator with it records leave too; '
+      + 'a team leader sees their own team’s without it.',
     group: 'Money',
     inDatabase: true,
   },

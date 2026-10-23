@@ -10,7 +10,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026** (People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026** (Leave and the SimplePay export, at the top of Start here; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -18,6 +18,39 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+0000000000000000. **23 Oct: LEAVE, AND THE EXPORT FOR SIMPLEPAY** (Stephan; migration in §5, open questions §4 000).
+   - **Leave** (People -> **Leave**, `/people/leave`, `/people/leave/:userId`). The firm: "Me and Camille
+     and any administrator can see the leave. Team leaders can also see the leave of their teams. Leaves
+     can be done in half days or full days." NOT pay data: a new tick **`people.leave`** in the
+     Administrator's template (sees everybody's; **records** only with the role too -- `may_record_leave`
+     asks Administrator AND the tick); `people.pay` (Stephan, Camille) also sees everybody's; a **team
+     leader** (Pre-legal Team Leader, Liaison Manager, Sales Manager -- the last INFERRED) sees their own
+     `team_id`'s, the **Call Centre Manager** the whole call centre (`leave_visible()`; browser copy
+     `leaveVisibleTo` in permissions.ts). Enforced by RLS on `leave_records`; probed on staging with an
+     Administrator without pay (records), the sales manager (sees own team only, write refused) and an
+     agent (sees nothing), rolled back.
+   - **Kinds** (BCEA): annual (15 working days/yr, accrued 1.25 per completed month, carried forward),
+     sick (30 per 36-month cycle; 1 per 26 worked in the first 6 months), family responsibility (3/yr
+     after 4 months), maternity / parental / adoption / commissioning parental (statutory periods, shown in
+     words, no pot), unpaid. **Working days only** (weekends + SA public holidays out, workingDays.ts),
+     **half days** (from midday on the first day / to midday on the last; one day = half). An **opening
+     annual balance** ("on day D they had X days", to the quarter day) stops years before Raptor being
+     counted as unused. Never edited or removed: **cancelled with a reason** (trigger stamps who/when);
+     overlaps refused in the browser and the database. All arithmetic in `src/lib/leave.ts` (pure).
+   - **Pay statement**: one information line, "Leave 26 Oct – 25 Nov: Annual leave 3 days" (the SALARY
+     month, which the basic pays for); the Month summary has a Leave column. **Pay maths unchanged.**
+   - **Export for SimplePay** (Month summary, people.pay only): a .csv per pay day -- employee number
+     (new `employee_profiles.employee_number`, unique where given, on the profile form, logged in the
+     history), name, email, basic (the summary's own, pro rata), commission payable (payments + PTCs
+     released), and leave days by kind in the salary month. Headings plain and provisional in ONE constant,
+     `SIMPLEPAY_HEADINGS` (`src/lib/simplePay.ts`), until the firm sends SimplePay's bulk-input template.
+   - The People workspace now opens for leave as well: `RequirePeople` on `/people`, **every pay route
+     inside still behind its own RequirePay** (check-clerk-commission holds each one); the rail shows a
+     non-pay person only Leave. check-leave (118), e2e/leave (21), e2e/people (26).
+   - **E2E port trap**: 5409 (and 5199, 5407, 5408) were held by another worktree's leftover Vite
+     servers, which answer with THAT checkout's code -- a run on a busy port tests somebody else's app
+     and fails mysteriously. e2e/leave was run on 5431. `curl -s 127.0.0.1:PORT/src/App.tsx | grep X`
+     tells you whose app is answering.
 00000000000000. **S10, 22 Oct: THE OPT-IN NOW NEEDS A SECOND PRESS** (the firm agreed). The /opt-in page asks 'status' on
    opening and records the yes only on "Confirm — keep me informed", so a mail system's link scanner
    cannot leave a consent nobody gave. e2e/news-prospects holds it (opening records nothing).
@@ -1430,6 +1463,21 @@ The four that stood here at the start of the fifth session were answered by the 
 
 Do not guess these. Each one changes money.
 
+000. **LEAVE AND SIMPLEPAY (23 Oct, built -- see Start here).** Open:
+   (i) **Annual accrual**: built as 1.25 days per COMPLETED month (15/yr). The BCEA's alternative is 1 day
+   per 17 days worked (about 14.7/yr); `annualByDaysWorked` exists if the firm prefers it.
+   (ii) **Carry-over / forfeiture of annual leave**: nothing forfeits (BCEA allows forfeiting what is not
+   taken within six months after the cycle, by agreement). Say if a cap applies.
+   (iii) **Which roles are "team leaders"** for leave: built as Pre-legal Team Leader, Liaison Manager
+   and **Sales Manager (inferred)** by team, and the Call Centre Manager over the whole call centre.
+   (iv) **Should everybody see their OWN leave balance?** Not asked, so not built: a collector sees none.
+   (v) **Unpaid leave** is shown and exported, never deducted from the basic here -- the payroll deducts.
+   Confirm SimplePay does that, and whether maternity is paid by the firm at all (policy).
+   (vi) **The SimplePay bulk-input template**: send it and `SIMPLEPAY_HEADINGS` is changed to match.
+   Also whether leave belongs in that file or is captured in SimplePay's own leave module.
+   (vii) **Sick-leave cycles and opening balances**: sick and family leave restart by cycle from the start
+   date and take no opening balance -- days taken earlier in the current cycle are recorded on their
+   days. Say if an opening figure is wanted for those too.
 00. **PEOPLE / THE CLERKS' COMMISSION (22 Oct; most answered 23 Oct -- see Start here).**
    **Still open after the 23 Oct answers:**
    (i) **THE PRO-RATA DIVISOR -- the one assumption to confirm.** Built as: basic x (working days from
@@ -1570,6 +1618,16 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **Leave (23 Oct, `leave_and_employee_number` then `leave_opening_quarter_days`, the very end of
+  schema.sql; staging only)**: `role_capabilities` (Administrator + `people.leave`; the live definition
+  read first), `leave_visible(uuid)` and `may_record_leave()` (security invoker), `leave_records` + trigger
+  `leave_record_stamp` (insert stamps who/when and refuses overlaps; an update is a cancellation with a
+  reason and nothing else) + RLS (read leave_visible, insert/update may_record_leave, no removal),
+  `employee_profiles.employee_number` + partial unique index, `employee_profile_stamp` (history + 
+  employee_number), `clear_staging` (live definition + `leave_records`). Then `days` widened to
+  numeric(6, 2) and the half-day constraint relaxed for an opening balance (quarter days). Probed in a
+  rolled-back transaction first. No data written. **Production needs both, in order.** No grant is
+  needed: every Administrator has people.leave by role.
 - **People round two (23 Oct, `people_payday_payover_release_and_carried`, the very end of schema.sql;
   staging only)**: `profiles.start_date` (copied from `employee_profiles.started_on`, which is then
   REMOVED -- one start date) + trigger `profile_start_date_history` (writes `start_date` changes into

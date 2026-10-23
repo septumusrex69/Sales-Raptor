@@ -1,10 +1,12 @@
 import { supabase } from './supabase'
 import type { CarriedEntry, CommissionPayment, PayBasis, PayoverRun } from './clerkCommission.ts'
+import type { LeaveKind, LeaveRecord } from './leave.ts'
 
 /**
  * THE PEOPLE WORKSPACE'S READS AND WRITES. Everything here is behind people.pay in the DATABASE --
  * the three tables' policies and both pay functions ask has_capability('people.pay') -- so somebody
- * without the tick who reaches these gets nothing, or a refusal, whatever the screen draws.
+ * without the tick who reaches these gets nothing, or a refusal, whatever the screen draws. LEAVE, at
+ * the bottom, is the exception and says so: it is not pay data and has its own rule.
  *
  * EVERY COLUMN BY HAND, AND THAT IS THE TRAP CLAUDE.md NAMES: a column in the table and the select but
  * missing from a mapper reads as undefined for ever and nothing fails. check-clerk-commission holds
@@ -30,10 +32,12 @@ export interface EmployeeProfile {
   notes: string | null
   updatedBy: string | null
   updatedAt: string | null
+  /** The number SimplePay knows them by, for the export (23 Oct). Unique where given. */
+  employeeNumber: string | null
 }
 
 export const EMPLOYEE_PROFILE_COLUMNS =
-  'user_id, job_title, pay_basis, basic_salary, notes, updated_by, updated_at, ended_on'
+  'user_id, job_title, pay_basis, basic_salary, notes, updated_by, updated_at, ended_on, employee_number'
 
 export function toEmployeeProfile(r: any): EmployeeProfile {
   return {
@@ -45,6 +49,7 @@ export function toEmployeeProfile(r: any): EmployeeProfile {
     notes: s(r.notes),
     updatedBy: s(r.updated_by),
     updatedAt: s(r.updated_at),
+    employeeNumber: s(r.employee_number),
   }
 }
 
@@ -61,7 +66,7 @@ export async function fetchEmployeeProfiles(): Promise<EmployeeProfile[]> {
  */
 export async function saveEmployeeProfile(p: {
   userId: string; jobTitle: string | null; endedOn: string | null; payBasis: PayBasis | null
-  basicSalary: number | null; notes: string | null
+  basicSalary: number | null; notes: string | null; employeeNumber: string | null
 }): Promise<void> {
   const { error } = await supabase.from('employee_profiles').upsert({
     user_id: p.userId,
@@ -70,6 +75,7 @@ export async function saveEmployeeProfile(p: {
     pay_basis: p.payBasis,
     basic_salary: p.basicSalary,
     notes: p.notes,
+    employee_number: p.employeeNumber,
   }, { onConflict: 'user_id' })
   if (error) throw new Error(error.message)
 }
@@ -332,5 +338,69 @@ export async function reverseCarried(id: string, reason: string, original: { use
     amount: -original.amount, source: 'reversal',
   })
   if (error) throw new Error(error.message)
+}
+
+/* ---------------------------------------------------------------------------------------------- *
+ * LEAVE (23 Oct) -- NOT behind people.pay. leave_records answers by leave_visible(): people.leave or
+ * people.pay sees everybody's, a team leader their own team's, everybody else nothing. Written only
+ * by an Administrator with people.leave (may_record_leave); never edited, never removed -- cancelled.
+ * ---------------------------------------------------------------------------------------------- */
+
+export const LEAVE_COLUMNS =
+  'id, user_id, kind, entry, starts_on, ends_on, start_half, end_half, days, note, created_by, created_at, cancelled_at, cancelled_by, cancel_reason'
+
+export function toLeaveRecord(r: any): LeaveRecord {
+  return {
+    id: String(r.id),
+    userId: String(r.user_id),
+    kind: String(r.kind) as LeaveKind,
+    entry: r.entry === 'opening' ? 'opening' : 'taken',
+    startsOn: String(r.starts_on),
+    endsOn: String(r.ends_on),
+    startHalf: r.start_half === true,
+    endHalf: r.end_half === true,
+    days: n(r.days),
+    note: s(r.note),
+    createdBy: s(r.created_by),
+    createdAt: String(r.created_at),
+    cancelledAt: s(r.cancelled_at),
+    cancelledBy: s(r.cancelled_by),
+    cancelReason: s(r.cancel_reason),
+  }
+}
+
+/**
+ * THE LEAVE THIS PERSON MAY SEE -- the database decides whose; `userId` narrows to one person. Read
+ * whole: a firm of a hundred records a few hundred stretches a year, and a balance needs all of
+ * somebody's since their start date. The select is written out literally (check-select-columns reads
+ * literals); check-leave holds it to LEAVE_COLUMNS.
+ */
+export async function fetchLeave(userId: string | null = null): Promise<LeaveRecord[]> {
+  let q = supabase.from('leave_records')
+    .select('id, user_id, kind, entry, starts_on, ends_on, start_half, end_half, days, note, created_by, created_at, cancelled_at, cancelled_by, cancel_reason')
+    .order('starts_on', { ascending: false })
+  if (userId) q = q.eq('user_id', userId)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as any[]).map(toLeaveRecord)
+}
+
+/** A new stretch of leave, or an opening annual balance. Who and when are the database's to write. */
+export async function recordLeave(r: {
+  userId: string; kind: LeaveKind; entry: 'taken' | 'opening'; startsOn: string; endsOn: string
+  startHalf: boolean; endHalf: boolean; days: number; note: string | null
+}): Promise<void> {
+  const { error } = await supabase.from('leave_records').insert({
+    user_id: r.userId, kind: r.kind, entry: r.entry, starts_on: r.startsOn, ends_on: r.endsOn,
+    start_half: r.startHalf, end_half: r.endHalf, days: r.days, note: r.note,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/** A cancellation with its reason; the database stamps who and when, and refuses any other change. */
+export async function cancelLeave(id: string, reason: string): Promise<void> {
+  const { data, error } = await supabase.from('leave_records').update({ cancel_reason: reason }).eq('id', id).select('id')
+  if (error) throw new Error(error.message)
+  if (!data || data.length === 0) throw new Error('The leave was not cancelled. Only an Administrator can cancel leave.')
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

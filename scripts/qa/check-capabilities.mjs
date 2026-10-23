@@ -29,7 +29,7 @@ import {
   canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canViewLibrary, canEditLibrary, mayPoolDisputes,
   canViewTrust, canViewBusiness, canSendMarketing,
-  canRunCampaigns, canViewPay,
+  canRunCampaigns, canViewPay, canViewLeave,
 } from '../../src/lib/permissions.ts'
 
 let pass = 0
@@ -147,12 +147,16 @@ const EXPECTED = {
      salaries, and they are given it one at a time; a role that picked it up would be a payroll
      shown to everybody who is ever made an Administrator. */
   canViewPay: [],
+  /* LEAVE (23 Oct): "Me and Camille and any administrator can see the leave." By role, the
+     Administrator; Stephan and Camille reach it through people.pay. Team leaders see their own
+     team's by a rule about who (leaveVisibleTo / leave_visible), which is not a capability. */
+  canViewLeave: ['Administrator'],
 }
 const FN = {
   canViewFinance, canViewTrust, canViewBusiness, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canEditLibrary, mayPoolDisputes, canViewLibrary,
   canSendMarketing,
-  canRunCampaigns, canViewPay,
+  canRunCampaigns, canViewPay, canViewLeave,
 }
 for (const [name, allowed] of Object.entries(EXPECTED)) {
   for (const role of ROLES) {
@@ -172,7 +176,7 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 21)
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 22)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:
@@ -186,6 +190,11 @@ check('every predicate goes through can()', (perms.match(/return can\(user, '/g)
  */
 const ALLOWED_TO_READ_A_ROLE = [
   'canEditOwned', 'visibleDisputeOwners', 'isAssignableOwner', 'useDefaultOwnerFilter',
+  /* LEAVE (23 Oct). Whose leave a team leader sees is a fact about WHO leads WHOM (the role and the
+     team), the same shape as visibleDisputeOwners, and recording is "administrators record leave" --
+     the role beside the tick, exactly as may_record_leave() asks it. check-leave holds all three
+     against leave_visible() and may_record_leave(). */
+  'canRecordLeave', 'leaveVisibleTo', 'canSeeSomeLeave',
 ]
 let rest = perms
 for (const fn of ALLOWED_TO_READ_A_ROLE) {

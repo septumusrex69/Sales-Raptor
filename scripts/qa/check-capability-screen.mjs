@@ -157,7 +157,9 @@ check('the ones marked as enforced are the ones the database really checks',
     /* S10: the marketing tables' policies ask for it. */
     'marketing.send',
     /* 22 Oct: every People table's policies and both pay functions ask for it. */
-    'people.pay'].sort())
+    'people.pay',
+    /* 23 Oct: leave_visible() and may_record_leave() ask for it, and leave_records' policies ask them. */
+    'people.leave'].sort())
 /*
  * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
  *

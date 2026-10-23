@@ -10,11 +10,12 @@ import { useAppStore } from '../../store/AppStore'
 import { departmentOf } from '../../lib/departments.ts'
 import {
   buildStatement, clientsWithPtc, defaultPayBasis, hasCommissionScheme, PAY_BASIS_LABEL, periodForKey,
-  periodKeyOf, periodLabel, shortDay, type PayBasis, type PayStatement,
+  periodKeyOf, periodLabel, salaryMonth, shortDay, type PayBasis, type PayStatement,
 } from '../../lib/clerkCommission.ts'
+import { leaveInPeriod, type LeaveRecord } from '../../lib/leave.ts'
 import {
   fetchCarried, fetchCommissionPayments, fetchCommissionStart, fetchEmployeeProfiles, fetchPayoverRuns, fetchProfileHistory,
-  saveEmployeeProfile, type EmployeeProfile, type ProfileChange,
+  fetchLeave, saveEmployeeProfile, type EmployeeProfile, type ProfileChange,
 } from '../../lib/peopleApi'
 import { fetchCollectorPerformance } from '../../lib/collectorStats.ts'
 import type { CollectorStats } from '../../lib/collectorScore.ts'
@@ -22,7 +23,7 @@ import { clockToday } from '../../lib/clock.ts'
 import { rand } from '../../lib/money'
 
 const FIELD_LABEL: Record<string, string> = {
-  job_title: 'Job title', start_date: 'Start date', started_on: 'Start date', ended_on: 'End date', pay_basis: 'Pay basis', basic_salary: 'Basic salary', notes: 'Notes',
+  employee_number: 'Employee number', job_title: 'Job title', start_date: 'Start date', started_on: 'Start date', ended_on: 'End date', pay_basis: 'Pay basis', basic_salary: 'Basic salary', notes: 'Notes',
 }
 
 /** "From midnight on the 11th to the end of the 10th", as the floor asks collector_performance. */
@@ -91,6 +92,21 @@ export function PersonPay() {
     return () => { live = false }
   }, [loaded, periodKey, basis, profile?.basicSalary, profile?.endedOn, person?.startDate, userId])
 
+  /* ---------------- leave, for the statement's information line ----------------
+     Read separately and allowed to fail: leave is not pay, and a statement that would not draw
+     because the leave could not be read would be the wrong way round. */
+  const [leave, setLeave] = useState<LeaveRecord[] | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchLeave(userId).then((r) => { if (live) setLeave(r) }).catch(() => { if (live) setLeave(null) })
+    return () => { live = false }
+  }, [userId])
+  const leaveLine = useMemo(() => {
+    if (!leave) return null
+    const m = salaryMonth(periodKey)
+    return { from: m.start, to: m.end, byKind: leaveInPeriod(leave, m.start, m.end) }
+  }, [leave, periodKey])
+
   /* ---------------- the floor's figures ---------------- */
   const [perf, setPerf] = useState<CollectorStats | null>(null)
   useEffect(() => {
@@ -142,7 +158,7 @@ export function PersonPay() {
       {statement === null && !stError ? (
         <div className="flex items-center gap-2 text-slate-400 text-sm py-6"><Loader2 size={16} className="animate-spin" /> Working out the pay…</div>
       ) : statement && (
-        <PayStatementView statement={statement} provisional={periodKey === latest}
+        <PayStatementView statement={statement} provisional={periodKey === latest} leave={leaveLine}
           scheme={hasCommissionScheme(basis) ? null : `${PAY_BASIS_LABEL[basis]}: commission scheme not set up yet. Basic salary only.`} />
       )}
 
@@ -185,6 +201,7 @@ function ProfileForm({ userId, profile, startDate, defaultBasis, onSaved }: {
   const [payBasis, setPayBasis] = useState<string>(profile?.payBasis ?? '')
   const [basic, setBasic] = useState(profile?.basicSalary === null || profile?.basicSalary === undefined ? '' : String(profile.basicSalary))
   const [notes, setNotes] = useState(profile?.notes ?? '')
+  const [employeeNumber, setEmployeeNumber] = useState(profile?.employeeNumber ?? '')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -193,7 +210,8 @@ function ProfileForm({ userId, profile, startDate, defaultBasis, onSaved }: {
   const dirty = useMemo(() => (
     jobTitle !== (profile?.jobTitle ?? '') || endedOn !== (profile?.endedOn ?? '')
     || payBasis !== (profile?.payBasis ?? '') || basicValue !== (profile?.basicSalary ?? null) || notes !== (profile?.notes ?? '')
-  ), [jobTitle, endedOn, payBasis, basicValue, notes, profile])
+    || employeeNumber !== (profile?.employeeNumber ?? '')
+  ), [jobTitle, endedOn, payBasis, basicValue, notes, employeeNumber, profile])
 
   async function save() {
     setBusy(true); setMsg(null)
@@ -205,6 +223,7 @@ function ProfileForm({ userId, profile, startDate, defaultBasis, onSaved }: {
         payBasis: (payBasis || null) as PayBasis | null,
         basicSalary: basicValue,
         notes: notes.trim() || null,
+        employeeNumber: employeeNumber.trim() || null,
       })
       await onSaved()
       setMsg('Saved.')
@@ -235,6 +254,9 @@ function ProfileForm({ userId, profile, startDate, defaultBasis, onSaved }: {
           </select></label>
         <label className="space-y-1"><span className="text-slate-500 text-[12px]">Basic salary a month (R)</span>
           <input className={inputClass} inputMode="decimal" value={basic} onChange={(e) => setBasic(e.target.value)} data-testid="basic-salary" /></label>
+        {/* THE NUMBER SIMPLEPAY KNOWS THEM BY: the export's first column (23 Oct). */}
+        <label className="space-y-1"><span className="text-slate-500 text-[12px]">Employee number (SimplePay)</span>
+          <input className={inputClass} value={employeeNumber} onChange={(e) => setEmployeeNumber(e.target.value)} data-testid="employee-number" /></label>
         <label className="space-y-1 sm:col-span-2"><span className="text-slate-500 text-[12px]">Notes</span>
           <input className={inputClass} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
       </div>

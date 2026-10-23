@@ -19,6 +19,7 @@ import { RequireFinance } from './components/auth/RequireFinance'
 import { RequireBusiness } from './components/auth/RequireBusiness'
 import { RequireIncome } from './components/auth/RequireIncome'
 import { RequirePay } from './components/auth/RequirePay'
+import { PeopleHome, RequirePeople } from './components/auth/RequirePeople'
 
 import { CollectorDashboard } from './pages/CollectorDashboard'
 /*
@@ -73,6 +74,8 @@ const PersonPay = lazy(() => import('./pages/people/PersonPay').then((m) => ({ d
 const PeopleMonth = lazy(() => import('./pages/people/PeopleMonth').then((m) => ({ default: m.PeopleMonth })))
 const CommissionRules = lazy(() => import('./pages/people/CommissionRules').then((m) => ({ default: m.CommissionRules })))
 const CarriedOver = lazy(() => import('./pages/people/CarriedOver').then((m) => ({ default: m.CarriedOver })))
+const LeaveList = lazy(() => import('./pages/people/PeopleLeave').then((m) => ({ default: m.LeaveList })))
+const PersonLeave = lazy(() => import('./pages/people/PeopleLeave').then((m) => ({ default: m.PersonLeave })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -241,13 +244,17 @@ function App() {
 
               {/* PEOPLE (22 Oct): profiles, pay and the clerks' commission, behind people.pay -- which no
                   role has; the firm named the two people who see pay. RequirePay is the courtesy, the
-                  tables' policies and the pay functions are the boundary. */}
-              <Route path="/people" element={<RequirePay><PeopleLayout /></RequirePay>}>
-                <Route index element={<PeopleList />} handle={{ title: 'People' }} />
-                <Route path="month" element={<PeopleMonth />} handle={{ title: 'Month summary' }} />
-                <Route path="commission" element={<CommissionRules />} handle={{ title: 'Commission rules' }} />
-                <Route path="carried" element={<CarriedOver />} handle={{ title: 'Carried over' }} />
-                <Route path=":userId" element={<PersonPay />} handle={{ title: 'Person' }} />
+                  tables' policies and the pay functions are the boundary.
+                  LEAVE (23 Oct) widened the DOOR, not the pay: Administrators and team leaders come
+                  in for leave, and every pay screen below still sits behind its own RequirePay. */}
+              <Route path="/people" element={<RequirePeople><PeopleLayout /></RequirePeople>}>
+                <Route index element={<PeopleHome><RequirePay><PeopleList /></RequirePay></PeopleHome>} handle={{ title: 'People' }} />
+                <Route path="leave" element={<LeaveList />} handle={{ title: 'Leave' }} />
+                <Route path="leave/:userId" element={<PersonLeave />} handle={{ title: 'Leave' }} />
+                <Route path="month" element={<RequirePay><PeopleMonth /></RequirePay>} handle={{ title: 'Month summary' }} />
+                <Route path="commission" element={<RequirePay><CommissionRules /></RequirePay>} handle={{ title: 'Commission rules' }} />
+                <Route path="carried" element={<RequirePay><CarriedOver /></RequirePay>} handle={{ title: 'Carried over' }} />
+                <Route path=":userId" element={<RequirePay><PersonPay /></RequirePay>} handle={{ title: 'Person' }} />
               </Route>
 
               {/* The old addresses. Every one of them, so nothing anybody saved goes dead. */}

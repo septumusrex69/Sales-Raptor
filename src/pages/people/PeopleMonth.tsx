@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { Download, Loader2 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { Button } from '../../components/ui/Button'
 import { PeriodStepper } from '../../components/people/PeriodStepper'
 import { useAppStore } from '../../store/AppStore'
 import {
@@ -9,8 +10,12 @@ import {
   summarise, type SummaryRow,
 } from '../../lib/clerkCommission.ts'
 import {
-  fetchCarried, fetchCommissionPayments, fetchCommissionStart, fetchEmployeeProfiles, fetchPayoverRuns,
+  fetchCarried, fetchCommissionPayments, fetchCommissionStart, fetchEmployeeProfiles, fetchLeave, fetchPayoverRuns,
+  type EmployeeProfile,
 } from '../../lib/peopleApi'
+import { leaveInPeriod, leaveWords } from '../../lib/leave.ts'
+import { simplePayCsv, simplePayFilename } from '../../lib/simplePay.ts'
+import { saveFile } from '../../lib/fileSave.ts'
 import { clockToday } from '../../lib/clock.ts'
 import { rand } from '../../lib/money'
 
@@ -27,7 +32,7 @@ export function PeopleMonth() {
   const { users } = useAppStore()
   const latest = periodKeyOf(clockToday())
   const [periodKey, setPeriodKey] = useState(latest)
-  const [result, setResult] = useState<{ rows: SummaryRow[]; unheld: number; unread: boolean } | null>(null)
+  const [result, setResult] = useState<{ rows: SummaryRow[]; unheld: number; unread: boolean; profiles: EmployeeProfile[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -48,7 +53,7 @@ export function PeopleMonth() {
         endedOn: byId.get(u.id)?.endedOn ?? null,
       }))
       const out = summarise({ periodKey, people, payments, runs, carried, commissionStart })
-      return { ...out, unread: runs === null && (payments.some((x) => x.paidToClient) || carried.length > 0) }
+      return { ...out, profiles, unread: runs === null && (payments.some((x) => x.paidToClient) || carried.length > 0) }
     })()
       .then((r) => { if (live) setResult(r) })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not work out the month.') })
@@ -62,6 +67,49 @@ export function PeopleMonth() {
   }, [result])
   const nameOf = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown'
 
+  /*
+   * EXPORT FOR SIMPLEPAY (the firm: "do the export one first, API later"). The rows are THIS table's
+   * -- summarise's basic and commission, never a second sum -- plus the leave each person took in the
+   * SALARY month (26th to 25th), which is the month the basic pays for. The headings are provisional
+   * until the firm sends SimplePay's bulk-input template: simplePay.ts, SIMPLEPAY_HEADINGS.
+   */
+  const [exporting, setExporting] = useState(false)
+  const [exportMsg, setExportMsg] = useState<string | null>(null)
+  const [leaveNote, setLeaveNote] = useState<Map<string, string> | null>(null)
+  useEffect(() => {
+    let live = true
+    setLeaveNote(null)
+    const m = salaryMonth(periodKey)
+    fetchLeave().then((all) => {
+      if (!live) return
+      const out = new Map<string, string>()
+      for (const u of users) out.set(u.id, leaveWords(leaveInPeriod(all.filter((r) => r.userId === u.id), m.start, m.end)))
+      setLeaveNote(out)
+    }).catch(() => { if (live) setLeaveNote(null) })
+    return () => { live = false }
+  }, [periodKey, users])
+
+  async function exportSimplePay() {
+    if (!result) return
+    setExporting(true); setExportMsg(null)
+    try {
+      const m = salaryMonth(periodKey)
+      const leave = await fetchLeave()
+      const byId = new Map(result.profiles.map((p) => [p.userId, p]))
+      const csv = simplePayCsv(result.rows.map((r) => {
+        const u = users.find((x) => x.id === r.userId)
+        return {
+          name: u?.name ?? 'Unknown', email: u?.email ?? '', employeeNumber: byId.get(r.userId)?.employeeNumber ?? null,
+          basic: r.basic, commission: r.commission,
+          leave: leaveInPeriod(leave.filter((x) => x.userId === r.userId), m.start, m.end),
+        }
+      }))
+      await saveFile(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), simplePayFilename(periodKey))
+    } catch (e) {
+      setExportMsg(e instanceof Error ? e.message : 'Could not make the export.')
+    } finally { setExporting(false) }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -69,8 +117,14 @@ export function PeopleMonth() {
           <h1 className="text-xl font-semibold tracking-tight text-slate-800">Month summary</h1>
           <span className="text-xs text-slate-400">What the firm pays for {periodLabel(periodKey)}</span>
         </div>
-        <PeriodStepper value={periodKey} onChange={setPeriodKey} latest={latest} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button onClick={() => void exportSimplePay()} disabled={!result || exporting} data-testid="export-simplepay" icon={<Download size={14} />}>
+            Export for SimplePay
+          </Button>
+          <PeriodStepper value={periodKey} onChange={setPeriodKey} latest={latest} />
+        </div>
       </div>
+      {exportMsg && <Card className="p-3 text-sm text-negative-700 bg-negative-50 border-negative-100">{exportMsg}</Card>}
       {/* THE PAY DAY, AND THE TWO MONTHS IT PAYS FOR (the firm, 23 Oct): commission on the collections
           month (11th to 10th), the basic on the salary month (26th to 25th), both on the 25th. */}
       <p className="text-sm text-slate-700">
@@ -96,6 +150,7 @@ export function PeopleMonth() {
                   <th className="text-right font-medium px-4 py-2.5">Commission payable</th>
                   <th className="text-right font-medium px-4 py-2.5">Total payable</th>
                   <th className="text-right font-medium px-4 py-2.5">PTC waiting</th>
+                  <th className="text-left font-medium px-4 py-2.5">Leave (salary month)</th>
                 </tr>
               </thead>
               <tbody>
@@ -106,6 +161,7 @@ export function PeopleMonth() {
                     <td className="px-4 py-1.5 text-right tabular-nums">{r.scheme ? rand(r.commission) : <span className="text-slate-400">No scheme yet</span>}</td>
                     <td className="px-4 py-1.5 text-right tabular-nums font-medium">{rand(r.payable)}</td>
                     <td className="px-4 py-1.5 text-right tabular-nums text-slate-500">{r.scheme ? rand(r.pending) : ''}</td>
+                    <td className="px-4 py-1.5 text-[12px] text-slate-500">{leaveNote?.get(r.userId) ?? ''}</td>
                   </tr>
                 ))}
                 <tr className="border-t border-slate-200 font-semibold text-slate-900">
@@ -114,6 +170,7 @@ export function PeopleMonth() {
                   <td className="px-4 py-2 text-right tabular-nums">{rand(totals.commission)}</td>
                   <td className="px-4 py-2 text-right tabular-nums" data-testid="month-payable">{rand(totals.payable)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-slate-500">{rand(totals.pending)}</td>
+                  <td />
                 </tr>
               </tbody>
             </table>

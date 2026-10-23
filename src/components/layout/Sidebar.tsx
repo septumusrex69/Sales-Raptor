@@ -8,7 +8,7 @@ import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
-import { canViewClients, canViewLibrary, canViewFinance, canViewBusiness, canSendMarketing, canViewPay } from '../../lib/permissions'
+import { canViewClients, canViewLibrary, canViewFinance, canViewBusiness, canSendMarketing, canViewPay, canSeeSomeLeave } from '../../lib/permissions'
 import { useSidebarCollapsed } from '../../lib/sidebarCollapsed'
 
 /**
@@ -87,7 +87,8 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
    */
   { to: '/trust', label: 'Trust', icon: Landmark },
   { to: '/business', label: 'Business', icon: Briefcase },
-  // PEOPLE (22 Oct): pay and profiles. Only for people.pay, which no role has -- the firm named who.
+  // PEOPLE (22 Oct): pay and profiles, for people.pay, which no role has -- the firm named who. And
+  // leave (23 Oct), for every Administrator and a team leader's own team; the pay screens keep RequirePay.
   { to: '/people', label: 'People', icon: IdCard },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
@@ -141,7 +142,7 @@ export function Sidebar() {
           .filter((n) => n.to !== '/library' || canViewLibrary(currentUser))
           .filter((n) => n.to !== '/trust' || canViewFinance(currentUser))
           .filter((n) => n.to !== '/business' || canViewBusiness(currentUser))
-          .filter((n) => n.to !== '/people' || canViewPay(currentUser))
+          .filter((n) => n.to !== '/people' || canViewPay(currentUser) || canSeeSomeLeave(currentUser))
           .filter((n) => n.to !== '/news' || canSendMarketing(currentUser))
           .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0

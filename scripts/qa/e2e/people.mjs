@@ -2,8 +2,9 @@
  * PEOPLE AND PAY, IN A REAL BROWSER (22 Oct 2026; the firm's answers, 23 Oct).
  *
  * check-clerk-commission holds the arithmetic and the database. What only a browser sees:
- *   1. An Administrator WITHOUT people.pay -- who has everything else -- has no People item, and the
- *      address alone does not open it. The firm named who sees pay: "not even all Administrators".
+ *   1. An Administrator WITHOUT people.pay -- who has everything else -- sees no pay: /people takes them
+ *      to Leave (every Administrator sees leave, 23 Oct), the rail has no pay item, and the pay
+ *      addresses alone do not open. The firm named who sees pay: "not even all Administrators".
  *   2. ...but the Add User box asks THEM for the start date too: "A user start date can also be asked
  *      for any administrator" (it is not pay data). And so it does for a people.pay holder.
  *   3. With the tick, a clerk's statement shows its pay day (the 25th), a pro-rata basic for a starter,
@@ -92,11 +93,18 @@ try {
   /* ---------------- 1. an Administrator without the tick ---------------- */
   {
     const { context, page } = await open(browser, ADMIN, '/people')
-    await page.waitForURL((u) => u.pathname === '/', { timeout: 20000 })
-    t.ok('the address alone does not open People for an Administrator without the tick', new URL(page.url()).pathname === '/')
-    await page.locator('aside nav a[href="/business"]').waitFor({ timeout: 20000 })
-    t.check('...and the menu has no People item', await page.locator('aside nav a[href="/people"]').count(), 0)
+    await page.waitForURL((u) => u.pathname === '/people/leave', { timeout: 20000 })
+    t.ok('/people takes an Administrator without the tick to Leave, not the pay list', new URL(page.url()).pathname === '/people/leave')
+    await page.getByTestId('leave-list').waitFor({ timeout: 20000 })
+    t.check('...the rail has no pay item', await page.locator('a[href="/people/month"], a[href="/people/commission"], a[href="/people/carried"]').count(), 0)
+    t.check('...and no salary is drawn', await page.getByTestId('people-list').count(), 0)
     await context.close()
+    for (const path of ['/people/month', `/people/${CLERK_ID}`]) {
+      const o = await open(browser, ADMIN, path)
+      await o.page.waitForURL((u) => u.pathname === '/', { timeout: 20000 })
+      t.ok(`${path} alone does not open for an Administrator without the tick`, new URL(o.page.url()).pathname === '/')
+      await o.context.close()
+    }
   }
 
   /* ---------------- 2. the start date at the door, for every Administrator ---------------- */
@@ -145,7 +153,7 @@ try {
   await stopServer(server)
 }
 const good = t.finish(
-  `People (22-23 Oct): an Administrator without people.pay has no People item, yet Add User asks every
+  `People (22-23 Oct): an Administrator without people.pay sees Leave and no pay screen, yet Add User asks every
 Administrator for the start date; with the tick, a clerk's statement shows the 25th as pay day, a
 pro-rata basic for a starter, and Payments, PTCs paid out (released by the payover run) and PTCs
 waiting in that order, the payable total leaving the waiting PTC out.`)
