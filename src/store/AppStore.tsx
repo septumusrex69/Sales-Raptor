@@ -256,8 +256,13 @@ export interface ConvertConfirmation {
   /** Service commencement date, applied to every deal confirmed in this conversion. */
   startDate: string
   deals: ConvertDealConfirmation[]
-  /** Who looks after the client (S10): required, and assigned through the welcome route. */
+  /** Who looks after the client (S10): required, and assigned through the assign-liaison route. */
   liaisonId: ID
+  /**
+   * The client's code (23 Oct), proposed and editable on the form; absent where the client already
+   * has one, which is never changed here.
+   */
+  code?: string
   /** The client's commission (S10), where debt collection was signed: a rate or a scale. */
   commission?: Pick<Company, 'commissionRate' | 'commissionBands' | 'commissionBandsSource'>
 }
@@ -1375,23 +1380,28 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [leads, ensureLeadCompany, addActivity, updateLead, showError],
   )
 
-  /** The welcome route (api/_lib/email/welcome.ts) for a liaison chosen at conversion. */
-  const welcomeOnConversion = useCallback(async (companyId: ID, liaisonId: ID) => {
+  /*
+   * The assign-liaison route (api/_lib/email/assignLiaison.ts) for a liaison chosen at conversion.
+   * IT SENDS NOTHING (23 Oct): the welcome email went automatically in Nicole's name at 11:55:58 and
+   * she was later told to send it, believing it had not gone. The firm: "The client liaison gets a
+   * notification and it becomes a task that they have to send a welcome letter and that they have to
+   * do an introductory call." So: hers, two tasks, her notification, the client's notes. She sends
+   * the welcome from the client's Welcome card.
+   */
+  const assignOnConversion = useCallback(async (companyId: ID, liaisonId: ID) => {
     try {
       const { data } = await supabase.auth.getSession()
-      const res = await fetch('/api/email/welcome', {
+      const res = await fetch('/api/email/assign-liaison', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session?.access_token ?? ''}` },
         body: JSON.stringify({ companyId, liaisonId }),
       })
-      const body = await res.json().catch(() => ({})) as { error?: string; sent?: boolean }
-      if (!res.ok) { showError(`The client is converted, but the liaison's welcome did not go: ${body.error ?? res.status}. Assign her again on the client.`); return }
+      const body = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) { showError(`The client is converted, but the liaison was not told: ${body.error ?? res.status}. Assign her again on the client.`); return }
       const now = new Date(clockNowMs()).toISOString()
-      setCompanies((prev) => prev.map((c) => (c.id === companyId
-        ? { ...c, liaisonAssignedAt: now, ...(body.sent ? { welcomeSentAt: now } : {}) } : c)))
-      if (!body.sent) showError(`The client is converted and the liaison assigned, but the welcome email could not go${body.error ? `: ${body.error}` : '.'}`)
+      setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, liaisonAssignedAt: now } : c)))
     } catch (e) {
-      showError(`The client is converted, but the liaison's welcome did not go: ${e instanceof Error ? e.message : String(e)}`)
+      showError(`The client is converted, but the liaison was not told: ${e instanceof Error ? e.message : String(e)}`)
     }
   }, [showError])
 
@@ -1405,11 +1415,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       /*
        * THE CLIENT'S TERMS, SET AS IT BECOMES ONE (S10, prompt 13 items 2 and 5): the commission the
        * conversion asked for, and the liaison. The liaison is written here so the client is never
-       * saved without one, and then ASSIGNED through the welcome route once the rows exist -- the
-       * same press as "Assign and welcome" on the client (S8), so choosing her at conversion sends
-       * the welcome email and puts the welcome call on her list rather than skipping both.
+       * saved without one, and then ASSIGNED through the assign-liaison route once the rows exist --
+       * the same press as "Assign" on the client's Welcome card, so choosing her at conversion puts
+       * "Send welcome email" and "Welcome call" on her list and tells her. It sends nothing (23 Oct).
+       * And the client's CODE (23 Oct), proposed on the form, only where it has none.
        */
-      const terms: Partial<Company> = { ...(confirm.commission ?? {}), accountOwnerId: confirm.liaisonId, liaisonNeeded: false }
+      const ownCode = companies.find((c) => c.id === companyId)?.code
+      const terms: Partial<Company> = {
+        ...(confirm.commission ?? {}), accountOwnerId: confirm.liaisonId, liaisonNeeded: false,
+        ...(confirm.code && !ownCode ? { code: confirm.code } : {}),
+      }
       setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, ...terms } : c)))
       if (newCompany) Object.assign(newCompany, terms)
       else updateRow('companies', companyId, terms, 'convertLeadToClient:terms', showError)
@@ -1616,8 +1631,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             return
           }
         }
-        /* After the client and its contact are in: the welcome writes to the client's first contact. */
-        void welcomeOnConversion(companyId, confirm.liaisonId)
+        /* After the client and its contact are in: her tasks and notice point at the client row. */
+        void assignOnConversion(companyId, confirm.liaisonId)
         if (dealsToCreate.length === 0) return
         const results = await Promise.all(dealsToCreate.map((deal) => insertRow('deals', deal, 'convertLeadToClient:deal')))
         const failedIds = dealsToCreate.filter((_, i) => results[i]).map((d) => d.id)
@@ -1647,7 +1662,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       return { companyId, deal: firstDeal }
     },
-    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError, celebrate, welcomeOnConversion],
+    [leads, deals, contacts, companies, ensureLeadCompany, updateLead, addActivity, showError, celebrate, assignOnConversion],
   )
 
   const rejectLead = useCallback<AppActions['rejectLead']>(

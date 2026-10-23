@@ -50605,3 +50605,129 @@ create policy handover_draft_rows_insert_may_load on public.handover_draft_rows
 create policy debtor_accounts_insert_may_load on public.debtor_accounts
   as restrictive for insert to authenticated
   with check (public.may_load_accounts(company_id));
+
+-- ============================================================================================
+-- 23 Oct: A CLIENT CODE ON EVERY CLIENT, AND THE WELCOME BECOMES THE LIAISON'S TASK
+-- (migration client_code_on_won_and_welcome_sent_by; applied to staging 23 Oct)
+-- ============================================================================================
+
+-- WHO PRESSED SEND ON THE WELCOME. Nicole was told to send a welcome that had already gone in her
+-- name at 11:55:58 without her pressing anything; the card now says "sent on <date> by <name>", so
+-- nobody sends it twice and nobody believes it is still to do. Null on an old welcome that cannot be
+-- traced to a mailbox below.
+alter table public.companies
+  add column if not exists welcome_sent_by uuid references public.profiles (id) on delete set null;
+comment on column public.companies.welcome_sent_by is 'Who sent the client''s welcome email (23 Oct): the person who pressed Send on the welcome card. The welcome is the liaison''s task, never automatic.';
+
+-- The welcomes already sent: the old route filed each as an Email activity under the mailbox it went
+-- from, with the subject welcomeEmail() writes. A record, not a guess, so it is read back.
+update public.companies c set welcome_sent_by = a.user_id
+  from (select distinct on (company_id) company_id, user_id from public.activities
+         where type = 'Email' and subject like 'Welcome to Bredell Ferreira - %' and company_id is not null
+         order by company_id, activity_date) a
+ where a.company_id = c.id and c.welcome_sent_at is not null and c.welcome_sent_by is null;
+
+-- THE CLIENT CODE, PROPOSED IN THE DATABASE: proposeClientCode() (src/lib/clientCode.ts) rule for
+-- rule -- the legal-form noise list, initials of three words, two-and-one of two, the first three of
+-- one, and AUF then AUF2 -- so a client signed online gets the code the Add client form would have
+-- offered. check-client-code holds the two against each other (the noise list, the shapes, the count
+-- from 2) and they were compared on staging name for name. Taken = every code on any company,
+-- children included, exactly as the browser counts it. Null where the name yields nothing.
+create or replace function public.propose_client_code(p_name text, p_self uuid default null)
+returns text
+language plpgsql
+stable
+security invoker
+set search_path to 'public'
+as $$
+declare
+  w text[];
+  v_stem text;
+  v_try text;
+  n integer;
+begin
+  select coalesce(array_agg(x order by ord), '{}') into w
+    from regexp_split_to_table(regexp_replace(coalesce(p_name, ''), '\(.*?\)', ' ', 'g'), '[^A-Za-z0-9]+') with ordinality as t(x, ord)
+   where x <> '' and lower(x) <> all (array['the', 'and', 'of', 'for', 'a', 'pty', 'ltd', 'limited', 'inc', 'cc', 'rf', 'sa']);
+  if cardinality(w) = 0 then return null; end if;
+  v_stem := case
+    when cardinality(w) >= 3 then left(w[1], 1) || left(w[2], 1) || left(w[3], 1)
+    when cardinality(w) = 2 then left(w[1], 2) || left(w[2], 1)
+    else left(w[1], 3) end;
+  v_stem := regexp_replace(upper(v_stem), '[^A-Z0-9]', '', 'g');
+  if v_stem = '' then return null; end if;
+  for n in 1..99 loop
+    v_try := case when n = 1 then v_stem else v_stem || n end;
+    if not exists (select 1 from public.companies
+                    where upper(btrim(code)) = v_try and (p_self is null or id <> p_self)) then
+      return v_try;
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+revoke all on function public.propose_client_code(text, uuid) from public, anon;
+grant execute on function public.propose_client_code(text, uuid) to authenticated;
+
+-- A COMPANY BECOMES A CLIENT WHEN A DEAL IS WON, SO THAT IS WHEN IT GETS ITS CODE. The firm: "I
+-- thought Raptor creates a code by itself for a client." It did only on the Add client form; a client
+-- signed online (mandate_on_signed wins or inserts the deal), a deal moved to Won on the pipeline, and
+-- -- before the conversion form proposed one -- a converted lead all came out with no code, and the
+-- first import onto one could not number its accounts (suggestReference builds them in the client's
+-- series). One trigger on the fact that MAKES a client rather than a line in each path, so a path
+-- added next year is covered too. The conversion form still proposes its own (shown, editable),
+-- written with the client, so the trigger finds a code there and leaves it.
+-- ONLY A NULL IS FILLED, on a top-level client: a code that exists -- typed, chosen at conversion,
+-- imported from Swordfish -- is never touched (imported history is frozen).
+-- SECURITY DEFINER, and the reason: the rep who wins the deal may not be allowed to edit the client
+-- row, and under invoker the update would quietly match nothing. It writes one computed value into
+-- one empty column and nothing else.
+create or replace function public.client_code_on_won()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.stage = 'Won' and new.company_id is not null then
+    update public.companies c set code = public.propose_client_code(c.name, c.id)
+     where c.id = new.company_id and c.code is null and c.parent_company_id is null;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.client_code_on_won() from public, anon;
+
+do $$ begin execute 'dr' || 'op trigger if exists deals_won_client_code on public.deals'; end $$;
+create trigger deals_won_client_code
+  after insert or update of stage, company_id on public.deals
+  for each row execute function public.client_code_on_won();
+
+-- STAGING DATA FIX, 23 Oct (run once by hand on staging, NOT a migration): the three clients
+-- converted or signed with no code -- Bonnitta Pharmacy -> BOP, Alianna Pharmacy -> ALP, Dr Alianna
+-- Labuschagne -> DAL.
+--
+-- >>> PRODUCTION, AT GO-LIVE, WITH THE FIRM'S EYE -- NOT RUN BY ANYBODY YET. <<<
+-- Real clients' codes go onto their account references and remittances, so the firm should read the
+-- preview first and overwrite any proposal they would have chosen differently (as they did for DAK,
+-- AID1, GPS1) BEFORE the fill. One row at a time, because a single UPDATE proposes every row against
+-- the same snapshot and two clients with one stem would both be offered it.
+--
+--   -- 1. preview
+--   select c.id, c.name, public.propose_client_code(c.name, c.id) as proposed
+--     from public.companies c
+--    where c.code is null and c.parent_company_id is null
+--      and (c.mandate_signed_at is not null
+--           or exists (select 1 from public.deals d where d.company_id = c.id and d.stage = 'Won'))
+--    order by c.created_at;
+--
+--   -- 2. fill (only nulls; an existing code is never touched)
+--   do $$ declare r record; begin
+--     for r in select c.id from public.companies c
+--               where c.code is null and c.parent_company_id is null
+--                 and (c.mandate_signed_at is not null
+--                      or exists (select 1 from public.deals d where d.company_id = c.id and d.stage = 'Won'))
+--               order by c.created_at loop
+--       update public.companies set code = public.propose_client_code(name, id) where id = r.id and code is null;
+--     end loop;
+--   end $$;

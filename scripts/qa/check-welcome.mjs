@@ -1,12 +1,14 @@
 /**
- * THE NEW CLIENT'S WELCOME (S8, 18 Oct): Sales assigns a liaison, the welcome goes from her, she is
- * told three ways, and the four steps are ticked from facts already on the client.
+ * THE NEW CLIENT'S WELCOME (S8, 18 Oct; made the liaison's press, 23 Oct): Sales assigns a liaison,
+ * which SENDS NOTHING -- she is told, and "Send welcome email" and "Welcome call" go on her list; the
+ * welcome goes from her when she presses Send, once, stamped with who pressed; and the four steps are
+ * ticked from facts already on the client.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-welcome.mjs
  */
 import { readFileSync } from 'node:fs'
 import { welcomeEmail } from '../../src/lib/welcomeEmail.ts'
-import { welcomeSteps, isLiaisonRole } from '../../src/lib/welcome.ts'
+import { welcomeSteps, isLiaisonRole, maySendWelcome, welcomeSentLine } from '../../src/lib/welcome.ts'
 import { newClientPopup } from '../../src/lib/newWork.ts'
 
 let pass = 0
@@ -37,6 +39,16 @@ check('signed, assigned, emailed, not yet called', welcomeSteps(co, []).map((s) 
 check('a call logged on the client after the assignment ticks the last step', welcomeSteps(co, [{ type: 'Courtesy Call', companyId: 'c1', activityDate: '2026-10-13T09:00:00Z' }]).map((s) => s.done), [true, true, true, true])
 check('...a call from BEFORE the assignment does not', welcomeSteps(co, [{ type: 'Call', companyId: 'c1', activityDate: '2026-10-01T09:00:00Z' }])[3].done, false)
 check('...nor an email, nor a call on another client', welcomeSteps(co, [{ type: 'Email', companyId: 'c1', activityDate: '2026-10-13T09:00:00Z' }, { type: 'Call', companyId: 'c2', activityDate: '2026-10-13T09:00:00Z' }])[3].done, false)
+ok('assigned and not yet sent: the email step says it waits for her', welcomeSteps({ ...co, welcomeSentAt: undefined }, [])[2].hint === 'waiting for the liaison to send it' && welcomeSteps({ ...co, welcomeSentAt: undefined }, [])[2].done === false)
+ok('...and says nothing of waiting once it has gone', welcomeSteps(co, [])[2].hint === undefined)
+check('"sent on <date> by <name>"', welcomeSentLine(co, 'Nicole Botha'), 'Welcome email sent on 12/10/2026 by Nicole Botha')
+check('...without a name nobody could trace', welcomeSentLine(co, null), 'Welcome email sent on 12/10/2026')
+check('...and nothing before it is sent', welcomeSentLine({ welcomeSentAt: undefined }, 'X'), null)
+const own = { accountOwnerId: 'u-nic', liaisonNeeded: false }
+ok('her client: she may send', maySendWelcome({ id: 'u-nic', role: 'Liaison' }, own))
+ok('...a Liaison Manager and an Administrator may', maySendWelcome({ id: 'm', role: 'Liaison Manager' }, own) && maySendWelcome({ id: 'a', role: 'Administrator' }, own))
+ok('...another liaison and Sales may not', !maySendWelcome({ id: 'u-other', role: 'Liaison' }, own) && !maySendWelcome({ id: 's', role: 'Sales Rep' }, own))
+ok('...nobody, while the client still waits for a liaison', !maySendWelcome({ id: 'a', role: 'Administrator' }, { accountOwnerId: 'a', liaisonNeeded: true }))
 ok('only a Liaison or Liaison Manager may be a client\'s liaison', isLiaisonRole('Liaison') && isLiaisonRole('Liaison Manager') && !isLiaisonRole('Sales Rep') && !isLiaisonRole('Administrator'))
 
 /* ---------- her pop-up ---------- */
@@ -48,18 +60,46 @@ const notes = [
 check('the pop-up: unread new-client notices only', newClientPopup(notes, '/').map((n) => n.id), ['a'])
 check('...and never over the client it would open', newClientPopup(notes, '/companies/c1').length, 0)
 
-/* ---------- the route ---------- */
-const route = readFileSync(new URL('../../api/_lib/email/welcome.ts', import.meta.url), 'utf8')
-const router = readFileSync(new URL('../../api/email/[action].ts', import.meta.url), 'utf8')
-ok('the route is registered', /\n  welcome,\n/.test(router) && /import welcome from '\.\.\/_lib\/email\/welcome\.js'/.test(router))
-ok('it refuses anybody but Sales, a Liaison Manager or an Administrator', /role === 'Administrator' \|\| role\.includes\('Sales'\) \|\| role === 'Liaison Manager'/.test(route) && /status\(403\)/.test(route))
-ok('...and a liaison who is not one', /liaison\.role === 'Liaison' \|\| liaison\.role === 'Liaison Manager'/.test(route))
-ok('the client becomes hers and stops waiting', /account_owner_id: liaisonId, liaison_needed: false, liaison_assigned_at: nowIso/.test(route))
-ok('the welcome goes from HER mailbox first, the closer\'s only if hers will not', route.indexOf('sendAsUser(admin, liaisonId') > 0 && route.indexOf('sendAsUser(admin, liaisonId') < route.indexOf('sendAsUser(admin, caller.id'))
-ok('a "Welcome call" task on her list, on a working day', /title: `Welcome call: \$\{company\.name\}`/.test(route) && /owner_id: liaisonId/.test(route) && /getUTCDay\(\) === 0 \|\| due\.getUTCDay\(\) === 6/.test(route))
-ok('her pop-up notice', /type: 'client\.assigned'/.test(route) && /user_id: liaisonId/.test(route))
-ok('both written into the client\'s notes', /Liaison assigned: \$\{liaison\.name\}/.test(route))
-ok('dated on the firm\'s clock', /admin\.rpc\('raptor_clock'\)/.test(route))
+/* ---------- assigning: hers, two tasks, her notice, the notes -- and NO email ---------- */
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+const assign = strip(read('api/_lib/email/assignLiaison.ts'))
+const route = strip(read('api/_lib/email/welcome.ts'))
+const router = read('api/email/[action].ts')
+ok('both routes are registered on the one email function', /\n  welcome,\n/.test(router) && /'assign-liaison': assignLiaison,/.test(router)
+  && /import assignLiaison from '\.\.\/_lib\/email\/assignLiaison\.js'/.test(router))
+ok('assigning refuses anybody but Sales, a Liaison Manager or an Administrator', /role === 'Administrator' \|\| role\.includes\('Sales'\) \|\| role === 'Liaison Manager'/.test(assign) && /status\(403\)/.test(assign))
+ok('...and a liaison who is not one', /liaison\.role === 'Liaison' \|\| liaison\.role === 'Liaison Manager'/.test(assign))
+ok('the client becomes hers and stops waiting', /account_owner_id: liaisonId, liaison_needed: false, liaison_assigned_at: nowIso/.test(assign))
+ok('ASSIGNING SENDS NOTHING: no mail code in the assign route', assign.length > 500 && !/sendAsUser|welcomeEmail|welcome_sent_at|resend|nodemailer/i.test(assign))
+ok('TWO tasks on her list: "Send welcome email" and "Welcome call"', /title: `Send welcome email: \$\{company\.name\}`/.test(assign) && /title: `Welcome call: \$\{company\.name\}`/.test(assign)
+  && /owner_id: liaisonId/.test(assign))
+ok('...due the next working day', /getUTCDay\(\) === 0 \|\| due\.getUTCDay\(\) === 6/.test(assign) && /d \+ 1/.test(assign))
+ok('her pop-up notice', /type: 'client\.assigned'/.test(assign) && /user_id: liaisonId/.test(assign))
+ok('the assignment written into the client\'s notes', /Liaison assigned: \$\{liaison\.name\}/.test(assign))
+ok('dated on the firm\'s clock', /admin\.rpc\('raptor_clock'\)/.test(assign) && /admin\.rpc\('raptor_clock'\)/.test(route))
+ok('the welcome route no longer assigns, makes tasks or notifies', route.length > 500 && !/liaison_assigned_at|tasks'\)\.insert|notifications'\)\.insert/.test(route))
+const store = read('src/store/AppStore.tsx')
+ok('converting a lead assigns through the assign route, never the welcome route', /fetch\('\/api\/email\/assign-liaison'/.test(store) && !/fetch\('\/api\/email\/welcome'/.test(store))
+const card = read('src/components/companies/WelcomeCard.tsx')
+ok('the card\'s Assign posts to the assign route', /post\('assign-liaison', \{ companyId: company\.id, liaisonId: pick \}\)/.test(card))
+
+/* ---------- sending: her press, once, and who pressed ---------- */
+ok('the welcome is from the client\'s liaison, read off the client', /const liaisonId = String\(company\.account_owner_id/.test(route))
+ok('...pressed by her, a Liaison Manager or an Administrator -- not Sales', /caller\.id === liaisonId \|\| role === 'Administrator' \|\| role === 'Liaison Manager'/.test(route) && !/includes\('Sales'\)/.test(route))
+ok('NEVER TWICE BY ACCIDENT: already sent is refused unless asked again', /company\.welcome_sent_at && again !== true/.test(route) && /status\(409\)/.test(route))
+ok('the welcome goes from HER mailbox first, the presser\'s only if hers will not', route.indexOf('sendAsUser(admin, liaisonId') > 0 && route.indexOf('sendAsUser(admin, liaisonId') < route.indexOf('sendAsUser(admin, caller.id'))
+const failAt = route.indexOf('if (!sent.ok)')
+const stampAt = route.indexOf('welcome_sent_at: nowIso, welcome_sent_by: caller.id')
+ok('sending stamps WHEN and WHO', stampAt > 0)
+ok('...only after it went (a failed send stamps nothing)', failAt > 0 && stampAt > failAt && failAt > route.indexOf('sendAsUser(admin, liaisonId'))
+const doneAt = route.indexOf(".update({ status: 'Completed', completed_at: nowIso })")
+ok('sending completes her "Send welcome email" task', doneAt > 0 && /\.like\('title', 'Send welcome email:%'\)/.test(route) && failAt > 0 && doneAt > failAt)
+ok('...and notes the email on the client', /type: 'Email', user_id: sentBy \?\? caller\.id, company_id: companyId/.test(route))
+ok('the card asks before sending again', /setConfirmAgain\(true\)/.test(card) && /send\(true\)/.test(card) && /data-testid="welcome-again-confirm"/.test(card))
+ok('...and says when and by whom', /welcomeSentLine\(company, company\.welcomeSentBy/.test(card))
+const sqlAll = read('supabase/schema.sql')
+ok('companies.welcome_sent_by is in the schema', /add column if not exists welcome_sent_by uuid references public\.profiles \(id\)/.test(sqlAll))
 
 /* ---------- signing marks the client as waiting ---------- */
 const sql = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')

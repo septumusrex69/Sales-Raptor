@@ -549,7 +549,7 @@ export function Dashboard({ layoutKey = 'raptor.dashboard.sales.layout' }: { lay
           <Card className="border-gold-300 bg-gold-50/60">
             <div data-testid="waiting-for-liaison">
               <CardHeader title={`Signed, waiting for a liaison · ${waitingForLiaison.length}`}
-                subtitle="Assign each one: the welcome email goes from the liaison and a welcome call goes on her list." />
+                subtitle="Assign each one: the liaison is told, and sending the welcome email and the welcome call go on her list." />
               <ul className="divide-y divide-gold-200/70">
                 {waitingForLiaison.map((c) => (
                   <li key={c.id} className="flex items-center gap-3 py-2 text-sm">

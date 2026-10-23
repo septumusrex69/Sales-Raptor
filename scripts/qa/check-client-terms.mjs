@@ -6,7 +6,8 @@
  *      client. The contract is filed as the Mandate once the client row exists.
  *   2. Converting a lead asks for the commission too, where debt collection was signed.
  *   5. Neither saves without a liaison, chosen rather than defaulted; at conversion she is assigned
- *      through the welcome route, as "Assign and welcome" does.
+ *      through the assign-liaison route, as "Assign" on the Welcome card does -- which sends nothing
+ *      (23 Oct): the welcome email is her task, see check-welcome.
  *
  * Source read back: the forms are React and the rules live in what they refuse to submit.
  *
@@ -61,12 +62,13 @@ ok('both lead screens offer only liaisons',
   ['src/pages/leads/LeadDetail.tsx', 'src/pages/leads/LeadsList.tsx'].every((p) =>
     /liaisons=\{(store\.)?users\.filter\(\(u\) => u\.status === 'Active' && canBeClientLiaison\(u\)\)\}/.test(read(p))))
 ok('the store writes the terms onto the client',
-  /const terms: Partial<Company> = \{ \.\.\.\(confirm\.commission \?\? \{\}\), accountOwnerId: confirm\.liaisonId, liaisonNeeded: false \}/.test(store))
+  /const terms: Partial<Company> = \{\s+\.\.\.\(confirm\.commission \?\? \{\}\), accountOwnerId: confirm\.liaisonId, liaisonNeeded: false,/.test(store))
 ok('...on a new client before it is inserted, an existing one by update',
   /if \(newCompany\) Object\.assign\(newCompany, terms\)\s+else updateRow\('companies', companyId, terms/.test(store))
-ok('...and welcomes through the same route as Assign and welcome',
-  /void welcomeOnConversion\(companyId, confirm\.liaisonId\)/.test(store) && /fetch\('\/api\/email\/welcome'/.test(store))
-const welcomeAt = store.indexOf('void welcomeOnConversion(')
+ok('...and assigns her through the same route as Assign on the Welcome card',
+  /void assignOnConversion\(companyId, confirm\.liaisonId\)/.test(store) && /fetch\('\/api\/email\/assign-liaison'/.test(store))
+ok('...which is NOT the welcome route: converting sends nothing', !/fetch\('\/api\/email\/welcome'/.test(store))
+const welcomeAt = store.indexOf('void assignOnConversion(')
 ok('...after the client and its contact are in the database',
   welcomeAt > store.indexOf("insertRow('contacts', newContact, 'convertLeadToClient:contact')") && welcomeAt > store.indexOf("insertRow('companies', newCompany, 'addCompany')"))
 

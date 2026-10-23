@@ -122,8 +122,11 @@ try {
   {
     const posted = []
     const BONITA = { ...PROFILE, id: 'u-bonita', name: 'Bonita Mahlangu', email: 'b@x.co.za', role: 'Liaison Manager' }
-    const NEWCLIENT = { id: COMPANY_ID, name: 'Abc Cricket', account_owner_id: ADMIN.id, created_at: '2026-10-11T07:00:00Z',
-      commission_rate: 0.25, mandate_signed_at: '2026-10-11T08:00:00Z', liaison_needed: true }
+    /* Assigned and not yet welcomed: since 23 Oct the welcome is the liaison's press, not the
+       assignment's side effect, so the sheet rides on Send. An Administrator may press it. */
+    const NEWCLIENT = { id: COMPANY_ID, name: 'Abc Cricket', account_owner_id: 'u-bonita', created_at: '2026-10-11T07:00:00Z',
+      commission_rate: 0.25, mandate_signed_at: '2026-10-11T08:00:00Z', liaison_needed: false,
+      liaison_assigned_at: '2026-10-12T08:00:00Z', welcome_sent_at: null }
     const { page } = await signedInPage(browser, ADMIN, [
       [(u) => /\/rest\/v1\/profiles.*id=eq\./.test(u), () => ({ body: [ADMIN] })],
       [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN, BONITA] })],
@@ -131,7 +134,7 @@ try {
     ], [], { now: '2026-10-18T10:00:00+02:00' })
     await page.route('**/api/email/welcome', async (route) => {
       posted.push(route.request().postDataJSON())
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ assigned: true, sent: true, fromLiaison: true }) })
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sent: true, fromLiaison: true }) })
     })
     await open(page, `/companies/${COMPANY_ID}`)
     const card = page.getByTestId('welcome-card')
@@ -144,11 +147,10 @@ try {
     const back = chip.getByRole('button', { name: 'Attach it again' })
     if (await back.count()) await back.click()
     t.ok('...and put back', (await chip.innerText()).includes(NEW_NAME))
-    await card.locator('select').selectOption('u-bonita')
-    await page.getByTestId('welcome-assign').click()
-    await card.getByRole('status').waitFor({ timeout: 15000 })
+    await page.getByTestId('welcome-send').click()
+    for (let i = 0; i < 50 && posted.length === 0; i += 1) await page.waitForTimeout(200)
     const att = posted[0]?.attachments ?? []
-    t.check('the welcome route is asked for this client and liaison', JSON.stringify([posted[0]?.companyId, posted[0]?.liaisonId]), JSON.stringify([COMPANY_ID, 'u-bonita']))
+    t.check('the welcome route is asked for this client', posted[0]?.companyId, COMPANY_ID)
     t.check('...with the handover sheet attached', JSON.stringify(att.map((a) => a.filename)), JSON.stringify([NEW_NAME]))
     t.ok('...as a real .xlsx', Buffer.from(att[0]?.content ?? '', 'base64').subarray(0, 2).toString('latin1') === 'PK')
     await page.context().close()
