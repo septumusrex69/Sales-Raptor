@@ -344,6 +344,72 @@ try {
     await context.close()
   }
 
+  /*
+   * ---------- the organogram: the structure drawn, and reached from a department ----------
+   *
+   * The firm: "like you see all users, departments and team, and then organogram ... if you go to
+   * the call center and you say view organogram." Asked of the rendered page because what matters is
+   * what is DRAWN -- a head on the drawing, a vacant post as a box -- and that on an iPad the wide
+   * company view scrolls inside its own box rather than dragging the page sideways.
+   */
+  {
+    const { context, page } = await open(browser, [(u) => /\/rest\/v1\/teams/.test(u), () => ({ body: TEAMS })])
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await page.getByRole('tab', { name: 'Organogram' }).click()
+    await page.getByTestId('organogram').waitFor({ timeout: 10000 })
+    t.check('the Organogram tab is in the URL', new URL(page.url()).searchParams.get('users'), 'organogram')
+    t.ok('the company is at the top, by the firm’s name', /Bredell Ferreira/.test(await page.getByTestId('organogram-firm').innerText()))
+    for (const d of DEPTS) t.ok(`...with ${d.name} under it`, await page.getByTestId(`organogram-department-${d.name}`).count() === 1)
+    t.ok('each department shows its head', /Mandla Manager/.test(await page.getByTestId('organogram-head-Call centre').innerText())
+      && /Sipho Sales/.test(await page.getByTestId('organogram-head-Sales').innerText()))
+    t.ok('...and a department with no head says so rather than drawing nothing',
+      /No head yet/.test(await page.getByTestId('organogram-head-Administration').innerText()))
+    t.ok('a team with no lead is drawn with the post vacant',
+      /No lead yet/.test(await page.getByTestId('organogram-lead-Pre-legal Alpha').innerText()))
+    const floor = await page.getByTestId('organogram-department-Call centre').innerText()
+    t.check('the head is drawn once, not again in their team', floor.split('Mandla Manager').length - 1, 1)
+    t.ok('people who have left are not on it', !/Gone Person|Also Gone/.test(await page.getByTestId('organogram').innerText()))
+    const page_ = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    t.ok('on an iPad the page itself does not scroll sideways', page_ <= 1)
+    /* SCROLLED, not measured: an element that merely overflows reports a scrollWidth too, while
+       whatever clips it (the card, the layout) leaves the far departments unreachable. */
+    const scrolled = await page.getByTestId('organogram-scroll').evaluate((el) => { el.scrollLeft = 120; return el.scrollLeft })
+    t.ok('...the company view scrolls inside its own box instead', scrolled > 0)
+    /* Folding a department takes its teams off the drawing and keeps the department. */
+    await page.getByRole('button', { name: 'Fold Call centre' }).click()
+    await page.waitForTimeout(300)
+    t.check('a department folds away its teams', await page.getByTestId('organogram-team-Pre-legal Alpha').count(), 0)
+    t.ok('...keeping its head', /Mandla Manager/.test(await page.getByTestId('organogram-head-Call centre').innerText()))
+    /* Nothing on it is a control that changes anything. */
+    t.check('the organogram offers no selects to change anyone', await page.getByTestId('organogram').locator('select').count(), 0)
+
+    /* "VIEW ORGANOGRAM" FROM THE CALL CENTRE'S PANE. */
+    await page.getByRole('tab', { name: 'Departments & teams' }).click()
+    await page.getByTestId('tree-department-Call centre').click()
+    await page.getByTestId('department-view-organogram').click()
+    await page.getByTestId('organogram').waitFor({ timeout: 10000 })
+    const url = new URL(page.url())
+    t.check('"View organogram" opens the Organogram tab', url.searchParams.get('users'), 'organogram')
+    t.check('...focused on that department', await page.getByTestId('organogram-focus').evaluate((el) => el.options[el.selectedIndex].text), 'Call centre')
+    t.check('...drawing it alone', await page.locator('[data-testid^="organogram-department-"]').count(), 1)
+    t.ok('...head first', /Mandla Manager/.test(await page.getByTestId('organogram-head-Call centre').innerText()))
+    const fits = await page.getByTestId('organogram-scroll').evaluate((el) => el.scrollWidth - el.clientWidth)
+    t.ok('...and on an iPad one department fits without scrolling', fits <= 1)
+    await page.getByTestId('organogram-focus').selectOption({ label: 'Whole company' })
+    await page.waitForTimeout(300)
+    t.check('the picker goes back to the whole company', await page.locator('[data-testid^="organogram-department-"]').count(), DEPTS.length)
+
+    /* FROM A TEAM'S PANE: its department, with the team lit. */
+    await page.getByRole('tab', { name: 'Departments & teams' }).click()
+    await page.getByTestId('tree-team-Pre-legal Bravo').click()
+    await page.getByTestId('team-view-organogram').click()
+    await page.getByTestId('organogram').waitFor({ timeout: 10000 })
+    t.check('from a team, its department is drawn', await page.getByTestId('organogram-focus').evaluate((el) => el.options[el.selectedIndex].text), 'Call centre')
+    t.check('...with that team lit', await page.getByTestId('organogram-team-Pre-legal Bravo').getAttribute('data-lit'), 'true')
+    t.check('...and no other', await page.locator('[data-lit]').count(), 1)
+    await context.close()
+  }
+
 } finally {
   if (browser) await browser.close()
   await stopServer(server)

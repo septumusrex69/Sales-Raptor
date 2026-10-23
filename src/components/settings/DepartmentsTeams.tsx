@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Building2, Check, ChevronDown, ChevronRight, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Building2, Check, ChevronDown, ChevronRight, Network, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
 import { Card } from '../ui/Card'
 import { UserAvatar } from '../ui/Avatar'
 import { Modal, FormField, inputClass, controlClass } from '../ui/Modal'
@@ -58,6 +59,19 @@ export function DepartmentsTeamsTab() {
   /* Folded departments, not open ones: a tree that opens closed answers nothing on arrival. */
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
   const [adding, setAdding] = useState<null | 'department' | 'team'>(null)
+  /*
+   * "IF YOU GO TO THE CALL CENTER AND YOU SAY VIEW ORGANOGRAM" (the firm, 23 Oct). The Organogram tab,
+   * focused on this department -- and from a team, on its department with that team lit. A URL, so
+   * Back returns here.
+   */
+  const [params, setParams] = useSearchParams()
+  const viewOrganogram = (deptId: string, teamId?: string) => {
+    const keep = new URLSearchParams(params)
+    keep.set('users', 'organogram')
+    keep.set('dept', deptId)
+    if (teamId) keep.set('team', teamId); else keep.delete('team')
+    setParams(keep)
+  }
 
   /* Nothing chosen yet: the first department, so the pane is never an empty box. */
   const current: Selection = selected ?? (sorted[0] ? { kind: 'department', id: sorted[0].id } : null)
@@ -181,12 +195,14 @@ export function DepartmentsTeamsTab() {
             onSelectTeam={(id) => setSelected({ kind: 'team', id })}
             onAddTeam={() => setAdding('team')}
             onRemoved={() => setSelected(null)}
+            onViewOrganogram={() => viewOrganogram(currentDept.id)}
             {...{ users, teams, updateDepartment, deleteDepartment, updateUser }} />
         )}
         {currentTeam && (
           <TeamPane key={currentTeam.id} team={currentTeam} isAdmin={isAdmin} departments={sorted}
             onSelectDepartment={(id) => setSelected({ kind: 'department', id })}
             onRemoved={() => setSelected({ kind: 'department', id: currentTeam.departmentId ?? '' })}
+            onViewOrganogram={currentTeam.departmentId ? () => viewOrganogram(currentTeam.departmentId!, currentTeam.id) : undefined}
             {...{ users, updateTeam, deleteTeam, updateUser }} />
         )}
         {current?.kind === 'unplaced' && (
@@ -222,7 +238,7 @@ export function DepartmentsTeamsTab() {
 
 /* ====================================================================== the department pane */
 
-function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteDepartment, updateUser, onSelectTeam, onAddTeam, onRemoved }: {
+function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteDepartment, updateUser, onSelectTeam, onAddTeam, onRemoved, onViewOrganogram }: {
   dept: DepartmentRow
   users: User[]
   teams: Team[]
@@ -233,6 +249,7 @@ function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteD
   onSelectTeam: (id: string) => void
   onAddTeam: () => void
   onRemoved: () => void
+  onViewOrganogram: () => void
 }) {
   const members = membersOfDepartment(dept.id, users)
   const dTeams = teamsIn(dept.id, teams)
@@ -247,6 +264,7 @@ function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteD
       <PaneTitle name={dept.name} kind="Department" isAdmin={isAdmin}
         onRename={(name) => updateDepartment(dept.id, { name })}
         onRemove={() => setConfirming(true)} whyNotRemove={whyNot} />
+      <ViewOrganogram onClick={onViewOrganogram} testid="department-view-organogram" />
 
       <Section title="Head">
         <PostHolder holder={head} empty="No head yet" isAdmin={isAdmin} label={`Head of ${dept.name}`}
@@ -360,7 +378,7 @@ function DepartmentPane({ dept, users, teams, isAdmin, updateDepartment, deleteD
 
 /* ====================================================================== the team pane */
 
-function TeamPane({ team, users, departments, isAdmin, updateTeam, deleteTeam, updateUser, onSelectDepartment, onRemoved }: {
+function TeamPane({ team, users, departments, isAdmin, updateTeam, deleteTeam, updateUser, onSelectDepartment, onRemoved, onViewOrganogram }: {
   team: Team
   users: User[]
   departments: DepartmentRow[]
@@ -370,6 +388,7 @@ function TeamPane({ team, users, departments, isAdmin, updateTeam, deleteTeam, u
   updateUser: (id: string, patch: Partial<User>) => void
   onSelectDepartment: (id: string) => void
   onRemoved: () => void
+  onViewOrganogram?: () => void
 }) {
   const members = membersOfTeam(team.id, users)
   const lead = users.find((u) => u.id === team.leadId)
@@ -389,6 +408,7 @@ function TeamPane({ team, users, departments, isAdmin, updateTeam, deleteTeam, u
       <PaneTitle name={team.name} kind="Team" isAdmin={isAdmin}
         onRename={(name) => updateTeam(team.id, { name })}
         onRemove={() => setConfirming(true)} whyNotRemove={whyNot} />
+      {onViewOrganogram && <ViewOrganogram onClick={onViewOrganogram} testid="team-view-organogram" />}
 
       <Section title="Department">
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -461,6 +481,16 @@ function TeamPane({ team, users, departments, isAdmin, updateTeam, deleteTeam, u
 }
 
 /* ====================================================================== the pieces */
+
+/** Everybody who can see this pane may see the drawing: it is read-only, so it is not an admin's button. */
+function ViewOrganogram({ onClick, testid }: { onClick: () => void; testid: string }) {
+  return (
+    <button type="button" onClick={onClick} data-testid={testid}
+      className="mt-2 inline-flex items-center gap-1.5 text-[12.5px] font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+      <Network size={14} className="text-slate-400" /> View organogram
+    </button>
+  )
+}
 
 function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
