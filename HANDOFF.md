@@ -525,6 +525,16 @@ the problem to the next session rather than solved it.
 
 ---
 
+
+## 23 Oct (S10) — mail already read in the mailbox arrives read
+
+The firm: a new user's mailbox synced and everything showed unread. `emailSync.ts` never fetched
+the IMAP flags. It now asks for them and stores a message read when the mailbox already had it
+`\Seen` (as well as sent mail). **Only the first sight counts** — the upsert ignores duplicates, so
+mail imported before this stays as it was, and reading a message on a phone AFTER Raptor has it
+does not flow back yet. That second half is a follow-up (re-read flags on each sync for recent
+mail). `check-mail-seen.mjs` holds it; `check-mail-queue` updated for the new line.
+
 ## 1. The state of play
 
 | | |

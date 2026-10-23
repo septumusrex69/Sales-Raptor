@@ -266,6 +266,8 @@ async function fileUserEmail(
     noRecordNeeded?: boolean
     /** Pulled from the Sent folder: a mailbox row and nothing else. Never filed, never charged. */
     isSent?: boolean
+    /** Already read in the mailbox itself (IMAP \\Seen) when Raptor first saw it. */
+    seen?: boolean
     /** Who it went to. The useful address on a sent message; From is always us. */
     toAddress?: string | null
     toName?: string | null
@@ -312,7 +314,14 @@ async function fileUserEmail(
          * opening one is the only thing that marks mail read, and nobody opens their own sent mail
          * to tick it off. You wrote it -- you have read it.
          */
-        read_at: message.isSent ? new Date().toISOString() : null,
+        /*
+         * AND MAIL ALREADY READ IN THE MAILBOX ARRIVES READ (22 Oct). The firm: a new user's mailbox
+         * synced and "it shows everything as unread". Sync never asked the server for the \Seen
+         * flag, so years of read mail landed bold. Now the flag is fetched with the message and
+         * honoured on the first sight of it. Only the first: the row is inserted once (the upsert
+         * ignores duplicates), so reading a message on a phone afterwards does not reach Raptor.
+         */
+        read_at: (message.isSent || message.seen) ? new Date().toISOString() : null,
         occurred_at: message.at,
       },
       { onConflict: 'user_id,message_id', ignoreDuplicates: true },
@@ -1260,7 +1269,7 @@ async function syncMailbox(
 
     let maxUid = sinceUid ?? 0
     for (const uid of uids) {
-      const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
+      const msg = await client.fetchOne(String(uid), { source: true, flags: true }, { uid: true })
       if (!msg || !msg.source) {
         console.log(`[emailSync] ${path} UID ${uid}: fetchOne returned no message/source, skipped`)
         continue
@@ -1401,6 +1410,7 @@ async function syncMailbox(
         /* The folder's answer, or the agent's standing one. Either is enough to make it junk. */
         isJunk: isJunk || junkedSender,
         isSent,
+        seen: msg.flags?.has('\\Seen') ?? false,
         toAddress: firstTo?.address ? normaliseAddress(firstTo.address) ?? firstTo.address : null,
         toName: firstTo?.name || null,
         toRecipients,

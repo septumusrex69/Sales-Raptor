@@ -549,7 +549,7 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
  * read -- so a synced Sent folder put a permanent column of bold rows on the Sent tab that no
  * action a person could take would ever clear. You wrote it; you have read it.
  */
-ok('the sync stamps sent mail as read', /read_at: message\.isSent \? new Date\(\)\.toISOString\(\) : null,/.test(sync))
+ok('the sync stamps sent mail as read', /read_at: \(message\.isSent \|\| message\.seen\) \? new Date\(\)\.toISOString\(\) : null,/.test(sync))
 /* And what was already stored is settled, dated to when it was sent rather than to now. */
 ok('...and what was already stored is settled too',
   /set read_at = coalesce\(read_at, occurred_at\)\s*\nwhere is_sent = true and read_at is null;/.test(schema))
