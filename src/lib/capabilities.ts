@@ -82,6 +82,7 @@ export type Capability =
   | 'book.freeze'
   | 'floor.lead'
   | 'campaign.run'
+  | 'handover.upload'
   | 'handover.discard'
   /* ---- clients and disputes ---- */
   | 'client.view'
@@ -256,6 +257,25 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
       + 'liaisons have it and a collector does not.',
     group: 'The book',
   },
+  /*
+   * LOADING A CLIENT'S ACCOUNTS (23 Oct). THE FIRM: "any person in the client liaison department can
+   * upload a handover sheet" -- the sheet (a batch) and the single account a client phones in. Both
+   * liaison roles by template; anybody else through their department's `load_handovers` duty or a
+   * grant. WHICH clients is not the tick's question but handoverUpload.ts's: an Administrator any,
+   * everybody else their own and their department colleagues' (may_load_accounts in the database).
+   *
+   * inDatabase: the INSERT policies on handovers, handover_drafts and debtor_accounts ask
+   * may_load_accounts(), which asks has_capability('handover.upload'). Before this, any signed-in
+   * person could insert an account from a console.
+   */
+  'handover.upload': {
+    label: "Load a client's accounts",
+    blurb: 'Upload a handover sheet or add a single account, for your own clients and your department '
+      + 'colleagues’ clients. Everything the import does — the duplicate checks, the corrections to the '
+      + 'liaison — happens the same whoever presses it.',
+    group: 'The book',
+    inDatabase: true,
+  },
   'handover.discard': {
     label: 'Undo a handover',
     blurb: 'Remove every account a batch opened, when a client sent the wrong file or sent the '
@@ -395,11 +415,13 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
   /* campaign.run for both liaison roles: "even liaisons can run campaigns over their own clients"
      (the firm, 21 Oct). mayCampaignOn keeps them to those clients. */
   'Liaison Manager': [
-    'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze', 'campaign.run',
+    'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze', 'campaign.run', 'handover.upload',
     'client.view', 'dispute.write_to_client', 'settlement.approve', 'marketing.send', 'library.view',
   ],
+  /* handover.upload for both liaison roles (23 Oct): "any person in the client liaison department
+     can upload a handover sheet". handoverUpload.ts keeps them to their department's clients. */
   Liaison: [
-    'payment.record', 'book.freeze', 'campaign.run', 'client.view', 'dispute.write_to_client', 'settlement.approve',
+    'payment.record', 'book.freeze', 'campaign.run', 'handover.upload', 'client.view', 'dispute.write_to_client', 'settlement.approve',
     'library.view',
   ],
   'Call Centre Manager': [

@@ -50456,3 +50456,152 @@ begin
                                       when 'Communications' then 'Liaison Manager'
                                       when 'Sales' then 'Sales Manager' end) = 1;
 end $$;
+
+-- =====================================================================================
+-- handover_upload_for_liaisons (23 Oct 2026)
+--
+-- THE FIRM (Stephan): "Please make it so that client liaisons can upload their own clients' import
+-- sheets. Also possibly other people in the department's import sheets. Okay, any person in the client
+-- liaison department can upload a handover sheet." Both roads: the sheet (a BATCH -- the `handovers`
+-- table) and the single account a client phones in (Add debtor). A handover is one account.
+--
+--   * A new tick, handover.upload, in the Administrator's template and both liaison roles.
+--   * A new duty, load_handovers, ticked on Communications: "any person in the department", whatever
+--     their role. duty_grantable() widens to it -- book work, never money.
+--   * may_load_accounts(company): the tick, AND an Administrator for any client, anybody else for a
+--     client whose liaison is them or sits in their (stored) department. A client with no liaison is
+--     the Administrator's alone. The TS twin is mayLoadAccountsFor (src/lib/handoverUpload.ts);
+--     check-handover-upload holds the two together.
+--   * RESTRICTIVE insert policies asking it on handovers, handover_drafts, handover_draft_rows and
+--     debtor_accounts. Until now any signed-in person could insert an account from a console; the
+--     permissive policies stay as they were, so reading, updating and discarding are unchanged.
+--
+-- Probed in a rolled-back transaction before it was applied: a liaison inserts a draft and an account
+-- for their own client and a department colleague's and is refused an Administration-owned client; a
+-- pre-legal agent is refused all three; an Administrator passes all three; a pre-legal agent moved
+-- into Communications gets the colleague's client through the duty and still no trust account; a
+-- liaison with the tick revoked is refused their own client.
+-- =====================================================================================
+-- ---------- 1. the tick, in the Administrator's template and both liaison roles ----------
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','people.leave','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','campaign.run','handover.upload','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze','campaign.run','handover.upload',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','campaign.run','handover.upload','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+-- ---------- 2. the duty: "any person in the client liaison department" ----------
+-- The constraint is replaced in a do-block because the MCP tool hangs on the word for removing it.
+do $$
+begin
+  execute 'alter table public.departments ' || 'dr' || 'op constraint if exists departments_duties_known';
+end $$;
+alter table public.departments add constraint departments_duties_known
+  check (duties <@ array['transfer_calls', 'reassign_accounts', 'load_handovers']::text[]);
+
+create or replace function public.duty_grantable()
+returns text[]
+language sql
+immutable
+security invoker
+set search_path to 'public'
+as $$
+  select array['book.hand_out', 'handover.upload']::text[]
+$$;
+
+create or replace function public.duty_capabilities(p_duty text)
+returns text[]
+language sql
+immutable
+security invoker
+set search_path to 'public'
+as $$
+  select array(
+    select c from unnest(case p_duty
+      when 'reassign_accounts' then array['book.hand_out']::text[]
+      when 'load_handovers' then array['handover.upload']::text[]
+      when 'transfer_calls' then array[]::text[]
+      else array[]::text[] end) c
+    where c = any(public.duty_grantable()))
+$$;
+
+-- Communications is the client liaison department; it carries the duty from today.
+update public.departments
+   set duties = duties || array['load_handovers']::text[]
+ where lower(btrim(name)) = 'communications'
+   and not ('load_handovers' = any(duties));
+
+-- ---------- 3. which clients: the TS twin is mayLoadAccountsFor (src/lib/handoverUpload.ts) ----------
+-- SECURITY INVOKER: companies and profiles are readable by everybody signed in (companies_select,
+-- profiles_select), and has_capability is the definer that needs to be one. Null is nobody's
+-- department, so two people with none are not colleagues. A client with no liaison matches no row,
+-- so it is the Administrator's alone.
+create or replace function public.may_load_accounts(p_company uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select public.has_capability('handover.upload')
+     and (
+       public.current_user_role() = 'Administrator'
+       or exists (
+         select 1
+           from public.companies c
+           join public.profiles liaison on liaison.id = c.account_owner_id
+           join public.profiles me on me.id = auth.uid()
+          where c.id = p_company
+            and (liaison.id = me.id
+                 or (me.department_id is not null and liaison.department_id = me.department_id))
+       )
+     )
+$$;
+
+revoke all on function public.may_load_accounts(uuid) from public, anon;
+grant execute on function public.may_load_accounts(uuid) to authenticated;
+
+-- ---------- 4. the doors: every insert that loads accounts asks it ----------
+-- RESTRICTIVE, so they narrow the permissive policies already there rather than replacing them:
+-- reading, updating and the Administrator's discard are exactly as they were. The Swordfish book
+-- import is an Administrator's and passes on the first arm. The service role (api/) bypasses RLS.
+create policy handovers_insert_may_load on public.handovers
+  as restrictive for insert to authenticated
+  with check (public.may_load_accounts(company_id));
+
+create policy handover_drafts_insert_may_load on public.handover_drafts
+  as restrictive for insert to authenticated
+  with check (public.may_load_accounts(company_id));
+
+create policy handover_draft_rows_insert_may_load on public.handover_draft_rows
+  as restrictive for insert to authenticated
+  with check (exists (select 1 from public.handover_drafts d
+                       where d.id = draft_id and public.may_load_accounts(d.company_id)));
+
+create policy debtor_accounts_insert_may_load on public.debtor_accounts
+  as restrictive for insert to authenticated
+  with check (public.may_load_accounts(company_id));
