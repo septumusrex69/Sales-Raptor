@@ -1,9 +1,30 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { useAuth } from '../../store/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { AuthShell, authFieldClass } from './AuthShell'
+
+/**
+ * WHY AN EMAILED LINK FAILED, SAID ON THE PAGE IT LANDS ON (23 Oct).
+ *
+ * Nicole pressed "Forgot password?" three times in three minutes and every link she opened was
+ * refused ("One-time token not found" in the auth log, while the newest token sat unused). Each
+ * press CANCELS the link before it, and the mail takes a minute to arrive, so she was always opening
+ * the one before last. Supabase sends a refused link back here with the reason in the hash; the
+ * page said nothing and showed an empty sign-in form, which reads as "reset doesn't work".
+ * Read once at module load, before the client library strips the hash.
+ */
+const linkError = (() => {
+  const h = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  if (!h.get('error') && !h.get('error_code')) return null
+  return h.get('error_code') === 'otp_expired' || /expired|invalid/i.test(h.get('error_description') ?? '')
+    ? 'That link has expired or was replaced by a newer one. Ask for a new link below, then open only the newest email.'
+    : `That link didn’t work (${h.get('error_description') ?? h.get('error')}). Ask for a new link below.`
+})()
+
+/** How long "Forgot password?" waits before it may be pressed again: a second press cancels the first link. */
+const RESEND_WAIT_SECONDS = 60
 
 export function LoginPage() {
   const { session, loading, signIn } = useAuth()
@@ -11,10 +32,16 @@ export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(linkError)
   const [submitting, setSubmitting] = useState(false)
   const [resetSent, setResetSent] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [wait, setWait] = useState(0)
+  useEffect(() => {
+    if (wait <= 0) return
+    const t = setTimeout(() => setWait((w) => w - 1), 1000)
+    return () => clearTimeout(t)
+  }, [wait])
 
   if (!loading && session) {
     const from = (location.state as { from?: Location })?.from
@@ -40,7 +67,7 @@ export function LoginPage() {
     const { error: sendError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login` })
     setResetting(false)
     if (sendError) setError(sendError.message)
-    else setResetSent(true)
+    else { setResetSent(true); setWait(RESEND_WAIT_SECONDS) }
   }
 
   return (
@@ -103,7 +130,10 @@ export function LoginPage() {
         </div>
 
         {error && <p className="text-sm text-[var(--c-rust-deep)] mb-3.5">{error}</p>}
-        {resetSent && <p className="text-sm text-[var(--c-green)] mb-3.5">If that email has an account, a password reset link has been sent.</p>}
+        {resetSent && <p className="text-sm text-[var(--c-green)] mb-3.5" data-testid="reset-sent">
+          If that email has an account, a reset link is on its way &mdash; it can take a minute or two. Open only the
+          newest one: asking again cancels the link before it.
+        </p>}
 
         <button
           type="submit"
@@ -117,10 +147,10 @@ export function LoginPage() {
         <button
           type="button"
           onClick={handleForgotPassword}
-          disabled={resetting}
+          disabled={resetting || wait > 0}
           className="w-full text-[13px] text-slate-500 underline underline-offset-4 hover:text-[#12233a] mt-4 disabled:opacity-50"
         >
-          {resetting ? 'Sending…' : 'Forgot password?'}
+          {resetting ? 'Sending…' : wait > 0 ? `Send another link in ${wait}s` : 'Forgot password?'}
         </button>
       </form>
     </AuthShell>

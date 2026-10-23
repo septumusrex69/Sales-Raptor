@@ -645,6 +645,21 @@ the problem to the next session rather than solved it.
 
 
 
+
+## 23 Oct (S10) — password reset: why Nicole's links failed
+
+Auth log, staging: Nicole pressed "Forgot password?" at 12:04:59, 12:06:39 and 12:07:53; each link
+she opened was refused "One-time token not found" while the NEWEST token sat unused. Each press
+cancels the link before it and the mail takes a minute, so she always opened the one before last;
+the refused link landed on /login and the page said nothing. Her invite (10:27) had already
+expired at 11:33 — **the email link lifetime on staging is one hour**, short for an invite.
+Fixed in the app: the login page explains a refused/expired link (read from the hash at module
+load), "Forgot password?" holds for 60 s after sending, and the message says to open only the newest
+email. `check-login-reset`, `e2e/login-reset`. **The firm should raise "Email OTP expiration" in
+Supabase → Authentication → Providers → Email to 86400 (24 h) on staging and production** — it is
+not settable from here. Open idea if links still fail: a scanner-proof flow (our own link to a page
+that verifies on a press, via admin.generateLink + Resend) — needs no dashboard change.
+
 ## 23 Oct (S10) — department heads from the managers; the department reads head → teams → people
 
 The firm, on the new Departments & teams: the call centre and communications said "No head" with
