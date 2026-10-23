@@ -1826,6 +1826,7 @@ export function MailPage() {
 
       {forwarding && (
         <ComposeEmailModal
+          title="Forward"
           initialSubject={forwardSubject(forwarding.mail.subject)}
           /*
             THE MARKUP WHERE THERE IS ANY. With HTML the original rides underneath as itself --

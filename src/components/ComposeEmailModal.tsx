@@ -475,7 +475,7 @@ export function ComposeEmailModal({
       reply to a debtor's three paragraphs was typed through a letterbox, and the quoted original
       below it would have been unreadable.
     */
-    <Modal title={title ?? (initialSubject ? `Reply to ${to ?? address}` : 'New Email')} onClose={onClose} width={760}>
+    <Modal title={title ?? (quotedHtml ? 'Forward' : initialSubject && (to ?? address) ? `Reply to ${to ?? address}` : 'New Email')} onClose={onClose} width={760}>
       {/*
         noValidate: THE BROWSER MAY NOT BE THE ONE TO REFUSE.
 
@@ -563,7 +563,11 @@ export function ComposeEmailModal({
             style={emailBodyCss(firm) as CSSProperties}
             spellCheck onChange={(e) => setBody(e.target.value)} required={!quotedHtml}
             placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
-            autoFocus={!!initialSubject} />
+            /* ONLY ONCE SOMEBODY IS ADDRESSED (the firm, 23 Oct: a forward "starts typing with
+               message. It doesn't say who do I want to send it to"). A forward has a subject and no
+               address; To and Message both asked for focus and the later one won, as Subject once
+               did above. */
+            autoFocus={!!initialSubject && !!address} />
         </FormField>
         {/*
           SAID, NOT SHOWN. The original goes out underneath as it was written, tables and all --
