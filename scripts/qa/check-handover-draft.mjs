@@ -104,6 +104,13 @@ ok('an empty client reference is given the account reference', fillAt !== -1 && 
 ok('...after the account reference is generated', fillAt > genAt)
 ok('...only where the sheet had none', /if \(!debtor\.clientReference\.trim\(\)\) debtor\.clientReference = /.test(body))
 
+/* S11: A BATCH WITH PROBLEMS IS SAID TO THE LIAISON MANAGERS TOO ("the liaison ... and perhaps the
+   liaison manager"), after the liaison's query, and never in a way that can undo the import. */
+const mgrAt = body.indexOf("eq('role', 'Liaison Manager')")
+ok('the Liaison Managers are notified of a batch with problems', mgrAt !== -1 && /p_type: 'handover\.problems'/.test(body))
+ok('...after the liaison\'s query is raised', mgrAt > body.indexOf('await raiseQuery('))
+ok('...and a failure is reported, not thrown', /A Liaison Manager was not notified/.test(body))
+
 /* A draft already approved cannot be approved again, or one sheet opens the accounts twice. */
 ok('a handover cannot be approved twice', /already been approved/.test(lib))
 

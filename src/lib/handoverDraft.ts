@@ -850,6 +850,24 @@ export async function approveDraft(input: {
       problems.push(`The client query was not raised: ${e instanceof Error ? e.message : String(e)}`)
     }
 
+    /*
+     * AND THE LIAISON MANAGERS ARE TOLD (S11). THE FIRM, of who should see a handover's problems:
+     * "the liaison ... and perhaps the liaison manager." The query and the email above are the
+     * liaison's; this is the managers' notification, so a batch with problems on a client whose
+     * liaison is away still reaches somebody who can act. Never fatal, like everything here.
+     */
+    const { data: managers } = await supabase.from('profiles').select('id')
+      .eq('role', 'Liaison Manager').neq('status', 'Inactive')
+    for (const m of (managers ?? []).filter((x) => x.id !== company?.account_owner_id)) {
+      const { error: nErr } = await supabase.rpc('notify_user', {
+        p_user_id: m.id, p_type: 'handover.problems',
+        p_message: `${(company?.name as string | null) ?? 'A client'}'s batch ${judged.draft.filename ?? ''} came in with `
+          + `${corrections.length} to confirm and ${notBroughtIn.length} not brought in. The client query is with their liaison.`,
+        p_link: `/companies/${judged.draft.companyId}`,
+      })
+      if (nErr) { problems.push(`A Liaison Manager was not notified: ${nErr.message}`); break }
+    }
+
     const liaisonId = (company?.account_owner_id as string | null) ?? null
     const liaisonEmail = liaisonId
       ? (await supabase.from('profiles').select('email')
