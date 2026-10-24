@@ -152,7 +152,7 @@ ok('the list opens the hand-out when the link says so',
 ok('...on everything the batch matches, not the first page',
   /setAllMatching\(true\)[\s\S]{0,120}?setAllocating\(\{ kind: 'matching'/.test(list))
 /* Once. Closing it must not have it open again on the next render. */
-ok('...and only once', /if \(handOutOpened \|\| !canSeeOthers\) return/.test(list))
+ok('...and only once', /if \(handOutOpened \|\| !canAllocate\) return/.test(list))
 /* An import that opened nothing has nothing to allocate, and a link to an empty list reads as a
    bug in the import rather than as an import that correctly imported nothing. */
 ok('but not when nothing was opened', /if \(result\.created > 0\)[\s\S]{0,120}?setAllocate/.test(card))

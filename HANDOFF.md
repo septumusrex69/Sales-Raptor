@@ -10,12 +10,58 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026, end of S10.** Read "S10 CLOSED -- THE NEXT SESSION STARTS HERE" below first; the dated entries under Start here are the detail.
+Last updated: **24 October 2026, S11.** Read "S11 -- WHERE IT STANDS" below first, then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
+
+## S11 -- WHERE IT STANDS (24 Oct) -- READ THIS FIRST
+
+Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Handers), fast-forwarded onto
+`claude/sales-raptor-review-p1pzx2`. Stephan answered S10's list A.1-A.10 (his words are in the commits).
+
+### Shipped (all on staging; migrations at the end of schema.sql)
+1. **A.1 No client reference** on a sheet row is a NOTE, and approveDraft writes the account's own reference
+   (generated in the client's series) into `client_reference`. Rinda's Bonnitta draft can now be approved.
+2. **A.2 "Client Division"** is on NOT_COLLECTED ("the client is chosen when the batch is uploaded").
+3. **A.6 The welcome** says she is "taking over from" the owner of the client's latest Won deal (the salesperson
+   who signed them) -- never the presser; nobody if the liaison closed it or there is no Won deal.
+4. **A.5/A.9 Hand-out**: `mayHandOutFor` / `may_hand_out(company)` = `book.hand_out` OR may load the client. A
+   liaison hands out her department's clients' batches (list scoped to ?client= or ?handover=, the batch's client
+   read off `handovers`; and the account page). **The database now enforces it**: trigger
+   `debtor_accounts_desk_guard` refuses a change of `assigned_to` made as `authenticated` by anybody else
+   (service role and definer functions pass). **Sales Manager lost `book.hand_out`** (TS + `role_capabilities`).
+   Migration `hand_out_for_loaders_and_desk_guard`.
+5. **A.4 Batches nobody handed out**: the 06:00 run (`api/_lib/workflow/handoutReminder.ts`, rule in
+   `src/lib/handoutReminder.ts`) on the first WORKING morning after receipt tells the client's liaison + every
+   Liaison Manager (notification + task "Hand out N accounts: <client>", opening the hand-out); once per batch
+   (`handovers.handout_reminded_at`); the task completes when the pile is empty (`tasks.handover_id`, no FK on
+   purpose). Timer only; production cron only (Vercel crons do not run on previews). Migration `handout_reminder`.
+6. **Handover problems** also notify every Liaison Manager (`handover.problems`); the liaison keeps query + email.
+7. **Supabase over its limit (709 MB of 500)**: 648 MB was `user_emails.body_html`, signature logos stored as
+   base64 because mailparser's default rewrites `cid:` into `data:` (keepCidLinks). Fixed in the sync + fallback
+   read (`keepCidLinks: true`) and `bodyToStore` strips any `data:image` src to `cid:raptor-picture-not-kept`.
+   **Staging's stored mail was cleaned by another session the same day: 709 MB -> 47 MB**, verified (0 embedded
+   pictures left, 1 710 marked, no body emptied). **Production will need the same clean-up at go-live** (its
+   database did not answer a read on 24 Oct -- possibly paused).
+8. **Vercel** (team is on **Pro**, not Hobby: $15.59 of $20 credit used by 24 Oct, ~90% build minutes):
+   `vercel.json` `git.deploymentEnabled` builds no `claude/**` branch except the preview branch. Session branches
+   no longer get their own preview URL -- test on the preview branch.
+9. **Resend**: bfnews.co.za open + click tracking ON with tracking subdomain `links`. **Needs a DNS CNAME `links`
+   -> `links2.resend-dns.com`** at bfnews.co.za's DNS host (Stephan; Cloudflare proxy off). Until then the domain
+   reads "partially verified" (sending unaffected). bredellferreira.co.za deliberately NOT tracked (legal notices).
+
+### Still open with Stephan
+- **Shortfall paid into the business account**: kept open. Recommendation given: release held commission pro
+  rata to the share of the shortfall paid, same fraction to every collector owed, oldest cycle first.
+- **Payovers confirmed as built**: cycle 11th-10th; collector commission on the 25th of the month it ends; the
+  client paid over on the 11th of the next month.
+- A.3 Swordfish clients: only those with NO liaison get "Needs a liaison" + assign; never welcome tasks. Not built.
+- A.7 optional second contact for individual clients ("good to have"); A.8 keep choosing the liaison. Not built.
+- A.11 leave (B.1) still the next big build; A.12 call transfer parked; BuzzBox is Stephan's.
+- C: Supabase "Email OTP Expiration" 86400 -- instructions given; not confirmed done.
 
 ## S10 CLOSED (23 Oct) -- THE NEXT SESSION STARTS HERE
 
@@ -99,7 +145,8 @@ short direct answers.
 Migrations applied to staging only and needed on production, in order, are listed in §5. S10 added (latest last):
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
-`client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill). Also: repoint the Resend
+`client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `hand_out_for_loaders_and_desk_guard`,
+`handout_reminder`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow
@@ -2460,6 +2507,14 @@ use `./x.ts`; files the API also imports use `./x.js`.
 
 **The MCP tool may ask the user before running anything that LOOKS destructive** -- an `update
 public.deployment` inside a probe was cancelled once. Keep probes to what they need.
+
+- **(S11) The Supabase MCP stalls on the word for removing things.** `apply_migration` and `execute_sql` both
+  stop for a confirmation the user never sees (it times out) when the SQL contains "drop" -- even `drop trigger
+  if exists`. Write `create or replace trigger`, a do-block that assembles the word (S10), or no foreign key.
+- **(S11) mailparser rewrites cid: pictures into data: URIs by default.** Any `simpleParser` whose html is
+  stored or shown must pass `{ keepCidLinks: true }`; check-mail-body-cache holds it against mailparser itself.
+- **(S11) Vercel is Pro, not Hobby.** The 12-function cap in CLAUDE.md was the Hobby limit; check before
+  contorting a route around it. Session branches no longer build previews (vercel.json).
 
 ## 7. How to pick up
 

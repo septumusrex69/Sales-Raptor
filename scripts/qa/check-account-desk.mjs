@@ -73,7 +73,10 @@ check('nobody signed in may not hand out', canHandOutAccounts(undefined), false)
    would not -- for the same action on the same account. */
 ok('the accounts list asks the shared test', /canHandOutAccounts\(currentUser\)/.test(list))
 ok('...and no longer keeps its own list of roles', !/CAN_SEE_OTHER_DESKS/.test(list))
-ok('the account screen asks the same one', /canHandOutAccounts\(currentUser\)/.test(detail))
+/* S11: both screens now ask mayHandOutFor -- the same tick, or may load the account's client --
+   so a liaison's own batch is hers to hand out on the list AND on the account. */
+ok('the account screen asks the same one', /mayHandOutFor\(currentUser, client, users\)/.test(detail)
+  && /mayHandOutFor\(currentUser, companies\.find/.test(list))
 
 /* ------------------------------------------------ the band names the right person */
 

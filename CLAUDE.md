@@ -459,8 +459,7 @@ screenshots of the book, no database dumps.
 **API keys never go in a `VITE_*` variable** — Vite bundles those into client code. Never ask the
 user to paste a secret into chat.
 
-**Vercel Hobby caps serverless functions at 12 and `api/` is at exactly 12.** A new endpoint
-needs an existing one removed, or a Pro plan. `api/` is also **not typechecked** by
+**`api/` is at exactly 12 serverless functions -- the Hobby plan's cap.** The team moved to **Pro** (seen 24 Oct), which does not cap at 12, so this is now a habit rather than a wall; check the plan before contorting a route around it. `api/` is also **not typechecked** by
 `npm run build` — use a temporary `tsconfig` to check it.
 
 ---
