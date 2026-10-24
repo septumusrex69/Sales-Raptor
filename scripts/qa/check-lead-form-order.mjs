@@ -55,8 +55,10 @@ ok('the choice is not guessed: nothing chosen unless a prefill names a company',
 ok('nothing else is drawn until it is answered',
   /\{party === 'company' && \(/.test(form) && /\{party === 'individual' && \(/.test(form) && /\{party !== null && \(/.test(form))
 ok('...and a submit without it is refused', /if \(!party \|\|/.test(form))
-ok('only a company is offered further contact persons',
-  /const further = party === 'company' \? furtherContacts\(others\) : \{ save: \[\], problem: null \}/.test(form))
+/* S11 changed this: a company may have many further contact persons, an individual ONE (below). */
+ok('only a company is offered MANY further contact persons',
+  /\{party === 'company' && \([\s\S]*?Add another contact person/.test(form)
+  && !/\{party === 'individual' && \([\s\S]*?Add another contact person[\s\S]*?\{party !== null/.test(form))
 ok('the client name is whichever the party says it is', /companyName: clientName,/.test(form) && /clientNameFor\(party, form\)/.test(form))
 ok('...the stored shape unchanged: the first contact person is the lead’s own name',
   /firstName: form\.firstName\.trim\(\),/.test(form) && /party,/.test(form))
@@ -142,6 +144,13 @@ ok('...for a top-level client only (client_intake_by_day counts sub-accounts wit
   /const showFirstThree = !!company && !company\.parentCompanyId &&/.test(page))
 ok('...read through the existing per-client function, no new endpoint',
   /fetchClientIntakeByDay\(clientId,/.test(strip(read('src/components/companies/FirstThreeMonths.tsx'))))
+
+/* S11: AN INDIVIDUAL MAY HAVE ONE SECOND CONTACT ("always good to have a second contact person, but
+   they always don't have one"): optional, one, saved through the same furtherContacts. */
+const second = at('data-testid="lead-second-contact"')
+ok('an individual is offered a second contact person', second > individualName && /Add a second contact person \(optional\)/.test(form))
+ok('...one at most, drawn and saved', /others\.slice\(0, 1\)\.map\(/.test(form)
+  && /furtherContacts\(party === 'individual' \? others\.slice\(0, 1\) : others\)/.test(form))
 
 if (failures.length) {
   console.error(`check-lead-form-order: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)

@@ -143,7 +143,9 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
   const [others, setOthers] = useState<ContactPersonDraft[]>([])
   const [opportunity, setOpportunity] = useState(emptyLeadOpportunityValue())
   const clientName = party ? clientNameFor(party, form) : ''
-  const further = party === 'company' ? furtherContacts(others) : { save: [], problem: null }
+  /* An individual has at most ONE further contact (the form draws one), so rows typed as a company
+     and left behind by switching to individual are not saved unseen. */
+  const further = party ? furtherContacts(party === 'individual' ? others.slice(0, 1) : others) : { save: [], problem: null }
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch })
   const setOther = (i: number, patch: Partial<ContactPersonDraft>) =>
     setOthers((prev) => prev.map((o, j) => (j === i ? { ...o, ...patch } : o)))
@@ -275,6 +277,43 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
                 <input type="email" className={inputClass} value={form.email} onChange={(e) => set({ email: e.target.value })} />
               </FormField>
             </div>
+            {/* 4. A SECOND CONTACT, IF THERE IS ONE (S11). The firm: "there's always good to have a
+                second contact person, but they always don't have one." A spouse, an executor, the
+                person who handles their affairs: optional, ONE, and saved as a contact on the lead
+                exactly as a company's further contact person is -- the conversion carries it over. */}
+            {others.slice(0, 1).map((o, i) => (
+              <div key={i} className="mb-3 rounded-lg border border-slate-200 p-3 pb-0" data-testid="lead-second-contact">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Second contact person</span>
+                  <button type="button" className="text-xs text-slate-500 hover:text-red-600"
+                    onClick={() => setOthers([])}>Remove</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="First Name" required>
+                    <input className={inputClass} value={o.firstName} onChange={(e) => setOther(i, { firstName: e.target.value })} />
+                  </FormField>
+                  <FormField label="Last Name">
+                    <input className={inputClass} value={o.lastName} onChange={(e) => setOther(i, { lastName: e.target.value })} />
+                  </FormField>
+                  <FormField label="Phone">
+                    <input className={inputClass} value={o.phone} onChange={(e) => setOther(i, { phone: e.target.value })} />
+                  </FormField>
+                  <FormField label="Email">
+                    <input type="email" className={inputClass} value={o.email} onChange={(e) => setOther(i, { email: e.target.value })} />
+                  </FormField>
+                </div>
+                <FormField label="Relationship">
+                  <input className={inputClass} value={o.jobTitle} onChange={(e) => setOther(i, { jobTitle: e.target.value })} placeholder="e.g. Spouse, executor" />
+                </FormField>
+              </div>
+            ))}
+            {others.length === 0 && (
+              <button type="button" onClick={() => setOthers([emptyContactPerson()])}
+                className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700" data-testid="lead-add-second-contact">
+                <Plus size={14} /> Add a second contact person (optional)
+              </button>
+            )}
+            {further.problem && <p className="-mt-2 mb-3 text-[12px] text-[var(--c-rust-deep)]">{further.problem}</p>}
           </>
         )}
 
