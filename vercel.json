@@ -2,6 +2,12 @@
   "regions": [
     "cdg1"
   ],
+  "git": {
+    "deploymentEnabled": {
+      "claude/**": false,
+      "claude/sales-raptor-review-p1pzx2": true
+    }
+  },
   "functions": {
     "api/**/*.ts": {
       "includeFiles": "public/fonts/charter/*.ttf",

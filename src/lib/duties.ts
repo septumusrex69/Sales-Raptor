@@ -62,8 +62,8 @@ export const DUTY_MAY_GRANT: readonly Capability[] = ['book.hand_out', 'handover
  * What each duty gives. Mirrors duty_capabilities() in the database.
  *
  * reassign_accounts IS 'book.hand_out' AND NOT 'book.reassign'. Hand-out is the account's desk --
- * debtor_accounts lets anybody signed in write assigned_to, so the tick is the whole gate and a duty
- * can open it. book.reassign is the SALES side's lead and deal owner, which the leads and deals RLS
+ * since S11 the database's debtor_accounts_desk_guard asks may_hand_out (this tick, or may load the
+ * account's client) on every change of assigned_to, so a duty that grants the tick opens it there too. book.reassign is the SALES side's lead and deal owner, which the leads and deals RLS
  * still decides by role; giving it here would offer a button Postgres then refuses.
  */
 export const DUTY_CAPABILITIES: Record<Duty, Capability[]> = {

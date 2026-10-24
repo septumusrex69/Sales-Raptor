@@ -16,7 +16,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-handover-upload.mjs
  */
 import { readFileSync } from 'node:fs'
-import { loadableClients, mayLoadAccounts, mayLoadAccountsFor, uploadPathFor } from '../../src/lib/handoverUpload.ts'
+import { loadableClients, mayHandOutFor, mayLoadAccounts, mayLoadAccountsFor, uploadPathFor } from '../../src/lib/handoverUpload.ts'
 import { ROLE_CAPABILITIES } from '../../src/lib/capabilities.ts'
 import { DUTY_CAPABILITIES, DUTY_MAY_GRANT } from '../../src/lib/duties.ts'
 
@@ -152,6 +152,31 @@ const tab = code('src/components/settings/DataImportTab.tsx')
 ok('Settings -> Data Import is still the Administrator\'s', /if \(!isAdmin\) \{\s*return \(/.test(tab)
   && /const isAdmin = currentUser\?\.role === 'Administrator'/.test(tab))
 ok('...and still draws the same card', /<HandoverImportCard forCompanyId=\{forCompanyId\} \/>/.test(tab))
+
+/* ---------------------------------------------------------------------------------------------
+ * S11: WHOEVER MAY LOAD A CLIENT'S BATCH MAY HAND IT OUT, AND NOBODY ELSE MOVES A DESK.
+ * The firm: "the person that loads a specific batch of accounts should hand them out ... clerks,
+ * like, they can't reassign anyone" -- and "Felicia shouldn't be able to hand out accounts".
+ * ------------------------------------------------------------------------------------------- */
+const felicia = { id: 'sales-mgr', role: 'Sales Manager', departmentId: 'd-sales' }
+const kea = { id: 'tl-1', role: 'Pre-legal Team Leader', departmentId: CALL }
+const commsClient = { accountOwnerId: bonnitta.id }
+const strayClient = { accountOwnerId: kamini.id }
+ok('a liaison hands out her department\'s client\'s accounts', mayHandOutFor(bonnitta, commsClient, people))
+ok('...and not another department\'s client\'s', !mayHandOutFor(bonnitta, strayClient, people))
+ok('a team leader hands out any client\'s, without loading any', mayHandOutFor(kea, strayClient, people) && !mayLoadAccounts(kea))
+ok('a pre-legal agent hands out nobody\'s', !mayHandOutFor(nathi, commsClient, people) && !mayHandOutFor(nathi, strayClient, people))
+ok('the Sales Manager hands out nobody\'s', !mayHandOutFor(felicia, commsClient, people) && !mayHandOutFor(felicia, strayClient, people))
+
+/* THE DATABASE ASKS THE SAME, off the LAST definition (schema.sql is append-only). */
+const schemaText = read('supabase/schema.sql')
+const mayHandOutSql = lastFn('may_hand_out')
+ok('may_hand_out is the tick OR may load this client', /has_capability\('book\.hand_out'\)\s+or\s+public\.may_load_accounts\(p_company\)/.test(mayHandOutSql))
+const guard = lastFn('debtor_accounts_desk_guard')
+ok('the desk guard asks may_hand_out on a change of desk', /new\.assigned_to is distinct from old\.assigned_to/.test(guard)
+  && /not public\.may_hand_out\(new\.company_id\)/.test(guard) && /raise exception/.test(guard))
+ok('...only for a signed-in person, so api/ and definer functions pass', /current_user = 'authenticated'/.test(guard))
+ok('...and it is wired to updates of assigned_to', /create or replace trigger debtor_accounts_desk_guard\s+before update of assigned_to on public\.debtor_accounts/.test(schemaText))
 
 console.log(`\ncheck-handover-upload: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

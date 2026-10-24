@@ -410,7 +410,9 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
      and the reason a grant exists at all is so it stops being the only way to give somebody one
      extra thing. */
   Administrator: CAPABILITY_ORDER.filter((c) => !NO_ROLE_CAPABILITIES.includes(c)),
-  'Sales Manager': ['book.hand_out', 'book.reassign', 'client.view', 'marketing.send', 'library.view'],
+  /* NO book.hand_out (S11). The firm: "Felicia shouldn't be able to hand out accounts" -- the sales
+     side does not put debtors on desks. book.reassign stays: it is the sales side's own leads and deals. */
+  'Sales Manager': ['book.reassign', 'client.view', 'marketing.send', 'library.view'],
   'Sales Representative': ['client.view', 'library.view'],
   /* campaign.run for both liaison roles: "even liaisons can run campaigns over their own clients"
      (the firm, 21 Oct). mayCampaignOn keeps them to those clients. */

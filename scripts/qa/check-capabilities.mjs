@@ -130,7 +130,8 @@ const EXPECTED = {
   canRecordPayment: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader', 'Liaison Manager', 'Liaison'],
   canViewClients: ROLES.filter((r) => r !== 'Pre-legal Agent' && r !== 'Read Only'),
   canFreezeAccounts: ['Administrator', 'Pre-legal Team Leader', 'Liaison Manager', 'Liaison'],
-  canHandOutAccounts: ['Administrator', 'Sales Manager', 'Liaison Manager', 'Call Centre Manager', 'Pre-legal Team Leader'],
+  /* No Sales Manager since S11 (the firm: "Felicia shouldn't be able to hand out accounts"). */
+  canHandOutAccounts: ['Administrator', 'Liaison Manager', 'Call Centre Manager', 'Pre-legal Team Leader'],
   canReassign: ['Administrator', 'Sales Manager', 'Liaison Manager'],
   canLeadCollections: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader'],
   /* S10: CAMPAIGNS. The firm: an Administrator, or a team leader on their own team's desks. The

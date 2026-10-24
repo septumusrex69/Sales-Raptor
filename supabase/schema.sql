@@ -50731,3 +50731,97 @@ create trigger deals_won_client_code
 --       update public.companies set code = public.propose_client_code(name, id) where id = r.id and code is null;
 --     end loop;
 --   end $$;
+
+-- ============================================================================
+-- S11 (24 Oct): WHOEVER MAY LOAD A CLIENT'S BATCH MAY HAND IT OUT, AND NOBODY ELSE MOVES A DESK.
+-- Migration `hand_out_for_loaders_and_desk_guard`, staging first (with the Sales Manager change at its end).
+--
+-- THE FIRM: "the person that loads a specific batch of accounts should hand them out ... the team
+-- leaders can do that as well, or the call center manager, but they can't load accounts ...
+-- clerks, like, they can't reassign anyone, and the marketing department also can't".
+--
+-- TWO THINGS:
+--   1. may_hand_out(company): the book-wide tick book.hand_out, OR may_load_accounts(company) --
+--      so a liaison hands out her department's clients' batches without being given the rest of
+--      the book. TS twin: mayHandOutFor (src/lib/handoverUpload.ts).
+--   2. debtor_accounts_desk_guard: until now debtor_accounts let ANYBODY signed in write
+--      assigned_to (duties.ts said so: "the tick is the whole gate"), so the hand-out rule lived
+--      only in the screens. This trigger asks may_hand_out on every change of assigned_to made AS A
+--      SIGNED-IN PERSON (current_user = 'authenticated'). The service role (api/) and SECURITY
+--      DEFINER functions (recovery_reopen, run as their owner) are not that role and pass, which is
+--      right: they are the system acting on a rule of its own, not a person choosing a desk.
+--   A TRIGGER, NOT A POLICY: a policy's WITH CHECK sees only the new row and cannot tell a change
+--   of desk from an edit to the debtor's telephone number by somebody who may not hand out.
+--   Probed in a rolled-back transaction on staging: a liaison moves her own client's account and
+--   is refused another's; a team leader moves either; a pre-legal agent is refused both.
+-- ============================================================================
+
+create or replace function public.may_hand_out(p_company uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select public.has_capability('book.hand_out') or public.may_load_accounts(p_company)
+$$;
+
+revoke all on function public.may_hand_out(uuid) from public, anon;
+grant execute on function public.may_hand_out(uuid) to authenticated;
+
+create or replace function public.debtor_accounts_desk_guard()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if current_user = 'authenticated'
+     and new.assigned_to is distinct from old.assigned_to
+     and not public.may_hand_out(new.company_id) then
+    raise exception 'Only somebody who hands out accounts may move this account to another desk.'
+      using errcode = '42501';
+  end if;
+  return new;
+end
+$$;
+
+-- CREATE OR REPLACE TRIGGER (PG14+), not the usual remove-then-create: the Supabase MCP tool stops
+-- for a confirmation nobody sees on any statement with the word for removing in it (S10 met it too).
+create or replace trigger debtor_accounts_desk_guard
+  before update of assigned_to on public.debtor_accounts
+  for each row execute function public.debtor_accounts_desk_guard();
+
+-- ---------- and the Sales Manager no longer hands out (S11) ----------
+-- THE FIRM: "Felicia shouldn't be able to hand out accounts." book.reassign stays -- it is the sales
+-- side's own leads and deals. The TS twin is ROLE_CAPABILITIES; check-capabilities holds the two.
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','people.leave','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','campaign.run','handover.upload','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze','campaign.run','handover.upload',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','campaign.run','handover.upload','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
