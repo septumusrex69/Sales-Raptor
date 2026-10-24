@@ -10,12 +10,97 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **23 October 2026** (A client code on every client, and the welcome as the liaison's task, at the top of Start here; before that Liaisons load their department's clients, at the top of Start here; before that Add Lead in the firm's order and Convert on the quoted rate, at the top of Start here; before that Users, departments and teams in one place, at the top of Start here; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
-Last updated: **23 October 2026** (The organogram, at the top of Start here; before that Users, departments and teams in one place; before that Leave and the SimplePay export; before that People round two -- the firm's answers on pay -- at the top of Start here); before that **22 October 2026** (People and pay); before that **21 October 2026**, S10 · Clients and Credits (prompt 13), on `claude/s10-clients-and-credits`
+Last updated: **23 October 2026, end of S10.** Read "S10 CLOSED -- THE NEXT SESSION STARTS HERE" below first; the dated entries under Start here are the detail.
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
+
+
+## S10 CLOSED (23 Oct) -- THE NEXT SESSION STARTS HERE
+
+S10 is finished. Everything is merged, pushed to `claude/s10-clients-and-credits` and fast-forwarded onto
+`claude/sales-raptor-review-p1pzx2` (last commit `008d96e`). **The next session is S11**: name it here first,
+branch `claude/s11-<theme>` from `claude/sales-raptor-review-p1pzx2`, and **open by asking Stephan the questions
+below, one batch, before building anything** -- he asked for exactly that. He works on an iPad, often by voice;
+short direct answers.
+
+### A. Questions to put to Stephan first (each blocks or shapes a build)
+
+1. **Accounts with no client reference.** Rinda's Bonnitta Pharmacy sheet (19 rows, a waiting draft in Data
+   Import, nothing loaded) is refused row by row only because `client_reference` is empty -- the planner refuses
+   it ("No reference. It is what the debtor is told to quote when they pay", `handoverImport.ts` ~907), though
+   notices and SMSs now quote OUR `case_number`. Recommendation: make it a warning, open with our case number.
+   Bonnitta now has code BOP, so account numbers generate. **Yes/no?**
+2. **"Client Division" on the old sheet.** The only old heading neither mapped nor in `NOT_COLLECTED`; every old
+   sheet we hand out shows one "not recognised" line. Recommendation: add to NOT_COLLECTED ("the client is chosen
+   when the batch is uploaded"). **OK?**
+3. **Imported Swordfish clients.** "New client records start under: Stephan" is only a placeholder owner.
+   Proposal: every client Swordfish brings in with no liaison is marked "Needs a liaison" (liaison_needed), the
+   import ends with "N clients need a liaison" and a button to assign them; assigning gives the liaison the
+   notification but NO welcome email / welcome call tasks (they already know the firm). **Build it?**
+4. **Batches nobody handed out.** "A recent handover has accounts on nobody's desk" is a warning on Data Import
+   only. Proposal: on approval of an unallocated batch, a notification + task to the Call Centre Manager and team
+   leaders ("Allocate 10 accounts from <batch>", opening the hand-out); the same reminder on the collections
+   dashboard; the client's liaison sees it on her client's page as information. **Build it?**
+5. **May liaisons hand out their own client's batch?** Today a liaison can load a batch (handover.upload, S10) but
+   not hand it out (book.hand_out); the import ends on a hand-out she cannot use.
+6. **The welcome's wording when someone else presses Send.** It says she is "taking over from <whoever pressed>"
+   (was always the closer). Name the closer, the assigner, or nobody?
+7. **Individual clients**: ever a different contact person (spouse, executor)? Not built.
+8. **Converting a lead**: should the liaison be pre-filled, or always chosen (as now)?
+9. **Departments**: should a duty ever grant more than handing out / loading accounts? And should hand-out
+   (book.hand_out) be enforced in the DATABASE too -- today any signed-in user can reassign an account outside the
+   screen (recommendation: yes).
+10. **Pay (People round two)**: pro-rata divisor = working days in the salary month (built) vs calendar days; pay
+    day on a weekend 25th -> the Friday before?; a shortfall paid into the business account releases held PTC
+    commission (built); a payover approved after the 25th pays on the next 25th; carried-over commission released
+    only by runs whose cycle ends on/after the commission start date.
+11. **Leave**: carry-over -- built design to offer: firm setting "most annual days carried into a new year"
+    (default 6, rest falls away), leave-year start (1 Jan), optional use-by deadline, per-person cap, one-off
+    adjustment with a reason. Does SimplePay do the unpaid-leave deduction? Send SimplePay's bulk-input template
+    (headings are one constant, `SIMPLEPAY_HEADINGS` in `src/lib/simplePay.ts`). Leave in the export, or captured in
+    SimplePay's own leave module?
+12. **Call transfer / incoming-call pop-up** (parked by Stephan, 23 Oct): only reception for now, later anyone on a
+    call may transfer and it pops up for the receiver. Needs a test inbound call on staging (BuzzBox payloads for
+    inbound calls have never been captured). Start when he says.
+
+### B. Agreed and not built -- the work list, in this order unless he reorders
+
+1. **Leave round two** (the agent was stopped before it committed; a partial worktree may still exist at
+   `.claude/worktrees/agent-a66e143ff022f5042` -- read it, do not trust it). Stephan's answers, 23 Oct: 1.25 days
+   a month (keep); carry-over flexible (A.11 design); **everybody sees their own leave and balance**; Sales Manager
+   sees their team; Call Centre Manager sees the whole call centre incl. team leaders; **a leave application form**
+   for anyone -> emailed to their team lead (now `teams.lead_id` -> `team_lead_of()`), their department head
+   (`department_head_of()`), and Camille (a firm setting "also approved by"), any one approves or declines with a
+   reason; only approved leave counts; **import all current balances** (annual, sick, family) from a sheet like
+   People -> Carried over; maternity is UNPAID; unpaid leave exported (SimplePay deducts, to confirm).
+2. Whatever Stephan answers "yes" to in A.1-A.5.
+3. **Mail read state, second half**: mail opened on a phone after Raptor has it does not flow back as read
+   (`emailSync.ts` only reads \Seen on first sight). Re-read flags for recent mail on each sync.
+4. **The same "reload under unsaved work" risk on staff pages** (NewVersionWatcher reloads an idle page; a form
+   outside a modal with nothing focused could lose typing). Not seen yet; signing pages are already exempt.
+
+### C. Things only Stephan can do (remind him)
+
+- **Supabase -> Authentication -> Sign In / Providers -> Email (the provider row) -> "Email OTP Expiration" ->
+  86400**, staging and production. Email links (invites, resets) die after 1 hour today; Nicole's invite expired
+  that way. He could not find the box on 23 Oct -- ask for a screenshot of the Email provider panel. The session's
+  Supabase MCP cannot change auth settings.
+- **Staging Supabase shows "EXCEEDING USAGE LIMITS"** on the free plan. Ask what is over (screenshot of Usage);
+  trim before the project is throttled or paused.
+- Resend: toggle open/click tracking for bfnews.co.za in the dashboard.
+- BuzzBox: set extensions for everybody (only Barry has one, 140) and make a test call; then a test INBOUND call.
+- Rinda's Bonnitta import is waiting as a draft in Settings -> Data Import (after A.1).
+- "Stephan's Test Client" (STC, 10 test accounts, 21 Oct) can be discarded with Undo a handover.
+
+### D. Go-live (production qcvesjzoiznrvunjrqpv -- never written by a session)
+
+Migrations applied to staging only and needed on production, in order, are listed in §5. S10 added (latest last):
+`people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
+`departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
+`client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill). Also: repoint the Resend
+webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow
 
