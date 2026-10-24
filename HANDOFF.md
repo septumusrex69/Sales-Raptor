@@ -53,13 +53,25 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
    -> `links2.resend-dns.com`** at bfnews.co.za's DNS host (Stephan; Cloudflare proxy off). Until then the domain
    reads "partially verified" (sending unaffected). bredellferreira.co.za deliberately NOT tracked (legal notices).
 
+10. **A.3 Swordfish clients**: `liaisonFor` matches the register's "Assigned To" by whole name to an ACTIVE
+    Liaison/Liaison Manager -> owns the client; otherwise the placeholder owner + `liaison_needed` (the plan's
+    notes count them). A sub-entity follows its parent. Assigning an imported client (`import_batch_id`) makes NO
+    welcome tasks; the Welcome card and attention line say it is an existing client. No staging data to backfill
+    (no imported clients on staging on 24 Oct).
+11. **A.7 Second contact** for an individual on Add lead: one, optional, saved as a contact on the lead.
+12. **B.3 Mail read on the phone**: each ordinary sync asks the folder for \Seen UIDs of the last 14 days and marks
+    those rows read (one way). Index `user_emails_unread_by_folder` (migration of that name).
+13. **Full suite 24 Oct**: 402 of 405; the 3 reds (e2e account-templates, client-handovers, excess-credit) fail
+    identically on S10's last commit `ef4ae21` -- pre-existing, not S11's. Not yet investigated.
+
 ### Still open with Stephan
+- **Dormant clients** (raised 24 Oct, "we need to think about that"): Swordfish's register already says
+  "Active / Dormant" per client (`companies.register_status`, imported, shown nowhere). Proposal sent; not built.
 - **Shortfall paid into the business account**: kept open. Recommendation given: release held commission pro
   rata to the share of the shortfall paid, same fraction to every collector owed, oldest cycle first.
 - **Payovers confirmed as built**: cycle 11th-10th; collector commission on the 25th of the month it ends; the
   client paid over on the 11th of the next month.
-- A.3 Swordfish clients: only those with NO liaison get "Needs a liaison" + assign; never welcome tasks. Not built.
-- A.7 optional second contact for individual clients ("good to have"); A.8 keep choosing the liaison. Not built.
+- A.8 keep choosing the liaison on conversion (as built).
 - A.11 leave (B.1) still the next big build; A.12 call transfer parked; BuzzBox is Stephan's.
 - C: Supabase "Email OTP Expiration" 86400 -- instructions given; not confirmed done.
 
@@ -146,7 +158,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

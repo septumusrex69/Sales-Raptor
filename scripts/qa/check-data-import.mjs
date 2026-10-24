@@ -112,13 +112,14 @@ ok('the blurb follows the tab', /tabs\.find\(\(\[k\]\) => k === side\)/.test(cod
  * that three hundred new clients do not arrive with no owner at all.
  */
 ok('the old label is gone', !/Clients land on/.test(code))
+/* S11: since the register's liaison owns a client wherever she is on staff, the picker is only for
+   the rest -- and the label and help say exactly that, and where their liaison is then chosen. */
 ok('...replaced by one that says what is being set',
-  /New client records start under/.test(code))
-/* Said outright, because "starts under" could still be read as allocation by somebody in a hurry. */
-ok('...and the help says in words that this is not client allocation',
-  /Not client allocation/.test(code))
-ok('...and says where allocation actually happens',
-  /set on the client itself/.test(code))
+  /Clients with no liaison on staff start under/.test(code))
+ok('...and the help says the register\'s liaison is used where she is on staff',
+  /A client goes to the liaison the register names, where she is on staff/.test(code))
+ok('...and says where the rest get theirs',
+  /Needs a liaison[\s\S]{0,40}: assign one on the[\s\S]{0,40}client/.test(code))
 
 /*
  * AND IT IS STILL A PICKER OF PEOPLE, not of clients. The firm asked for a CLIENT picker -- "so
@@ -126,7 +127,7 @@ ok('...and says where allocation actually happens',
  * import of one batch onto one existing client, which does not exist yet. Renaming this control
  * to look like that one would be worse than leaving it wrong: it would look built.
  */
-const picker = code.match(/New client records start under[\s\S]*?<\/label>/)
+const picker = code.match(/Clients with no liaison on staff start under[\s\S]*?<\/label>/)
 ok('the picker is readable', picker !== null)
 ok('...and still offers people, because it is setting an owner', /u\.name/.test(picker?.[0] ?? ''))
 
