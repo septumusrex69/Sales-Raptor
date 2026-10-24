@@ -19,6 +19,22 @@ ok('the sync fetch asks the server for the flags', /fetchOne\(String\(uid\), \{ 
 ok('...passes \\Seen on with the message', /seen: msg\.flags\?\.has\('\\\\Seen'\) \?\? false/.test(src))
 ok('...and a seen message is stored read', /read_at: \(message\.isSent \|\| message\.seen\) \?/.test(src))
 
+/* S11: READ ELSEWHERE AFTERWARDS IS READ HERE. The firm: "mail read on the phone also should show
+   as read on Raptor." One IMAP search per folder per sync, the last READ_CATCH_UP_DAYS, one way. */
+const code = src.replace(/\/\*[\s\S]*?\*\//g, '')
+ok('each sync asks the folder which recent messages are \\Seen',
+  /client\.search\(\{ seen: true, since \}, \{ uid: true \}\)/.test(code) && /READ_CATCH_UP_DAYS = 14/.test(code))
+ok('...and marks only those rows, only where still unread',
+  /\.eq\('user_id', userId\)\.eq\('folder', path\)\.is\('read_at', null\)\.in\('uid', /.test(code))
+ok('...never un-reads anything', !/read_at: null\s*\}\)\s*\.eq\('user_id', userId\)/.test(code))
+ok('...on an ordinary sync of a received folder, not Sent or a first read',
+  /if \(!isSent && !firstRead && sinceUid\) await catchUpReadFlags\(client, admin, conn\.user_id, path\)/.test(code)
+  && code.indexOf('await catchUpReadFlags(') < code.indexOf('return { logged, maxUid }'))
+ok('...and a failure is logged, never thrown', /async function catchUpReadFlags[\s\S]*?\} catch \(e\) \{[\s\S]*?console\.log/.test(code))
+const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+ok('...with an index over the unread rows it updates',
+  /create index if not exists user_emails_unread_by_folder\s+on public\.user_emails \(user_id, folder, uid\) where read_at is null/.test(schema))
+
 if (failures.length) {
   console.error(`check-mail-seen: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)
   process.exit(1)

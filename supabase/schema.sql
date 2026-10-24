@@ -50843,3 +50843,15 @@ $$;
 alter table public.handovers add column if not exists handout_reminded_at timestamptz;
 alter table public.tasks add column if not exists handover_id uuid;
 create index if not exists tasks_handover_open on public.tasks (handover_id) where handover_id is not null;
+
+-- ============================================================================
+-- S11 (24 Oct): MAIL READ ON THE PHONE IS READ IN RAPTOR. Migration `user_emails_unread_by_folder`.
+--
+-- THE FIRM: "mail read on the phone also should show as read on Raptor." Every sync now asks each
+-- folder which messages of the last 14 days carry \Seen and marks those rows read
+-- (catchUpReadFlags, api/_lib/emailSync.ts): an update by user, folder and uid, every five minutes
+-- per mailbox. No index answered that shape, so this one does -- and only over UNREAD rows, which
+-- is all the update can touch, so it stays small however much mail is read.
+-- ============================================================================
+create index if not exists user_emails_unread_by_folder
+  on public.user_emails (user_id, folder, uid) where read_at is null;

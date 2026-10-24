@@ -318,8 +318,8 @@ async function fileUserEmail(
          * AND MAIL ALREADY READ IN THE MAILBOX ARRIVES READ (22 Oct). The firm: a new user's mailbox
          * synced and "it shows everything as unread". Sync never asked the server for the \Seen
          * flag, so years of read mail landed bold. Now the flag is fetched with the message and
-         * honoured on the first sight of it. Only the first: the row is inserted once (the upsert
-         * ignores duplicates), so reading a message on a phone afterwards does not reach Raptor.
+         * honoured on the first sight of it. The row is inserted once (the upsert ignores
+         * duplicates); reading it on a phone afterwards reaches Raptor through catchUpReadFlags (S11).
          */
         read_at: (message.isSent || message.seen) ? new Date().toISOString() : null,
         occurred_at: message.at,
@@ -1208,6 +1208,25 @@ export async function fetchAttachment(
   })
 }
 
+/** How far back a sync looks for mail read elsewhere (S11). Older unread rows are left as they are. */
+export const READ_CATCH_UP_DAYS = 14
+
+/** Mark read in Raptor what the mailbox says was read recently -- see the call in syncMailbox. */
+async function catchUpReadFlags(client: ImapFlow, admin: SupabaseClient, userId: string, path: string): Promise<void> {
+  try {
+    const since = new Date(Date.now() - READ_CATCH_UP_DAYS * 24 * 60 * 60 * 1000)
+    const found = await client.search({ seen: true, since }, { uid: true })
+    const seen = found === false ? [] : found
+    for (let i = 0; i < seen.length; i += 500) {
+      const { error } = await admin.from('user_emails').update({ read_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('folder', path).is('read_at', null).in('uid', seen.slice(i, i + 500))
+      if (error) { console.log(`[emailSync] ${path}: read flags not caught up: ${error.message}`); return }
+    }
+  } catch (e) {
+    console.log(`[emailSync] ${path}: read flags not caught up: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 /**
  * Pulls whatever's new in one mailbox since sinceUid, and logs an Activity for
  * any message whose sender matches a known Contact, Lead, or Company email —
@@ -1718,6 +1737,18 @@ async function syncMailbox(
         console.log(`[emailSync] ${path} UID ${uid}: upsert reported a duplicate (already logged), skipped`)
       }
     }
+
+    /*
+     * AND WHAT WAS READ ELSEWHERE SINCE, IS READ HERE (S11). THE FIRM: "mail read on the phone also
+     * should show as read on Raptor." The flag is honoured on a message's first sight (above), and
+     * until now never again: read it on the phone a minute later and Raptor still drew it bold.
+     * Every sync now asks the folder ONE question -- which messages of the last READ_CATCH_UP_DAYS
+     * carry \Seen -- and marks those rows read. One direction only: mail read in Raptor stays read
+     * here whatever the phone says, because unreading what somebody has opened is the surprise.
+     * Not on a folder's first read (its rows just arrived with the flag) and not for Sent (it
+     * arrives read). Never fatal: a flag that could not be read is a bold row, not a failed sync.
+     */
+    if (!isSent && !firstRead && sinceUid) await catchUpReadFlags(client, admin, conn.user_id, path)
 
     return { logged, maxUid }
   } finally {
