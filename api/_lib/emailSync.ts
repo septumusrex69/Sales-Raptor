@@ -16,7 +16,8 @@ import {
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
 import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
-import { bodyToStore, tooBigFor } from '../../src/lib/mailBodyCache.js'
+import { bodyToStore, extractPictures, tooBigFor } from '../../src/lib/mailBodyCache.js'
+import { savePictures } from './mailPictures.js'
 import { actsOnItsOwn, bounceSeverity } from '../../src/lib/bounceSeverity.js'
 import { clientMailActivity } from '../../src/lib/clientMailActivity.js'
 import { notifyHeld } from './workflow/notify.js'
@@ -276,6 +277,13 @@ async function fileUserEmail(
     ccRecipients?: { name: string | null; address: string }[]
   },
 ): Promise<string | null> {
+  /*
+   * THE PICTURES GO TO THE STORE FIRST (S11), so the row never names a picture that is not there.
+   * bodyToStore below takes them out of the markup the same way and names each by fingerprint;
+   * saving is a no-op for the logo the store already holds, which is nearly every one.
+   */
+  await savePictures(admin, extractPictures(message.html ?? '').pictures)
+    .catch((e: unknown) => console.log(`[emailSync] pictures not saved: ${e instanceof Error ? e.message : String(e)}`))
   const { data, error } = await admin
     .from('user_emails')
     .upsert(

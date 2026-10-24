@@ -837,7 +837,8 @@ export function MailPage() {
       setHtmlBodies((h) => ({ ...h, [mail.id]: cached.html }))
       setCalendars((c) => ({ ...c, [mail.id]: cached.calendar }))
       setLinkedDetails((d) => ({ ...d, [mail.id]: cached.details }))
-      setBodyImages((i) => ({ ...i, [mail.id]: [] }))
+      /* Out of the picture store (S11), where the message's pictures had been seen before. */
+      setBodyImages((i) => ({ ...i, [mail.id]: cached.images }))
       setImagesSkipped((n) => ({ ...n, [mail.id]: 0 }))
       /*
        * AND THE PICTURES AFTERWARDS, where the message draws any.

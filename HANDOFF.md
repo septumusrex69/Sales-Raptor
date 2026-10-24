@@ -37,6 +37,18 @@ Staging cleaned with the same regex in batches, then `vacuum full user_emails`: 
 body still cached. **Production is paused and was not touched**; it needs the same SQL + vacuum when it is resumed
 (after this code is live there, or the next sync refills it).
 
+**Then the picture store, same day.** Stephan: "save one image somewhere and then always go and check it and take
+it back, like Microsoft, and then delete it after 30 days." So `extractPictures` names each picture by the SHA-256 of
+its base64 (`cid:raptor-pic-<hash>`), `api/_lib/mailPictures.ts` saves it ONCE in the private `mail-pictures` bucket
+(+ a `mail_pictures` row, `last_used_on`), at sync time and in the read route's write-back (which first draws the
+mailbox's own cid: pictures back in -- `inlinePictures`). The page reads pictures from the store
+(`fetchStoredPictures`, kept in memory for the sitting) and goes to the mailbox only for what the store lacks.
+`expireMailPictures` runs in the sync-all cron: unused 30 real days -> file then row deleted; a later open re-saves
+from the mailbox. Rows cleaned in the morning still carry `cid:raptor-picture-not-kept`; they heal on first open.
+`touch_mail_pictures` is on check-staging-clock's real-clock list (housekeeping, not a business date).
+**The Supabase MCP cancels any SQL containing DROP** -- policies are created inside `do $$ if not exists`.
+To watch it work: `select count(*), pg_size_pretty(sum(bytes)) from mail_pictures;`
+
 Already Outlook-shaped and deliberately kept: the mailbox is the master, Raptor caches bodies (the firm asked for
 the speed), attachments are never stored.
 

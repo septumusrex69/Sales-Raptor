@@ -123,7 +123,10 @@ check('only the named audit and real-world functions read the real clock', still
      lands inside a window on staging. Not a business date -- done_at and due_on still are the firm's.
      The funnel reads now() only to shift the firm-clock stamps onto that clock. */
   'stamp_diary_closed_at',
-  'step_staging_clock', 'touch_message_template', 'trace_campaign_funnel', 'trusted_device_seen',
+  /* touch_mail_pictures (S11, Lean Mail): when a signature logo was last opened is housekeeping for
+     a cache, deleted after 30 REAL days by a cron on the real clock. Staging's clock moved a month on
+     must not make every stored logo look abandoned. */
+  'step_staging_clock', 'touch_mail_pictures', 'touch_message_template', 'trace_campaign_funnel', 'trusted_device_seen',
   'workflow_publish',
 ])
 ok('...and set_trust_opening_balance only for its updated_at',
