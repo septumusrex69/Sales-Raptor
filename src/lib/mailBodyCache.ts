@@ -75,11 +75,14 @@ export interface BodyPatch {
  * because there was nothing in it the first time.
  */
 export function bodyToStore(body: MailBody, at: string): BodyPatch {
-  body = { ...body, html: withoutEmbeddedPictures(body.html ?? '') }
   const keep = (s: string, limit: number) => {
     const t = s ?? ''
     return t.length > 0 && t.length <= limit ? t : null
   }
+  /* The pictures come out BEFORE anything is measured -- see withoutEmbeddedPictures. Measured
+     first, a signature logo counted against the markup limit and pushed ordinary mail out of the
+     cache for the sake of a picture the cache was never going to hold. */
+  body = { ...body, html: withoutEmbeddedPictures(body.html ?? '') }
   /*
    * MARKUP TOO BIG TO KEEP MEANS KEEP NO WORDS EITHER (10 Oct). Kept alone, the plain text made the
    * cache answer every later open with the flat version -- no bold, no paragraphs -- and the
@@ -99,24 +102,44 @@ export function bodyToStore(body: MailBody, at: string): BodyPatch {
 }
 
 /**
- * THE MARK LEFT WHERE A PICTURE WAS TAKEN OUT. A cid:, so needsPictures says yes and the reader
- * goes to the mailbox for the pictures in the background -- the same road a signature logo takes.
+ * WHAT A KEPT PICTURE IS REPLACED WITH: a cid: reference, which is exactly what the message had
+ * before the parser rewrote it, and exactly what needsPictures already reads as "go to the
+ * mailbox for the pictures". Named so nobody mistakes it for a Content-ID the sender wrote.
  */
-export const PICTURE_NOT_KEPT = 'cid:raptor-picture-not-kept'
+export const DROPPED_PICTURE = 'cid:raptor-picture-not-kept'
 
 /**
- * A PICTURE WRITTEN INTO THE MARKUP ITSELF IS NOT KEPT EITHER (S11).
+ * THE PICTURES WERE BEING KEPT ALL ALONG, and they were 96% of the database (24 Oct, S11).
  *
- * Some mail carries its pictures as data: URIs inside the html rather than as cid: attachments --
- * and until S11 the sync's own parser turned every cid: picture into one (see keepCidLinks in
- * emailSync.ts). Base64 barely compresses, so one logo cost more than a hundred messages of words:
- * staging's 3 949 messages held 648 MB of markup, nearly all of it pictures. The words stay; each
- * picture becomes PICTURE_NOT_KEPT and is fetched from the mailbox when the message is opened.
- * Only data:IMAGE, and only the src= of one: a data: link a person might click is text.
+ * The note at the top of this file says the pictures drawn into a message are not stored. They
+ * were. mailparser's simpleParser, by default, REWRITES every `cid:` reference into a `data:`
+ * URI carrying the picture itself in base64, so by the time the sync or the read route handed
+ * `parsed.html` here, the signature logo was no longer a reference to an attachment -- it was the
+ * attachment, inside the markup. needsPictures then found no `cid:` and said nothing was missing.
+ * On staging that was 645 MB of a 710 MB database: 1 710 messages, each carrying the same handful
+ * of logos again, until the disk filled and Postgres refused writes.
+ *
+ * SO THEY ARE TAKEN OUT HERE, at the one door both ends of the cache go through, rather than at
+ * the three places the parser is called: a fourth caller would bring the leak back, and a
+ * picture PASTED into a message (Outlook on a phone sends those as data: URIs with no
+ * attachment behind them) would never have been a cid in the first place.
+ *
+ * THE WORDS STILL OPEN AT ONCE. What replaces each picture is a cid:, which needsPictures reads,
+ * so the page shows the message out of the cache and then fetches it from the mailbox for the
+ * pictures -- the Gmail-shaped trade this file already chose, now actually in force.
+ *
+ * Small pictures are not spared. The bloat was never one big image; it was a 40 kB logo on
+ * every message a firm sends, which is the case a size threshold keeps.
+ *
+ * AND THE PARSER IS ALSO TOLD NOT TO DO IT (S11, the other half, merged the same day): the sync and
+ * the fallback read pass `keepCidLinks: true`, so a cid: picture stays the sender's own Content-ID
+ * and the reader can match it to the attachment. This door is what catches everything else.
  */
 export function withoutEmbeddedPictures(html: string): string {
-  if (!html || html.indexOf('data:image') === -1) return html
-  return html.replace(/(\bsrc\s*=\s*["']?)data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]*/gi, `$1${PICTURE_NOT_KEPT}`)
+  if (!html || !/data:image\//i.test(html)) return html
+  /* NO WHITESPACE IN THE CLASS. An unquoted src= followed by a space and `alt=` would otherwise be
+     swallowed whole -- letters and `=` are both base64 -- taking the next attribute with it. */
+  return html.replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]*/gi, DROPPED_PICTURE)
 }
 
 /** Why a message is still read out of the mailbox, for the log the sync writes. */

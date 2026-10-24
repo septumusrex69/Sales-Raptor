@@ -1,9 +1,13 @@
 # Handoff — where Raptor stands
 
-> **This session: S11 · Loaders and Handers** — branch `claude/new-session-8jcj9a` (the harness's name, not `claude/s11-*`), from `claude/sales-raptor-review-p1pzx2` at `ef4ae21` (S10's last commit).
+> **S11 was two sessions in parallel on 24 Oct, both from `claude/sales-raptor-review-p1pzx2` at `ef4ae21`:**
+> **S11 · Lean Mail** (`claude/s11-lean-mail`, the mail clean-up) and **S11 · Loaders and Handers**
+> (`claude/new-session-8jcj9a`, the harness's name; S10's questions A.1-A.10 asked and answered, and built).
+>
+> **Previous: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Loaders and Handers (`claude/new-session-8jcj9a`).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel.
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
@@ -17,7 +21,7 @@ Everything is committed and pushed, and **the same commit is pushed to
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 
-## S11 -- WHERE IT STANDS (24 Oct) -- READ THIS FIRST
+## S11 · LOADERS AND HANDERS -- WHERE IT STANDS (24 Oct) -- READ THIS FIRST
 
 Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Handers), fast-forwarded onto
 `claude/sales-raptor-review-p1pzx2`. Stephan answered S10's list A.1-A.10 (his words are in the commits).
@@ -43,7 +47,8 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
 7. **Supabase over its limit (709 MB of 500)**: 648 MB was `user_emails.body_html`, signature logos stored as
    base64 because mailparser's default rewrites `cid:` into `data:` (keepCidLinks). Fixed in the sync + fallback
    read (`keepCidLinks: true`) and `bodyToStore` strips any `data:image` src to `cid:raptor-picture-not-kept`.
-   **Staging's stored mail was cleaned by another session the same day: 709 MB -> 47 MB**, verified (0 embedded
+   **Staging's stored mail was cleaned by S11 · Lean Mail the same day: 709 MB -> 47 MB** (its section is next;
+   both sessions wrote `withoutEmbeddedPictures` -- the merge kept Lean Mail's, whose class has no whitespace), verified (0 embedded
    pictures left, 1 710 marked, no body emptied). **Production will need the same clean-up at go-live** (its
    database did not answer a read on 24 Oct -- possibly paused).
 8. **Vercel** (team is on **Pro**, not Hobby: $15.59 of $20 credit used by 24 Oct, ~90% build minutes):
@@ -74,6 +79,26 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
 - A.8 keep choosing the liaison on conversion (as built).
 - A.11 leave (B.1) still the next big build; A.12 call transfer parked; BuzzBox is Stephan's.
 - C: Supabase "Email OTP Expiration" 86400 -- instructions given; not confirmed done.
+## S11 · LEAN MAIL (24 Oct) -- THE PICTURES WERE IN THE DATABASE
+
+Stephan: Raptor Mail "is taking up a lot of space on Supabase", and asked for it to work "more like Outlook".
+Staging was **710 MB, 682 MB of it `user_emails`, and the disk was full** (a read query failed with
+"no space left on device"). **645 MB was base64 pictures inside `body_html`** on 1,710 messages -- signature
+logos, the same few hundred times over.
+
+Cause: mailparser's `simpleParser` rewrites every `cid:` into a `data:` URI by default, so the "pictures are
+not kept" rule in `mailBodyCache.ts` never held -- the parser had already put them into the markup.
+Fix: `withoutEmbeddedPictures()` in `bodyToStore`, the one door both the sync and the read route's write-back
+go through. Each picture becomes `cid:raptor-picture-not-kept`, which `needsPictures` reads, so the words still
+open from the cache at once and the pictures come from the mailbox -- the trade the file already chose. Pictures
+are stripped BEFORE the size limit is measured. `check-mail-body-cache` holds it (broken and re-run: 4 fail).
+
+Staging cleaned with the same regex in batches, then `vacuum full user_emails`: **710 MB -> 47 MB**, every cached
+body still cached. **Production is paused and was not touched**; it needs the same SQL + vacuum when it is resumed
+(after this code is live there, or the next sync refills it).
+
+Already Outlook-shaped and deliberately kept: the mailbox is the master, Raptor caches bodies (the firm asked for
+the speed), attachments are never stored.
 
 ## S10 CLOSED (23 Oct) -- THE NEXT SESSION STARTS HERE
 
