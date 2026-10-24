@@ -77,6 +77,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const row = (Array.isArray(clock) ? clock[0] : clock) as { business_now?: string; business_today?: string } | null
   const nowIso = row?.business_now ?? new Date().toISOString()
 
+  /*
+   * WHO SHE IS TAKING OVER FROM: THE SALESPERSON WHO SIGNED THE CLIENT (S11), not whoever pressed.
+   * THE FIRM: "My name is Pete. I've taken over from Felicia and I am your client liaison." It
+   * named the presser, which since the welcome became the liaison's own press (23 Oct) is nearly
+   * always the liaison herself -- so it named nobody -- and when a Liaison Manager pressed for her
+   * it named the manager, whom the client has never met. The client met the person who closed the
+   * deal, so that is the owner of the latest Won deal on the client. No Won deal (a client added by
+   * hand) or the liaison closed it herself: no "taking over" at all, rather than a stranger's name.
+   */
+  const { data: won } = await admin.from('deals').select('owner_id')
+    .eq('company_id', companyId).eq('stage', 'Won').order('won_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+  const closerId = String(won?.owner_id ?? '')
+  const closerName = closerId && closerId !== liaisonId
+    ? String((await admin.from('profiles').select('name').eq('id', closerId).maybeSingle()).data?.name ?? '') || null
+    : null
+
   /* The person at the client to write to: the mandate's first contact, else the client's own address. */
   const { data: contact } = await admin.from('contacts').select('first_name, last_name, email')
     .eq('company_id', companyId).not('email', 'is', null).order('created_at', { ascending: true }).limit(1).maybeSingle()
@@ -90,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const mail = welcomeEmail({
     clientName: String(company.name), contactName: contactName || null,
     liaison: { name: String(liaison.name), email: (liaison.email as string | null) ?? null, phone: (liaison.phone as string | null) ?? null, whatsapp: (liaison.whatsapp as string | null) ?? null },
-    closerName: liaisonId === caller.id ? null : String(me?.name ?? '') || null,
+    closerName,
     bannerUrl: `${origin}/brand/email/welcome.jpg`,
     handoverSheetAttached: sheets.length > 0,
   })

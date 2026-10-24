@@ -88,6 +88,16 @@ ok('the card\'s Assign posts to the assign route', /post\('assign-liaison', \{ c
 ok('the welcome is from the client\'s liaison, read off the client', /const liaisonId = String\(company\.account_owner_id/.test(route))
 ok('...pressed by her, a Liaison Manager or an Administrator -- not Sales', /caller\.id === liaisonId \|\| role === 'Administrator' \|\| role === 'Liaison Manager'/.test(route) && !/includes\('Sales'\)/.test(route))
 ok('NEVER TWICE BY ACCIDENT: already sent is refused unless asked again', /company\.welcome_sent_at && again !== true/.test(route) && /status\(409\)/.test(route))
+/*
+ * TAKING OVER FROM THE SALESPERSON WHO SIGNED THE CLIENT (S11), never from whoever pressed. The
+ * firm: "I've taken over from Felicia and I am your client liaison." The closer is the owner of
+ * the latest Won deal; the presser (caller / me) must not reach closerName at all.
+ */
+const closerAt = route.indexOf("from('deals').select('owner_id')")
+ok('the closer is read off the client\'s Won deal', closerAt > 0 && /\.eq\('stage', 'Won'\)/.test(route))
+ok('...and the welcome is given that name', /welcomeEmail\(\{[\s\S]*?\bcloserName,/.test(route) && closerAt < route.indexOf('welcomeEmail({'))
+ok('...never the presser\'s', !/closerName:[^\n]*(me\?\.name|caller)/.test(route))
+ok('...and none where the liaison closed it herself', /closerId !== liaisonId/.test(route))
 ok('the welcome goes from HER mailbox first, the presser\'s only if hers will not', route.indexOf('sendAsUser(admin, liaisonId') > 0 && route.indexOf('sendAsUser(admin, liaisonId') < route.indexOf('sendAsUser(admin, caller.id'))
 const failAt = route.indexOf('if (!sent.ok)')
 const stampAt = route.indexOf('welcome_sent_at: nowIso, welcome_sent_by: caller.id')
