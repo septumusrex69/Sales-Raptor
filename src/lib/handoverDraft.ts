@@ -624,12 +624,15 @@ export async function approveDraft(input: {
      */
     if (row.planned?.defaultDateUsed) {
       debtor.defaultDate = row.planned.defaultDateUsed
-      substituted.push(row.values.client_reference ?? `row ${row.line}`)
+      substituted.push(row.values.client_reference || `row ${row.line}`)
     }
     if (!debtor.accountNumber.trim()) {
       debtor.accountNumber = generated[nextGenerated] ?? ''
       nextGenerated += 1
     }
+    /* NO CLIENT REFERENCE ON THE SHEET: the account's own goes there too (S11, the planner's note
+       says so on the row). After the line above, so a generated reference is what is copied. */
+    if (!debtor.clientReference.trim()) debtor.clientReference = debtor.accountNumber
     return { row, debtor }
   })
 

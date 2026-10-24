@@ -1,9 +1,9 @@
 # Handoff — where Raptor stands
 
-> **This session: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
+> **This session: S11 · Loaders and Handers** — branch `claude/new-session-8jcj9a` (the harness's name, not `claude/s11-*`), from `claude/sales-raptor-review-p1pzx2` at `ef4ae21` (S10's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Loaders and Handers (`claude/new-session-8jcj9a`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not

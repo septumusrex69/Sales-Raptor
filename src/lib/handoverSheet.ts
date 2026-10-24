@@ -349,6 +349,13 @@ export const NOT_COLLECTED: NotCollectedColumn[] = [
     why: 'none of it changes how the debt is collected, and the sheet asks for the employer and '
       + 'occupation instead, which is what a trace runs on',
   },
+  /*
+   * WHOSE BOOK IT IS, which a sheet never decides. "Client Division" held a person's name in the
+   * client's office, and the client is picked on the screen when the batch is uploaded. It was the
+   * last old heading reported as "not recognised", so every old sheet we hand out drew one line of
+   * alarm over nothing. Decided S11 (the firm: "perhaps we can do it, if you think so").
+   */
+  { headings: ['Client Division'], why: 'the client is chosen when the batch is uploaded' },
 ]
 
 /** Heading, reduced, to the reason the firm does not collect it. */

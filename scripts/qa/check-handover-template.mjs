@@ -177,17 +177,16 @@ ok('...with no row of anybody’s data in it', !/<row r="2">[^]*?<t[^>]*>[^<]+<\
 
 /*
  * THE IMPORTER READS WHAT WE HAND OUT. Every heading is a column (aliasIndex) or a decision
- * (NOT_COLLECTED, reported with its reason). UNDECIDED is the one heading the firm has not
- * decided about -- handoverSheet.ts says so of "Client Division", and the importer reports it as
- * not recognised, which is the truth. It is named here so that a SECOND such heading fails, and
- * so that the day it is decided this list has to be emptied rather than quietly still excusing it.
+ * (NOT_COLLECTED, reported with its reason). "Client Division" was the one heading nobody had
+ * decided about until S11, when the firm put it on NOT_COLLECTED; so there is now NO exception,
+ * and a heading added to the old sheet without a decision fails here.
  */
-const UNDECIDED = ['Client Division']
 const alias = aliasIndex()
 const declined = notCollectedIndex()
-check('every old heading is read by the importer -- a column or a decision -- bar the undecided one',
-  OLD_HANDOVER_HEADINGS.filter((h) => !alias.has(headingKey(h)) && !declined.has(headingKey(h))), UNDECIDED)
-ok('...and the undecided one is genuinely neither', UNDECIDED.every((h) => !alias.has(headingKey(h)) && !declined.has(headingKey(h))))
+check('every old heading is read by the importer -- a column or a decision',
+  OLD_HANDOVER_HEADINGS.filter((h) => !alias.has(headingKey(h)) && !declined.has(headingKey(h))), [])
+ok('...and "Client Division" is a decision with its reason',
+  declined.get(headingKey('Client Division')) === 'the client is chosen when the batch is uploaded')
 
 const oldRefs = new Map(oldHeads.map((h) => [h.text, h.ref]))
 const oldDigits = OLD_HANDOVER_HEADINGS.filter((h) => alias.get(headingKey(h))?.kind === 'text'

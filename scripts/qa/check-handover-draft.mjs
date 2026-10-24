@@ -94,6 +94,16 @@ ok('...and the batch is created before the first account',
   body.indexOf("from('handovers')") !== -1
   && body.indexOf("from('handovers')") < body.indexOf('createDebtorAccount'))
 
+/*
+ * NO CLIENT REFERENCE ON THE SHEET: THE ACCOUNT'S OWN GOES THERE (S11). After the generated
+ * reference is assigned, or an empty sheet copies an empty string and the planner's note lies.
+ */
+const fillAt = body.indexOf('debtor.clientReference = debtor.accountNumber')
+const genAt = body.indexOf('debtor.accountNumber = generated[nextGenerated]')
+ok('an empty client reference is given the account reference', fillAt !== -1 && genAt !== -1)
+ok('...after the account reference is generated', fillAt > genAt)
+ok('...only where the sheet had none', /if \(!debtor\.clientReference\.trim\(\)\) debtor\.clientReference = /.test(body))
+
 /* A draft already approved cannot be approved again, or one sheet opens the accounts twice. */
 ok('a handover cannot be approved twice', /already been approved/.test(lib))
 

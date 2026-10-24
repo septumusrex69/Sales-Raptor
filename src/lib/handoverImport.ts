@@ -901,12 +901,19 @@ function readRow(
    * two rows sharing a client reference collide over nothing, and refusing them sent a second
    * genuine debt back to the client to argue about.
    *
-   * AN EMPTY ONE IS STILL A REFUSAL, because that is a different thing entirely: no reference at
-   * all is the client unable to tell us which of their debts this is.
+   * AN EMPTY ONE IS GIVEN OURS, AND SAID (S11). It was a refusal, on the argument that it is what
+   * the debtor quotes when they pay -- which stopped being true when notices and SMSs moved to our
+   * `case_number`, and which held Rinda's whole Bonnitta Pharmacy sheet (19 rows) over an empty
+   * column. THE FIRM: "Is it possible for Raptor to generate its own client reference? ... I think
+   * there should be a client reference. If we add that for them." So approveDraft writes the
+   * account's own reference (the client's series, generated where the sheet has none) into the
+   * empty box. A NOTE, not a warning: nothing is guessed, there is nothing to decide, and nineteen
+   * Accept presses over one sentence is how people learn to press Accept without reading.
    */
   const ref = (values.client_reference ?? '').trim()
   if (!ref) {
-    refuse('client_reference', 'No reference. It is what the debtor is told to quote when they pay.')
+    note('client_reference', 'No client reference on the sheet. The account is given its Raptor '
+      + 'reference in that place too, so the client has one to quote back to us.')
   } else if (ctx.seen.has(ref)) {
     linkedTo = { how: 'client-reference', line: ctx.seen.get(ref) ?? null, account: null }
     warn('client_reference', linkedMessage(linkedTo, ref))

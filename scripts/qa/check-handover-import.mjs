@@ -452,6 +452,18 @@ ok('a row with no name is refused', noName.refused.length === 1)
 const noMoney = rows(['A1', '', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
 ok('a row with no handover amount is refused', noMoney.refused.length === 1)
 /*
+ * NO CLIENT REFERENCE IS NO LONGER A REFUSAL (S11). It held Rinda's whole Bonnitta sheet: nineteen
+ * good debts sent back over an empty column. The firm: "Is it possible for Raptor to generate its
+ * own client reference? ... If we add that for them." approveDraft gives the row the account's own
+ * reference (check-handover-draft holds that half); here, the row is READY and says so in a NOTE,
+ * because a warning would put nineteen Accept presses between the firm and one sentence.
+ */
+const noRef = rows(['', '100', '2026-01-01', 'Person', 'Dube', '', '082 123 4567', 'a@b.co.za'])
+check('a row with no client reference opens', [noRef.refused.length, noRef.ready.length], [0, 1])
+const noRefSaid = (noRef.ready[0]?.problems ?? []).filter((p) => p.key === 'client_reference')
+check('...and says so once, as a note', noRefSaid.map((p) => p.level), ['note'])
+ok('...naming what it is given', /Raptor reference/.test(noRefSaid[0]?.message ?? ''))
+/*
  * ---- A DATE NOBODY CAN READ, AND NO DATE AT ALL, ARE WARNINGS TOO ----
  *
  * THE FIRM: "it should also show you in a rejection state, but I have an option to accept it --
