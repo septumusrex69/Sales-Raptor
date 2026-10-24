@@ -120,7 +120,9 @@ export function ClientAttentionCard({ company, canEdit, userId, userName, unallo
   }
   if (company.liaisonNeeded) {
     items.push({ key: 'liaison', tone: 'amber', title: 'Waiting for a liaison',
-      detail: 'Signed online; Sales has not handed this client to a liaison yet.' })
+      detail: company.importBatchId
+        ? 'From Swordfish with nobody on staff named as their liaison. Assign one under Assign a liaison.'
+        : 'Signed online; Sales has not handed this client to a liaison yet.' })
   }
 
   return (

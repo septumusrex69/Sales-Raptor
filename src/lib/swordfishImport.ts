@@ -69,6 +69,8 @@ export interface CompanyRow {
   bf_reference: string | null
   register_status: string | null
   liaison: string | null
+  /** No liaison on staff matched the register's name (S11): the client page asks somebody to assign one. */
+  liaison_needed: boolean
   marketing_agent: string | null
   classification: string | null
   mandate_signed_at: string | null
@@ -331,7 +333,28 @@ export interface BuildOptions {
    * an account is imported, it should go automatically to its swordfish clerk." Matched on the
    * whole name only (see `clerkKey`); an unknown or inactive name is FLAGGED, never guessed at.
    */
-  clerks?: { id: string; name: string; active: boolean }[]
+  clerks?: { id: string; name: string; active: boolean; role?: string }[]
+}
+
+/**
+ * WHO LOOKS AFTER AN IMPORTED CLIENT (S11).
+ *
+ * THE FIRM: "if things are built from Swordfish ... it already has a liaison. They already have
+ * received a welcome letter ... However, if there is no liaison, please, yeah, then we can ask."
+ * The register names her ("Assigned To"); she is matched by WHOLE name, like a clerk (clerkKey),
+ * to an ACTIVE Liaison or Liaison Manager. A match owns the client. Anything else -- no name, a
+ * name nobody on staff has, somebody who left, somebody who is not a liaison -- is the placeholder
+ * owner the screen chose AND liaison_needed, so the client page asks for one. Never guessed at: a
+ * client handed to the wrong liaison is a relationship nobody is minding.
+ */
+export function liaisonFor(
+  name: string | null,
+  people: readonly { id: string; name: string; active: boolean; role?: string }[],
+): string | null {
+  if (!name) return null
+  const key = clerkKey(name)
+  const p = people.find((x) => clerkKey(x.name) === key)
+  return p && p.active && (p.role === 'Liaison' || p.role === 'Liaison Manager') ? p.id : null
 }
 
 /**
@@ -429,6 +452,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       bf_reference: null,
       register_status: null,
       liaison: null,
+      liaison_needed: true,
       marketing_agent: null,
       classification: null,
       mandate_signed_at: null,
@@ -580,6 +604,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
         // "Assigned To" is filled on a client's first row and "Assigned Dup" on the rest, so
         // either can be the one that carries the name.
         liaison: group.map((r) => text(r['Assigned To']) ?? text(r['Assigned Dup'])).find(Boolean) ?? null,
+        liaison_needed: true,
         marketing_agent: text(first['Source']),
         classification: ['A', 'B', 'C', 'D'].includes(text(first['Ranking']) ?? '') ? text(first['Ranking']) : null,
         mandate_signed_at: group.map((r) => isoDate(r['Sign Date'])).find(Boolean) ?? null,
@@ -637,6 +662,31 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     if (!name || companyBySwordfishName.has(name)) continue
     companyBySwordfishName.set(name, addCompany({ name, swordfish: [name] }))
     problem(`"${name}" is not in the client configuration — imported as its own client. Check whether it belongs under an existing one.`)
+  }
+
+  /*
+   * EACH CLIENT TO ITS LIAISON, where the register names one on staff (liaisonFor). A sub-entity
+   * with no name of its own follows its parent: Adowa's properties are one relationship.
+   */
+  const people = options.clerks ?? []
+  const byIdForLiaison = new Map(companies.map((c) => [c.id, c]))
+  const ownerOf = (c: CompanyRow, depth = 0): string | null => {
+    const mine = liaisonFor(c.liaison, people)
+    if (mine) return mine
+    const parent = c.parent_company_id ? byIdForLiaison.get(c.parent_company_id) : undefined
+    return parent && depth < 5 ? ownerOf(parent, depth + 1) : null
+  }
+  for (const c of companies) {
+    const liaisonId = ownerOf(c)
+    c.account_owner_id = liaisonId ?? ownerId
+    c.liaison_needed = !liaisonId
+  }
+  const needing = companies.filter((c) => c.liaison_needed)
+  if (needing.length) {
+    notes.push(`${needing.length} ${needing.length === 1 ? 'client needs' : 'clients need'} a liaison -- the register names `
+      + 'nobody on staff as a liaison for them. Each opens on the client page with "Assign a liaison"; '
+      + `assigning sends no welcome. ${needing.slice(0, 8).map((c) => c.liaison ? `${c.name} ("${c.liaison}")` : c.name).join(', ')}`
+      + `${needing.length > 8 ? ` and ${needing.length - 8} more` : ''}.`)
   }
 
   const companyById = new Map(companies.map((c) => [c.id, c]))

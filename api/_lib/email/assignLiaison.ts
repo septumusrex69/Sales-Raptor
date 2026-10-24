@@ -38,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [{ data: me }, { data: liaison }, { data: company }, { data: clock }] = await Promise.all([
     admin.from('profiles').select('id, name, role').eq('id', caller.id).maybeSingle(),
     admin.from('profiles').select('id, name, role, status').eq('id', liaisonId).maybeSingle(),
-    admin.from('companies').select('id, name').eq('id', companyId).maybeSingle(),
+    admin.from('companies').select('id, name, import_batch_id').eq('id', companyId).maybeSingle(),
     admin.rpc('raptor_clock'),
   ])
   const role = String(me?.role ?? '')
@@ -60,13 +60,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .update({ account_owner_id: liaisonId, liaison_needed: false, liaison_assigned_at: nowIso }).eq('id', companyId)
   if (upErr) { res.status(500).json({ error: upErr.message }); return }
 
-  /* 2. Her two tasks, the next working day. */
+  /*
+   * A CLIENT FROM SWORDFISH IS NOT NEW (S11), so no welcome. THE FIRM: "it already has a liaison.
+   * They already have received a welcome letter." One the register gave no liaison on staff arrives
+   * "Needs a liaison"; assigning it gives her the client and the notification, and no welcome tasks.
+   */
+  const imported = !!company.import_batch_id
+
+  /* 2. Her two tasks, the next working day -- a new client only. */
   const [y, m, d] = today.split('-').map(Number)
   const due = new Date(Date.UTC(y, m - 1, d + 1, 7, 0))
   while (due.getUTCDay() === 0 || due.getUTCDay() === 6) due.setUTCDate(due.getUTCDate() + 1)
   const task = { status: 'Not Started', priority: 'High', owner_id: liaisonId, due_date: due.toISOString(),
     company_id: companyId, related_to_label: String(company.name) }
-  const { error: taskErr } = await admin.from('tasks').insert([
+  const { error: taskErr } = imported ? { error: null } : await admin.from('tasks').insert([
     { ...task, title: `Send welcome email: ${company.name}`, type: 'Email' },
     { ...task, title: `Welcome call: ${company.name}`, type: 'Call' },
   ])
@@ -74,15 +81,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   /* 3. Her pop-up and bell. */
   await admin.from('notifications').insert({
     user_id: liaisonId, type: 'client.assigned', link: `/companies/${companyId}`,
-    message: `New client: ${company.name}. Send them your welcome email from the client's page, and call to introduce yourself.`,
+    message: imported
+      ? `${company.name} is yours to look after now. An existing client from Swordfish, so no welcome is needed.`
+      : `New client: ${company.name}. Send them your welcome email from the client's page, and call to introduce yourself.`,
   })
 
   /* 4. The client's notes. */
   await admin.from('activities').insert({
     type: 'Deal update', user_id: caller.id, company_id: companyId, activity_date: nowIso,
     subject: `Liaison assigned: ${liaison.name}`,
-    notes: `Assigned by ${me?.name ?? 'Sales'}. Tasks set for ${due.toISOString().slice(0, 10)}: send the welcome email, and the welcome call.`,
+    notes: imported
+      ? `Assigned by ${me?.name ?? 'Sales'}. An existing client from Swordfish: no welcome email or welcome call.`
+      : `Assigned by ${me?.name ?? 'Sales'}. Tasks set for ${due.toISOString().slice(0, 10)}: send the welcome email, and the welcome call.`,
   })
 
-  res.status(200).json({ assigned: true, tasks: !taskErr, error: taskErr ? taskErr.message : null })
+  res.status(200).json({ assigned: true, imported, tasks: !imported && !taskErr, error: taskErr ? taskErr.message : null })
 }

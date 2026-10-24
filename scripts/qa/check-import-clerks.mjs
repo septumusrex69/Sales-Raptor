@@ -25,7 +25,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-import-clerks.mjs
  */
 import { readFileSync } from 'node:fs'
-import { buildImportPlan, clerkKey } from '../../src/lib/swordfishImport.ts'
+import { buildImportPlan, clerkKey, liaisonFor } from '../../src/lib/swordfishImport.ts'
 import { splitUncredited } from '../../src/lib/collectorScore.ts'
 
 let pass = 0
@@ -99,8 +99,8 @@ ok('a person on an action who is not a user is noted, history kept',
 ok('...and the action keeps their name', plan.fees.some((f) => f.performed_by === 'Departed Person'))
 
 const tab = strip(read('src/components/settings/DataImportTab.tsx'))
-ok('the import screen hands the plan every user, with whether they are active',
-  /clerks: users\.map\(\(u\) => \(\{ id: u\.id, name: u\.name, active: u\.status === 'Active' \}\)\)/.test(tab))
+ok('the import screen hands the plan every user, with whether they are active and (S11) their role',
+  /clerks: users\.map\(\(u\) => \(\{ id: u\.id, name: u\.name, active: u\.status === 'Active', role: u\.role \}\)\)/.test(tab))
 
 /* ---------------- 3: the desk trigger ---------------- */
 
@@ -150,6 +150,50 @@ ok('the hero says so under the period\'s total', /not on anybody’s desk/.test(
 const stats = strip(read('src/lib/collectorStats.ts'))
 ok('every list of people is read through the split',
   /return \(await fetchCollectionsPeriod\(from, to\)\)\.rows/.test(stats))
+
+/* ---------------- S11: each imported CLIENT to the liaison the register names ----------------
+ * THE FIRM: "it already has a liaison ... if there is no liaison, please, yeah, then we can ask."
+ * Whole-name match to an ACTIVE Liaison or Liaison Manager owns the client; anything else is the
+ * placeholder owner AND liaison_needed. A sub-entity with no name of its own follows its parent. */
+const NICOLE = '00000000-0000-0000-0000-0000000000b1'
+const PLACEHOLDER = '00000000-0000-0000-0000-0000000000b9'
+const people = [
+  { id: NICOLE, name: 'Nicole Loder', active: true, role: 'Liaison Manager' },
+  { id: VUSI, name: 'Vusi Maringa', active: true, role: 'Call Centre Manager' },
+  { id: GONE, name: 'Old Liaison', active: false, role: 'Liaison' },
+]
+check('a liaison on staff is found by whole name', liaisonFor('nicole  LODER', people), NICOLE)
+check('...not by a first name', liaisonFor('Nicole', people), null)
+check('...not somebody who is not a liaison', liaisonFor('Vusi Maringa', people), null)
+check('...not somebody who has left', liaisonFor('Old Liaison', people), null)
+check('...and no name is nobody', liaisonFor(null, people), null)
+const reg = (client, reg, assigned) => ({ 'Client': client, 'COMPANY REG/ID': reg, 'Prefix': client.slice(0, 3).toUpperCase(),
+  'PERCENTAGE': '20', 'Assigned To': assigned, 'Active / Dormant': 'Active' })
+const liaisonPlan = buildImportPlan({
+  accounts: [], payments: [], actions: [], interest: [], clients: [
+    reg('Known Client', 'R1', 'Nicole Loder'),
+    reg('Stranger Client', 'R2', 'Somebody Else'),
+    reg('Nameless Client', 'R3', ''),
+    reg('Parent Ltd - Ellis Park', 'R4', 'Nicole Loder'), reg('Parent Ltd - Frederick Street', 'R4', ''),
+  ],
+}, { ownerId: PLACEHOLDER, clerks: people })
+const byName = new Map(liaisonPlan.companies.map((c) => [c.name, c]))
+const known = byName.get('Known Client')
+check('a client whose liaison is on staff is hers, and needs nobody', [known?.account_owner_id, known?.liaison_needed], [NICOLE, false])
+check('a stranger\'s client starts under the placeholder and needs a liaison',
+  [byName.get('Stranger Client')?.account_owner_id, byName.get('Stranger Client')?.liaison_needed], [PLACEHOLDER, true])
+check('...and so does a client with no name', byName.get('Nameless Client')?.liaison_needed, true)
+ok('the plan says how many need one', liaisonPlan.notes.some((n) => /^2 clients need a liaison/.test(n)))
+ok('a sub-entity with no name follows its parent',
+  liaisonPlan.companies.filter((c) => /Ellis Park|Frederick Street|^Parent Ltd/.test(c.name)).every((c) => c.account_owner_id === NICOLE && !c.liaison_needed))
+
+/* AND ASSIGNING ONE SENDS NO WELCOME: the route, the card and the attention line all know. */
+const assign = strip(read('api/_lib/email/assignLiaison.ts'))
+ok('assigning an imported client makes no welcome tasks', /const imported = !!company\.import_batch_id/.test(assign)
+  && /imported \? \{ error: null \} : await admin\.from\('tasks'\)\.insert/.test(assign))
+const card = strip(read('src/components/companies/WelcomeCard.tsx'))
+ok('the Welcome card never offers a welcome to an imported client', /const imported = fromSwordfish\(company\)/.test(card)
+  && /if \(!company\.liaisonNeeded && \(imported \|\|/.test(card))
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-import-clerks: ${pass} passed, ${failures.length} failed`)

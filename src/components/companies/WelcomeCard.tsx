@@ -9,6 +9,7 @@ import { clockNow } from '../../lib/clock'
 import { welcomeSteps, isLiaisonRole, maySendWelcome, welcomeSentLine } from '../../lib/welcome'
 import { fetchFirmSettings } from '../../lib/firmSettings'
 import { handoverSheetAttachment, handoverSheetFilename } from '../../lib/handoverTemplate'
+import { fromSwordfish } from '../../lib/mandateRule'
 import type { Company } from '../../types'
 
 /**
@@ -53,7 +54,9 @@ export function WelcomeCard({ company }: { company: Company }) {
   const maySend = maySendWelcome(currentUser, company)
   const liaisonName = userById(company.accountOwnerId)?.name ?? 'the liaison'
   const sentLine = welcomeSentLine(company, company.welcomeSentBy ? userById(company.welcomeSentBy)?.name : null)
-  if (!company.liaisonNeeded && (!company.liaisonAssignedAt || steps.every((s) => s.done))) return null
+  /* A Swordfish client is not new (S11): the card only ever asks for its liaison, never a welcome. */
+  const imported = fromSwordfish(company)
+  if (!company.liaisonNeeded && (imported || !company.liaisonAssignedAt || steps.every((s) => s.done))) return null
 
   async function post(action: 'assign-liaison' | 'welcome', payload: Record<string, unknown>) {
     const { data } = await supabase.auth.getSession()
@@ -74,7 +77,9 @@ export function WelcomeCard({ company }: { company: Company }) {
       showCompanyChange(company.id, { accountOwnerId: pick, liaisonNeeded: false, liaisonAssignedAt: clockNow().toISOString() })
       void refreshSyncedData()
       const name = userById(pick)?.name ?? 'The liaison'
-      setResult(`${name} now looks after ${company.name}. She has been told, and two tasks are on her list: send the welcome email, and the welcome call.`)
+      setResult(imported
+        ? `${name} now looks after ${company.name}. She has been told. No welcome: an existing client from Swordfish.`
+        : `${name} now looks after ${company.name}. She has been told, and two tasks are on her list: send the welcome email, and the welcome call.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -106,7 +111,9 @@ export function WelcomeCard({ company }: { company: Company }) {
     <Card className={company.liaisonNeeded ? 'border-gold-300 bg-gold-50/60' : undefined}>
       <div data-testid="welcome-card">
         <CardHeader title={company.liaisonNeeded ? 'Assign a liaison' : 'Welcome'}
-          subtitle={company.liaisonNeeded
+          subtitle={company.liaisonNeeded && imported
+            ? 'From Swordfish, where nobody on staff was named as their liaison. Choose who looks after them: she is told. No welcome, as they are an existing client.'
+            : company.liaisonNeeded
             ? 'Signed online. Choose who looks after them: she is told, and sending the welcome email and the welcome call go on her list.'
             : 'A new client, from the signed mandate to the first call.'} />
         {company.liaisonNeeded && (

@@ -250,7 +250,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
         {
           ownerId, only: only.trim() || undefined, settledThrough, cleanBreak,
           /* Every user, active or not: an inactive match is flagged rather than treated as unknown. */
-          clerks: users.map((u) => ({ id: u.id, name: u.name, active: u.status === 'Active' })),
+          clerks: users.map((u) => ({ id: u.id, name: u.name, active: u.status === 'Active', role: u.role })),
         },
       ))
     } catch (e) {
@@ -472,7 +472,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           */}
           <label className="block">
             <span className="block text-xs font-medium text-slate-500 mb-1">
-              New client records start under
+              Clients with no liaison on staff start under
             </span>
             <select className={inputClass} value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setPlan(null) }}>
               {users.filter((u) => u.status === 'Active').map((u) => (
@@ -480,8 +480,9 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
               ))}
             </select>
             <span className="block text-[11px] text-slate-400 mt-1">
-              Not client allocation &mdash; a placeholder so no client arrives ownerless. Who looks
-              after a client is set on the client itself, one at a time.
+              A client goes to the liaison the register names, where she is on staff. The rest
+              start under this person and are marked &ldquo;Needs a liaison&rdquo;: assign one on the
+              client&rsquo;s page (no welcome is sent &mdash; they are existing clients).
             </span>
           </label>
           {/*
