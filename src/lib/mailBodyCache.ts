@@ -75,6 +75,7 @@ export interface BodyPatch {
  * because there was nothing in it the first time.
  */
 export function bodyToStore(body: MailBody, at: string): BodyPatch {
+  body = { ...body, html: withoutEmbeddedPictures(body.html ?? '') }
   const keep = (s: string, limit: number) => {
     const t = s ?? ''
     return t.length > 0 && t.length <= limit ? t : null
@@ -97,11 +98,32 @@ export function bodyToStore(body: MailBody, at: string): BodyPatch {
   }
 }
 
+/**
+ * THE MARK LEFT WHERE A PICTURE WAS TAKEN OUT. A cid:, so needsPictures says yes and the reader
+ * goes to the mailbox for the pictures in the background -- the same road a signature logo takes.
+ */
+export const PICTURE_NOT_KEPT = 'cid:raptor-picture-not-kept'
+
+/**
+ * A PICTURE WRITTEN INTO THE MARKUP ITSELF IS NOT KEPT EITHER (S11).
+ *
+ * Some mail carries its pictures as data: URIs inside the html rather than as cid: attachments --
+ * and until S11 the sync's own parser turned every cid: picture into one (see keepCidLinks in
+ * emailSync.ts). Base64 barely compresses, so one logo cost more than a hundred messages of words:
+ * staging's 3 949 messages held 648 MB of markup, nearly all of it pictures. The words stay; each
+ * picture becomes PICTURE_NOT_KEPT and is fetched from the mailbox when the message is opened.
+ * Only data:IMAGE, and only the src= of one: a data: link a person might click is text.
+ */
+export function withoutEmbeddedPictures(html: string): string {
+  if (!html || html.indexOf('data:image') === -1) return html
+  return html.replace(/(\bsrc\s*=\s*["']?)data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]*/gi, `$1${PICTURE_NOT_KEPT}`)
+}
+
 /** Why a message is still read out of the mailbox, for the log the sync writes. */
 export function tooBigFor(body: MailBody): string | null {
   const over: string[] = []
   if ((body.text ?? '').length > TEXT_LIMIT) over.push('text')
-  if ((body.html ?? '').length > HTML_LIMIT) over.push('html')
+  if (withoutEmbeddedPictures(body.html ?? '').length > HTML_LIMIT) over.push('html')
   return over.length ? `${over.join(' and ')} over the cache limit` : null
 }
 

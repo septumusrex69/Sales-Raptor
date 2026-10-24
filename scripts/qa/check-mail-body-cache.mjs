@@ -21,7 +21,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  bodyToStore, hasCachedBody, needsPictures, tooBigFor,
+  bodyToStore, hasCachedBody, needsPictures, tooBigFor, withoutEmbeddedPictures, PICTURE_NOT_KEPT,
   CALENDAR_LIMIT, HTML_LIMIT, TEXT_LIMIT,
 } from '../../src/lib/mailBodyCache.ts'
 
@@ -226,6 +226,37 @@ ok('...and never the same message twice in one sitting', /!warmed\.current\.has\
 /* SILENT WHEN IT FAILS: nobody asked for these. An error about a message somebody has not clicked
    is a warning that fires when nothing has gone wrong. */
 ok('...and says nothing when it cannot', /SILENT, AND DELIBERATELY SO/.test(page))
+
+/*
+ * PICTURES ARE NOT KEPT, AND THAT IS NOW TRUE (S11). Staging's user_emails reached 682 MB on 3 949
+ * messages -- 648 MB of it body_html, 97% of the sampled characters base64 pictures, most of them
+ * the firm's own signature logo. Two causes and both are held: mailparser's default rewrote every
+ * cid: picture into a data: URI (keepCidLinks), and nothing stripped a data: picture on the way in.
+ */
+const logo = 'data:image/png;base64,' + 'iVBORw0KGgo'.repeat(50000)
+const fat = `<p>Dear Sir</p><img src="${logo}" alt="logo"><p>Regards</p>`
+const thin = withoutEmbeddedPictures(fat)
+ok('an embedded picture is not kept', !thin.includes('base64') && thin.length < 200)
+ok('...the words are', thin.includes('Dear Sir') && thin.includes('Regards'))
+ok('...and the mark left is a cid:, so the pictures are fetched from the mailbox', needsPictures(thin) && thin.includes(PICTURE_NOT_KEPT))
+check('bodyToStore keeps the thin markup', bodyToStore({ text: 'Dear Sir', html: fat, calendar: '' }, 'now').body_html, thin)
+ok('...including where the pictures alone put it over the limit',
+  bodyToStore({ text: 'x', html: `<p>x</p><img src="data:image/jpeg;base64,${'A'.repeat(HTML_LIMIT)}">`, calendar: '' }, 'now').body_html !== null
+  && tooBigFor({ text: 'x', html: `<p>x</p><img src="data:image/jpeg;base64,${'A'.repeat(HTML_LIMIT)}">`, calendar: '' }) === null)
+check('a data: link a person might click is text, and stays', withoutEmbeddedPictures('<a href="data:image/png;base64,AAAA">x</a>'), '<a href="data:image/png;base64,AAAA">x</a>')
+check('every parse that yields stored or shown html keeps cid links',
+  (sync.match(/simpleParser\(msg\.source[^)]*\)/g) ?? []).concat(sync.match(/const parsed = await simpleParser\(whole\.source[^)]*\)\n\s*\/\*\n\s*\* The HTML/g) ?? [])
+    .map((c) => /keepCidLinks: true/.test(c)), [true, true])
+{
+  /* AND THE OPTION DOES WHAT IT SAYS, on mailparser itself rather than on our reading of it. */
+  const { simpleParser } = await import('mailparser')
+  const raw = ['From: a@b.co.za', 'To: c@d.co.za', 'Subject: x', 'MIME-Version: 1.0',
+    'Content-Type: multipart/related; boundary="B"', '', '--B', 'Content-Type: text/html', '',
+    '<p>Hi</p><img src="cid:logo1">', '--B', 'Content-Type: image/png', 'Content-ID: <logo1>',
+    'Content-Transfer-Encoding: base64', '', 'iVBORw0KGgo=', '--B--', ''].join('\r\n')
+  ok('mailparser by default writes the picture into the html (the cause)', /data:image/.test((await simpleParser(raw)).html || ''))
+  ok('...and with keepCidLinks it does not', /cid:logo1/.test((await simpleParser(raw, { keepCidLinks: true })).html || ''))
+}
 
 /* THE COLUMNS EXIST. A select naming a column that is not there empties the whole request, which
    is what check-select-columns exists for -- this is the schema half of the same guard. */

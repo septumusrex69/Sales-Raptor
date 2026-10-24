@@ -985,7 +985,8 @@ export async function fetchMessageBody(
      */
     const whole = await client.fetchOne(String(uid), { source: true }, { uid: true })
     if (!whole || !whole.source) return null
-    const parsed = await simpleParser(whole.source)
+    /* keepCidLinks: see the sync's own parse below -- the pictures travel in `images`, not in the html. */
+    const parsed = await simpleParser(whole.source, { keepCidLinks: true })
     /*
      * The HTML comes back as well as the text, because plainText() strips every tag — and the
      * tags are where an image signature keeps its contact details. A signature that renders as a
@@ -1276,7 +1277,17 @@ async function syncMailbox(
       }
       maxUid = Math.max(maxUid, msg.uid)
 
-      const parsed = await simpleParser(msg.source)
+      /*
+       * keepCidLinks, OR EVERY SIGNATURE LOGO IS STORED IN FULL (S11). mailparser's default
+       * rewrites each `cid:` picture in the html into a data: URI of the whole image, so the html
+       * this writes into user_emails.body_html carried every logo as base64 -- 570 000 characters on
+       * an average large message, 97% of it picture. mailBodyCache.ts was written on the opposite
+       * assumption ("the pictures drawn INTO a message are not stored either -- see needsPictures",
+       * which looks for cid:), and staging's database reached 709 MB of a 500 MB plan, 648 MB of it
+       * these bodies. Kept as cid:, the words are cached and the pictures come from the mailbox when
+       * somebody opens the message, which is what the cache was designed to do.
+       */
+      const parsed = await simpleParser(msg.source, { keepCidLinks: true })
       const fromAddress = parsed.from?.value?.[0]?.address
       if (!fromAddress) {
         console.log(`[emailSync] ${path} UID ${uid}: no parseable From address, skipped`)
