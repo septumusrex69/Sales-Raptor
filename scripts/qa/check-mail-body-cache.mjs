@@ -21,8 +21,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  bodyToStore, hasCachedBody, needsPictures, tooBigFor,
-  CALENDAR_LIMIT, HTML_LIMIT, TEXT_LIMIT,
+  bodyToStore, hasCachedBody, needsPictures, tooBigFor, withoutEmbeddedPictures,
+  CALENDAR_LIMIT, DROPPED_PICTURE, HTML_LIMIT, TEXT_LIMIT,
 } from '../../src/lib/mailBodyCache.ts'
 
 let pass = 0
@@ -114,6 +114,31 @@ ok('a message with no pictures needs nothing more', !needsPictures('<p>Please se
 ok('a remote picture is not fetched from the mailbox',
   !needsPictures('<img src="https://tracker.example/pixel.gif">'))
 ok('...and neither is nothing at all', !needsPictures(null) && !needsPictures(''))
+
+/*
+ * AND THE PICTURES THE PARSER HAD ALREADY PUT INTO THE MARKUP (24 Oct, S11). mailparser rewrites
+ * every cid: into a data: URI by default, so the logos were stored inside body_html after all --
+ * 645 MB of a 710 MB staging database, until the disk filled. They come out at bodyToStore.
+ */
+const LOGO = 'data:image/png;base64,' + 'iVBORw0KGgo'.repeat(4000)
+const signed = `<p>Regards</p><img src="${LOGO}" alt="BF">`
+const kept = bodyToStore(body({ html: signed }), AT).body_html
+ok('a picture the parser drew into the markup is not stored', !!kept && !kept.includes('base64'))
+ok('...the words around it are', !!kept && kept.includes('<p>Regards</p>'))
+ok('...and the attribute after it survives', !!kept && kept.includes('alt="BF"'))
+check('...replaced by a reference, not removed', kept, `<p>Regards</p><img src="${DROPPED_PICTURE}" alt="BF">`)
+/* WHICH IS WHAT SENDS THE READER TO THE MAILBOX FOR IT, with the words already on screen. */
+ok('...so the page knows to fetch the pictures', needsPictures(kept))
+/* UNQUOTED: base64 letters and `=` look like the next attribute, and must not swallow it. */
+check('an unquoted picture does not take the next attribute with it',
+  withoutEmbeddedPictures('<img src=data:image/gif;base64,R0lGOD== alt=x>'), `<img src=${DROPPED_PICTURE} alt=x>`)
+check('a background picture in a style goes too',
+  withoutEmbeddedPictures("<td style=\"background:url('data:image/jpeg;base64,/9j/4AAQ')\">"),
+  `<td style="background:url('${DROPPED_PICTURE}')">`)
+check('markup with no pictures is untouched', withoutEmbeddedPictures('<p>Please settle.</p>'), '<p>Please settle.</p>')
+/* MEASURED AFTER, so a big logo no longer pushes an ordinary message out of the cache. */
+ok('a message over the limit only because of its pictures is now kept',
+  bodyToStore(body({ html: '<p>hi</p><img src="data:image/png;base64,' + 'A'.repeat(HTML_LIMIT) + '">' }), AT).body_html !== null)
 
 /* WHY A MESSAGE IS STILL SLOW, for the sync's log: a message that is slower than its neighbours
    for no visible reason is a bug report nobody can answer. */

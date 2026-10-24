@@ -1,6 +1,8 @@
 # Handoff — where Raptor stands
 
-> **This session: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
+> **This session: S11 · Lean Mail** — branch `claude/s11-lean-mail`, from `claude/sales-raptor-review-p1pzx2` at `ef4ae21`. One fix, below. **S10's questions (section A) are still unasked** — the next session opens with them.
+>
+> **Previous: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
 > S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`).
@@ -16,6 +18,27 @@ Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
+
+## S11 · LEAN MAIL (24 Oct) -- THE PICTURES WERE IN THE DATABASE
+
+Stephan: Raptor Mail "is taking up a lot of space on Supabase", and asked for it to work "more like Outlook".
+Staging was **710 MB, 682 MB of it `user_emails`, and the disk was full** (a read query failed with
+"no space left on device"). **645 MB was base64 pictures inside `body_html`** on 1,710 messages -- signature
+logos, the same few hundred times over.
+
+Cause: mailparser's `simpleParser` rewrites every `cid:` into a `data:` URI by default, so the "pictures are
+not kept" rule in `mailBodyCache.ts` never held -- the parser had already put them into the markup.
+Fix: `withoutEmbeddedPictures()` in `bodyToStore`, the one door both the sync and the read route's write-back
+go through. Each picture becomes `cid:raptor-picture-not-kept`, which `needsPictures` reads, so the words still
+open from the cache at once and the pictures come from the mailbox -- the trade the file already chose. Pictures
+are stripped BEFORE the size limit is measured. `check-mail-body-cache` holds it (broken and re-run: 4 fail).
+
+Staging cleaned with the same regex in batches, then `vacuum full user_emails`: **710 MB -> 47 MB**, every cached
+body still cached. **Production is paused and was not touched**; it needs the same SQL + vacuum when it is resumed
+(after this code is live there, or the next sync refills it).
+
+Already Outlook-shaped and deliberately kept: the mailbox is the master, Raptor caches bodies (the firm asked for
+the speed), attachments are never stored.
 
 ## S10 CLOSED (23 Oct) -- THE NEXT SESSION STARTS HERE
 
