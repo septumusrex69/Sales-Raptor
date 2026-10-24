@@ -50825,3 +50825,21 @@ as $$
     else array[]::text[]
   end
 $$;
+
+-- ============================================================================
+-- S11 (24 Oct): A BATCH NOBODY HANDED OUT IS SAID TO THE LIAISON AND THE LIAISON MANAGERS.
+-- Migration `handout_reminder`, staging first.
+--
+-- THE FIRM: "unhanded, handed out batches, I think that's still also with the liaison and the
+-- liaison manager." The 06:00 morning run (api/_lib/workflow/handoutReminder.ts; the rule is
+-- src/lib/handoutReminder.ts, because only workingDays.ts knows a public holiday) tells them once,
+-- on the first working morning after the batch came in, with a notification and a task each.
+--   handovers.handout_reminded_at -- when that was done, so it is done once.
+--   tasks.handover_id             -- which batch a reminder task is about, so the morning run can
+--                                    complete it once nobody is left in the pile. NO FOREIGN KEY on
+--                                    purpose: undoing a handover must not be refused over a task, and
+--                                    a batch that is gone has nobody in its pile, so its task closes.
+-- ============================================================================
+alter table public.handovers add column if not exists handout_reminded_at timestamptz;
+alter table public.tasks add column if not exists handover_id uuid;
+create index if not exists tasks_handover_open on public.tasks (handover_id) where handover_id is not null;

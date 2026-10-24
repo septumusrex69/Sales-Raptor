@@ -5,6 +5,7 @@ import { firmClock } from './clock.js'
 import { planUnplannedRuns, redateResumedRuns } from './plan.js'
 import { expireDefaultedPromises } from './promises.js'
 import { runOneStep, type DueStep } from './step.js'
+import { remindUnallocatedBatches } from './handoutReminder.js'
 
 /**
  * THE MORNING RUN: every workflow step that has come due, sent or held.
@@ -136,7 +137,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(500).json({ error: result.error })
     return
   }
-  res.status(200).json({ ok: true, ...result })
+  /* THE TIMER'S MORNING ONLY: batches nobody handed out, said to the liaison and the Liaison
+     Managers (S11, handoutReminder.ts). After the sweep, and never able to fail it. */
+  const handout = accountIds.length === 0
+    ? await remindUnallocatedBatches(admin, clock.today, clock.now)
+      .catch((e: unknown) => ({ closed: 0, reminded: 0, problems: [e instanceof Error ? e.message : String(e)] }))
+    : null
+  if (handout?.problems.length) console.log(`[workflow/run] hand-out reminders: ${handout.problems.join('; ')}`)
+  res.status(200).json({ ok: true, ...result, handout })
 }
 
 export interface SweepOptions {
