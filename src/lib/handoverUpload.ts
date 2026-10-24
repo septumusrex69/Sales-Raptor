@@ -57,6 +57,31 @@ export function mayLoadAccountsFor(
   return !!liaison && (liaison.departmentId ?? null) === mine
 }
 
+/**
+ * WHO MAY PUT ONE OF THIS CLIENT'S ACCOUNTS ON SOMEBODY'S DESK (S11).
+ *
+ * THE FIRM: "the person that loads a specific batch of accounts should hand them out" -- and of
+ * the floor, "the team leaders can do that as well, or the call center manager, but they can't
+ * load accounts ... clerks, like, they can't reassign anyone". So two roads, either is enough:
+ *
+ *   1. THE BOOK-WIDE TICK `book.hand_out` -- team leaders, the Call Centre Manager, the Liaison
+ *      Manager, the Administrator, and anybody whose department carries `reassign_accounts`.
+ *   2. MAY LOAD THIS CLIENT'S ACCOUNTS (mayLoadAccountsFor). A liaison hands out her department's
+ *      clients' batches, which is what ends the batch loaded by somebody who could not hand it out
+ *      -- the commonest way, by far, that a batch sat on nobody's desk. It does NOT give her the
+ *      rest of the book: road 1 is not widened to the Liaison role on purpose.
+ *
+ * THE DATABASE ASKS THE SAME (may_hand_out, and the trigger debtor_accounts_desk_guard on every
+ * change of assigned_to made as a signed-in person), so a console cannot walk round a hidden button.
+ */
+export function mayHandOutFor(
+  user: Loader | null | undefined,
+  client: ClientLike | null | undefined,
+  people: readonly Person[],
+): boolean {
+  return can(user, 'book.hand_out') || mayLoadAccountsFor(user, client, people)
+}
+
 /** The clients this person may load for, out of the ones offered. What the import's picker lists. */
 export function loadableClients<C extends ClientLike>(
   user: Loader | null | undefined,

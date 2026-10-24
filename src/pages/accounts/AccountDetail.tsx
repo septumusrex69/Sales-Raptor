@@ -27,7 +27,7 @@ import {
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { accountEnded, isWrittenOff } from '../../lib/accountStatus'
 import {
-  canFreezeAccounts, canHandOutAccounts, canViewClients, canViewFinance, isAssignableOwner,
+  canFreezeAccounts, canViewClients, canViewFinance, isAssignableOwner,
 } from '../../lib/permissions'
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
@@ -149,6 +149,7 @@ import { instalmentsDue } from '../../lib/arrangements'
 import { AccountWhatsApp } from './AccountWhatsApp'
 import { whatsAppOpening } from '../../lib/whatsapp'
 import { recordWhatsApp } from '../../lib/accountWhatsApp'
+import { mayHandOutFor } from '../../lib/handoverUpload'
 
 type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -1110,8 +1111,9 @@ function AccountPage() {
   const assignedName = account.assignedTo
     ? (users.find((u) => u.id === account.assignedTo)?.name ?? 'Someone no longer here')
     : null
-  /* The same authority as handing out from the accounts list, and now literally the same test. */
-  const mayHandOut = canHandOutAccounts(currentUser)
+  /* The same authority as handing out from the accounts list, and now literally the same test --
+     the book-wide tick, or (S11) may load this account's client, which is a liaison's own batch. */
+  const mayHandOut = mayHandOutFor(currentUser, client, users)
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)

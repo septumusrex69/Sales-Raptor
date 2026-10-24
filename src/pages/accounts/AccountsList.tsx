@@ -32,6 +32,7 @@ import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { canHandOutAccounts, canRunCampaigns } from '../../lib/permissions'
+import { mayHandOutFor } from '../../lib/handoverUpload'
 import { CampaignModal } from './CampaignModal'
 import { useColumnWidths } from '../../lib/columnWidths'
 import { ResizableTh } from '../../components/ui/ResizableTh'
@@ -136,6 +137,27 @@ export function AccountsList() {
   const visibleColumns = ['account', 'debtor', ...(companyId ? [] : ['client']), 'handed', 'capital',
     'fees', 'interest', 'paid', 'balance', 'rate', 'position', 'desk', 'worked']
   const canSeeOthers = canHandOutAccounts(currentUser)
+  /*
+   * AND A LIAISON MAY HAND OUT A BATCH SHE MAY LOAD (S11). THE FIRM: "the person that loads a
+   * specific batch of accounts should hand them out." The import ends here, on ?handover=, and she
+   * used to land on a list with no Hand out on it -- the batch then sat on nobody's desk. So where
+   * the list is one client's (?client=) or one batch's (?handover=, whose client is read off the
+   * batch), mayHandOutFor decides; elsewhere it is the book-wide tick, as it was. canSeeOthers is
+   * NOT widened: her views and the desk filter stay her own. The database asks the same
+   * (debtor_accounts_desk_guard), so a selection that strays outside the client is refused there.
+   */
+  const handoverParam = params.get('handover')
+  const [batchClientId, setBatchClientId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!handoverParam) { setBatchClientId(null); return }
+    let cancelled = false
+    void supabase.from('handovers').select('company_id').eq('id', handoverParam).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setBatchClientId((data?.company_id as string | null) ?? null) })
+    return () => { cancelled = true }
+  }, [handoverParam])
+  const scopeClientId = companyId ?? batchClientId
+  const canAllocate = canSeeOthers
+    || (!!scopeClientId && mayHandOutFor(currentUser, companies.find((c) => c.id === scopeClientId), users))
   const mayCampaign = canRunCampaigns(currentUser)
 
   /*
@@ -242,12 +264,12 @@ export function AccountsList() {
    * batch, which is what the filter is for.
    */
   useEffect(() => {
-    if (handOutOpened || !canSeeOthers) return
+    if (handOutOpened || !canAllocate) return
     if (new URLSearchParams(key).get('handout') !== '1') return
     setHandOutOpened(true)
     setAllMatching(true)
     setAllocating({ kind: 'matching', query })
-  }, [key, query, handOutOpened, canSeeOthers])
+  }, [key, query, handOutOpened, canAllocate])
 
   /*
    * The first page, whenever the question changes. Pages after it are appended by loadMore, so
@@ -416,7 +438,6 @@ export function AccountsList() {
   const pageIds = accounts.map((a) => a.id)
   const allOnPageTicked = allMatching || (pageIds.length > 0 && pageIds.every((id) => ticked.has(id)))
   const selectedCount = allMatching ? total : ticked.size
-  const canAllocate = canSeeOthers
   /* THE TICK BOXES are drawn for anybody with a bulk action: the hand-out, or a campaign (S10). */
   const canSelect = canAllocate || mayCampaign
 
