@@ -24,7 +24,7 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 ## S11 · LOADERS AND HANDERS -- WHERE IT STANDS (24 Oct) -- READ THIS FIRST
 
 Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Handers), fast-forwarded onto
-`claude/sales-raptor-review-p1pzx2`. Stephan answered S10's list A.1-A.10 (his words are in the commits).
+`claude/sales-raptor-review-p1pzx2` on 25 Oct with the firm's say-so. Stephan answered S10's list A.1-A.10 (his words are in the commits).
 
 ### Shipped (all on staging; migrations at the end of schema.sql)
 1. **A.1 No client reference** on a sheet row is a NOTE, and approveDraft writes the account's own reference
@@ -74,7 +74,9 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
     (`ClientDormancy`). Swordfish's register "Dormant" imports dormant and needs no liaison. **A new account wakes
     a dormant client in the database** (trigger `client_wakes_on_account`, definer; asks for a liaison where the
     owner is not one). Migration `client_dormant`. check-client-dormant (26), e2e/client-dormant (12).
-    NOT built (proposed, not asked): keeping dormant clients out of campaigns and reminders.
+    The Swordfish import ends on the same panel ("we can do it in the import"), after reloading the clients.
+    NOT built (proposed; the firm said "a good idea" but did not ask for it yet): keeping dormant clients out of
+    campaigns and reminders.
 13. **Full suite 24 Oct**: 402 of 405; the 3 reds (e2e account-templates, client-handovers, excess-credit) fail
     identically on S10's last commit `ef4ae21` -- pre-existing, not S11's. Not yet investigated.
 

@@ -21,6 +21,7 @@ import {
 import { formatCurrency } from '../../data/mockData'
 import { HandoverImportCard } from './HandoverImportCard'
 import { LeadsImportCard } from './LeadsImportCard'
+import { NeedsLiaisonPanel } from '../companies/NeedsLiaisonPanel'
 import { clockNow, clockToday } from '../../lib/clock.ts'
 
 /**
@@ -130,7 +131,7 @@ type Phase = { step: string; done: number; total: number } | null
 
 export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }) {
   const { currentUser } = useAuth()
-  const { users } = useAppStore()
+  const { users, refreshSyncedData } = useAppStore()
   const [files, setFiles] = useState<Files>({})
   const [ownerId, setOwnerId] = useState(currentUser?.id ?? '')
   const [only, setOnly] = useState('')
@@ -361,6 +362,8 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
          completed_at reads as "never finished", which is the cautious reading, not a wrong one. */
       const { error: finishError } = await supabase.from('swordfish_import_runs')
         .update({ completed_at: clockNow().toISOString() }).eq('id', batch)
+      /* The clients just written, so the panel below can offer the ones needing a liaison (S11). */
+      void refreshSyncedData()
       const r = plan.receipts
       setDone(`Imported ${totalRows.toLocaleString('en-ZA')} rows. `
         + `${receiptSplitLine(r)} `
@@ -372,7 +375,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
     } finally {
       setPhase(null); setStoppable(false); setStopping(false)
     }
-  }, [plan, wipe])
+  }, [plan, wipe, refreshSyncedData])
 
   /*
    * TWO TABS, NOT TWO HEADINGS, at the firm's correction -- drawn on the screenshot as a pair of
@@ -645,6 +648,13 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           </div>
         </Card>
       )}
+      {/*
+        AND THE CLIENTS IT LEFT WITHOUT A LIAISON, RIGHT HERE (S11). The firm: "we can do it in the
+        import ... if there's someone that hasn't been assigned, we should be able to mark it as
+        dormant as well." The same panel the Clients list draws: assign them in bulk, or mark them
+        dormant. It draws nothing when nobody is waiting.
+      */}
+      {done && <NeedsLiaisonPanel />}
 
       {!plan && <EarlierImports refreshKey={done} />}
 
