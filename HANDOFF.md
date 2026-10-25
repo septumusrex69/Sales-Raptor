@@ -88,6 +88,14 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
 - A.8 keep choosing the liaison on conversion (as built).
 - A.11 leave (B.1) still the next big build; A.12 call transfer parked; BuzzBox is Stephan's.
 - C: Supabase "Email OTP Expiration" 86400 -- instructions given; not confirmed done.
+- Resend: bfnews.co.za needs DNS CNAME `links` -> `links2.resend-dns.com` (Stephan) before tracking starts.
+
+### The next session starts here
+1. **Dormant clients out of campaigns and reminders** -- the firm: "a good idea"; said next, not yet built.
+2. **Leave round two** (B.1) -- waiting on Stephan: is the carry-over right (6 days max into the new year, leave
+   year from 1 Jan), and SimplePay's bulk-input template.
+3. The three browser reds that predate S11 (account-templates, client-handovers, excess-credit).
+
 ## S11 · LEAN MAIL (24 Oct) -- THE PICTURES WERE IN THE DATABASE
 
 Stephan: Raptor Mail "is taking up a lot of space on Supabase", and asked for it to work "more like Outlook".
