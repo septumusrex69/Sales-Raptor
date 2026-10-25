@@ -50944,3 +50944,27 @@ grant execute on function public.touch_mail_pictures(text[]) to authenticated;
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('mail-pictures', 'mail-pictures', false, 2097152)
 on conflict (id) do nothing;
+
+-- ============================================================================
+-- RECORD ONLY, NOT RE-RUNNABLE HERE: migration `leave_round_two`, applied to STAGING on 23 Oct
+-- (version 20261023084321) by S10's leave agent, which was stopped before it committed any code.
+-- Found by S11 on 25 Oct comparing staging's migrations with this file. It is LIVE on staging and
+-- nothing in src/ or api/ uses it yet. Its full text (20 410 characters, md5
+-- 9b2684d5c3224a335dce0120f1ec1eec) is in supabase_migrations.schema_migrations where
+-- name = 'leave_round_two'; the next leave session should copy it here verbatim (and verify the
+-- md5) rather than retype it. What it created or replaced:
+--   tables    leave_settings (one row: carry_cap 6, year_start 1 Jan, carried_expiry_months,
+--             also_approvers uuid[]), leave_person_settings (per-person carry_cap),
+--             leave_setting_changes (audit), leave_applications (pending/approved/declined/withdrawn)
+--   columns   leave_records.application_id; leave_records' entry/shape/half-day checks re-made to
+--             allow entry = 'adjustment' (a reason of 3+ characters) beside 'taken' and 'opening'
+--   functions leave_visible, leave_settings_stamp, leave_approvers, leave_may_approve,
+--             leave_application_stamp, leave_application_notify, leave_application_decide,
+--             leave_application_withdraw, and REPLACED leave_record_stamp and clear_staging
+--   triggers  leave_settings_stamp, leave_person_settings_stamp, leave_application_stamp,
+--             leave_application_notify; RLS policies on all four tables
+-- NOTE: its approvers are by ROLE and team_id (team leader / Liaison Manager / Sales Manager of the
+-- same team, the Call Centre Manager for the call centre, plus also_approvers) -- NOT the
+-- teams.lead_id / department_head_of() Stephan asked for on 23 Oct. And the clear_staging live on
+-- staging is THIS one, not the last definition above it in this file.
+-- ============================================================================

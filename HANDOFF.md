@@ -93,7 +93,12 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
 ### The next session starts here
 1. **Dormant clients out of campaigns and reminders** -- the firm: "a good idea"; said next, not yet built.
 2. **Leave round two** (B.1) -- waiting on Stephan: is the carry-over right (6 days max into the new year, leave
-   year from 1 Jan), and SimplePay's bulk-input template.
+   year from 1 Jan), and SimplePay's bulk-input template. **READ FIRST: its DATABASE half is already live on
+   staging** -- migration `leave_round_two` (23 Oct, S10's stopped agent; found by S11 comparing staging with
+   schema.sql): leave_settings, leave_person_settings, leave_setting_changes, leave_applications, the approve /
+   decline / withdraw functions, and it REPLACED `leave_record_stamp` and `clear_staging`. No app code uses it. Its
+   approvers are by role + team_id, not the team lead / department head / Camille Stephan asked for. schema.sql's
+   last block records it and says where the full text is (md5 9b2684d5...); copy it in verbatim before building.
 3. The three browser reds that predate S11 (account-templates, client-handovers, excess-credit).
 
 ## S11 · LEAN MAIL (24 Oct) -- THE PICTURES WERE IN THE DATABASE
@@ -211,8 +216,8 @@ short direct answers.
 Migrations applied to staging only and needed on production, in order, are listed in §5. S10 added (latest last):
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
-`client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `client_dormant`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
+`client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow
