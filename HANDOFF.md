@@ -45,10 +45,10 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
    purpose). Timer only; production cron only (Vercel crons do not run on previews). Migration `handout_reminder`.
 6. **Handover problems** also notify every Liaison Manager (`handover.problems`); the liaison keeps query + email.
 7. **Supabase over its limit (709 MB of 500)**: 648 MB was `user_emails.body_html`, signature logos stored as
-   base64 because mailparser's default rewrites `cid:` into `data:` (keepCidLinks). Fixed in the sync + fallback
-   read (`keepCidLinks: true`) and `bodyToStore` strips any `data:image` src to `cid:raptor-picture-not-kept`.
-   **Staging's stored mail was cleaned by S11 · Lean Mail the same day: 709 MB -> 47 MB** (its section is next;
-   both sessions wrote `withoutEmbeddedPictures` -- the merge kept Lean Mail's, whose class has no whitespace), verified (0 embedded
+   base64 because mailparser's default rewrites `cid:` into `data:`. **S11 · Lean Mail's design is the one in the
+   code** (its section is next): pictures fingerprinted and saved once in the `mail-pictures` store, expired after
+   30 days. This session briefly added `keepCidLinks: true` to the parser; it was REMOVED at the merge, because the
+   store needs the pictures inside the html at sync to save them. Staging cleaned the same day: 709 MB -> 47 MB, verified (0 embedded
    pictures left, 1 710 marked, no body emptied). **Production will need the same clean-up at go-live** (its
    database did not answer a read on 24 Oct -- possibly paused).
 8. **Vercel** (team is on **Pro**, not Hobby: $15.59 of $20 credit used by 24 Oct, ~90% build minutes):
@@ -103,6 +103,18 @@ are stripped BEFORE the size limit is measured. `check-mail-body-cache` holds it
 Staging cleaned with the same regex in batches, then `vacuum full user_emails`: **710 MB -> 47 MB**, every cached
 body still cached. **Production is paused and was not touched**; it needs the same SQL + vacuum when it is resumed
 (after this code is live there, or the next sync refills it).
+
+**Then the picture store, same day.** Stephan: "save one image somewhere and then always go and check it and take
+it back, like Microsoft, and then delete it after 30 days." So `extractPictures` names each picture by the SHA-256 of
+its base64 (`cid:raptor-pic-<hash>`), `api/_lib/mailPictures.ts` saves it ONCE in the private `mail-pictures` bucket
+(+ a `mail_pictures` row, `last_used_on`), at sync time and in the read route's write-back (which first draws the
+mailbox's own cid: pictures back in -- `inlinePictures`). The page reads pictures from the store
+(`fetchStoredPictures`, kept in memory for the sitting) and goes to the mailbox only for what the store lacks.
+`expireMailPictures` runs in the sync-all cron: unused 30 real days -> file then row deleted; a later open re-saves
+from the mailbox. Rows cleaned in the morning still carry `cid:raptor-picture-not-kept`; they heal on first open.
+`touch_mail_pictures` is on check-staging-clock's real-clock list (housekeeping, not a business date).
+**The Supabase MCP cancels any SQL containing DROP** -- policies are created inside `do $$ if not exists`.
+To watch it work: `select count(*), pg_size_pretty(sum(bytes)) from mail_pictures;`
 
 Already Outlook-shaped and deliberately kept: the mailbox is the master, Raptor caches bodies (the firm asked for
 the speed), attachments are never stored.
@@ -2555,8 +2567,9 @@ public.deployment` inside a probe was cancelled once. Keep probes to what they n
 - **(S11) The Supabase MCP stalls on the word for removing things.** `apply_migration` and `execute_sql` both
   stop for a confirmation the user never sees (it times out) when the SQL contains "drop" -- even `drop trigger
   if exists`. Write `create or replace trigger`, a do-block that assembles the word (S10), or no foreign key.
-- **(S11) mailparser rewrites cid: pictures into data: URIs by default.** Any `simpleParser` whose html is
-  stored or shown must pass `{ keepCidLinks: true }`; check-mail-body-cache holds it against mailparser itself.
+- **(S11) mailparser rewrites cid: pictures into data: URIs by default.** That is what filled staging, and the
+  picture store now RELIES on it (it saves each `data:` picture once at sync). So do not add `keepCidLinks: true`
+  to fix "pictures in the cache" -- `bodyToStore` / `extractPictures` is the one door; see Lean Mail's section.
 - **(S11) Vercel is Pro, not Hobby.** The 12-function cap in CLAUDE.md was the Hobby limit; check before
   contorting a route around it. Session branches no longer build previews (vercel.json).
 

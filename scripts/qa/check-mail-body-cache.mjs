@@ -21,8 +21,9 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  bodyToStore, hasCachedBody, needsPictures, tooBigFor, withoutEmbeddedPictures,
-  CALENDAR_LIMIT, DROPPED_PICTURE, HTML_LIMIT, TEXT_LIMIT,
+  bodyToStore, extractPictures, hasCachedBody, inlinePictures, needsPictures, sha256Hex,
+  storedPictureHashes, tooBigFor, withoutEmbeddedPictures,
+  CALENDAR_LIMIT, HTML_LIMIT, PICTURE_PREFIX, TEXT_LIMIT,
 } from '../../src/lib/mailBodyCache.ts'
 
 let pass = 0
@@ -118,27 +119,52 @@ ok('...and neither is nothing at all', !needsPictures(null) && !needsPictures(''
 /*
  * AND THE PICTURES THE PARSER HAD ALREADY PUT INTO THE MARKUP (24 Oct, S11). mailparser rewrites
  * every cid: into a data: URI by default, so the logos were stored inside body_html after all --
- * 645 MB of a 710 MB staging database, until the disk filled. They come out at bodyToStore.
+ * 645 MB of a 710 MB staging database, until the disk filled. They come out at bodyToStore, and
+ * (the firm: "save one image somewhere ... like Microsoft") each is saved ONCE, by fingerprint.
  */
-const LOGO = 'data:image/png;base64,' + 'iVBORw0KGgo'.repeat(4000)
+const LOGO_B64 = 'iVBORw0KGgo'.repeat(4000)
+const LOGO = 'data:image/png;base64,' + LOGO_B64
+const LOGO_REF = PICTURE_PREFIX + sha256Hex(LOGO_B64)
 const signed = `<p>Regards</p><img src="${LOGO}" alt="BF">`
 const kept = bodyToStore(body({ html: signed }), AT).body_html
 ok('a picture the parser drew into the markup is not stored', !!kept && !kept.includes('base64'))
 ok('...the words around it are', !!kept && kept.includes('<p>Regards</p>'))
 ok('...and the attribute after it survives', !!kept && kept.includes('alt="BF"'))
-check('...replaced by a reference, not removed', kept, `<p>Regards</p><img src="${DROPPED_PICTURE}" alt="BF">`)
-/* WHICH IS WHAT SENDS THE READER TO THE MAILBOX FOR IT, with the words already on screen. */
-ok('...so the page knows to fetch the pictures', needsPictures(kept))
+check('...replaced by its fingerprint', kept, `<p>Regards</p><img src="${LOGO_REF}" alt="BF">`)
+check('...which the page reads back to fetch it from the store', storedPictureHashes(kept), [sha256Hex(LOGO_B64)])
+
+/* ONE FILE PER PICTURE, HOWEVER MANY TIMES IT APPEARS -- the whole point of the store. */
+const twice = extractPictures(`<img src="${LOGO}"><p>x</p><img src="${LOGO}">`)
+check('the same logo twice in one message is one picture to save', twice.pictures.length, 1)
+check('...saved with its type and its bytes', [twice.pictures[0].contentType, twice.pictures[0].base64 === LOGO_B64], ['image/png', true])
+/* AND THE SAME LOGO ON TWO MESSAGES IS THE SAME NAME, which is what makes the second one free. */
+check('the same logo on another message has the same fingerprint',
+  extractPictures(`<div><img src="${LOGO}"></div>`).pictures[0].hash, twice.pictures[0].hash)
+/* A REAL HASH: a collision would show one sender another firm's logo. */
+check('the fingerprint is SHA-256', sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+
 /* UNQUOTED: base64 letters and `=` look like the next attribute, and must not swallow it. */
 check('an unquoted picture does not take the next attribute with it',
-  withoutEmbeddedPictures('<img src=data:image/gif;base64,R0lGOD== alt=x>'), `<img src=${DROPPED_PICTURE} alt=x>`)
+  withoutEmbeddedPictures('<img src=data:image/gif;base64,R0lGOD== alt=x>'), `<img src=${PICTURE_PREFIX}${sha256Hex('R0lGOD==')} alt=x>`)
 check('a background picture in a style goes too',
   withoutEmbeddedPictures("<td style=\"background:url('data:image/jpeg;base64,/9j/4AAQ')\">"),
-  `<td style="background:url('${DROPPED_PICTURE}')">`)
+  `<td style="background:url('${PICTURE_PREFIX}${sha256Hex('/9j/4AAQ')}')">`)
 check('markup with no pictures is untouched', withoutEmbeddedPictures('<p>Please settle.</p>'), '<p>Please settle.</p>')
 /* MEASURED AFTER, so a big logo no longer pushes an ordinary message out of the cache. */
 ok('a message over the limit only because of its pictures is now kept',
   bodyToStore(body({ html: '<p>hi</p><img src="data:image/png;base64,' + 'A'.repeat(HTML_LIMIT) + '">' }), AT).body_html !== null)
+
+/*
+ * THE MAILBOX'S OWN cid:s ARE PUT BACK BEFORE THE WRITE-BACK. The fast read returns markup with
+ * `cid:image001...` and the pictures beside it; stored like that, every later open would go back
+ * to the mail server for a logo the store could answer.
+ */
+const fromMailbox = inlinePictures('<img src="cid:image001.png@01D9">',
+  [{ cid: '<image001.png@01D9>', dataUri: LOGO }])
+check('a mailbox picture is drawn back into its markup', fromMailbox, `<img src="${LOGO}">`)
+check('...so the write-back stores it by fingerprint like any other', withoutEmbeddedPictures(fromMailbox), `<img src="${LOGO_REF}">`)
+check('...and a cid with no picture is left as it was',
+  inlinePictures('<img src="cid:missing">', [{ cid: 'other', dataUri: LOGO }]), '<img src="cid:missing">')
 
 /* WHY A MESSAGE IS STILL SLOW, for the sync's log: a message that is slower than its neighbours
    for no visible reason is a bug report nobody can answer. */
@@ -174,8 +200,12 @@ const route = read('api/_lib/email/attachment.ts')
 ok('the read route writes what it fetched back onto the row',
   /from\('user_emails'\)\s*\n?\s*\.update\(bodyToStore\(/.test(route))
 /* NEVER FATAL. The caller came to read their mail; a cache that cannot be written is a slower
-   read next time and nothing worse. */
-ok('...without the response waiting on it', /void admin\.from\('user_emails'\)/.test(route))
+   read next time and nothing worse. (S11: the pictures are saved first, then the row.) */
+ok('...without the response waiting on it', /void savePictures\(admin, extractPictures\(fullHtml\)\.pictures\)/.test(route))
+ok('...with the mailbox pictures drawn back in first', /const fullHtml = inlinePictures\(body\.html, body\.images/.test(route))
+ok('the sync saves the pictures before it writes the row',
+  sync.indexOf('await savePictures(admin, extractPictures(') >= 0
+  && sync.indexOf('await savePictures(admin, extractPictures(') < sync.indexOf(".from('user_emails')\n    .upsert("))
 /* PRESENCE BEFORE ORDER -- indexOf returns -1, so an order-only assertion passes vacuously the
    day the thing it orders is deleted. */
 const writeAt = route.indexOf('.update(bodyToStore(')
@@ -253,34 +283,24 @@ ok('...and never the same message twice in one sitting', /!warmed\.current\.has\
 ok('...and says nothing when it cannot', /SILENT, AND DELIBERATELY SO/.test(page))
 
 /*
- * PICTURES ARE NOT KEPT, AND THAT IS NOW TRUE (S11). Staging's user_emails reached 682 MB on 3 949
- * messages -- 648 MB of it body_html, 97% of the sampled characters base64 pictures, most of them
- * the firm's own signature logo. Two causes and both are held: mailparser's default rewrote every
- * cid: picture into a data: URI (keepCidLinks), and nothing stripped a data: picture on the way in.
+ * THE PICTURE STORE, FROM THE BROWSER (S11). A cached message's logos come out of the store, and
+ * only what the store does not answer sends the page to the mailbox.
  */
-const logo = 'data:image/png;base64,' + 'iVBORw0KGgo'.repeat(50000)
-const fat = `<p>Dear Sir</p><img src="${logo}" alt="logo"><p>Regards</p>`
-const thin = withoutEmbeddedPictures(fat)
-ok('an embedded picture is not kept', !thin.includes('base64') && thin.length < 200)
-ok('...the words are', thin.includes('Dear Sir') && thin.includes('Regards'))
-ok('...and the mark left is a cid:, so the pictures are fetched from the mailbox', needsPictures(thin) && thin.includes(DROPPED_PICTURE))
-check('bodyToStore keeps the thin markup', bodyToStore({ text: 'Dear Sir', html: fat, calendar: '' }, 'now').body_html, thin)
-ok('...including where the pictures alone put it over the limit',
-  bodyToStore({ text: 'x', html: `<p>x</p><img src="data:image/jpeg;base64,${'A'.repeat(HTML_LIMIT)}">`, calendar: '' }, 'now').body_html !== null
-  && tooBigFor({ text: 'x', html: `<p>x</p><img src="data:image/jpeg;base64,${'A'.repeat(HTML_LIMIT)}">`, calendar: '' }) === null)
-check('every parse that yields stored or shown html keeps cid links',
-  (sync.match(/simpleParser\(msg\.source[^)]*\)/g) ?? []).concat(sync.match(/const parsed = await simpleParser\(whole\.source[^)]*\)\n\s*\/\*\n\s*\* The HTML/g) ?? [])
-    .map((c) => /keepCidLinks: true/.test(c)), [true, true])
-{
-  /* AND THE OPTION DOES WHAT IT SAYS, on mailparser itself rather than on our reading of it. */
-  const { simpleParser } = await import('mailparser')
-  const raw = ['From: a@b.co.za', 'To: c@d.co.za', 'Subject: x', 'MIME-Version: 1.0',
-    'Content-Type: multipart/related; boundary="B"', '', '--B', 'Content-Type: text/html', '',
-    '<p>Hi</p><img src="cid:logo1">', '--B', 'Content-Type: image/png', 'Content-ID: <logo1>',
-    'Content-Transfer-Encoding: base64', '', 'iVBORw0KGgo=', '--B--', ''].join('\r\n')
-  ok('mailparser by default writes the picture into the html (the cause)', /data:image/.test((await simpleParser(raw)).html || ''))
-  ok('...and with keepCidLinks it does not', /cid:logo1/.test((await simpleParser(raw, { keepCidLinks: true })).html || ''))
-}
+ok('the cached read fetches its pictures from the store',
+  /const images = hashes\.length > 0 \? await fetchStoredPictures\(hashes\)/.test(lib))
+ok('...out of the private mail-pictures bucket', /storage\.from\('mail-pictures'\)\.download\(/.test(lib))
+ok('...remembered for the sitting, so the firm’s own logo downloads once', /pictureMemory\.set\(hash, dataUri\)/.test(lib))
+ok('...and only pictures the store did not answer count as missing',
+  /pictures: needsPictures\(images\.reduce\(/.test(lib))
+ok('the page draws the stored pictures', /setBodyImages\(\(i\) => \(\{ \.\.\.i, \[mail\.id\]: cached\.images \}\)\)/.test(page))
+/* AND THE 30 DAYS: the firm's number, run by the cron that already runs every five minutes. */
+const store = read('api/_lib/mailPictures.ts')
+ok('a picture unused for 30 days is deleted', /PICTURE_EXPIRY_DAYS = 30\b/.test(store))
+ok('...by the sync cron', /expireMailPictures\(admin\)/.test(read('api/_lib/email/sync-all.ts')))
+ok('...the file before the row, so no file is ever orphaned',
+  store.indexOf('.remove(hashes.map(picturePath))') >= 0
+  && store.indexOf('.remove(hashes.map(picturePath))') < store.indexOf(".from('mail_pictures').delete()"))
+ok('the store table is in the schema', /create table if not exists public\.mail_pictures/.test(read('supabase/schema.sql')))
 
 /* THE COLUMNS EXIST. A select naming a column that is not there empties the whole request, which
    is what check-select-columns exists for -- this is the schema half of the same guard. */

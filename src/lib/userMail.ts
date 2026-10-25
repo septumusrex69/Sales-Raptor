@@ -27,7 +27,7 @@
 import { supabase } from './supabase'
 import type { InviteResponse } from './inviteReply.ts'
 import { senderName, type MailFilter } from './emailRules'
-import { hasCachedBody, needsPictures, type CachedBody } from './mailBodyCache.ts'
+import { hasCachedBody, needsPictures, storedPictureHashes, type CachedBody } from './mailBodyCache.ts'
 import { findLinkedDetails } from './signature.ts'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
@@ -608,10 +608,59 @@ export interface InlineImage {
  * Throws with the server's own wording on the uncached path. The caller keeps showing the snippet
  * either way: a message the mail server has since moved should not leave the row blank.
  */
+/**
+ * THE PICTURE STORE, read from the browser (S11 · Lean Mail).
+ *
+ * A cached message names each of its pictures by fingerprint (cid:raptor-pic-<sha256>); the
+ * picture itself is one file in the private mail-pictures bucket, saved once however many messages
+ * carry it. This fetches the ones a message needs and hands them back exactly as the mailbox read
+ * does -- an InlineImage per picture, bytes as a data: URI -- so the renderer cannot tell which
+ * way they came, and opening the message still asks nobody outside Raptor for anything.
+ *
+ * KEPT IN MEMORY FOR THE SITTING, which is the Outlook half of it: the firm's own logo is on most
+ * of the mail anybody reads, and it is downloaded once per visit rather than once per message.
+ *
+ * A picture the store does not have -- never saved, or deleted after 30 days unused -- is simply
+ * not in the answer; the caller sees it still missing and goes to the mailbox, whose write-back
+ * saves it again.
+ */
+const pictureMemory = new Map<string, string>()
+
+async function blobToDataUri(blob: Blob): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+export async function fetchStoredPictures(hashes: string[]): Promise<InlineImage[]> {
+  const out: InlineImage[] = []
+  await Promise.all(hashes.map(async (hash) => {
+    let dataUri = pictureMemory.get(hash)
+    if (!dataUri) {
+      const { data, error } = await supabase.storage.from('mail-pictures').download(`${hash.slice(0, 2)}/${hash}`)
+      if (error || !data || !data.type.startsWith('image/')) return
+      dataUri = await blobToDataUri(data).catch(() => undefined)
+      if (!dataUri?.startsWith('data:image/')) return
+      pictureMemory.set(hash, dataUri)
+    }
+    out.push({ cid: `raptor-pic-${hash}`, filename: '', dataUri })
+  }))
+  /* Opened, so in use: the 30 days start over. Once a day per picture, and never awaited. */
+  if (out.length > 0) {
+    void supabase.rpc('touch_mail_pictures', { p_hashes: out.map((i) => i.cid.slice('raptor-pic-'.length)) })
+  }
+  return out
+}
+
 export async function fetchCachedBody(mailId: string): Promise<{
   text: string; html: string; calendar: string; details: ContactCandidate[]
-  /** True where the message draws pictures the cache does not hold. */
+  /** True where the message draws pictures that neither the cache nor the picture store holds. */
   pictures: boolean
+  /** The pictures the picture store answered, ready for the renderer. */
+  images: InlineImage[]
 } | null> {
   const { data, error } = await supabase
     .from('user_emails')
@@ -622,6 +671,8 @@ export async function fetchCachedBody(mailId: string): Promise<{
   const row = data as CachedBody
   if (!hasCachedBody(row)) return null
   const html = row.body_html ?? ''
+  const hashes = storedPictureHashes(html)
+  const images = hashes.length > 0 ? await fetchStoredPictures(hashes).catch(() => [] as InlineImage[]) : []
   return {
     text: row.body_text ?? '',
     html,
@@ -633,7 +684,12 @@ export async function fetchCachedBody(mailId: string): Promise<{
      * would be fetching a message to look at a copy of itself.
      */
     details: html ? findLinkedDetails(html, undefined) : [],
-    pictures: needsPictures(html),
+    /*
+     * MISSING IS WHATEVER THE STORE DID NOT ANSWER: the references it resolved are taken out before
+     * asking, so a message whose only pictures are stored logos never goes near a mail server.
+     */
+    pictures: needsPictures(images.reduce((h, i) => h.split(`cid:${i.cid}`).join(''), html)),
+    images,
   }
 }
 

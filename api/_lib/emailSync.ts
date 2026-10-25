@@ -16,7 +16,8 @@ import {
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
 import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
-import { bodyToStore, tooBigFor } from '../../src/lib/mailBodyCache.js'
+import { bodyToStore, extractPictures, tooBigFor } from '../../src/lib/mailBodyCache.js'
+import { savePictures } from './mailPictures.js'
 import { actsOnItsOwn, bounceSeverity } from '../../src/lib/bounceSeverity.js'
 import { clientMailActivity } from '../../src/lib/clientMailActivity.js'
 import { notifyHeld } from './workflow/notify.js'
@@ -276,6 +277,13 @@ async function fileUserEmail(
     ccRecipients?: { name: string | null; address: string }[]
   },
 ): Promise<string | null> {
+  /*
+   * THE PICTURES GO TO THE STORE FIRST (S11), so the row never names a picture that is not there.
+   * bodyToStore below takes them out of the markup the same way and names each by fingerprint;
+   * saving is a no-op for the logo the store already holds, which is nearly every one.
+   */
+  await savePictures(admin, extractPictures(message.html ?? '').pictures)
+    .catch((e: unknown) => console.log(`[emailSync] pictures not saved: ${e instanceof Error ? e.message : String(e)}`))
   const { data, error } = await admin
     .from('user_emails')
     .upsert(
@@ -985,8 +993,7 @@ export async function fetchMessageBody(
      */
     const whole = await client.fetchOne(String(uid), { source: true }, { uid: true })
     if (!whole || !whole.source) return null
-    /* keepCidLinks: see the sync's own parse below -- the pictures travel in `images`, not in the html. */
-    const parsed = await simpleParser(whole.source, { keepCidLinks: true })
+    const parsed = await simpleParser(whole.source)
     /*
      * The HTML comes back as well as the text, because plainText() strips every tag — and the
      * tags are where an image signature keeps its contact details. A signature that renders as a
@@ -1296,17 +1303,7 @@ async function syncMailbox(
       }
       maxUid = Math.max(maxUid, msg.uid)
 
-      /*
-       * keepCidLinks, OR EVERY SIGNATURE LOGO IS STORED IN FULL (S11). mailparser's default
-       * rewrites each `cid:` picture in the html into a data: URI of the whole image, so the html
-       * this writes into user_emails.body_html carried every logo as base64 -- 570 000 characters on
-       * an average large message, 97% of it picture. mailBodyCache.ts was written on the opposite
-       * assumption ("the pictures drawn INTO a message are not stored either -- see needsPictures",
-       * which looks for cid:), and staging's database reached 709 MB of a 500 MB plan, 648 MB of it
-       * these bodies. Kept as cid:, the words are cached and the pictures come from the mailbox when
-       * somebody opens the message, which is what the cache was designed to do.
-       */
-      const parsed = await simpleParser(msg.source, { keepCidLinks: true })
+      const parsed = await simpleParser(msg.source)
       const fromAddress = parsed.from?.value?.[0]?.address
       if (!fromAddress) {
         console.log(`[emailSync] ${path} UID ${uid}: no parseable From address, skipped`)

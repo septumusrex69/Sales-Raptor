@@ -4,7 +4,8 @@ import { adminClient, requireCaller } from '../auth.js'
 import { fetchAttachment, fetchMessageBody } from '../emailSync.js'
 import { attachmentLeaf } from '../mime.js'
 import { findLinkedDetails } from '../../../src/lib/signature.js'
-import { bodyToStore } from '../../../src/lib/mailBodyCache.js'
+import { bodyToStore, extractPictures, inlinePictures } from '../../../src/lib/mailBodyCache.js'
+import { savePictures } from '../mailPictures.js'
 
 /*
  * THE NAME THE FILE IS SAVED UNDER: the file's own, never the path it was listed under (a file
@@ -248,12 +249,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * be written is a slower read next time and nothing worse, and failing the response over it
        * would turn a storage problem into an unreadable inbox.
        */
-      void admin.from('user_emails')
-        .update(bodyToStore(
-          { text: body.text, html: body.html, calendar: body.calendar },
-          new Date().toISOString(),
-        ))
-        .eq('id', mail.id)
+      /*
+       * WITH ITS PICTURES PUT BACK IN FIRST (S11). The fast read hands the markup back with its own
+       * cid: references and the pictures beside it; inlined, bodyToStore fingerprints them like any
+       * other and the picture store answers every later open. Stored with the raw cid:s, every open
+       * would come back here for a logo the store could have given.
+       */
+      const fullHtml = inlinePictures(body.html, body.images ?? [])
+      void savePictures(admin, extractPictures(fullHtml).pictures)
+        .catch(() => 0)
+        .then(() => admin.from('user_emails')
+          .update(bodyToStore(
+            { text: body.text, html: fullHtml, calendar: body.calendar },
+            new Date().toISOString(),
+          ))
+          .eq('id', mail.id))
         .then(({ error }) => {
           if (error) console.log(`[attachment] body not cached for ${mail.id}: ${error.message}`)
         })

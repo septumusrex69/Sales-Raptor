@@ -3,6 +3,7 @@ import { adminClient, requireCaller } from '../auth.js'
 import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../emailSync.js'
 import { inPool } from '../../../src/lib/pool.js'
 import { drainMarketing } from '../marketing.js'
+import { expireMailPictures } from '../mailPictures.js'
 import { sendCampaignChunk } from '../campaign/send.js'
 
 /*
@@ -182,6 +183,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const news = fromCron
     ? drainMarketing(admin, { budgetMs: 120_000 }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
     : Promise.resolve(null)
+  /*
+   * AND THE PICTURE STORE'S 30 DAYS (S11). A signature logo nobody has opened in a month is deleted;
+   * opened later, the mailbox still has it and it is saved again. The cron only, beside the mail,
+   * and it cannot fail the sync.
+   */
+  const pictures = fromCron
+    ? expireMailPictures(admin).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
+    : Promise.resolve(null)
   const results: { userId: string; email?: string; logged?: number; error?: string; skipped?: boolean }[] = []
   /*
    * WHICH MAILBOXES THE BUDGET DID NOT REACH, BY ADDRESS.
@@ -317,9 +326,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const failed = results.filter((r) => r.error).length
   const skipped = results.filter((r) => r.skipped).length
   const marketing = await news
+  const pictureExpiry = await pictures
   res.status(200).json({
     ok: true,
     marketing,
+    pictureExpiry,
     callsEnded,
     syncedMailboxes: results.length,
     mailboxes: all.length,
