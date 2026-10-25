@@ -66,12 +66,19 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
 11. **A.7 Second contact** for an individual on Add lead: one, optional, saved as a contact on the lead.
 12. **B.3 Mail read on the phone**: each ordinary sync asks the folder for \Seen UIDs of the last 14 days and marks
     those rows read (one way). Index `user_emails_unread_by_folder` (migration of that name).
+14. **Bulk, and dormant clients (25 Oct)** -- the firm: "assign them in bulk, or leave us dormant". Clients list
+    draws `NeedsLiaisonPanel` (tick; Assign to one liaison through `/api/email/assign-liaison` with `companyIds`
+    -- one notification for the lot, imported clients no welcome; or Mark dormant). **Dormant** is stored:
+    `companies.dormant_at / dormant_reason / dormant_by` (`src/lib/clientDormant.ts`); clients list has an
+    Active / Dormant shelf; the client page says it with Make active, or offers "Mark this client dormant"
+    (`ClientDormancy`). Swordfish's register "Dormant" imports dormant and needs no liaison. **A new account wakes
+    a dormant client in the database** (trigger `client_wakes_on_account`, definer; asks for a liaison where the
+    owner is not one). Migration `client_dormant`. check-client-dormant (26), e2e/client-dormant (12).
+    NOT built (proposed, not asked): keeping dormant clients out of campaigns and reminders.
 13. **Full suite 24 Oct**: 402 of 405; the 3 reds (e2e account-templates, client-handovers, excess-credit) fail
     identically on S10's last commit `ef4ae21` -- pre-existing, not S11's. Not yet investigated.
 
 ### Still open with Stephan
-- **Dormant clients** (raised 24 Oct, "we need to think about that"): Swordfish's register already says
-  "Active / Dormant" per client (`companies.register_status`, imported, shown nowhere). Proposal sent; not built.
 - **Shortfall paid into the business account**: kept open. Recommendation given: release held commission pro
   rata to the share of the shortfall paid, same fraction to every collector owed, oldest cycle first.
 - **Payovers confirmed as built**: cycle 11th-10th; collector commission on the 25th of the month it ends; the
@@ -183,7 +190,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `client_dormant`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

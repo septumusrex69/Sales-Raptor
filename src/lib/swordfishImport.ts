@@ -22,6 +22,7 @@
  *   3. **Nothing is dropped silently.** An action nobody can price still imports as history; a
  *      client not in the configuration still imports, under its own name, loudly.
  */
+import { dormantInRegister, SWORDFISH_DORMANT_REASON } from './clientDormant.ts'
 import { num, isoDate, text, type CsvRow } from './csv.ts'
 import { kindFromIdentity, normaliseRegistrationNumber } from './debtorIdentity.ts'
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
@@ -71,6 +72,9 @@ export interface CompanyRow {
   liaison: string | null
   /** No liaison on staff matched the register's name (S11): the client page asks somebody to assign one. */
   liaison_needed: boolean
+  /** Dormant in Swordfish's register (S11, clientDormant.ts): kept, and asks nobody for a liaison. */
+  dormant_at?: string | null
+  dormant_reason?: string | null
   marketing_agent: string | null
   classification: string | null
   mandate_signed_at: string | null
@@ -676,10 +680,24 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     const parent = c.parent_company_id ? byIdForLiaison.get(c.parent_company_id) : undefined
     return parent && depth < 5 ? ownerOf(parent, depth + 1) : null
   }
+  /*
+   * AND A CLIENT THE REGISTER CALLS DORMANT ARRIVES DORMANT (S11): the firm's own word for a client
+   * not using us any more, so nobody is asked to find it a liaison. A new account from it wakes it
+   * (client_wakes_on_account), and then it asks.
+   */
+  const importedAt = now.toISOString()
   for (const c of companies) {
     const liaisonId = ownerOf(c)
+    const dormant = dormantInRegister(c.register_status)
     c.account_owner_id = liaisonId ?? ownerId
-    c.liaison_needed = !liaisonId
+    c.liaison_needed = !liaisonId && !dormant
+    c.dormant_at = dormant ? importedAt : null
+    c.dormant_reason = dormant ? SWORDFISH_DORMANT_REASON : null
+  }
+  const dormantCount = companies.filter((c) => c.dormant_at).length
+  if (dormantCount) {
+    notes.push(`${dormantCount} ${dormantCount === 1 ? 'client is' : 'clients are'} dormant in the register and `
+      + 'come in dormant: listed under Dormant, and not asked for a liaison.')
   }
   const needing = companies.filter((c) => c.liaison_needed)
   if (needing.length) {

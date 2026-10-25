@@ -50855,3 +50855,47 @@ create index if not exists tasks_handover_open on public.tasks (handover_id) whe
 -- ============================================================================
 create index if not exists user_emails_unread_by_folder
   on public.user_emails (user_id, folder, uid) where read_at is null;
+
+-- ============================================================================
+-- S11 (25 Oct): A DORMANT CLIENT. Migration `client_dormant`, staging first.
+--
+-- THE FIRM: "There are also clients that are dormant ... not using our services or not interested
+-- in using our services anymore" -- and, of the Swordfish clients with no liaison, "assign them in
+-- bulk, or leave us dormant". Swordfish's register already says Active / Dormant on every client
+-- (register_status); this is the same fact kept by Raptor, with when, why and who. The TS side is
+-- src/lib/clientDormant.ts.
+--
+-- A NEW ACCOUNT WAKES IT, in the database: a client who sends us accounts is plainly not dormant,
+-- and the batch import and Add debtor both open accounts, so the rule sits on debtor_accounts
+-- rather than in either screen. SECURITY DEFINER because the person loading the accounts (a liaison)
+-- may not be allowed to update the client row; it changes only the dormancy columns and
+-- liaison_needed, and only on a client that was dormant. A woken client whose owner is not a
+-- liaison needs one again, and the "Needs a liaison" list says so.
+-- ============================================================================
+alter table public.companies add column if not exists dormant_at timestamptz;
+alter table public.companies add column if not exists dormant_reason text;
+alter table public.companies add column if not exists dormant_by uuid references public.profiles (id);
+
+create or replace function public.client_wakes_on_account()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  update public.companies c
+     set dormant_at = null, dormant_reason = null, dormant_by = null,
+         liaison_needed = not exists (select 1 from public.profiles p
+                                       where p.id = c.account_owner_id
+                                         and p.role in ('Liaison', 'Liaison Manager')
+                                         and p.status = 'Active')
+   where c.id = new.company_id and c.dormant_at is not null;
+  return new;
+end
+$$;
+
+revoke all on function public.client_wakes_on_account() from public, anon, authenticated;
+
+create or replace trigger client_wakes_on_account
+  after insert on public.debtor_accounts
+  for each row execute function public.client_wakes_on_account();

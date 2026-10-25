@@ -190,7 +190,7 @@ ok('a sub-entity with no name follows its parent',
 /* AND ASSIGNING ONE SENDS NO WELCOME: the route, the card and the attention line all know. */
 const assign = strip(read('api/_lib/email/assignLiaison.ts'))
 ok('assigning an imported client makes no welcome tasks', /const imported = !!company\.import_batch_id/.test(assign)
-  && /imported \? \{ error: null \} : await admin\.from\('tasks'\)\.insert/.test(assign))
+  && /if \(!imported\) \{[\s\S]*?from\('tasks'\)\.insert/.test(assign))
 const card = strip(read('src/components/companies/WelcomeCard.tsx'))
 ok('the Welcome card never offers a welcome to an imported client', /const imported = fromSwordfish\(company\)/.test(card)
   && /if \(!company\.liaisonNeeded && \(imported \|\|/.test(card))

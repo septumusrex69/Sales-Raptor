@@ -14,12 +14,16 @@ import { useAuth } from '../../store/AuthContext'
 import type { ID } from '../../types'
 import { canBeClientLiaison } from '../../lib/permissions'
 import { MANDATE_KIND, uploadClientDocument } from '../../lib/clientDocuments'
+import { NeedsLiaisonPanel } from '../../components/companies/NeedsLiaisonPanel'
+import { isDormant } from '../../lib/clientDormant'
 
 export function CompaniesList() {
   const { companies, deals, users, addCompany } = useAppStore()
   const { currentUser } = useAuth()
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
+  /* ACTIVE OR DORMANT (S11, clientDormant.ts). Dormant clients are kept, listed apart, never mixed in. */
+  const [shelf, setShelf] = useState<'active' | 'dormant'>('active')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   // Sub-accounts start collapsed — only expand the ones someone actually opens.
@@ -44,11 +48,13 @@ export function CompaniesList() {
     [companies, deals],
   )
 
+  const dormantCount = clients.filter((c) => isDormant(c)).length
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    if (!q) return clients
-    return clients.filter((c) => c.name.toLowerCase().includes(q) || childrenOf(c.id).some((ch) => ch.name.toLowerCase().includes(q)))
-  }, [clients, search, companies])
+    const onShelf = clients.filter((c) => isDormant(c) === (shelf === 'dormant'))
+    if (!q) return onShelf
+    return onShelf.filter((c) => c.name.toLowerCase().includes(q) || childrenOf(c.id).some((ch) => ch.name.toLowerCase().includes(q)))
+  }, [clients, search, companies, shelf])
 
   const activeDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage !== 'Won' && d.stage !== 'Rejected')
 
@@ -69,6 +75,16 @@ export function CompaniesList() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
         <span className="text-xs text-slate-400">{filtered.length} clients</span>
+        {(dormantCount > 0 || shelf === 'dormant') && (
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs" role="radiogroup" aria-label="Active or dormant" data-testid="client-shelf">
+            {(['active', 'dormant'] as const).map((v) => (
+              <button key={v} type="button" role="radio" aria-checked={shelf === v} onClick={() => setShelf(v)}
+                className={`rounded-md px-2.5 py-1 ${shelf === v ? 'bg-navy-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+                {v === 'active' ? 'Active' : `Dormant (${dormantCount})`}
+              </button>
+            ))}
+          </div>
+        )}
         {/*
           LOADING A CLIENT DIRECTLY, at the firm's instruction -- "this isn't the traditional way
           of converting a lead to a client, this is just loading a client directly." The lead path
@@ -81,6 +97,8 @@ export function CompaniesList() {
           <Plus size={15} /> Add client
         </button>
       </div>
+
+      <NeedsLiaisonPanel />
 
       <Card padded={false}>
         <div className="overflow-x-auto">

@@ -57,6 +57,7 @@ import { WelcomeCard } from '../../components/companies/WelcomeCard'
 import { ClientBookRings } from '../../components/companies/ClientBookRings'
 import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
 import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
+import { ClientDormancy } from '../../components/companies/ClientDormancy'
 import { ClientUpcomingPayover } from '../../components/companies/ClientUpcomingPayover'
 import { outcomeRing, type OutcomeRow } from '../../lib/clientOutcomes'
 import { ruleKind } from '../../lib/commissionRule'
@@ -1008,6 +1009,8 @@ export function CompanyDetail() {
               <ClientBookRings clientId={bookId ?? company.id} />
             </div>
             <div className="min-w-0 space-y-5">
+              {/* DORMANT OR NOT (S11): said first where it is, a quiet link where it is not. */}
+              <ClientDormancy company={company} />
               <ClientAttentionCard company={company}
                 canEdit={canEditOwned(currentUser, company.accountOwnerId)}
                 userId={currentUser?.id ?? null} userName={currentUser?.name ?? null}

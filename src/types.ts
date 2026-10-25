@@ -415,6 +415,12 @@ export interface Company {
    * takes handovers without a mandate date (prompt 10); see mandateRule.ts.
    */
   importBatchId?: string | null
+  /** DORMANT (S11, clientDormant.ts): when, why and who. Undefined is an active client. */
+  dormantAt?: string | null
+  dormantReason?: string | null
+  dormantBy?: string | null
+  /** Swordfish's own "Active / Dormant", as imported. */
+  registerStatus?: string | null
   /**
    * The interest rate in THIS CLIENT'S mandate, as a PERCENT a year — 24 means 24%.
    *
