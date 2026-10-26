@@ -3,8 +3,9 @@
 > **Every session, commit, handoff, brief and reply says "Raptor · Handoff N"** (CLAUDE.md, top). This file is
 > **Raptor Handoff 13**, written by S12, which started from Raptor Handoff 12. The next session is S13 and writes Handoff 14.
 
-> **S12 · No News** (`claude/s12-no-news`, from `claude/sales-raptor-review-p1pzx2` at `4afb3f3`, 26 Oct): a client
-> unsubscribed from our news as a whole. Its section is the first below.
+> **S12 · No News, then Requests** (`claude/s12-no-news`, then `claude/s12-requests`, from `claude/sales-raptor-review-p1pzx2`
+> at `4afb3f3`, 26 Oct; last commit pushed to both the session branch and the preview). Start at "S12 -- WHERE IT
+> STANDS" just below.
 >
 > **S11 was two sessions in parallel on 24 Oct, both from `claude/sales-raptor-review-p1pzx2` at `ef4ae21`:**
 > **S11 · Lean Mail** (`claude/s11-lean-mail`, the mail clean-up) and **S11 · Loaders and Handers**
@@ -20,12 +21,51 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **26 October 2026, S12.** Read S12 first, then "S11 -- WHERE IT STANDS", then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
+Last updated: **26 October 2026, 19:00, S12 (Raptor · Handoff 12 -> 13).** Read "S12 -- WHERE IT STANDS" first, then "S11 -- WHERE IT STANDS", then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
+
+## S12 -- WHERE IT STANDS, AND WHERE S13 STARTS (Raptor · Handoff 13)
+
+**Shipped today, all on staging and the preview** (each has its own section below): a client-wide **Unsubscribed**
+from our news (dormant stops nothing); **R-3** client reference in dispute and request emails; **debtor campaigns**
+choose who they come from (me / each collector / legal@) and may run on written-off accounts, with a client switch
+to forbid it; the **Feedback Centre** (/requests: Overview / List / Board, one **Open** list, "Needs feedback from"),
+the **nightly review** and the **builder** (you approve, Claude builds); **questions with options to tick**; **R-5**
+bulk person-or-business on a new handover draft (released, waiting on Rinda's test); the brief for **Reino**
+(S13 · Campaigns).
+
+**The two scheduled tasks** (claude.ai -> Scheduled; both need their connectors attached by Stephan in Edit ->
+Advanced settings, which create_trigger cannot do):
+- **Raptor · nightly change-request review** -- Supabase attached; reads new requests, writes a review row.
+- **Raptor · builder** (`trig_012GPomZiD3QdM8B7T59dkiB`, hourly 07:13-18:13 weekdays SAST) -- Supabase attached
+  18:09; **repository attached 18:47** (a push dry-run at 18:54 was not refused, where the 18:18 run got a 403).
+  **Its first queued request is the real test of the push.** Its first real run (R-5) built and could not push;
+  the work was recovered from its transcript (`git format-patch | base64`, decoded out of this session's own
+  .jsonl) -- the way to rescue a run that cannot push.
+
+**Waiting on people, not on code:**
+1. **Rinda** -- test R-5 (Released, "Please test it"); tick her two answers on **R-6** (which reference on the
+   diary; Diary or Accounts). Then Stephan presses **Ask Claude to build it** on R-6.
+2. **Stephan** -- **fees on written-off campaigns, A or B** (see DEBTOR CAMPAIGNS: A = as now, fees resume if the
+   account is reopened, recommended; B = change the statement/balance for written-off accounts -- a money change).
+3. **Stephan** -- set up **legal@bredellferreira.co.za** as a login with a connected mailbox, then choose it in
+   Settings -> Integrations -> Central mailbox. Until then "central" falls back to the sender. (He pasted a
+   password in chat once; it was not used -- tell him again to change it if he has not.)
+4. **Stephan** -- for Reino: a Resend key for bredellferreira.co.za (`RESEND_FIRM_API_KEY` in Vercel).
+5. **Swordfish import, person or business** -- Stephan: "we will need to find a way" -- not started, separate
+   from R-5 (which is new handover drafts only; imported history stays as imported).
+
+**Things that bite, learnt today:**
+- The Supabase MCP asks Stephan to confirm any DELETE; unanswered it times out, and a second call in the same turn
+  fails. Prefer an UPDATE (mark read, unqueue) over a delete wherever that does the job.
+- A comment written by Claude has `by_id` null; any trigger that SELECTs a name INTO a variable must handle no row
+  (it left the message NULL and refused the comment -- fixed in `change_request_event_notify`).
+- A scheduled task made with create_trigger has no connectors and no repository; the person attaches both in the
+  claude.ai Scheduled -> Edit dialog. get_trigger shows connectors but not the repository.
 
 ## S12 · REQUESTS (26 Oct) -- "REQUEST A CHANGE" INSIDE RAPTOR, AND A NIGHTLY REVIEW
 
@@ -104,15 +144,14 @@ request a run, oldest queued; unclear -> a comment and off the queue; else build
 -> Released with how to test; a failure goes back to Approved with why. Scheduled task **"Raptor · builder"**,
 hourly 07:13-18:13 weekdays SAST, fresh session; it needs the Supabase connector (and the repository, to push)
 attached in Scheduled -> Edit, as the nightly one did. History lines with nobody's name read "Claude".
-Supabase is attached to the builder (seen 26 Oct, 18:09). **Its first real build is the test of whether it can PUSH**
--- no repository was offered on the Edit screen; if it cannot, it stops and says so in one line.
+Supabase is attached to the builder (26 Oct, 18:09) and the repository (18:47) -- see WHERE IT STANDS above.
 **Comments by Claude (`by_id` null) were refused** -- `change_request_event_notify` SELECTed the name INTO
 v_who, no profile row left it NULL, and a NULL notification message failed the whole insert. That would have
 broken the builder's "Claude needs an answer" step on its first unclear request. Fixed (migration
 `change_request_comment_by_claude`, md5 matched); check-change-requests holds it.
 R-5 was put back to Approved (it had been released by hand, nothing built); the wrong "in development" and
-"released" notifications to Rinda were marked read, not deleted. **R-5 waits on Stephan's answers to the
-review's three questions** (which problems, import review only, preview before a bulk change) before Ask Claude.
+"released" notifications to Rinda were marked read, not deleted. Stephan then answered the review's three questions
+(person-or-business only; new imports only, Swordfish later; show the count first) and it was built -- see R-5 BUILT.
 
 ## S12 · R-5 BUILT: PERSON OR BUSINESS IN BULK ON A NEW HANDOVER (26 Oct, Raptor H12)
 
