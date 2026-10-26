@@ -429,6 +429,13 @@ export interface Company {
   newsResumedAt?: string | null
   newsResumedReason?: string | null
   newsResumedBy?: string | null
+  /**
+   * THE CLIENT ASKED US NOT TO WORK ITS WRITTEN-OFF ACCOUNTS (Raptor H12): every campaign on the
+   * written-off book -- a message, a recovery call, a trace -- leaves them out. When, why and who.
+   */
+  noWriteoffWorkAt?: string | null
+  noWriteoffWorkReason?: string | null
+  noWriteoffWorkBy?: string | null
   /** Swordfish's own "Active / Dormant", as imported. */
   registerStatus?: string | null
   /**

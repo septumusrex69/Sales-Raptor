@@ -42,6 +42,7 @@ const PREVIEW = {
   },
   estimate: { item: '1c', perMessage: 3.5, total: 3.5, citation: 'GN R.7207, GG 54273, 6 March 2026', monthlyLimit: null },
   estimateWords: 'R 3,50', atMonthlyLimit: 0, mailbox: null, hoursProblem: null, wordingProblem: null,
+  sendFrom: 'me', target: 'live', fromSplit: [], central: null, writtenOffUncharged: false,
 }
 
 const CAMPAIGN = {
@@ -58,6 +59,9 @@ function handlers(profile) {
     })],
     [(u) => /\/rest\/v1\/message_templates/.test(u), () => ({ body: [TEMPLATE] })],
     [(u) => /\/rest\/v1\/campaigns/.test(u), () => ({ body: [CAMPAIGN] })],
+    [(u) => /\/rpc\/recovery_reasons/.test(u), () => ({
+      body: [{ reason_key: 'raptor:uncontactable', source: 'raptor', label: 'Uncontactable', accounts: 1 }],
+    })],
     [(u) => /\/rpc\/campaign_counts/.test(u), () => ({
       body: [{ campaign_id: 'camp-1', pending: 1, sending: 0, sent: 0, skipped: 0, failed: 0, cancelled: 0, fees: 0 }],
     })],
@@ -142,6 +146,43 @@ try {
     await page.waitForTimeout(400)
     t.ok('Stop stops it', calls.some((c) => c.op === 'stop' && c.campaignId === 'camp-1'))
     await t.shot(page, 'campaigns-page')
+    await context.close()
+  }
+
+  /* ------------------- 3b. Raptor H12: an email to written-off accounts, from the central mailbox */
+  {
+    const { context, page } = await signedInPage(browser, ADMIN, handlers(ADMIN), [])
+    await stubApi(page, { ...PREVIEW, sendFrom: 'central', target: 'written_off', writtenOffUncharged: true,
+      sample: { ...PREVIEW.sample, subject: 'Your account', html: '<p>Dear A Mokoena</p>', segments: null, encoding: null },
+      estimate: { ...PREVIEW.estimate, item: '1a', perMessage: 25, total: 25 },
+      central: { name: 'Bredell Ferreira Legal', address: 'legal@bredellferreira.co.za' },
+      fromSplit: [{ name: 'Bredell Ferreira Legal', address: 'legal@bredellferreira.co.za', count: 1, central: true }] })
+    await openCampaignBox(page)
+    t.ok('the box asks which accounts: live or written off', (await page.getByTestId('campaign-target').count()) === 1)
+    t.check('...and "who it comes from" is for an email only', await page.getByTestId('campaign-send-from').count(), 0)
+    await page.getByTestId('campaign-channel-email').click()
+    await page.getByTestId('campaign-target-written_off').click()
+    await page.locator('[data-testid="recovery-reason"][data-key="raptor:uncontactable"]').waitFor({ timeout: 5000 })
+    t.ok('written off asks for the write-off reasons first', await page.getByTestId('campaign-preview-go').isDisabled()
+      || !(await page.getByTestId('campaign-name').inputValue()))
+    await page.locator('[data-testid="recovery-reason"][data-key="raptor:uncontactable"]').check()
+    await page.getByTestId('campaign-from-central').click()
+    await page.getByTestId('campaign-subject').fill('Your account')
+    await page.getByTestId('campaign-body').fill('Dear {{debtor_name}}, please contact us.')
+    await page.getByTestId('campaign-name').fill('Written-off October')
+    calls.length = 0
+    await page.getByTestId('campaign-preview-go').click()
+    await page.getByTestId('campaign-preview').waitFor({ timeout: 5000 })
+    const asked = calls.find((c) => c.op === 'preview')
+    t.check('the preview asks for written-off accounts, by reason, from the central mailbox',
+      JSON.stringify([asked?.target, asked?.reasons, asked?.sendFrom]), JSON.stringify(['written_off', ['raptor:uncontactable'], 'central']))
+    t.ok('...shows who it goes out from', /1 from Bredell Ferreira Legal <legal@bredellferreira\.co\.za> — the central mailbox/.test(await page.getByTestId('campaign-from-split').innerText()))
+    t.ok('...and says a written-off account is charged nothing today', /No fee today/.test(await page.getByTestId('campaign-fee').innerText()))
+    await t.shot(page, 'campaigns-written-off')
+    await page.getByTestId('campaign-continue').click()
+    t.ok('the confirm step names the mailbox and says nothing is charged',
+      /from legal@bredellferreira\.co\.za\./.test(await page.getByTestId('campaign-confirm-words').innerText())
+      && /Nothing is charged/.test(await page.getByTestId('campaign-confirm-words').innerText()))
     await context.close()
   }
 

@@ -5,11 +5,11 @@ import { firmClock } from '../workflow/clock.js'
 import { chargeItemWith, type ChargeDb, type ChargeResult } from '../../../src/lib/chargeEngine.js'
 import { itemAmountFor, scheduleFor } from '../../../src/lib/annexureB.js'
 import {
-  CAMPAIGN_ACTION, CAMPAIGN_ITEM, campaignSkip, mayCampaignOn, renderCampaignMessage, skipWords,
-  type CampaignChannel, type SkipReason,
+  CAMPAIGN_ACTION, CAMPAIGN_ITEM, campaignSkip, mayCampaignOn, mayRecoverOn, renderCampaignMessage, senderFor, skipWords,
+  writtenOffMessageSkip, type CampaignChannel, type SendFrom, type SkipReason,
 } from '../../../src/lib/campaigns.js'
 import { callHoursProblem, johannesburgMinute } from '../../../src/lib/contactHours.js'
-import { callerFor, factsFor, holdersFor, valuesFor } from './gather.js'
+import { callerFor, centralSender, factsFor, holdersFor, valuesFor, withMailbox } from './gather.js'
 
 /**
  * WORKING THROUGH A CAMPAIGN, A FEW MESSAGES AT A TIME.
@@ -56,6 +56,8 @@ export interface ChunkResult {
 interface CampaignRow {
   id: string; name: string; channel: CampaignChannel; subject: string | null; body: string
   template_id: string | null; created_by: string | null; status: string
+  /* Raptor H12 */
+  send_from: SendFrom; target: 'live' | 'written_off'; reasons: string[]
 }
 
 interface MessageRow { id: string; account_id: string }
@@ -75,7 +77,7 @@ export async function sendCampaignChunk(
   }
 
   let query = admin.from('campaigns')
-    .select('id, name, channel, subject, body, template_id, created_by, status')
+    .select('id, name, channel, subject, body, template_id, created_by, status, send_from, target, reasons')
     .eq('status', 'sending').neq('channel', 'call').order('created_at')
   if (options.campaignId) query = query.eq('id', options.campaignId)
   const { data: campaigns, error } = await query
@@ -104,7 +106,9 @@ async function workCampaign(
 
   /* NOT CONNECTED, NOT SENT. The creation refused this; a mailbox disconnected since means the
      campaign waits, with the reason on it, rather than failing every account one by one. */
-  if (campaign.channel === 'email') {
+  /* Only a campaign sent FROM its creator waits on the creator's mailbox; one from the collectors or
+     the central mailbox decides per account (sendOne), and skips an account nobody can send as. */
+  if (campaign.channel === 'email' && (campaign.send_from ?? 'me') === 'me') {
     const { data: conn } = await admin.from('email_connections').select('email').eq('user_id', creator.id).maybeSingle()
     if (!conn) {
       const note = `${creator.name || 'The person who ran it'} has no connected mailbox, so the emails are waiting. `
@@ -181,11 +185,34 @@ async function sendOne(
   const people = await holdersFor(admin, [facts.assignedTo, facts.liaisonId])
   const holder = facts.assignedTo ? people.get(facts.assignedTo) ?? null : null
   const liaison = facts.liaisonId ? people.get(facts.liaisonId) ?? null : null
-  if (!mayCampaignOn(creator, holder, liaison)) return skip('out_of_scope')
-  const reason = campaignSkip(facts, campaign.channel, audience)
+  const writtenOff = campaign.target === 'written_off'
+  if (!(writtenOff ? mayRecoverOn(creator, holder, liaison) : mayCampaignOn(creator, holder, liaison))) return skip('out_of_scope')
+  const reason = writtenOff
+    ? writtenOffMessageSkip({ ...facts, onCallCampaign: false }, campaign.channel, campaign.reasons ?? [], audience)
+    : campaignSkip(facts, campaign.channel, audience)
   if (reason) return skip(reason, skipWords(reason, facts))
 
-  const merged = await valuesFor(admin, message.account_id, creator.id, clock.today)
+  /*
+   * WHO IT GOES OUT AS, NOW (Raptor H12): the creator, the account's collector, or the central
+   * mailbox -- decided again at the moment it goes, because a desk can change hands mid-campaign.
+   * The agent in the merge is that person, so {{agent_name}} signs as whoever the debtor replies to.
+   */
+  let senderId = creator.id
+  if (campaign.channel === 'email') {
+    const central = await centralSender(admin)
+    const boxes = await withMailbox(admin, [creator.id, central?.id ?? null, facts.assignedTo])
+    const h = facts.assignedTo ? people.get(facts.assignedTo) ?? null : null
+    const who = senderFor({
+      sendFrom: campaign.send_from ?? 'me', callerId: creator.id, callerHasMailbox: boxes.has(creator.id),
+      centralId: central && boxes.has(central.id) ? central.id : null,
+      holder: h ? { id: h.id, active: h.active, hasMailbox: boxes.has(h.id) } : null,
+    })
+    if (!who) return skip('no_sender')
+    senderId = who
+  }
+  const sender = senderId === creator.id ? creator : (await callerFor(admin, senderId)) ?? creator
+
+  const merged = await valuesFor(admin, message.account_id, senderId, clock.today)
   if (!merged) return skip('closed', 'The account could not be read')
   const out = renderCampaignMessage({
     channel: campaign.channel, subject: campaign.subject, body: campaign.body, values: merged.values,
@@ -227,7 +254,7 @@ async function sendOne(
     smsId = (row?.id as string) ?? null
   } else {
     sentTo = facts.email ?? ''
-    const sent = await sendAsUser(admin, creator.id, {
+    const sent = await sendAsUser(admin, senderId, {
       to: sentTo, subject: out.subject ?? '', bodyHtml: out.html ?? '',
     })
     if (!sent.ok) {
@@ -244,7 +271,7 @@ async function sendOne(
     const { data: row } = await admin.from('account_emails').insert({
       account_id: message.account_id, direction: 'out', debtor_address: sentTo, our_address: sent.from,
       subject: out.subject ?? '', body: out.text, message_id: sent.messageId,
-      sent_by: creator.id, sent_by_name: creator.name || null,
+      sent_by: sender.id, sent_by_name: sender.name || null,
       charged_excl_vat: itemAmountFor('1a', 1, 0, scheduleFor(actionDate)),
     }).select('id').maybeSingle()
     emailId = (row?.id as string) ?? null

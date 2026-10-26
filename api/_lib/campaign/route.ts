@@ -6,11 +6,11 @@ import { moneyZa } from '../workflow/locale.js'
 import { can } from '../../../src/lib/capabilities.js'
 import {
   CAMPAIGN_CEILING, campaignFeeEstimate, campaignSkip, campaignWordingProblem, mayCampaignOn,
-  mayManageCampaign, renderCampaignMessage, skipWords, tallySkips,
-  type CampaignChannel, type SkipReason,
+  mayManageCampaign, mayRecoverOn, renderCampaignMessage, senderFor, skipWords, tallySkips, writtenOffMessageSkip,
+  type CampaignChannel, type SendFrom, type SkipReason,
 } from '../../../src/lib/campaigns.js'
 import { callHoursProblem, johannesburgMinute } from '../../../src/lib/contactHours.js'
-import { callerFor, factsFor, holdersFor, valuesFor, type AccountFacts } from './gather.js'
+import { callerFor, centralSender, factsFor, holdersFor, valuesFor, withMailbox, type AccountFacts } from './gather.js'
 import { sendCampaignChunk, stopCampaign } from './send.js'
 import { callAssess, callCreate, readCallInput } from './call.js'
 
@@ -118,6 +118,10 @@ interface Input {
   subject: string | null
   body: string
   accountIds: string[]
+  /* Raptor H12: who an email comes from; live accounts or written-off ones, by reason. */
+  sendFrom: SendFrom
+  target: 'live' | 'written_off'
+  reasons: string[]
 }
 
 function readInput(body: Record<string, unknown>): Input | { error: string } {
@@ -136,6 +140,10 @@ function readInput(body: Record<string, unknown>): Input | { error: string } {
     subject: channel === 'email' && typeof body.subject === 'string' ? body.subject : null,
     body: typeof body.body === 'string' ? body.body : '',
     accountIds: ids,
+    /* An SMS goes under the firm's name whoever runs it, so only an email has a sender to choose. */
+    sendFrom: channel === 'email' && (body.sendFrom === 'owner' || body.sendFrom === 'central') ? body.sendFrom : 'me',
+    target: body.target === 'written_off' ? 'written_off' : 'live',
+    reasons: Array.isArray(body.reasons) ? body.reasons.filter((r): r is string => typeof r === 'string') : [],
   }
 }
 
@@ -169,11 +177,45 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
     if (!f) continue
     const holder = f.assignedTo ? holders.get(f.assignedTo) ?? null : null
     const liaison = f.liaisonId ? holders.get(f.liaisonId) ?? null : null
-    if (!mayCampaignOn(caller, holder, liaison)) { outOfScope.push(id); continue }
-    const reason = campaignSkip(f, input.channel, audience)
+    /* The written-off book is mostly on nobody's desk: the recovery call's widening applies. */
+    const may = input.target === 'written_off' ? mayRecoverOn(caller, holder, liaison) : mayCampaignOn(caller, holder, liaison)
+    if (!may) { outOfScope.push(id); continue }
+    const reason = input.target === 'written_off'
+      ? writtenOffMessageSkip({ ...f, onCallCampaign: false }, input.channel, input.reasons, audience)
+      : campaignSkip(f, input.channel, audience)
     if (reason) skipped.push({ id, reason, holdReason: f.holdReason })
     else sendable.push(f)
   }
+
+  /*
+   * WHO EACH EMAIL GOES OUT AS (Raptor H12), decided here for the preview's split and again by the
+   * sender at the moment it goes (send.ts). An account nobody can send as is skipped, and said.
+   */
+  const central = input.channel === 'email' ? await centralSender(admin) : null
+  const mailboxes = input.channel === 'email'
+    ? await withMailbox(admin, [caller.id, central?.id ?? null, ...sendable.map((f) => f.assignedTo)])
+    : new Map<string, string>()
+  const senders = new Map<string, number>()
+  if (input.channel === 'email') {
+    for (let i = sendable.length - 1; i >= 0; i -= 1) {
+      const f = sendable[i]
+      const h = f.assignedTo ? holders.get(f.assignedTo) ?? null : null
+      const who = senderFor({
+        sendFrom: input.sendFrom, callerId: caller.id, callerHasMailbox: mailboxes.has(caller.id),
+        centralId: central && mailboxes.has(central.id) ? central.id : null,
+        holder: h ? { id: h.id, active: h.active, hasMailbox: mailboxes.has(h.id) } : null,
+      })
+      if (!who) { sendable.splice(i, 1); skipped.push({ id: f.id, reason: 'no_sender', holdReason: null }); continue }
+      senders.set(who, (senders.get(who) ?? 0) + 1)
+    }
+  }
+  const senderNames = senders.size
+    ? new Map(((await admin.from('profiles').select('id, name').in('id', [...senders.keys()])).data ?? [])
+      .map((p) => [p.id as string, (p.name as string) ?? ''] as const))
+    : new Map<string, string>()
+  const fromSplit = [...senders.entries()].map(([id, count]) => ({
+    name: senderNames.get(id) || 'Somebody', address: mailboxes.get(id) ?? null, count, central: id === central?.id,
+  })).sort((a, b) => b.count - a.count)
 
   /*
    * ONE REAL ACCOUNT'S MESSAGE, merged exactly as it will be sent. The first sendable one whose
@@ -201,6 +243,13 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
   }
 
   const estimate = campaignFeeEstimate(input.channel, sendable.length, sample?.segments ?? null, clock.today)
+  /*
+   * A WRITTEN-OFF ACCOUNT IS CHARGED NOTHING TODAY -- the charge engine's rule (chargeEngine.ts: "a
+   * written-off account earns nothing more", because the statement drops fees dated after the
+   * write-off). The firm has said it wants these charged; until that rule is changed with the
+   * statement, the preview says what will actually happen rather than promise a fee.
+   */
+  const writtenOffUncharged = input.target === 'written_off'
   /*
    * ITEM 1(c)'s MONTHLY ALLOWANCE, WHERE IT BINDS. Off since 10 September at the firm's instruction
    * (annexureB.ts ENFORCE_MONTHLY_LIMITS), in which case monthlyLimit is null and nobody is "at the
@@ -236,6 +285,11 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
     estimateWords: moneyZa(estimate.total),
     atMonthlyLimit,
     mailbox,
+    sendFrom: input.sendFrom,
+    target: input.target,
+    fromSplit,
+    central: central ? { name: central.name, address: mailboxes.get(central.id) ?? null } : null,
+    writtenOffUncharged,
     hoursProblem: callHoursProblem(clock.today, johannesburgMinute(clock.now)),
     wordingProblem,
     /* Which accounts, for create -- never sent to the browser (forBrowser). */
@@ -268,11 +322,17 @@ async function create(
       status: 403,
     }
   }
-  if (input.channel === 'email' && !a.mailbox) {
+  if (input.channel === 'email' && input.sendFrom === 'me' && !a.mailbox) {
     return {
-      error: 'Your mailbox is not connected. An email campaign goes from your own mailbox so the replies come back to you -- connect it in Settings first.',
+      error: 'Your mailbox is not connected. An email campaign from you goes from your own mailbox so the replies come back to you -- connect it in Settings first.',
       status: 400,
     }
+  }
+  if (input.channel === 'email' && input.sendFrom === 'central' && !a.central?.address) {
+    return { error: 'The central mailbox is not set up. Choose it in Settings -> Mail, and connect its mailbox, first.', status: 400 }
+  }
+  if (input.target === 'written_off' && input.reasons.length === 0) {
+    return { error: 'Choose which write-off reasons the campaign goes to.', status: 400 }
   }
   if (a.sending === 0) return { error: 'Every selected account is skipped, so there is nothing to send.', status: 400 }
 
@@ -287,7 +347,8 @@ async function create(
     name, channel: input.channel, template_id: input.templateId,
     subject: input.channel === 'email' ? (input.subject ?? '') : null, body: input.body,
     selection, created_by: caller.id, created_by_name: caller.name || null, team_id: caller.teamId,
-    selected: a.selected, to_send: a.sending, skipped: a.skipped, fee_estimate: a.estimate.total,
+    selected: a.selected, to_send: a.sending, skipped: a.skipped, fee_estimate: a.writtenOffUncharged ? 0 : a.estimate.total,
+    send_from: input.sendFrom, target: input.target, reasons: input.target === 'written_off' ? input.reasons : [],
   }).select('id').single()
   if (error || !made) return { error: error?.message ?? 'The campaign could not be saved.', status: 500 }
 

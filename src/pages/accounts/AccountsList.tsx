@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchReadyToClose } from '../../lib/readyToClose'
 import { AlertTriangle, Loader2, Megaphone, Search, UserCheck, X } from 'lucide-react'
-import { BOOK_CHOICES, bookLabel, parseBook } from '../../lib/accountBooks'
+import { BOOK_CHOICES, CLOSURE_KINDS, bookLabel, parseBook } from '../../lib/accountBooks'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
@@ -628,6 +628,27 @@ export function AccountsList() {
           <span className="text-slate-400 text-[12.5px]">
             An account on hold is one somebody has to come back to. These are the ones nobody has.
           </span>
+        </div>
+      )}
+
+      {/*
+        CLOSED, BY HOW IT ENDED (Raptor H12). The firm: written off and withdrawn are "two different
+        things" -- a withdrawn account went back to the client and may never be worked; a written-off
+        one may be, by a campaign. One list of all four read as one pile.
+      */}
+      {book === 'closed' && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[13px]" data-testid="closed-endings">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Ended</span>
+          {CLOSURE_KINDS.map((k) => {
+            const on = params.get('ending') === k.id
+            return (
+              <button key={k.id} type="button" onClick={() => setParam('ending', on ? null : k.id)} aria-pressed={on}
+                data-testid={`closed-ending-${k.id}`}
+                className={`rounded-lg border px-2.5 py-1.5 font-medium ${on ? 'border-gold-500 bg-gold-50 text-gold-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                {k.label}
+              </button>
+            )
+          })}
         </div>
       )}
 

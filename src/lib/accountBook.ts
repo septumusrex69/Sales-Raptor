@@ -432,6 +432,12 @@ export interface AccountQuery {
    * problems and one list over both would flatten them.
    */
   review?: 'due' | 'unset'
+  /**
+   * HOW A CLOSED ACCOUNT ENDED (Raptor H12): paid up, settled, written off or withdrawn -- the
+   * generated `closure` column, recovery_closure()'s reading. The firm: "written off ... or
+   * withdrawn ... that's two different things", so Closed is filtered by it rather than read as one.
+   */
+  ending?: 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
   /** Today, in the firm's zone, for `review`. Passed in: this file has no clock. */
   today?: string
   /** Active, with no diary date: nobody is booked to ring it. */
@@ -525,6 +531,7 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
    */
   if (q.review === 'due' && q.today) out = out.lte('hold_review_on', q.today)
   if (q.review === 'unset') out = out.is('hold_review_on', null)
+  if (q.ending) out = out.eq('closure', q.ending)
 
   /*
    * ADRIFT. On the active book and nobody booked to ring it -- the hole the whole diary design

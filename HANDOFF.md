@@ -92,6 +92,37 @@ new requests every night and then show them to me in the group list ... That's a
 - **At go-live**: the requests live on STAGING (where the testers are). Decide then whether production gets its
   own, and point the nightly task at it.
 
+## S12 · DEBTOR CAMPAIGNS: WHO THEY COME FROM, AND THE WRITTEN-OFF BOOK (26 Oct, Raptor H12)
+
+Stephan: a campaign should "ask if it goes out from ... a centralized email, or ... the person who sends it, or
+... the person who owns the account"; the central one is **legal@bredellferreira.co.za**; written off and
+withdrawn are "two different things"; "yes, charge fees"; "yes, client switch".
+
+- **Send from** (email only; an SMS always goes under the firm's name): **Me** (default, as before) / **Each
+  account's collector** (an empty desk, a leaver or no mailbox -> the central mailbox, else me) / **The central
+  mailbox**. Decided in the preview (who-it-goes-from split shown) and again per message by the sender
+  (`senderFor`, campaigns.ts; send.ts). {{agent_name}} is whoever it goes from. Still always a real mailbox
+  (sendAsUser) -- never Resend.
+- **The central mailbox is a LOGIN**: `firm_mailboxes` (purpose 'central' -> a profile). **Stephan must**: invite
+  a user legal@bredellferreira.co.za, connect its mailbox on its behalf under Settings -> Users, then choose it in
+  Settings -> Integrations -> "Central mailbox for debtor campaigns" (CentralMailboxCard).
+- **SMS / email to WRITTEN-OFF accounts**: the box asks Live / Written off; written off asks for write-off reasons
+  (one shared picker with the recovery/trace calls: components/accounts/WriteOffReasons.tsx).
+  `writtenOffMessageSkip` = the recovery call's rules (never withdrawn, paid up, settled, prescribed, disputed,
+  a client that said no, a reason not chosen) + the message's own (audience, address, number).
+- **Client switch** "Don't work this client's written-off accounts" on the client page (ClientWrittenOffWork;
+  `companies.no_writeoff_work_*`, same people as dormancy): every written-off campaign -- message, recovery call,
+  closed-book trace -- skips them (`client_no_writeoff`). Live accounts untouched; withdrawn never worked anyway.
+- **Closed, by how it ended**: `debtor_accounts.closure` (stored, generated from recovery_closure); the Closed
+  book has Paid up / Settled / Written off / Withdrawn chips (`?ending=`, applyAccountFilters).
+- **FEES -- NOT DONE, NEEDS STEPHAN'S DECISION.** He said "yes charge fees" on written-off campaigns, but the charge
+  engine deliberately charges a written-off account nothing (chargeEngine.ts: the statement drops fees after
+  the write-off, so a fee would be recorded and invisible). The box says "No fee today" honestly. Charging them
+  means changing the statement/balance for written-off accounts too (and interest stops at the write-off) --
+  a money change to be decided, not slipped in. check-campaign-sender holds what is true now.
+- Migration **`campaign_sender_and_written_off`** (staging). check-campaign-sender (34), check-campaigns updated,
+  e2e/campaigns +8 (24); each new rule broken and seen failing.
+
 ## S13 · CAMPAIGNS -- HANDED TO REINO (26 Oct)
 
 Stephan gave the News & campaigns section to **Reino's** session: **`docs/briefs/S13-reino-campaigns.md`** is the
@@ -334,7 +365,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`, `feedback_centre`. Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`, `feedback_centre`, `campaign_sender_and_written_off` (adds a stored generated column to debtor_accounts -- a table rewrite on production's size). Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

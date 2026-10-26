@@ -66,6 +66,10 @@ export type SkipReason =
   | 'paid'
   | 'withdrawn'
   | 'reason_not_chosen'
+  /* Raptor H12: the client asked us not to work its written-off accounts. */
+  | 'client_no_writeoff'
+  /* Raptor H12: who an email comes from could not be decided (no mailbox anywhere to send it from). */
+  | 'no_sender'
 
 /** What one account looks like to the skip rule. Gathered in bulk by the server. */
 export interface CampaignFacts {
@@ -80,6 +84,8 @@ export interface CampaignFacts {
   openDispute: boolean
   /** A workflow step went to this account today, or a pending one is due by today. */
   workflowToday: boolean
+  /** The client asked us not to work its written-off accounts (companies.no_writeoff_work_at). */
+  clientNoWriteoff?: boolean
 }
 
 /**
@@ -219,11 +225,72 @@ export function recoverySkip(facts: ClosedFacts, chosenReasons: readonly string[
   if (closed === 'paid_up' || closed === 'settled') return 'paid'
   if (closed === 'withdrawn') return 'withdrawn'
   if (facts.prescribed) return 'prescribed'
+  /* THE CLIENT'S OWN INSTRUCTION (Raptor H12): "unless the client asks us not to work on their
+     accounts, even after ... we've already been withdrawing it." Before the reasons: no reason a
+     person ticks reaches an account its client has taken off the table. */
+  if (facts.clientNoWriteoff) return 'client_no_writeoff'
   if (!chosenReasons.includes(writeOffReasonKey(facts))) return 'reason_not_chosen'
   if (facts.openDispute) return 'dispute'
   if (!facts.mobile?.trim()) return 'no_phone'
   if (facts.onCallCampaign) return 'on_call_campaign'
   return null
+}
+
+/**
+ * AN SMS OR EMAIL TO WRITTEN-OFF ACCOUNTS (Raptor H12). The firm: "a centralized email ... to send
+ * out to debtors as well that have been written off", and "written off ... or withdrawn ... that's
+ * two different things". The recovery call's rules exactly -- closed, written off (never paid up,
+ * settled or withdrawn), not prescribed, not a client that said no, a reason chosen, no open dispute
+ * -- and then the message's own: the wording's audience, somewhere to send it, a number an SMS can
+ * reach. Not the workflow rule: a written-off account is in no workflow.
+ */
+export function writtenOffMessageSkip(
+  facts: ClosedFacts, channel: CampaignChannel, chosenReasons: readonly string[],
+  audience: 'individual' | 'company' | null = null,
+): SkipReason | null {
+  const recovery = recoverySkip({ ...facts, mobile: facts.mobile || 'not needed', onCallCampaign: false }, chosenReasons)
+  if (recovery) return recovery
+  if (audience && audience !== facts.debtorKind) return 'wrong_audience'
+  if (channel === 'sms' && !facts.mobile?.trim()) return 'no_mobile'
+  if (channel === 'email' && !facts.email?.trim()) return 'no_email'
+  if (channel === 'sms' && facts.mobile && !looksLikeMobile(facts.mobile)) return 'bad_number'
+  return null
+}
+
+/* ------------------------------------------------------------------------------------------
+ * WHO AN EMAIL CAMPAIGN COMES FROM (Raptor H12)
+ * ------------------------------------------------------------------------------------------ */
+
+/**
+ * The firm: it "should ... ask if it goes out from ... a centralized email, or ... the person who
+ * sends it, or ... the person who owns the account." legal@bredellferreira.co.za is the central
+ * one (firm_mailboxes). An SMS has no sender to choose: it always goes under the firm's name.
+ */
+export type SendFrom = 'me' | 'owner' | 'central'
+export const SEND_FROM_LABEL: Record<SendFrom, string> = {
+  me: 'Me', owner: 'Each account\u2019s collector', central: 'The central mailbox',
+}
+
+/**
+ * THE LOGIN AN ACCOUNT'S EMAIL GOES OUT AS, or null where there is none. The account's owner is
+ * its collector; where the desk is empty, its holder has left, or has no mailbox connected, the
+ * central mailbox takes it -- a written-off book is mostly exactly that, and "nobody's desk" must
+ * not mean "nobody hears from us". Without a central mailbox the person running it takes it.
+ */
+export function senderFor(input: {
+  sendFrom: SendFrom
+  callerId: string
+  callerHasMailbox: boolean
+  centralId: string | null
+  holder: { id: string; active: boolean; hasMailbox: boolean } | null
+}): string | null {
+  const central = input.centralId
+  const me = input.callerHasMailbox ? input.callerId : null
+  if (input.sendFrom === 'me') return me
+  if (input.sendFrom === 'central') return central
+  const h = input.holder
+  if (h && h.active && h.hasMailbox) return h.id
+  return central ?? me
 }
 
 /**
@@ -320,6 +387,8 @@ export function skipWords(reason: SkipReason, facts?: Pick<CampaignFacts, 'holdR
     case 'paid': return 'Paid up or settled: there is nothing to recover'
     case 'withdrawn': return 'Withdrawn by the client: never in a recovery campaign'
     case 'reason_not_chosen': return 'Written off for a reason not chosen for this campaign'
+    case 'client_no_writeoff': return 'The client asked us not to work its written-off accounts'
+    case 'no_sender': return 'No mailbox to send it from'
   }
 }
 
@@ -536,8 +605,10 @@ export function campaignConfirmation(input: {
     `Campaign “${input.name.trim()}” will send one ${what} to ${plural(input.sending, 'debtor', 'debtors')}`
       + (input.channel === 'email' && input.from ? `, from ${input.from}` : '') + '.',
     input.skipped > 0 ? `${plural(input.skipped, 'account is', 'accounts are')} skipped and will not be contacted.` : null,
-    `Each message is charged to the debtor’s account under Annexure B item ${input.estimate.item === '1a' ? '1(a)' : '1(c)'}`
-      + ` as it goes: about ${input.money(input.estimate.total)} excluding VAT in all.`,
+    input.estimate.total === 0 && input.sending > 0
+      ? 'Nothing is charged: a written-off account earns no fee until it is re-opened.'
+      : `Each message is charged to the debtor’s account under Annexure B item ${input.estimate.item === '1a' ? '1(a)' : '1(c)'}`
+        + ` as it goes: about ${input.money(input.estimate.total)} excluding VAT in all.`,
     'It goes out only during the firm’s calling hours, and can be stopped at any time from Campaigns.',
   ]
   return parts.filter(Boolean).join(' ')

@@ -1,4 +1,5 @@
 import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { CentralMailboxCard } from '../../components/settings/CentralMailboxCard'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
@@ -2000,6 +2001,8 @@ function IntegrationsTab() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <EmailIntegrationCard />
+      {/* Raptor H12: the central mailbox a debtor campaign may go out from (legal@). Administrators only. */}
+      <CentralMailboxCard />
       <BuzzBoxIntegrationCard />
       {INTEGRATIONS.map((i) => (
         <Card key={i.name} className="p-4">

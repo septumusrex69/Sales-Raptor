@@ -159,11 +159,22 @@ ok('...not another team’s', !mayManageCampaign(leader, { createdBy: 'other', t
 ok('the route asks the rule for EVERY account', /for \(const id of input\.accountIds\)[\s\S]{0,300}mayCampaignOn\(caller, holder, liaison\)/.test(routeSrc))
 ok('...and refuses the whole selection when one is outside it', /if \(a\.outOfScope > 0\)[\s\S]{0,400}status: 403/.test(routeSrc))
 ok('...needing the tick before anything', /!can\(caller, 'campaign\.run'\)/.test(routeSrc))
-ok('the sender asks again before each message', /if \(!mayCampaignOn\(creator, holder, liaison\)\) return skip\('out_of_scope'\)/.test(sendSrc))
-ok('...and the skip rule again', /const reason = campaignSkip\(facts, campaign\.channel, audience\)/.test(sendSrc))
-ok('an email campaign refuses to start without the creator’s mailbox',
-  /input\.channel === 'email' && !a\.mailbox/.test(routeSrc))
-ok('...and sends from the creator’s mailbox, never a firm-wide sender', /sendAsUser\(admin, creator\.id,/.test(sendSrc) && !/resend/i.test(sendSrc))
+ok('the sender asks again before each message -- the recovery widening on the written-off book (Raptor H12)',
+  /if \(!\(writtenOff \? mayRecoverOn\(creator, holder, liaison\) : mayCampaignOn\(creator, holder, liaison\)\)\) return skip\('out_of_scope'\)/.test(sendSrc))
+ok('...and the skip rule again, the written-off one where the campaign is on that book',
+  /writtenOffMessageSkip\(\{ \.\.\.facts, onCallCampaign: false \}, campaign\.channel, campaign\.reasons \?\? \[\], audience\)/.test(sendSrc)
+  && /: campaignSkip\(facts, campaign\.channel, audience\)/.test(sendSrc))
+/*
+ * WHO IT COMES FROM (Raptor H12). The firm, 26 Oct: a campaign "should ... ask if it goes out from
+ * ... a centralized email, or ... the person who sends it, or ... the person who owns the account."
+ * Still never a bulk sender: every email goes through a real mailbox (sendAsUser), the creator's,
+ * the collector's or the central login's (legal@) -- and Resend stays the sales side's.
+ */
+ok('an email campaign from its creator refuses to start without the creator\u2019s mailbox',
+  /input\.channel === 'email' && input\.sendFrom === 'me' && !a\.mailbox/.test(routeSrc))
+ok('...one from the central mailbox refuses without it', /input\.sendFrom === 'central' && !a\.central\?\.address/.test(routeSrc))
+ok('...and each email goes through a real mailbox, decided per account, never a bulk sender',
+  /sendAsUser\(admin, senderId,/.test(sendSrc) && /const who = senderFor\(/.test(sendSrc) && !/resend/i.test(sendSrc))
 
 /* ---------------------------------------------------------------- 5. the sender */
 

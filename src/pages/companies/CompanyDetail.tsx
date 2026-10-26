@@ -58,6 +58,7 @@ import { ClientBookRings } from '../../components/companies/ClientBookRings'
 import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
 import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
 import { ClientDormancy } from '../../components/companies/ClientDormancy'
+import { ClientWrittenOffWork } from '../../components/companies/ClientWrittenOffWork'
 import { ClientUpcomingPayover } from '../../components/companies/ClientUpcomingPayover'
 import { outcomeRing, type OutcomeRow } from '../../lib/clientOutcomes'
 import { ruleKind } from '../../lib/commissionRule'
@@ -1011,6 +1012,8 @@ export function CompanyDetail() {
             <div className="min-w-0 space-y-5">
               {/* DORMANT OR NOT (S11): said first where it is, a quiet link where it is not. */}
               <ClientDormancy company={company} />
+              {/* Raptor H12: the client's instruction not to work its written-off accounts. */}
+              <ClientWrittenOffWork company={company} />
               <ClientAttentionCard company={company}
                 canEdit={canEditOwned(currentUser, company.accountOwnerId)}
                 userId={currentUser?.id ?? null} userName={currentUser?.name ?? null}

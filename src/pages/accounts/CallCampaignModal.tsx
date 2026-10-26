@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, Loader2, Phone } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import {
   CALL_KIND_LABEL, DEFAULT_SPREAD_RANK, NOW_RANK, SPREAD_RANKS, callConfirmation, sharedAmongChosen,
   type CallKind, type CallMode,
 } from '../../lib/callCampaign.ts'
-import { mayGiveCampaignTo, writeOffReasonKey } from '../../lib/campaigns.ts'
-import { WRITE_OFF_REASONS } from '../../lib/accountEnding'
+import { mayGiveCampaignTo } from '../../lib/campaigns.ts'
+import { WriteOffReasonPicker, useWriteOffReasons } from '../../components/accounts/WriteOffReasons'
 import {
-  createCallCampaign, fetchRecoveryReasons, previewCallCampaign, type CallPreview, type ReasonCount,
+  createCallCampaign, previewCallCampaign, type CallPreview,
 } from '../../lib/campaignApi'
 import { formatDate } from '../../data/mockData'
 import { rand } from '../../lib/money'
@@ -55,7 +55,6 @@ export function CallCampaignModal({ selection, selectedCount, ids, onClose, onBa
   const [collectorIds, setCollectorIds] = useState<string[]>([])
   const [traceTarget, setTraceTarget] = useState<'live' | 'closed'>('live')
   const [reasons, setReasons] = useState<string[]>([])
-  const [reasonCounts, setReasonCounts] = useState<ReasonCount[] | null>(null)
   const [preview, setPreview] = useState<CallPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -63,37 +62,8 @@ export function CallCampaignModal({ selection, selectedCount, ids, onClose, onBa
   const closedBook = kind === 'recovery' || (kind === 'trace' && traceTarget === 'closed')
   const pooled = sharedAmongChosen(kind)
 
-  /* THE WRITE-OFF REASONS IN THIS SELECTION, counted by the database, once the box needs them. */
-  useEffect(() => {
-    if (!closedBook || !ids || reasonCounts) return
-    let live = true
-    fetchRecoveryReasons(ids)
-      .then((r) => { if (live) setReasonCounts(r) })
-      .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
-    return () => { live = false }
-  }, [closedBook, ids, reasonCounts])
-
-  /*
-   * THE REASONS AS THE BOX OFFERS THEM. Raptor's closed list BY NAME, each with its count (nought
-   * included -- the list is the firm's and its shape should not change with the selection); then
-   * anything else Raptor wrote; then the imported free text exactly as stored, most common first;
-   * then "No reason recorded".
-   */
-  const offered = useMemo(() => {
-    const counts = new Map((reasonCounts ?? []).map((r) => [r.key, r]))
-    const closedList = WRITE_OFF_REASONS.map((label) => {
-      const key = writeOffReasonKey({ endedAs: 'written_off', endedReason: label, writeOffReason: null })
-      return { key, label, accounts: counts.get(key)?.accounts ?? 0, group: 'Written off in Raptor' }
-    })
-    const listed = new Set(closedList.map((r) => r.key))
-    const rest = (reasonCounts ?? []).filter((r) => !listed.has(r.key))
-    return [
-      ...closedList,
-      ...rest.filter((r) => r.source === 'raptor').map((r) => ({ ...r, group: 'Written off in Raptor' })),
-      ...rest.filter((r) => r.source === 'imported').map((r) => ({ ...r, group: 'Imported from Swordfish' })),
-      ...rest.filter((r) => r.source === 'none').map((r) => ({ ...r, group: 'No reason' })),
-    ]
-  }, [reasonCounts])
+  /* THE WRITE-OFF REASONS IN THIS SELECTION -- one list for every closed-book box (WriteOffReasons). */
+  const { loaded: reasonsLoaded, offered } = useWriteOffReasons(ids, closedBook, setError)
 
   /* WHO MAY BE GIVEN THE WORK: active people on the floor this person may hand work to. */
   const caller = currentUser ? {
@@ -263,25 +233,7 @@ export function CallCampaignModal({ selection, selectedCount, ids, onClose, onBa
 
         {closedBook && (
           <FormField label="Which write-off reasons?" required>
-            {!reasonCounts ? (
-              <p className="text-xs text-slate-500 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Counting the reasons…</p>
-            ) : (
-              <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100" data-testid="recovery-reasons">
-                {offered.map((r, i) => (
-                  <div key={r.key}>
-                    {(i === 0 || offered[i - 1].group !== r.group) && (
-                      <p className="px-3 pt-2 pb-1 text-[10.5px] uppercase tracking-wide text-slate-400">{r.group}</p>
-                    )}
-                    <label className={`flex items-center gap-2 px-3 py-1.5 text-sm ${r.accounts === 0 ? 'text-slate-400' : 'text-slate-700'}`}>
-                      <input type="checkbox" checked={reasons.includes(r.key)} disabled={r.accounts === 0}
-                        onChange={() => setReasons((x) => toggle(x, r.key))} data-testid="recovery-reason" data-key={r.key} />
-                      <span className="flex-1 truncate">{r.label}</span>
-                      <span className="tabular-nums text-xs">{r.accounts.toLocaleString('en-ZA')}</span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            )}
+            <WriteOffReasonPicker loaded={reasonsLoaded} offered={offered} chosen={reasons} onToggle={(k) => setReasons((x) => toggle(x, k))} />
             <p className="text-[11px] text-slate-400 mt-1">Counted over the selection: written off, not prescribed.</p>
           </FormField>
         )}

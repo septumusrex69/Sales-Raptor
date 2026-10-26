@@ -63,7 +63,7 @@ export async function factsFor(
   for (const part of chunks([...new Set(ids)])) {
     const [accounts, contacts, disputes, steps] = await Promise.all([
       admin.from('debtor_accounts')
-        .select('id, book, hold_reason, prescribed, debtor_kind, assigned_to, status, ended_as, ended_reason, write_off_reason, companies(account_owner_id)')
+        .select('id, book, hold_reason, prescribed, debtor_kind, assigned_to, status, ended_as, ended_reason, write_off_reason, companies(account_owner_id, no_writeoff_work_at)')
         .in('id', part),
       fetchAllRows<ContactRow>(() => admin.from('account_contacts')
         .select('account_id, kind, value, is_primary, retired_at')
@@ -103,6 +103,8 @@ export async function factsFor(
         id: a.id as string,
         assignedTo: (a.assigned_to as string) ?? null,
         liaisonId: ((Array.isArray(a.companies) ? a.companies[0] : a.companies) as { account_owner_id?: string } | null)?.account_owner_id ?? null,
+        /* Raptor H12: the client asked us not to work its written-off accounts. */
+        clientNoWriteoff: !!((Array.isArray(a.companies) ? a.companies[0] : a.companies) as { no_writeoff_work_at?: string | null } | null)?.no_writeoff_work_at,
         book: (a.book as string) ?? null,
         holdReason: (a.hold_reason as string) ?? null,
         prescribed: Boolean(a.prescribed),
@@ -238,3 +240,27 @@ export async function valuesFor(
   })
   return { values: values as Record<string, string>, account }
 }
+
+/**
+ * WHICH OF THESE LOGINS HAVE A MAILBOX CONNECTED -- an email can only go out as somebody whose
+ * mailbox Raptor holds (sendAsUser). Read for the senders a campaign might use (Raptor H12).
+ */
+export async function withMailbox(admin: SupabaseClient, userIds: (string | null)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds.filter((u): u is string => !!u))]
+  const out = new Map<string, string>()
+  for (const part of chunks(ids)) {
+    const { data, error } = await admin.from('email_connections').select('user_id, email').in('user_id', part)
+    if (error) throw new Error(error.message)
+    for (const c of data ?? []) out.set(c.user_id as string, (c.email as string) ?? '')
+  }
+  return out
+}
+
+/** The central mailbox's login (firm_mailboxes, legal@ at the firm's word), or null where none is set. */
+export async function centralSender(admin: SupabaseClient): Promise<{ id: string; name: string } | null> {
+  const { data } = await admin.from('firm_mailboxes').select('user_id, profiles!firm_mailboxes_user_id_fkey(name)').eq('purpose', 'central').maybeSingle()
+  if (!data) return null
+  const p = (Array.isArray(data.profiles) ? data.profiles[0] : data.profiles) as { name?: string } | null
+  return { id: data.user_id as string, name: p?.name ?? 'The central mailbox' }
+}
+

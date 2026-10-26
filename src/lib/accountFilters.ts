@@ -141,6 +141,12 @@ export function queryFromParams(
     q.today = today.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
   }
 
+  /* HOW IT ENDED, inside Closed (Raptor H12). Only on the closed book: elsewhere it would empty the list. */
+  const ending = params.get('ending')
+  if (q.book === 'closed' && (ending === 'paid_up' || ending === 'settled' || ending === 'written_off' || ending === 'withdrawn')) {
+    q.ending = ending
+  }
+
   const group = params.get('status')
   if (group && STATUS_GROUPS.some((g) => g.value === group)) {
     q.statusGroup = group as AccountQuery['statusGroup']

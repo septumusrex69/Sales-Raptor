@@ -51526,3 +51526,63 @@ begin
 end
 $$;
 revoke all on function public.change_request_notify() from public, anon, authenticated;
+
+-- ============================================================================
+-- Raptor · Handoff 12 (S12, 26 Oct): WHO A DEBTOR CAMPAIGN COMES FROM, AND WRITTEN-OFF ACCOUNTS.
+-- Migration `campaign_sender_and_written_off`.
+--
+-- THE FIRM: a campaign should "ask if it goes out from ... a centralized email, or ... the person who
+-- sends it, or ... the person who owns the account ... a centralized email from Bredell Ferreira ...
+-- to send out to debtors as well that have been written off" -- legal@bredellferreira.co.za. And:
+-- "accounts that we write off ... or ... written off by a client on their instruction, that's two
+-- different things. Unless the client asks us not to work on their accounts" -- yes, a client switch.
+--
+--   * debtor_accounts.closure: HOW A CLOSED ACCOUNT ENDED (paid_up / settled / written_off /
+--     withdrawn), stored and generated from recovery_closure() -- the same reading the recovery
+--     campaigns already use -- so the Closed book can be filtered by it with one indexed equality.
+--     Null on an account that has not ended (the book rule's own condition).
+--   * companies.no_writeoff_work_*: THE CLIENT ASKED US NOT TO WORK ITS WRITTEN-OFF ACCOUNTS.
+--     Every campaign on written-off accounts -- message, recovery call, trace -- leaves them out.
+--     Withdrawn accounts are never worked whatever this says.
+--   * campaigns.send_from: me (the person running it, as before) / owner (each account's collector,
+--     the central mailbox where the desk is empty or its holder has no mailbox) / central.
+--     campaigns.target: live (as before) / written_off, with the write-off reasons chosen.
+--   * firm_mailboxes: WHICH RAPTOR LOGIN IS THE CENTRAL MAILBOX. A mailbox is connected per login
+--     (email_connections), so legal@ is a login whose mailbox is connected like anybody's; this row
+--     says it is the central one. Administrators set it.
+-- ============================================================================
+alter table public.debtor_accounts add column if not exists closure text generated always as (
+  case when ended_as is not null or coalesce(status, '') ~* '^(written.off|closed)'
+       then public.recovery_closure(ended_as, status, write_off_reason) end) stored;
+create index if not exists debtor_accounts_closure_idx on public.debtor_accounts (closure) where closure is not null;
+
+alter table public.companies add column if not exists no_writeoff_work_at timestamptz;
+alter table public.companies add column if not exists no_writeoff_work_reason text;
+alter table public.companies add column if not exists no_writeoff_work_by uuid references public.profiles (id) on delete set null;
+
+alter table public.campaigns add column if not exists send_from text not null default 'me';
+alter table public.campaigns add column if not exists target text not null default 'live';
+alter table public.campaigns add column if not exists reasons text[] not null default '{}';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'campaigns_send_from_known') then
+    alter table public.campaigns add constraint campaigns_send_from_known check (send_from in ('me', 'owner', 'central'));
+    alter table public.campaigns add constraint campaigns_target_known check (target in ('live', 'written_off'));
+  end if;
+end $$;
+
+create table if not exists public.firm_mailboxes (
+  purpose text primary key check (purpose in ('central')),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  set_by uuid default auth.uid() references public.profiles (id) on delete set null,
+  set_at timestamptz not null default now()
+);
+alter table public.firm_mailboxes enable row level security;
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'firm_mailboxes' and policyname = 'firm_mailboxes_select') then
+    create policy firm_mailboxes_select on public.firm_mailboxes for select to authenticated using (true);
+    create policy firm_mailboxes_write on public.firm_mailboxes for all to authenticated
+      using (public.current_user_role() = 'Administrator') with check (public.current_user_role() = 'Administrator');
+  end if;
+end $$;

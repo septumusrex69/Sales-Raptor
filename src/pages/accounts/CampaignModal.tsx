@@ -4,8 +4,9 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary'
 import { groupedFields } from '../../lib/messageTemplates.ts'
 import {
-  campaignConfirmation, campaignWordingProblem, type CampaignChannel,
+  SEND_FROM_LABEL, campaignConfirmation, campaignWordingProblem, type CampaignChannel, type SendFrom,
 } from '../../lib/campaigns.ts'
+import { WriteOffReasonPicker, useWriteOffReasons } from '../../components/accounts/WriteOffReasons'
 import {
   campaignAccountIds, createCampaign, previewCampaign, type CampaignPreview,
 } from '../../lib/campaignApi'
@@ -49,6 +50,17 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
   const [emailCss, setEmailCss] = useState<Record<string, string> | undefined>(undefined)
   /* A CALL CAMPAIGN is a different box: the accounts go onto the diaries, nothing is sent. */
   const [calling, setCalling] = useState(false)
+  /*
+   * RAPTOR H12: WHICH ACCOUNTS, AND WHO IT COMES FROM. The firm: written-off accounts may be sent a
+   * message ("a centralized email ... to debtors ... that have been written off"), never withdrawn
+   * ones; and an email asks whether it goes from the person sending it, each account's collector, or
+   * the central mailbox (legal@). The person sending stays the default: it is what every campaign
+   * did until now.
+   */
+  const [target, setTarget] = useState<'live' | 'written_off'>('live')
+  const [reasons, setReasons] = useState<string[]>([])
+  const [sendFrom, setSendFrom] = useState<SendFrom>('me')
+  const { loaded: reasonsLoaded, offered: offeredReasons } = useWriteOffReasons(ids, target === 'written_off', setError)
 
   /* THE ACCOUNTS, ONCE, as the list's own clauses resolve them. A failure here is the hand-out's
      own refusal ("N match but the database returned M") and is shown rather than worked round. */
@@ -82,6 +94,7 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
 
   const draft = () => ({
     channel, templateId: templateId || null, subject: channel === 'email' ? subject : null, body,
+    sendFrom: channel === 'email' ? sendFrom : 'me' as SendFrom, target, reasons: target === 'written_off' ? reasons : [],
   })
 
   const pickTemplate = (id: string) => {
@@ -127,12 +140,17 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
       ?? (preview.outOfScope > 0
         ? `${preview.outOfScope.toLocaleString('en-ZA')} of these accounts ${preview.outOfScope === 1 ? 'is' : 'are'} not on your team’s desks. A team leader runs a campaign on their own team’s accounts — narrow the selection.`
         : null)
-      ?? (channel === 'email' && !preview.mailbox
-        ? 'Your mailbox is not connected. An email campaign goes from your own mailbox so the replies come back to you — connect it in Settings first.'
+      ?? (channel === 'email' && sendFrom === 'me' && !preview.mailbox
+        ? 'Your mailbox is not connected. An email from you goes from your own mailbox so the replies come back to you — connect it in Settings first, or send it from the central mailbox.'
+        : null)
+      ?? (channel === 'email' && sendFrom === 'central' && !preview.central?.address
+        ? 'The central mailbox is not set up yet: an Administrator chooses it in Settings → Mail, and its mailbox must be connected.'
         : null)
       ?? (preview.sending === 0 ? 'Every selected account is skipped, so there is nothing to send.' : null)
 
   const what = channel === 'sms' ? 'SMS' : 'email'
+  /* Who the emails go out as -- absent from a server older than Raptor H12, and empty for an SMS. */
+  const fromSplit = preview?.fromSplit ?? []
   const subtitle = `${selectedCount.toLocaleString('en-ZA')} ${selectedCount === 1 ? 'account' : 'accounts'} selected`
 
   if (calling) {
@@ -150,7 +168,8 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
           <div className="rounded-lg border border-gold-500 bg-gold-50 p-3.5 text-sm text-navy-950" data-testid="campaign-confirm-words">
             {campaignConfirmation({
               name, channel, sending: preview.sending, skipped: preview.skipped + (preview.selected - preview.found),
-              estimate: preview.estimate, money: rand, from: preview.mailbox,
+              estimate: preview.writtenOffUncharged ? { ...preview.estimate, total: 0 } : preview.estimate, money: rand,
+              from: fromSplit.length === 1 ? (fromSplit[0].address ?? fromSplit[0].name) : fromSplit.length > 1 ? `${fromSplit.length} mailboxes` : null,
             })}
           </div>
           {preview.hoursProblem && (
@@ -233,6 +252,12 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
             )}
           </div>
 
+          {preview.writtenOffUncharged ? (
+            <div className="rounded-lg border border-slate-200 p-3 text-[13px] text-slate-700" data-testid="campaign-fee">
+              <p><span className="font-medium">No fee today.</span> These accounts are written off, and Raptor charges a written-off
+                account nothing — its statement stops at the write-off. A debtor who answers and is re-opened is charged as usual from then.</p>
+            </div>
+          ) : (
           <div className="rounded-lg border border-slate-200 p-3 text-[13px] text-slate-700" data-testid="campaign-fee">
             <p>
               <span className="font-medium">About {rand(preview.estimate.total)}</span> excluding VAT, charged to the debtors’
@@ -249,9 +274,21 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
               {channel === 'sms' && ', and a longer name elsewhere can make a message a segment longer'}.
             </p>
           </div>
+          )}
 
+          {channel === 'email' && fromSplit.length > 0 && (
+            <div className="rounded-lg border border-slate-200 p-3 text-[13px] text-slate-700" data-testid="campaign-from-split">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Who it goes out from</p>
+              <ul className="space-y-0.5">
+                {fromSplit.map((f) => (
+                  <li key={`${f.name}${f.address}`}><span className="tabular-nums font-medium">{f.count.toLocaleString('en-ZA')}</span> from {f.name}
+                    {f.address ? <span className="text-slate-500"> &lt;{f.address}&gt;</span> : null}{f.central ? ' — the central mailbox' : ''}</li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs text-slate-500">Each reply goes back to the mailbox it came from, and onto the account.</p>
+            </div>
+          )}
           <p className="text-xs text-slate-500">
-            {channel === 'email' && preview.mailbox && <>From your mailbox, <span className="text-slate-700">{preview.mailbox}</span>, so replies come back to you and onto each account. </>}
             Sent only in the firm’s calling hours: weekdays 08:00–17:00 and Saturdays 09:00–13:00, never on a Sunday or a public holiday.
             {preview.hoursProblem ? ` Right now: ${preview.hoursProblem}` : ''}
           </p>
@@ -297,6 +334,43 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
           </button>
         </div>
 
+        {/* WHICH ACCOUNTS (Raptor H12): the live ones selected, or the written-off ones among them. */}
+        <FormField label="Which accounts?">
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" data-testid="campaign-target">
+            {([['live', 'Live accounts', 'As selected on the list.'], ['written_off', 'Written off', 'Chosen by write-off reason. Never withdrawn, paid up or settled.']] as const).map(([t, title, words]) => (
+              <button key={t} type="button" role="radio" aria-checked={target === t} onClick={() => { setTarget(t); setPreview(null) }} data-testid={`campaign-target-${t}`}
+                className={`rounded-lg border p-2.5 text-left ${target === t ? 'border-navy-950 bg-navy-950 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                <span className="block text-sm font-medium">{title}</span>
+                <span className={`block text-xs ${target === t ? 'text-white/70' : 'text-slate-500'}`}>{words}</span>
+              </button>
+            ))}
+          </div>
+        </FormField>
+        {target === 'written_off' && (
+          <FormField label="Which write-off reasons?" required>
+            <WriteOffReasonPicker loaded={reasonsLoaded} offered={offeredReasons} chosen={reasons}
+              onToggle={(k) => setReasons((x) => (x.includes(k) ? x.filter((y) => y !== k) : [...x, k]))} />
+            <p className="text-[11px] text-slate-400 mt-1">Counted over the selection. A client that asked us not to work its written-off accounts is left out.</p>
+          </FormField>
+        )}
+        {channel === 'email' && (
+          <FormField label="Send it from">
+            <div className="flex flex-wrap gap-1.5" role="radiogroup" data-testid="campaign-send-from">
+              {(['me', 'owner', 'central'] as const).map((f) => (
+                <button key={f} type="button" role="radio" aria-checked={sendFrom === f} onClick={() => setSendFrom(f)} data-testid={`campaign-from-${f}`}
+                  className={`text-xs px-2.5 py-1.5 rounded-full border ${sendFrom === f ? 'border-navy-950 bg-navy-950 text-white' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                  {SEND_FROM_LABEL[f]}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {sendFrom === 'me' ? 'From your own mailbox; replies come back to you.'
+                : sendFrom === 'owner' ? 'Each email from the collector whose desk the account is on; an account on nobody’s desk goes from the central mailbox.'
+                  : 'From the firm’s central mailbox (legal@), whoever sends it.'}
+            </p>
+          </FormField>
+        )}
+
         <FormField label="From the library">
           <select className={inputClass} value={templateId} onChange={(e) => pickTemplate(e.target.value)} data-testid="campaign-template">
             <option value="">Type my own</option>
@@ -335,7 +409,7 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
         {error && <p className="text-sm text-negative-700 mb-2">{error}</p>}
 
         <div className="flex items-center gap-2">
-          <button type="button" onClick={runPreview} disabled={busy || !ids || !!wordingProblem || !name.trim()}
+          <button type="button" onClick={runPreview} disabled={busy || !ids || !!wordingProblem || !name.trim() || (target === 'written_off' && reasons.length === 0)}
             data-testid="campaign-preview-go"
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-navy-950 text-white disabled:opacity-40">
             {(busy || !ids) && !error && <Loader2 size={14} className="animate-spin" />}

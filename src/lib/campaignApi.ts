@@ -4,7 +4,7 @@
  * server (api/_lib/campaign), and this only carries the question and the answer.
  */
 import { supabase } from './supabase'
-import type { CampaignChannel, FeeEstimate, SkipTally } from './campaigns.ts'
+import type { CampaignChannel, FeeEstimate, SendFrom, SkipTally } from './campaigns.ts'
 import { resolveIds, type Selection } from './accountAllocation'
 import type { CallKind, CallMode } from './callCampaign.ts'
 
@@ -13,6 +13,10 @@ export interface CampaignDraft {
   templateId: string | null
   subject: string | null
   body: string
+  /* Raptor H12: who an email comes from, and live accounts or written-off ones by reason. */
+  sendFrom?: SendFrom
+  target?: 'live' | 'written_off'
+  reasons?: string[]
 }
 
 export interface CampaignPreview {
@@ -31,6 +35,13 @@ export interface CampaignPreview {
   estimateWords: string
   atMonthlyLimit: number
   mailbox: string | null
+  sendFrom: SendFrom
+  target: 'live' | 'written_off'
+  /** Who the emails go out as, and how many each (an SMS has none). */
+  fromSplit: { name: string; address: string | null; count: number; central: boolean }[]
+  central: { name: string; address: string | null } | null
+  /** Written-off accounts are charged nothing by the engine today (see route.ts). */
+  writtenOffUncharged: boolean
   hoursProblem: string | null
   wordingProblem: string | null
 }
