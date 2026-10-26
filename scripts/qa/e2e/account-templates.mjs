@@ -27,6 +27,11 @@ const seen = []
 
 /* The one account this whole file is about. Its balance is what every assertion below reads. */
 const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000' }
+/* The day the balance below is struck on; see where the page is opened. */
+const BALANCE_STRUCK_ON = '2026-10-26T08:00:00Z'
+/* R180 000 capital plus the interest run to that day, in en-ZA (space groups, comma decimals) --
+   \s because the SMS strips the non-breaking space and the call script keeps it. */
+const OWN_BALANCE = /R\s?180\s135,26/
 
 /*
  * THE FIRM'S WORDING, as the library would hold it. Deliberately full of merge fields — a
@@ -241,7 +246,14 @@ const handlers = [
 const server = startServer()
 const browser = await chromium.launch()
 try {
-  const { page } = await signedInPage(browser, PROFILE, handlers, seen)
+  /*
+   * THE CLOCK IS PINNED because the balance is struck TODAY: interest runs every day from the
+   * handover, so a figure asserted against the real clock is right for one day only. This file was
+   * red from S7 to S13 (Raptor H13) for exactly that -- "R 180,128.02" on 12 Oct, "R 180 135,26" on
+   * 26 Oct, against a test expecting R180 000. (The fixture's interest_rate_annual is 0.115, which
+   * the statement reads as 0.115% a year -- rates are percentages, 24 = 24% -- hence cents a day.)
+   */
+  const { page } = await signedInPage(browser, PROFILE, handlers, seen, { now: BALANCE_STRUCK_ON })
 
   let up = false
   for (let i = 0; i < 40 && !up; i += 1) {
@@ -348,7 +360,7 @@ try {
    * braces in it.
    */
   t.ok(`...and the debtor's own balance (${JSON.stringify(smsText)})`,
-    /R\s?180,000\.00/.test(smsText))
+    OWN_BALANCE.test(smsText))
   /* The reference is the client's own, which is what appears on the debtor's paperwork. */
   t.ok('...carrying the reference the debtor knows', smsText.includes('REF/0'))
 
@@ -439,7 +451,7 @@ try {
   /* The figure, not the absence of a placeholder: "does not contain {{balance}}" would also pass
      on a script that lost the sentence entirely. */
   t.ok(`the workflow script carries this debtor's balance (${JSON.stringify(script)})`,
-    /R\s?180,000\.00/.test(script))
+    OWN_BALANCE.test(script))
   /*
    * AND THE FIELD THIS ACCOUNT COULD NOT ANSWER IS A NAMED GAP, not braces and not a blank.
    *

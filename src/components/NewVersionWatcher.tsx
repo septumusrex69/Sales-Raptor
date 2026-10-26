@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { useTheme } from '../store/ThemeContext'
-import { nextVersionAction } from '../lib/versionCheck'
+import { nextVersionAction, safeToReload } from '../lib/versionCheck'
 
 /** Quiet enough not to hammer the server, frequent enough that a fix lands the same day it ships. */
 const CHECK_INTERVAL_MS = 5 * 60 * 1000
@@ -41,10 +41,17 @@ export function holdsReload(pathname: string): boolean {
   return NEVER_RELOAD_UNDER.some((p) => pathname.startsWith(p))
 }
 
+/** The page somebody last typed on in this tab -- see safeToReload for why it holds a reload. */
+let typedOn: string | null = null
+
 function safeToReloadNow(): boolean {
-  if (document.querySelector('[data-modal-open]')) return false
   const el = document.activeElement
-  return !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement | null)?.isContentEditable)
+  return safeToReload({
+    modalOpen: !!document.querySelector('[data-modal-open]'),
+    editing: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || !!(el as HTMLElement | null)?.isContentEditable,
+    typedOn,
+    pathname: window.location.pathname,
+  })
 }
 
 /** Remembers which deployed bundle this tab has already reloaded itself for. */
@@ -116,6 +123,11 @@ export function NewVersionWatcher() {
       }
     }
 
+    /* Capture phase, on the document: every input, textarea and contenteditable on every page
+       reports here without any of them having to know this exists. */
+    function onInput() { typedOn = window.location.pathname }
+    document.addEventListener('input', onInput, true)
+
     const timer = setInterval(check, CHECK_INTERVAL_MS)
     function onVisible() {
       if (!document.hidden) void check()
@@ -125,6 +137,7 @@ export function NewVersionWatcher() {
     return () => {
       cancelled = true
       clearInterval(timer)
+      document.removeEventListener('input', onInput, true)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }

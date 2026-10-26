@@ -39,3 +39,28 @@ export function nextVersionAction(input: {
   if (!safeToReload) return 'banner'
   return 'reload'
 }
+
+/*
+ * TYPED ON THIS PAGE IS UNSAVED WORK, WHETHER OR NOT THE BOX STILL HAS FOCUS (Raptor H13).
+ *
+ * The test used to be "is a modal open, or is a box focused right now". A form ON the page -- a
+ * note, a client's details, a template -- passes that the moment the person taps anything else, and
+ * on the iPad the keyboard dropping is itself a blur. A deploy landing then reloaded the page and
+ * took what they had typed. The signing pages lost two signers' work exactly that way (23 Oct) and
+ * were exempted; this is the same hole on every staff page. So once somebody has typed on a page,
+ * that page is never reloaded silently: the banner is offered and they press it when they are
+ * ready. Erring this way costs a button press; the other way costs their work. Leaving the page
+ * (another path) clears it, because whatever they typed there was saved or abandoned by then.
+ */
+export function safeToReload(input: {
+  /** A modal (data-modal-open) is on screen. */
+  modalOpen: boolean
+  /** The focused element is an input, a textarea or contenteditable. */
+  editing: boolean
+  /** The path somebody last typed on, or null if nobody has typed since the tab opened. */
+  typedOn: string | null
+  /** Where the tab is now. */
+  pathname: string
+}): boolean {
+  return !input.modalOpen && !input.editing && input.typedOn !== input.pathname
+}

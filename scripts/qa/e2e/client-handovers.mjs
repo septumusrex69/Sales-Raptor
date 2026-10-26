@@ -96,7 +96,9 @@ try {
   t.check('Line draws a line and no bars', JSON.stringify([await card.locator('.recharts-bar-rectangle').count(), await card.locator('.recharts-line').count()]), '[0,1]')
   await page.getByTestId('client-handovers-show-both').click()
   await page.getByTestId('client-handovers-measure-capital').click(); await page.waitForTimeout(300)
-  t.ok('Rand switches the figures to capital', /R 440 000 over 12 months|R 440,000 over 12 months|R 440 000 over 12 months/.test(await card.innerText()))
+  /* en-ZA puts an ordinary space after the R and a NON-BREAKING one inside the number ("R 440\u00a0000");
+     the three spellings this used to list missed that mix and kept the file red from S11 to S13 (Raptor H13). */
+  t.ok('Rand switches the figures to capital', /R\s440\s000 over 12 months/.test(await card.innerText()))
   await page.getByTestId('client-handovers-months-6').click(); await page.waitForTimeout(500)
   t.check('six months on the switch', (await card.locator('.recharts-xAxis-tick-labels text').allTextContents()).length, 6)
   /* TWO RINGS (the firm, 18 Oct): what became of the accounts with the recovery rate, withdrawn out;

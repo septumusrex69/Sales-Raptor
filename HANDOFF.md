@@ -28,6 +28,31 @@ Everything is committed and pushed, and **the same commit is pushed to
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 
+## RAPTOR · HANDOFF 13 SESSION -- LOOSE ENDS (26 Oct, evening; commits `Raptor H13: ...`)
+
+Started from Handoff 13 on the preview branch. Its S-number is not settled: Reino's campaigns session is also
+S13 (Stephan to say: a second S13, as the two S11s were, or S14). No migrations, nothing on staging changed.
+
+- **R-numbers on one line** (`692bdfb`). Stephan's iPad showed "R-" over "6" in the Requests table: the browser broke
+  the number at its hyphen. Every place a request number shows is `whitespace-nowrap`; check-change-requests +1,
+  e2e/change-requests +1 (at 900 px) -- both seen failing.
+- **The three old browser reds are green** -- every one was the TEST, not the app:
+  `e2e/account-templates` asserted "R 180,000.00" against a balance struck TODAY (interest runs daily from the
+  handover, so the figure moved every day: 180,128.02 on 12 Oct, 180 135,26 on 26 Oct); the clock is now pinned and
+  the en-ZA figure asserted. Note the shared fixture's `interest_rate_annual: 0.115` is read as 0.115% a year
+  (rates are percentages; staging's are 24) -- harmless, left alone because other files read it.
+  `e2e/client-handovers`: en-ZA writes "R 440<nbsp>000" (ordinary space after R, non-breaking inside); `\s` now.
+  `e2e/excess-credit`: overpayments moved to Trust > To sort (TrustOverpayments, 13 Oct) with row id
+  `overpay-undecided`; the test still looked for `exception-row`.
+- **B.3 (mail read on the phone) was already built by S11** (`ab41c28`) -- the S10 list below is stale there.
+- **B.4 built: a page somebody has typed on is never reloaded silently.** NewVersionWatcher reloaded whenever no
+  modal was open and no box had focus; a form on the page loses focus the moment the person taps elsewhere (on the
+  iPad, the keyboard dropping). Now any `input` event marks the page; a deploy then shows the "newer version ...
+  Reload" banner on that page instead (`safeToReload`, versionCheck.ts). Leaving the page clears it.
+  `check-reload-unsaved` (9), broken and seen failing.
+- **R-6** is "Queued for Claude" while Rinda's two questions are unanswered: the builder will most likely take it
+  off the queue with a comment. Its queue time reads 23 Oct because staging's clock is set to 23 Oct -- not a bug.
+
 ## S12 -- WHERE IT STANDS, AND WHERE S13 STARTS (Raptor · Handoff 13)
 
 **Shipped today, all on staging and the preview** (each has its own section below): a client-wide **Unsubscribed**
@@ -342,7 +367,7 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
    decline / withdraw functions, and it REPLACED `leave_record_stamp` and `clear_staging`. No app code uses it. Its
    approvers are by role + team_id, not the team lead / department head / Camille Stephan asked for. schema.sql's
    last block records it and says where the full text is (md5 9b2684d5...); copy it in verbatim before building.
-3. The three browser reds that predate S11 (account-templates, client-handovers, excess-credit).
+3. ~~The three browser reds that predate S11~~ -- green (Raptor H13, above): each was the test, not the app.
 
 ## S11 · LEAN MAIL (24 Oct) -- THE PICTURES WERE IN THE DATABASE
 
@@ -436,9 +461,9 @@ short direct answers.
    reason; only approved leave counts; **import all current balances** (annual, sick, family) from a sheet like
    People -> Carried over; maternity is UNPAID; unpaid leave exported (SimplePay deducts, to confirm).
 2. Whatever Stephan answers "yes" to in A.1-A.5.
-3. **Mail read state, second half**: mail opened on a phone after Raptor has it does not flow back as read
+3. ~~**Mail read state, second half**~~ (built by S11, `ab41c28`): mail opened on a phone after Raptor has it does not flow back as read
    (`emailSync.ts` only reads \Seen on first sight). Re-read flags for recent mail on each sync.
-4. **The same "reload under unsaved work" risk on staff pages** (NewVersionWatcher reloads an idle page; a form
+4. ~~**The same "reload under unsaved work" risk on staff pages**~~ (built, Raptor H13: check-reload-unsaved) (NewVersionWatcher reloads an idle page; a form
    outside a modal with nothing focused could lose typing). Not seen yet; signing pages are already exempt.
 
 ### C. Things only Stephan can do (remind him)

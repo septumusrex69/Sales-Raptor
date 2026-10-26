@@ -59,7 +59,9 @@ try {
   t.check('both overpayments are listed', await decide.count(), 2)
 
   /* ---- the box opens, with every choice ---- */
-  await page.getByTestId('exception-row').filter({ hasText: 'Ilse Muller' }).filter({ hasText: 'Lowveld Motors' })
+  /* overpay-undecided, not exception-row: overpayments became their own section of Trust > To sort
+     (TrustOverpayments, 13 Oct) and this kept looking for the old row -- red from S7 to S13 (Raptor H13). */
+  await page.getByTestId('overpay-undecided').filter({ hasText: 'Ilse Muller' }).filter({ hasText: 'Lowveld Motors' })
     .first().getByRole('button', { name: 'Decide it' }).click()
   await page.getByText('Refund it to the debtor').waitFor({ timeout: 10000 })
   for (const choice of ['Refund it to the debtor', 'Move it to another of their accounts', 'Release it to the client']) {
