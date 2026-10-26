@@ -53,7 +53,9 @@ export function RequestsPage() {
   const [reviewIndex, setReviewIndex] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [view, setViewState] = useState<View>(() => readView(currentUser?.id))
-  const [shelf, setShelf] = useState<Shelf>('all')
+  // The list opens on New, with All last as the option to put on (Stephan, Raptor H12): what is waiting
+  // to be decided is what somebody comes here for; everything else is one press away.
+  const [shelf, setShelf] = useState<Shelf>('new')
   const [dept, setDept] = useState<RequestDepartment | 'all'>('all')
   const [search, setSearch] = useState('')
   const [tile, setTile] = useState<TileFilter>(null)
@@ -77,11 +79,11 @@ export function RequestsPage() {
     const nameOf = (id: string) => users.find((u) => u.id === id)?.name ?? ''
     const tileIds = tile ? reviews.find((v) => v.id === tile.reviewId)?.request_ids ?? [] : null
     return sortRequests((rows ?? []).filter((r) =>
-      onShelf(r, shelf)
+      (view === 'board' || onShelf(r, shelf))   // the board IS every stage; the shelf is the list's
       && (dept === 'all' || r.department === dept)
       && (!tileIds || (tileIds.includes(r.id) && (tile?.verdict === 'reviewed' || r.review_verdict === tile?.verdict)))
       && (!q || `${requestLabel(r)} ${titleOf(r)} ${r.description} ${nameOf(r.created_by)} ${r.pane ?? ''}`.toLowerCase().includes(q))))
-  }, [rows, shelf, dept, search, tile, reviews, users])
+  }, [rows, shelf, view, dept, search, tile, reviews, users])
 
   const counts = useMemo(() => {
     const all = rows ?? []
@@ -147,7 +149,7 @@ export function RequestsPage() {
           </div>
           {view !== 'board' && (
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Which requests" data-testid="requests-shelf">
-              {([['all', 'All'], ['new', 'New'], ['progress', 'In progress'], ['done', 'Released'], ['declined', 'Declined']] as const).map(([s, label]) => (
+              {([['new', 'New'], ['progress', 'In progress'], ['done', 'Released'], ['declined', 'Declined'], ['all', 'All']] as const).map(([s, label]) => (
                 <button key={s} type="button" role="radio" aria-checked={shelf === s} onClick={() => { setShelf(s); setTile(null) }}
                   className={`rounded-lg border px-3 py-1 text-sm ${shelf === s && !tile ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                   {label} ({counts[s]})
