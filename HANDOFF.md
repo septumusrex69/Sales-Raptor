@@ -92,6 +92,20 @@ new requests every night and then show them to me in the group list ... That's a
 - **At go-live**: the requests live on STAGING (where the testers are). Decide then whether production gets its
   own, and point the nightly task at it.
 
+## S12 · "CLAUDE, PLEASE DO THIS" -- THE BUILD QUEUE (26 Oct, Raptor H12)
+
+Stephan pressed Approve -> Start development -> Release on R-5 and it read Released with nothing built: "It
+should only be released ... if you have told me that it's been done ... click on it and say, okay, well,
+Claude, please do this." So **no person moves a request to In development or Released any more**. A new
+request offers **Approve & ask Claude** / Approve only / Request info / Decline; an approved one **Ask Claude to
+build it** (or Take it off the queue). `change_requests.build_requested_at/_by` (migration
+`change_request_build_queue`). **The builder** is skill Job 3 (`.claude/skills/change-requests/SKILL.md`): one
+request a run, oldest queued; unclear -> a comment and off the queue; else building -> build -> checks -> preview
+-> Released with how to test; a failure goes back to Approved with why. Scheduled task **"Raptor · builder"**,
+hourly 07:13-18:13 weekdays SAST, fresh session; it needs the Supabase connector (and the repository, to push)
+attached in Scheduled -> Edit, as the nightly one did. History lines with nobody's name read "Claude".
+R-5 was put back to Approved (it had been released by hand, nothing built).
+
 ## S12 · DEBTOR CAMPAIGNS: WHO THEY COME FROM, AND THE WRITTEN-OFF BOOK (26 Oct, Raptor H12)
 
 Stephan: a campaign should "ask if it goes out from ... a centralized email, or ... the person who sends it, or
@@ -365,7 +379,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`, `feedback_centre`, `campaign_sender_and_written_off` (adds a stored generated column to debtor_accounts -- a table rewrite on production's size). Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`, `feedback_centre`, `change_request_build_queue`, `campaign_sender_and_written_off` (adds a stored generated column to debtor_accounts -- a table rewrite on production's size). Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

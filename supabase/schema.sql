@@ -51586,3 +51586,19 @@ begin
       using (public.current_user_role() = 'Administrator') with check (public.current_user_role() = 'Administrator');
   end if;
 end $$;
+
+-- ============================================================================
+-- Raptor · Handoff 12 (S12, 26 Oct): "CLAUDE, PLEASE DO THIS" -- THE BUILD QUEUE.
+-- Migration `change_request_build_queue`.
+--
+-- THE FIRM: "If we approve something ... it asks me ... if it can be released ... but actually it's
+-- not been released. It should only be released ... if you have told me that it's been done ... I
+-- would have to be able to ... click on it and say, okay, well, Claude, please do this."
+-- An Administrator puts an approved request on the queue (build_requested_*); the scheduled builder
+-- session takes the oldest, moves it to In development, builds it, and releases it with how to test --
+-- as the database owner, so the moves read as Claude's. The screen no longer offers In development or
+-- Released to a person. The update policy already lets only Administrators set these columns.
+-- ============================================================================
+alter table public.change_requests add column if not exists build_requested_at timestamptz;
+alter table public.change_requests add column if not exists build_requested_by uuid references public.profiles (id) on delete set null;
+create index if not exists change_requests_build_queue_idx on public.change_requests (build_requested_at) where build_requested_at is not null;

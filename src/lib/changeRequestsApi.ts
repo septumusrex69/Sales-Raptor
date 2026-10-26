@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { clockNow } from './clock'
 import {
   base64Bytes, parseReviewGroups,
   type ChangeRequest, type RequestDepartment, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
@@ -11,7 +12,7 @@ import {
  * screenshots to draw forty titles.
  */
 
-const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by, assigned_to, review_title, review_verdict, review_size, review_summary, review_questions, reviewed_at'
+const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by, assigned_to, review_title, review_verdict, review_size, review_summary, review_questions, reviewed_at, build_requested_at, build_requested_by'
 
 export async function listRequests(): Promise<ChangeRequest[]> {
   const { data, error } = await supabase.from('change_requests').select(REQUEST_COLUMNS).order('created_at', { ascending: false }).limit(500)
@@ -93,3 +94,18 @@ export async function answerTest(number: number, ok: boolean, note: string): Pro
   const { error } = await supabase.rpc('change_request_tested', { p_number: number, p_ok: ok, p_note: note.trim() || null })
   if (error) throw new Error(error.message)
 }
+
+/**
+ * "CLAUDE, PLEASE DO THIS" (Raptor H12): put an approved request on the builder's queue, or take it
+ * off. The scheduled builder session picks the oldest queued one, builds it, and is the only one that
+ * moves it to In development and Released. Said on the request's history in the person's own name.
+ */
+export async function askClaude(r: Pick<ChangeRequest, 'id'>, me: { id: string } | null, on: boolean): Promise<void> {
+  if (!me) throw new Error('Sign in again.')
+  const { error } = await supabase.from('change_requests')
+    .update(on ? { build_requested_at: clockNow().toISOString(), build_requested_by: me.id } : { build_requested_at: null, build_requested_by: null })
+    .eq('id', r.id)
+  if (error) throw new Error(error.message)
+  await addEvent(r.id, 'comment', on ? 'Asked Claude to build this.' : 'Took it off Claude\u2019s queue.', me.id)
+}
+

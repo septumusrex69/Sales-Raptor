@@ -115,3 +115,48 @@ about.
    first thing the next "work the list" picks up -- read `tested_note`, fix it, mark Done again.
    If Stephan says no: `status = 'declined', admin_note = '<why, in a sentence they will understand>'`.
 4. Note what you built in HANDOFF.md as usual.
+
+## Job 3 -- the builder (scheduled, hourly in working hours; or ▶ / "work on R-12")
+
+The firm (Raptor H12): "It should only be released ... if you have told me that it's been done ... I would
+have to be able to ... click on it and say, okay, well, Claude, please do this." Stephan approves and presses
+**Ask Claude to build it**; this job is the only thing that moves a request to In development and Released.
+
+1. **ONE request a run**, the oldest on the queue -- a sent-back one counts (it is `accepted` again):
+   ```sql
+   select r.number, r.department, r.pane, r.description, r.review_summary, r.review_questions,
+          r.tested_ok, r.tested_note, r.page_path, r.build_requested_at
+     from public.change_requests r
+    where r.status = 'accepted' and r.build_requested_at is not null
+    order by r.build_requested_at limit 1;
+   ```
+   None: stop, write nothing. Read its files and its history (`change_request_events`, oldest first) --
+   Stephan's answers to the review's questions are there as comments.
+2. **Not clear enough to build without guessing?** (an open review question nobody answered, two readings that
+   change money or the law.) Do NOT guess. Write the question onto the request and take it off the queue:
+   ```sql
+   insert into public.change_request_events (request_id, kind, body, by_id)
+   select id, 'comment', $q$Claude needs an answer before building: <the question, one sentence>$q$, null from public.change_requests where number = 12;
+   update public.change_requests set build_requested_at = null where number = 12;
+   ```
+   Then stop. Stephan answers with a note and presses Ask Claude again.
+3. Otherwise: `update public.change_requests set status = 'building' where number = 12;` (the asker is told).
+4. **Build it as any session would** -- read CLAUDE.md and HANDOFF.md first; branch
+   `claude/h<handoff>-r12` from `claude/sales-raptor-review-p1pzx2`; staging only; migrations mirrored into
+   schema.sql; every new check broken once and seen failing; `npm run qa -- --fast`, `npm run build`,
+   `npm run lint`, and the browser tests for what you touched. Commit subjects `Raptor H<n>: R-12 ...`.
+5. **Green**: push the branch, fast-forward `claude/sales-raptor-review-p1pzx2` to it (`git push origin
+   HEAD:claude/sales-raptor-review-p1pzx2`; if that is not a fast-forward, merge the preview branch in first,
+   re-run the checks, then push). Then release it with how to test, and take it off the queue:
+   ```sql
+   update public.change_requests
+      set status = 'done', build_requested_at = null, done_in = 'Raptor H12, commit 1a2b3c4',
+          admin_note = $n$Where to click, and what they should now see.$n$
+    where number = 12;
+   ```
+   Add a line under the newest handoff section in HANDOFF.md, commit and push it the same way.
+6. **Cannot get it green** in this run: push nothing to the preview branch; put it back
+   (`status = 'accepted'`, `build_requested_at = null`) with a comment saying what failed and what is needed.
+7. Never: production; a second request in one run; declining; changing anything outside what the request
+   needs; a request that is not on the queue.
+

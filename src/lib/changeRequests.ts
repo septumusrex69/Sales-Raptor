@@ -57,6 +57,9 @@ export interface ChangeRequest {
   review_summary: string | null
   review_questions: string[]
   reviewed_at: string | null
+  /** On Claude's build queue since (Raptor H12): set by "Ask Claude to build it", cleared by the builder. */
+  build_requested_at: string | null
+  build_requested_by: string | null
 }
 
 export type ReviewVerdict = 'ready' | 'decision' | 'blocked'

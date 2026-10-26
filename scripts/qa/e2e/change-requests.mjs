@@ -18,7 +18,8 @@ const t = makeRunner('change-requests')
 const TESTER = { ...PROFILE, id: 'u-ali', name: 'Alianna Botha', email: 'a@x.co.za', role: 'Pre-legal Agent' }
 const ADMIN = { ...PROFILE, id: 'u-stephan', name: 'Stephan', email: 's@x.co.za', role: 'Administrator' }
 const NONE = { tested_ok: null, tested_note: null, tested_at: null, tested_by: null, assigned_to: null,
-  review_title: null, review_verdict: null, review_size: null, review_summary: null, review_questions: [], reviewed_at: null }
+  review_title: null, review_verdict: null, review_size: null, review_summary: null, review_questions: [], reviewed_at: null,
+  build_requested_at: null, build_requested_by: null }
 const REQUESTS = [
   { ...NONE, id: 'q1', number: 7, description: 'Diary: make broken promises red', page_path: '/diary', page_title: 'Diary', pane: 'Diary', department: 'Call centre', status: 'new', priority: 'normal',
     admin_note: null, done_in: null, created_by: TESTER.id, created_at: '2026-10-25T08:00:00Z', decided_by: null, decided_at: null, closed_at: null,
@@ -184,18 +185,25 @@ try {
   t.ok('the panel shows the night\'s reading apart from the status', /Needs your decision/.test(await ad.getByTestId('request-panel-review').innerText())
     && /Red or orange\?/.test(await ad.getByTestId('request-panel-review').innerText()))
   t.ok('...and the history', /sent the request/.test(await ad.getByTestId('request-activity').innerText()) && /The nightly review/.test(await ad.getByTestId('request-activity').innerText()))
+  t.check('a person is never offered In development or Released', await ad.locator('[data-testid="request-start"], [data-testid="request-release"]').count(), 0)
+  await ad.getByTestId('request-approve-build').click()
+  await ap.waitForTimeout(600)
+  const queued = adminWrites.filter((w) => w.table === 'patch').map((w) => w.body)
+  t.ok('"Approve & ask Claude" approves it and puts it on Claude\'s queue', queued.some((b) => b.status === 'accepted')
+    && queued.some((b) => typeof b.build_requested_at === 'string' && b.build_requested_by === ADMIN.id))
+  t.ok('...and says so on its history', adminWrites.some((w) => w.table === 'event' && w.body.kind === 'comment' && w.body.body === 'Asked Claude to build this.'))
   await ad.getByTestId('request-ask').click()
   await ad.getByTestId('request-compose-words').fill('Red or orange?')
   await ad.getByTestId('request-compose-send').click()
   await ap.waitForTimeout(500)
-  t.check('Request info asks the person who asked, as a question on the request', JSON.stringify(adminWrites.find((w) => w.table === 'event')?.body),
+  t.check('Request info asks the person who asked, as a question on the request', JSON.stringify(adminWrites.find((w) => w.table === 'event' && w.body.kind === 'question')?.body),
     JSON.stringify({ request_id: 'q1', kind: 'question', body: 'Red or orange?', by_id: ADMIN.id }))
   await ad.getByTestId('request-decline').click()
   t.ok('a decline needs a reason', await ad.getByTestId('request-compose-send').isDisabled())
   await ad.getByTestId('request-compose-words').fill('Covered by R-8.')
   await ad.getByTestId('request-compose-send').click()
   await ap.waitForTimeout(600)
-  const patch = adminWrites.find((w) => w.table === 'patch')
+  const patch = adminWrites.find((w) => w.table === 'patch' && w.body.status === 'declined')
   t.ok('...and with one it writes the status and the reason to that request', !!patch && /id=eq\.q1/.test(patch.url)
     && patch.body.status === 'declined' && patch.body.admin_note === 'Covered by R-8.')
   await t.shot(ap, 'change-requests-2-admin')

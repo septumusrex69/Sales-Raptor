@@ -126,8 +126,20 @@ ok('/requests is routed and in the menu for everybody', /path="\/requests" eleme
 const page = code('src/pages/requests/RequestsPage.tsx')
 const panel = code('src/components/requests/RequestPanel.tsx')
 ok('the panel offers decisions only to an Administrator', /const admin = mayDecide\(me\)/.test(panel) && /\{admin && composing === null && \(/.test(panel))
-ok('...a decline, a question and a release each need words', /disabled=\{busy \|\| !words\.trim\(\)\}/.test(panel)
-  && /composing === 'decline'\) void move\('declined', w\)/.test(panel) && /status: 'done', admin_note: w/.test(panel))
+ok('...a decline and a question each need words', /disabled=\{busy \|\| !words\.trim\(\)\}/.test(panel)
+  && /composing === 'decline'\) void move\('declined', w\)/.test(panel))
+/*
+ * YOU DECIDE, CLAUDE BUILDS (Raptor H12). The firm: "it should only be released ... if you have told
+ * me that it's been done". No button moves a request to In development or Released; a person puts an
+ * approved one on Claude's queue, and the builder session makes those two moves.
+ */
+ok('no person moves a request to In development or Released', !/move\('building'\)/.test(panel) && !/status: 'done'/.test(panel))
+ok('...an approved one is put on Claude\'s queue instead, or approved and queued in one press',
+  /askClaude\(r, me, true\)/.test(panel) && /data-testid="request-build"/.test(read('src/components/requests/RequestPanel.tsx'))
+  && /data-testid="request-approve-build"/.test(read('src/components/requests/RequestPanel.tsx')))
+ok('...which is said on the request\'s history in the person\'s own name', /addEvent\(r\.id, 'comment', on \? 'Asked Claude to build this\.'/.test(code('src/lib/changeRequestsApi.ts')))
+ok('the queue is two columns on the request', /add column if not exists build_requested_at timestamptz/.test(read('supabase/schema.sql')))
+ok('the builder\'s instructions are in the skill', /## Job 3 -- the builder/.test(read('.claude/skills/change-requests/SKILL.md')))
 ok('the list does not pull every picture: files are fetched when a request is opened',
   /select\('id, request_id, name, mime, bytes, purged_at'\)/.test(code('src/lib/changeRequestsApi.ts')) && /fileDataUrl\(f\)/.test(panel) && !/fileDataUrl/.test(page))
 

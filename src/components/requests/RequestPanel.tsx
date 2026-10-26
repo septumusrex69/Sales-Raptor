@@ -11,7 +11,7 @@ import {
   PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, mayDecide, mayTest, mayWithdraw, requestLabel, stageOf, testState, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
-import { addEvent, answerTest, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
+import { addEvent, answerTest, askClaude, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
 import type { User } from '../../types'
 
 /**
@@ -47,7 +47,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /* One box for words, used by whichever action needs them: a decline's reason, a question, how to test. */
-  const [composing, setComposing] = useState<null | 'decline' | 'question' | 'release' | 'comment' | 'sendback'>(null)
+  const [composing, setComposing] = useState<null | 'decline' | 'question' | 'comment' | 'sendback'>(null)
   const [words, setWords] = useState('')
 
   const loadEvents = useCallback(() => {
@@ -65,11 +65,18 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
     status, ...(note !== undefined ? { admin_note: note.trim() || null } : {}),
   }))
 
+  /* Approve, and put it on Claude's queue, in one press. */
+  async function approveAndBuild() {
+    await act(async () => {
+      await updateRequest(r.id, { status: 'accepted' })
+      await askClaude(r, me, true)
+    })
+  }
+
   function submitWords() {
     const w = words.trim()
     if (!w || !me) return
     if (composing === 'decline') void move('declined', w)
-    else if (composing === 'release') void act(() => updateRequest(r.id, { status: 'done', admin_note: w }))
     else if (composing === 'question') void act(() => addEvent(r.id, 'question', w, me.id))
     else if (composing === 'comment') void act(() => addEvent(r.id, 'comment', w, me.id))
     else if (composing === 'sendback') void act(() => answerTest(r.number, false, w))
@@ -78,7 +85,6 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   const PROMPT: Record<NonNullable<typeof composing>, { label: string; placeholder: string; button: string }> = {
     decline: { label: 'Why not? They are told.', placeholder: 'e.g. Covered by R-8, which does the same.', button: 'Decline' },
     question: { label: `Ask ${asker?.name ?? 'them'} — they are notified and can answer here.`, placeholder: 'e.g. Which reference do you mean: ours or the client’s?', button: 'Send question' },
-    release: { label: 'How to test it — they read this in their "Please test it" box.', placeholder: 'Where to click, and what they should now see.', button: 'Release' },
     comment: { label: 'Add a note to the history.', placeholder: 'Write a note…', button: 'Add note' },
     sendback: { label: 'What is still not right?', placeholder: 'e.g. The reference is still missing on disputes.', button: 'Send it back' },
   }
@@ -198,18 +204,33 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
       {/* THE NEXT STEP, pinned to the bottom where a thumb finds it on the iPad. */}
       {admin && composing === null && (
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-5 py-3" data-testid="request-actions">
+          {/*
+            YOU DECIDE, CLAUDE BUILDS (the firm, 26 Oct: "it should only be released ... if you have
+            told me that it's been done ... I would have to be able to ... click on it and say, okay,
+            well, Claude, please do this"). In development and Released are Claude's moves, made when
+            the work is on the preview -- there is no button here for them, so nothing reads as
+            released that nobody built.
+          */}
           {r.status === 'new' && <>
-            <Button variant="primary" disabled={busy} onClick={() => void move('accepted')} data-testid="request-approve">Approve</Button>
+            <Button variant="primary" disabled={busy} onClick={() => void approveAndBuild()} data-testid="request-approve-build">Approve &amp; ask Claude</Button>
+            <Button variant="secondary" disabled={busy} onClick={() => void move('accepted')} data-testid="request-approve">Approve only</Button>
             <Button variant="secondary" disabled={busy} onClick={() => setComposing('question')} icon={<HelpCircle size={14} />} data-testid="request-ask">Request info</Button>
             <Button variant="danger" disabled={busy} onClick={() => setComposing('decline')} data-testid="request-decline">Decline</Button>
           </>}
           {r.status === 'accepted' && <>
-            <Button variant="primary" disabled={busy} onClick={() => void move('building')} data-testid="request-start">Start development</Button>
+            {r.build_requested_at ? (
+              <>
+                <span className="text-xs text-violet-800" data-testid="request-queued">Queued for Claude since {formatDateTime(r.build_requested_at)}</span>
+                <Button variant="ghost" disabled={busy} onClick={() => void act(() => askClaude(r, me, false))} data-testid="request-unqueue">Take it off the queue</Button>
+              </>
+            ) : (
+              <Button variant="primary" disabled={busy} onClick={() => void act(() => askClaude(r, me, true))} data-testid="request-build">Ask Claude to build it</Button>
+            )}
             <Button variant="secondary" disabled={busy} onClick={() => setComposing('question')} icon={<HelpCircle size={14} />} data-testid="request-ask">Request info</Button>
             <Button variant="danger" disabled={busy} onClick={() => setComposing('decline')} data-testid="request-decline">Decline</Button>
           </>}
           {r.status === 'building' && <>
-            <Button variant="primary" disabled={busy} onClick={() => { setComposing('release'); setWords(r.admin_note ?? '') }} data-testid="request-release">Release</Button>
+            <span className="text-xs text-amber-800" data-testid="request-building">Claude is building it. It is released here, with how to test, when it is on the preview.</span>
             <Button variant="secondary" disabled={busy} onClick={() => setComposing('question')} icon={<HelpCircle size={14} />} data-testid="request-ask">Request info</Button>
           </>}
           {(r.status === 'done' || r.status === 'declined') && (
@@ -241,6 +262,7 @@ export function StagePill({ r }: { r: ChangeRequest }) {
   return (
     <span className="inline-flex items-center gap-1">
       <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`} data-testid="request-status">{stage}</span>
+      {r.status === 'accepted' && r.build_requested_at && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="request-queued-pill">Queued for Claude</span>}
       {test === 'works' && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">Tested ✓</span>}
       {test === 'waiting' && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">To test</span>}
       {test === 'sent back' && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">Sent back</span>}
@@ -249,7 +271,8 @@ export function StagePill({ r }: { r: ChangeRequest }) {
 }
 
 function EventLine({ e, who }: { e: RequestEvent; who: string | null }) {
-  const name = who ?? (e.kind === 'reviewed' ? 'The nightly review' : 'Raptor')
+  /* Nobody's name on a move is Claude's: the reviewer and the builder write as the database owner. */
+  const name = who ?? (e.kind === 'reviewed' ? 'The nightly review' : 'Claude')
   const what = e.kind === 'sent' ? 'sent the request'
     : e.kind === 'reviewed' ? 'read it'
       : e.kind === 'status' ? `moved it to ${e.to_status ? STATUS_LABEL[e.to_status] : '?'}`
