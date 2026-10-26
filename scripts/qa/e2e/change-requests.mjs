@@ -34,7 +34,8 @@ const REQUESTS = [
 const REVIEWS = [{ id: 'v1', created_at: '2026-10-26T02:00:00Z', summary: 'Two requests about the diary, one decision needed.', request_ids: ['q1', 'q2'],
   groups: [{ title: 'Broken promises stand out in the diary', request_numbers: [7, 8], what: 'Colour the broken-promise rows.', questions: ['Red or orange?'], size: 'small' }] }]
 const EVENTS = [{ id: 'e1', request_id: 'q1', kind: 'sent', body: null, from_status: null, to_status: null, by_id: TESTER.id, at: '2026-10-25T08:00:00Z' },
-  { id: 'e2', request_id: 'q1', kind: 'reviewed', body: 'Colour the broken-promise rows.', from_status: null, to_status: null, by_id: null, at: '2026-10-26T02:00:00Z' }]
+  { id: 'e2', request_id: 'q1', kind: 'reviewed', body: 'Colour the broken-promise rows.', from_status: null, to_status: null, by_id: null, at: '2026-10-26T02:00:00Z' },
+  { id: 'e3', request_id: 'q1', kind: 'question', body: 'Which colour?', choices: ['Red', 'Orange'], answers: null, from_status: null, to_status: null, by_id: ADMIN.id, at: '2026-10-26T03:00:00Z' }]
 
 const open = async (page, path) => {
   for (let i = 0; i < 60; i += 1) {
@@ -180,6 +181,25 @@ try {
   t.check('...and sends it back with that', JSON.stringify(writes.find((w) => w.table === 'tested')?.body),
     JSON.stringify({ p_number: 5, p_ok: false, p_note: 'The reference is still missing on disputes.' }))
   await t.shot(page, 'change-requests-4-test')
+
+  /* A question with options: the person who asked ticks one, or Other with their own words. */
+  const choices = panel.getByTestId('request-choices')
+  t.check('a question with options shows them as ticks, with Other last', JSON.stringify(await choices.getByTestId('request-choice').allInnerTexts()),
+    JSON.stringify(['Red', 'Orange', 'Other']))
+  t.ok('...nothing is sent before something is ticked', await panel.getByTestId('request-choice-send').isDisabled())
+  await choices.getByTestId('request-choice').filter({ hasText: 'Orange' }).click()
+  await panel.getByTestId('request-choice-send').click()
+  await page.waitForTimeout(500)
+  const answers = () => writes.filter((w) => w.table === 'event' && w.body.answers === 'e3').map((w) => w.body)
+  t.check('...a tick answers the question, as a reply pointing at it', JSON.stringify(answers()[0]),
+    JSON.stringify({ request_id: 'q3', kind: 'comment', body: 'Orange', by_id: TESTER.id, answers: 'e3' }))
+  await choices.getByTestId('request-choice').filter({ hasText: 'Other' }).click()
+  t.ok('...Other needs their own words', await panel.getByTestId('request-choice-send').isDisabled())
+  await panel.getByTestId('request-choice-other').fill('Purple')
+  await panel.getByTestId('request-choice-send').click()
+  await page.waitForTimeout(500)
+  t.check('...and sends them as Other', answers()[1]?.body, 'Other: Purple')
+  await t.shot(page, 'change-requests-6-choices')
   await page.context().close()
 
   /* 3. An Administrator works a ticket from the panel. */
@@ -199,11 +219,16 @@ try {
     && queued.some((b) => typeof b.build_requested_at === 'string' && b.build_requested_by === ADMIN.id))
   t.ok('...and says so on its history', adminWrites.some((w) => w.table === 'event' && w.body.kind === 'comment' && w.body.body === 'Asked Claude to build this.'))
   await ad.getByTestId('request-ask').click()
+  t.ok('an Administrator sees the options, waiting for the person who asked', /Waiting for .+ to choose/.test(await ad.getByTestId('request-choices').innerText())
+    && (await ad.getByTestId('request-choice-send').count()) === 0)
   await ad.getByTestId('request-compose-words').fill('Red or orange?')
+  await ad.getByTestId('request-compose-choices').fill('Red')
+  t.ok('one option is not a choice', await ad.getByTestId('request-compose-send').isDisabled())
+  await ad.getByTestId('request-compose-choices').fill('1. Red\n2. Orange')
   await ad.getByTestId('request-compose-send').click()
   await ap.waitForTimeout(500)
   t.check('Request info asks the person who asked, as a question on the request', JSON.stringify(adminWrites.find((w) => w.table === 'event' && w.body.kind === 'question')?.body),
-    JSON.stringify({ request_id: 'q1', kind: 'question', body: 'Red or orange?', by_id: ADMIN.id }))
+    JSON.stringify({ request_id: 'q1', kind: 'question', body: 'Red or orange?', by_id: ADMIN.id, choices: ['Red', 'Orange'] }))
   await ad.getByTestId('request-decline').click()
   t.ok('a decline needs a reason', await ad.getByTestId('request-compose-send').isDisabled())
   await ad.getByTestId('request-compose-words').fill('Covered by R-8.')

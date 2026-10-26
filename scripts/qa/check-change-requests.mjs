@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
-  STATUS_LABEL, mayTest, onShelf, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
+  STATUS_LABEL, OTHER_CHOICE, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, onShelf, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
 let pass = 0
@@ -133,7 +133,7 @@ ok('/requests is routed and in the menu for everybody', /path="\/requests" eleme
 const page = code('src/pages/requests/RequestsPage.tsx')
 const panel = code('src/components/requests/RequestPanel.tsx')
 ok('the panel offers decisions only to an Administrator', /const admin = mayDecide\(me\)/.test(panel) && /\{admin && composing === null && \(/.test(panel))
-ok('...a decline and a question each need words', /disabled=\{busy \|\| !words\.trim\(\)\}/.test(panel)
+ok('...a decline and a question each need words', /disabled=\{busy \|\| !words\.trim\(\) \|\| \(composing === 'question' && !choicesOk\(choices\)\)\}/.test(panel)
   && /composing === 'decline'\) void move\('declined', w\)/.test(panel))
 /*
  * YOU DECIDE, CLAUDE BUILDS (Raptor H12). The firm: "it should only be released ... if you have told
@@ -184,6 +184,34 @@ ok('...it sends the pane and the chosen department, suggested from the pane',
   && /pageTitle, pane, department, files:/.test(modal))
 ok('the list shows the department and can be filtered by it', /<Chip tone="gold">\{r\.department\}<\/Chip>/.test(page)
   && /dept === 'all' \|\| r\.department === dept/.test(page))
+
+/* ---------- a question with options to tick (Raptor H12) ---------- */
+check('choices are read one per line, numbering and bullets off, blanks and repeats gone',
+  JSON.stringify(parseChoices("1. Raptor's case number\n2) The client's account number\n\n- The client's own reference\n• raptor's case number\nOther")),
+  JSON.stringify(["Raptor's case number", "The client's account number", "The client's own reference"]))
+check('...at most six', parseChoices('a\nb\nc\nd\ne\nf\ng').length, 6)
+check('one choice is not a choice; none is a question for words', [choicesOk([]), choicesOk(['a']), choicesOk(['a', 'b'])].join(), 'true,false,true')
+check('a tick sends the choice as written', answerBody('Red', ''), 'Red')
+check('Other needs words, and says it is Other', [answerBody(OTHER_CHOICE, '  '), answerBody(OTHER_CHOICE, ' Purple ')].join('|'), '|Other: Purple')
+check('nothing ticked sends nothing', answerBody(null, 'x'), null)
+const qEv = { id: 'q', kind: 'question', choices: ['Red', 'Orange'] }
+check('the answer is the latest comment pointing at the question', answerTo(qEv, [
+  { kind: 'comment', answers: 'q', at: '2026-10-26T10:00:00Z', body: 'Red' },
+  { kind: 'comment', answers: 'q', at: '2026-10-26T11:00:00Z', body: 'Orange' },
+  { kind: 'comment', answers: null, at: '2026-10-26T12:00:00Z', body: 'Red' }])?.body, 'Orange')
+check('...and none when nobody answered', answerTo(qEv, [{ kind: 'question', answers: null, at: 'x' }]), null)
+check('the tick an answer shows', [tickedOf(['Red', 'Orange'], 'Orange'), tickedOf(['Red'], 'Other: Purple'), tickedOf(['Red'], 'Blue')].join('|'), 'Orange|Other|')
+check('only the person who asked answers, and only a question with choices',
+  [mayAnswer({ id: 'u1' }, { created_by: 'u1' }, qEv), mayAnswer({ id: 'admin' }, { created_by: 'u1' }, qEv),
+   mayAnswer({ id: 'u1' }, { created_by: 'u1' }, { kind: 'question', choices: null })].join(), 'true,false,false')
+{
+  const sql = read('supabase/schema.sql'), m = sql.slice(sql.lastIndexOf('migration `change_request_choices`'))
+  ok('the database holds the shape: 2-6 choices on a question, an answer is a comment', m.length > 0 && /cardinality\(choices\) between 2 and 6/.test(m)
+    && /check \(answers is null or kind = 'comment'\)/.test(m))
+  ok('...and an answer must answer a question with choices on the same request',
+    /q\.id = change_request_events\.answers and q\.kind = 'question' and q\.choices is not null\s+and q\.request_id = change_request_events\.request_id/.test(m))
+  ok('the history reads both columns', /by_id, at, choices, answers'/.test(read('src/lib/changeRequestsApi.ts')))
+}
 
 if (failures.length) {
   console.log(`check-change-requests: ${pass} passed, ${failures.length} failed`)

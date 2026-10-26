@@ -114,6 +114,21 @@ R-5 was put back to Approved (it had been released by hand, nothing built); the 
 "released" notifications to Rinda were marked read, not deleted. **R-5 waits on Stephan's answers to the
 review's three questions** (which problems, import review only, preview before a bulk change) before Ask Claude.
 
+## S12 · QUESTIONS WITH OPTIONS TO TICK (26 Oct, Raptor H12)
+
+Stephan, of the plain question on R-6: "Can't we build this like you have ... to choose the option by means of
+a tick. Or choose other. And then write other suggestion." **Request info** now takes optional options (one
+per line, 2-6); the person who asked sees ticks plus **Other** with a box for their own words, and **Send
+answer**. The answer is a comment with `answers` = the question's id, so it notifies the Administrators as any
+reply does and reads as "answered" in the history; once answered everybody sees the chosen tick. Migration
+`change_request_choices` (md5 matched): `change_request_events.choices text[]` and `.answers uuid`, shape
+constraints, and one clause added to the insert policy -- an answer must answer a question with choices on the
+SAME request (probed as Rinda, rolled back). Rules in `changeRequests.ts` (`parseChoices`, `answerBody`,
+`answerTo`, `tickedOf`, `mayAnswer`); check-change-requests +12, e2e/change-requests +7. The skill tells the
+builder and the nightly review to ask this way when the answer is one of a few.
+**R-6** now carries two such questions for Rinda (which reference; Diary or Accounts). It goes on the queue
+once she answers.
+
 ## S12 · DEBTOR CAMPAIGNS: WHO THEY COME FROM, AND THE WRITTEN-OFF BOOK (26 Oct, Raptor H12)
 
 Stephan: a campaign should "ask if it goes out from ... a centralized email, or ... the person who sends it, or

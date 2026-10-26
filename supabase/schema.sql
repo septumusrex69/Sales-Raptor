@@ -51641,3 +51641,35 @@ $$;
 revoke all on function public.change_request_event_notify() from public, anon, authenticated;
 create or replace trigger change_request_event_notify after insert on public.change_request_events
   for each row execute function public.change_request_event_notify();
+
+-- ============================================================================
+-- Raptor H12, migration `change_request_choices`: A QUESTION WITH OPTIONS TO TICK. The firm, of a
+-- plain question on R-6: "to choose the option by means of a tick. Or choose other. And then write
+-- other suggestion." A question may carry 2-6 `choices`; the asker answers with a comment whose
+-- `answers` points at it (so the reply notifies the Administrators as any reply does). The insert
+-- policy is unchanged but for one clause: an answer must answer a question with choices on the
+-- SAME request.
+-- ============================================================================
+alter table public.change_request_events add column if not exists choices text[];
+alter table public.change_request_events add column if not exists answers uuid references public.change_request_events (id) on delete set null;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'change_request_events_choices_shape') then
+    -- Choices belong to a question, two to six of them, none empty; an answer is a comment.
+    alter table public.change_request_events add constraint change_request_events_choices_shape
+      check (choices is null or (kind = 'question' and cardinality(choices) between 2 and 6
+                                 and array_position(choices, null) is null and not ('' = any (choices))));
+    alter table public.change_request_events add constraint change_request_events_answer_is_comment
+      check (answers is null or kind = 'comment');
+  end if;
+end $$;
+-- An answer answers a question with choices ON THE SAME REQUEST; otherwise as before.
+alter policy change_request_events_insert on public.change_request_events
+  with check (
+    by_id = auth.uid()
+    and (kind = 'comment' or (kind = 'question' and public.current_user_role() = 'Administrator'))
+    and (public.current_user_role() = 'Administrator'
+         or exists (select 1 from public.change_requests r where r.id = request_id and r.created_by = auth.uid()))
+    and (answers is null or exists (select 1 from public.change_request_events q
+                                     where q.id = change_request_events.answers and q.kind = 'question' and q.choices is not null
+                                       and q.request_id = change_request_events.request_id)));

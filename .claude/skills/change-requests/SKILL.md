@@ -139,7 +139,17 @@ have to be able to ... click on it and say, okay, well, Claude, please do this."
    select id, 'comment', $q$Claude needs an answer before building: <the question, one sentence>$q$, null from public.change_requests where number = 12;
    update public.change_requests set build_requested_at = null where number = 12;
    ```
-   Then stop. Stephan answers with a note and presses Ask Claude again.
+   **When the answer is one of a few, ask it with options to tick** (Raptor H12 -- the firm: "choose the
+   option by means of a tick. Or choose other"): a `question` with 2-6 `choices`; the person who asked
+   ticks one or writes their own under Other, and the answer arrives as a comment with `answers` = the
+   question's id. One question per event; ask the person who ASKED (they are notified), not Stephan:
+   ```sql
+   insert into public.change_request_events (request_id, kind, body, choices, by_id)
+   select id, 'question', $q$Which reference should the diary show?$q$,
+          array[$c$Raptor's case number$c$, $c$The client's account number$c$], null
+     from public.change_requests where number = 12;
+   ```
+   Then stop. The answer comes back as a comment (read `answers`), and Stephan presses Ask Claude again.
 3. Otherwise: `update public.change_requests set status = 'building' where number = 12;` (the asker is told).
 4. **Build it as any session would** -- read CLAUDE.md and HANDOFF.md first; branch
    `claude/h<handoff>-r12` from `claude/sales-raptor-review-p1pzx2`; staging only; migrations mirrored into

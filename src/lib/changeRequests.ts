@@ -77,6 +77,62 @@ export interface RequestEvent {
   to_status: RequestStatus | null
   by_id: string | null
   at: string
+  /** A question's options to tick (Raptor H12); null on a question that wants words. */
+  choices?: string[] | null
+  /** The question this comment answers, when it is a ticked answer. */
+  answers?: string | null
+}
+
+/*
+ * A QUESTION WITH OPTIONS TO TICK (Raptor H12). The firm, of the plain question on R-6: "Can't we
+ * build this like you have ... to choose the option by means of a tick. Or choose other. And then
+ * write other suggestion." So a question may carry two to six choices, and the person who asked
+ * answers by ticking one -- or Other, with their own words. The answer is an ordinary comment with
+ * `answers` pointing at the question, so it notifies the Administrators the way any reply does and
+ * reads in the history as what it is, and the builder finds it where it already looks.
+ */
+export const OTHER_CHOICE = 'Other'
+export const MAX_CHOICES = 6
+
+/** The choices typed one per line: numbering and bullets dropped, blanks and repeats gone, at most six. */
+export function parseChoices(text: string): string[] {
+  const out: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const c = line.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, '').trim()
+    if (c && c.toLowerCase() !== OTHER_CHOICE.toLowerCase() && !out.some((o) => o.toLowerCase() === c.toLowerCase())) out.push(c)
+  }
+  return out.slice(0, MAX_CHOICES)
+}
+
+/** One choice needs no more; at least two are what make it a choice. */
+export function choicesOk(choices: string[]): boolean {
+  return choices.length === 0 || choices.length >= 2
+}
+
+/** What a tick sends: the choice as written, or "Other: <their words>"; null while it says nothing. */
+export function answerBody(choice: string | null, other: string): string | null {
+  if (choice === null) return null
+  if (choice !== OTHER_CHOICE) return choice
+  const w = other.trim()
+  return w ? `${OTHER_CHOICE}: ${w}` : null
+}
+
+/** The answer given to a question, if any -- the latest, should two have crossed. */
+export function answerTo<E extends Pick<RequestEvent, 'kind' | 'answers' | 'at'>>(q: Pick<RequestEvent, 'id'>, events: E[]): E | null {
+  const a = events.filter((e) => e.kind === 'comment' && e.answers === q.id)
+  return a.length ? a.reduce((x, y) => (y.at > x.at ? y : x)) : null
+}
+
+/** Which tick the answer was: a listed choice, Other, or none of them (null). */
+export function tickedOf(choices: string[], body: string | null): string | null {
+  if (!body) return null
+  if (choices.includes(body)) return body
+  return body.startsWith(`${OTHER_CHOICE}:`) ? OTHER_CHOICE : null
+}
+
+/** The person who asked answers their own request's questions; an Administrator answers for nobody. */
+export function mayAnswer(user: Pick<User, 'id'> | null | undefined, r: Pick<ChangeRequest, 'created_by'>, q: Pick<RequestEvent, 'kind' | 'choices'>): boolean {
+  return !!user && user.id === r.created_by && q.kind === 'question' && (q.choices?.length ?? 0) >= 2
 }
 
 export interface RequestFileMeta {

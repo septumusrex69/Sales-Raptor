@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ChevronLeft, ChevronRight, FileText, HelpCircle, Loader2, MessageSquare, Moon, Paperclip, X,
+  Check, ChevronLeft, ChevronRight, FileText, HelpCircle, Loader2, MessageSquare, Moon, Paperclip, X,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, mayDecide, mayTest, mayWithdraw, requestLabel, stageOf, testState, titleOf,
+  MAX_CHOICES, OTHER_CHOICE, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayDecide, mayTest, mayWithdraw,
+  parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
-import { addEvent, answerTest, askClaude, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
+import { addEvent, answerQuestion, answerTest, askClaude, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
 import type { User } from '../../types'
 
 /**
@@ -49,15 +50,18 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   /* One box for words, used by whichever action needs them: a decline's reason, a question, how to test. */
   const [composing, setComposing] = useState<null | 'decline' | 'question' | 'comment' | 'sendback'>(null)
   const [words, setWords] = useState('')
+  /* A question's options, one per line; empty is a question that wants words. */
+  const [choiceWords, setChoiceWords] = useState('')
+  const choices = parseChoices(choiceWords)
 
   const loadEvents = useCallback(() => {
     listEvents(r.id).then(setEvents).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [r.id])
-  useEffect(() => { setEvents(null); setComposing(null); setWords(''); setError(null); loadEvents() }, [loadEvents])
+  useEffect(() => { setEvents(null); setComposing(null); setWords(''); setChoiceWords(''); setError(null); loadEvents() }, [loadEvents])
 
   async function act(fn: () => Promise<void>) {
     setBusy(true); setError(null)
-    try { await fn(); setComposing(null); setWords(''); onChanged(); loadEvents() }
+    try { await fn(); setComposing(null); setWords(''); setChoiceWords(''); onChanged(); loadEvents() }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -77,7 +81,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
     const w = words.trim()
     if (!w || !me) return
     if (composing === 'decline') void move('declined', w)
-    else if (composing === 'question') void act(() => addEvent(r.id, 'question', w, me.id))
+    else if (composing === 'question') void act(() => addEvent(r.id, 'question', w, me.id, choices))
     else if (composing === 'comment') void act(() => addEvent(r.id, 'comment', w, me.id))
     else if (composing === 'sendback') void act(() => answerTest(r.number, false, w))
   }
@@ -176,7 +180,14 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
         <Section label="Activity">
           {events === null ? <p className="text-xs text-slate-400"><Loader2 size={12} className="inline animate-spin" /> Reading the history…</p> : (
             <ol className="space-y-2.5" data-testid="request-activity">
-              {events.map((e) => <EventLine key={e.id} e={e} who={userOf(e.by_id)?.name ?? null} />)}
+              {events.map((e) => (
+                <EventLine key={e.id} e={e} who={userOf(e.by_id)?.name ?? null}>
+                  {(e.choices?.length ?? 0) >= 2 && (
+                    <ChoiceAnswer q={e} answer={answerTo(e, events)} canAnswer={mayAnswer(me, r, e)} askerName={asker?.name ?? 'the person who asked'}
+                      busy={busy} onAnswer={(body) => { if (me) void act(() => answerQuestion(r.id, e.id, body, me.id)) }} />
+                  )}
+                </EventLine>
+              ))}
             </ol>
           )}
           {(admin || isAsker) && composing === null && (
@@ -191,8 +202,17 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
             <p className="text-xs font-semibold text-slate-600">{PROMPT[composing].label}</p>
             <textarea value={words} onChange={(e) => setWords(e.target.value)} rows={3} autoFocus placeholder={PROMPT[composing].placeholder}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-compose-words" />
+            {composing === 'question' && (
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">Options to tick, one per line (optional, up to {MAX_CHOICES}). They can always choose Other and write their own.</span>
+                <textarea value={choiceWords} onChange={(e) => setChoiceWords(e.target.value)} rows={3}
+                  placeholder={'e.g.\nRaptor\u2019s case number\nThe client\u2019s reference'}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-compose-choices" />
+                {!choicesOk(choices) && <span className="text-xs text-amber-700">Add a second option, or leave this empty to ask for words.</span>}
+              </label>
+            )}
             <div className="flex gap-2">
-              <Button size="sm" variant={composing === 'decline' || composing === 'sendback' ? 'danger' : 'primary'} disabled={busy || !words.trim()}
+              <Button size="sm" variant={composing === 'decline' || composing === 'sendback' ? 'danger' : 'primary'} disabled={busy || !words.trim() || (composing === 'question' && !choicesOk(choices))}
                 onClick={submitWords} data-testid="request-compose-send">{PROMPT[composing].button}</Button>
               <Button size="sm" variant="ghost" onClick={() => setComposing(null)}>Cancel</Button>
             </div>
@@ -270,7 +290,43 @@ export function StagePill({ r }: { r: ChangeRequest }) {
   )
 }
 
-function EventLine({ e, who }: { e: RequestEvent; who: string | null }) {
+/**
+ * A QUESTION'S OPTIONS: ticks for the person who asked until they answer, then the one they chose,
+ * ticked, for everybody. Other opens a box for their own words.
+ */
+function ChoiceAnswer({ q, answer, canAnswer, askerName, busy, onAnswer }: {
+  q: RequestEvent; answer: Pick<RequestEvent, 'body' | 'at'> | null; canAnswer: boolean; askerName: string; busy: boolean; onAnswer: (body: string) => void
+}) {
+  const [pick, setPick] = useState<string | null>(null)
+  const [other, setOther] = useState('')
+  const choices = q.choices ?? []
+  const open = canAnswer && !answer
+  const ticked = answer ? tickedOf(choices, answer.body) : pick
+  const send = answerBody(pick, other)
+  return (
+    <div className="mt-1.5 space-y-1" data-testid="request-choices" data-answered={answer ? 'yes' : 'no'}>
+      {[...choices, OTHER_CHOICE].map((c) => {
+        const on = ticked === c
+        return (
+          <button key={c} type="button" role="radio" aria-checked={on} disabled={!open || busy} onClick={() => setPick(c)} data-testid="request-choice"
+            className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[13px] ${on ? 'border-emerald-400 bg-emerald-50 text-emerald-900' : 'border-slate-200 text-slate-700'} ${open ? 'hover:border-slate-300' : 'cursor-default'}`}>
+            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white'}`}>{on && <Check size={12} />}</span>
+            <span>{c}</span>
+          </button>
+        )
+      })}
+      {open && pick === OTHER_CHOICE && (
+        <textarea value={other} onChange={(e) => setOther(e.target.value)} rows={2} autoFocus placeholder="Your suggestion…"
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-choice-other" />
+      )}
+      {open && <Button size="sm" variant="primary" disabled={busy || !send} onClick={() => { if (send) onAnswer(send) }} data-testid="request-choice-send">Send answer</Button>}
+      {answer && ticked === OTHER_CHOICE && <p className="text-[13px] text-emerald-900" data-testid="request-choice-other-said">{answer.body}</p>}
+      {!answer && !canAnswer && <p className="text-xs text-slate-500">Waiting for {askerName} to choose.</p>}
+    </div>
+  )
+}
+
+function EventLine({ e, who, children }: { e: RequestEvent; who: string | null; children?: ReactNode }) {
   /* Nobody's name on a move is Claude's: the reviewer and the builder write as the database owner. */
   const name = who ?? (e.kind === 'reviewed' ? 'The nightly review' : 'Claude')
   const what = e.kind === 'sent' ? 'sent the request'
@@ -278,7 +334,7 @@ function EventLine({ e, who }: { e: RequestEvent; who: string | null }) {
       : e.kind === 'status' ? `moved it to ${e.to_status ? STATUS_LABEL[e.to_status] : '?'}`
         : e.kind === 'tested' ? 'tested it'
           : e.kind === 'assigned' ? (e.body ? `gave it to ${e.body}` : 'took it off everybody')
-            : e.kind === 'question' ? 'asked' : 'wrote'
+            : e.kind === 'question' ? 'asked' : e.answers ? 'answered' : 'wrote'
   const body = e.kind === 'assigned' ? null : e.body
   return (
     <li className="flex gap-2.5 text-sm" data-kind={e.kind}>
@@ -286,6 +342,7 @@ function EventLine({ e, who }: { e: RequestEvent; who: string | null }) {
       <div className="min-w-0">
         <p className="text-slate-700"><strong className="font-medium">{name}</strong> {what} <span className="text-xs text-slate-400">· {formatDateTime(e.at)}</span></p>
         {body && <p className={`mt-0.5 whitespace-pre-wrap rounded-md px-2 py-1 text-[13px] ${e.kind === 'question' ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-700'}`}>{body}</p>}
+        {children}
       </div>
     </li>
   )
