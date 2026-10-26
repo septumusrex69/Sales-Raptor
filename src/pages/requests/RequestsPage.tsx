@@ -10,8 +10,8 @@ import { useAuth } from '../../store/AuthContext'
 import { formatDate, formatDateTime } from '../../data/mockData'
 import type { User } from '../../types'
 import {
-  PRIORITY_LABEL, STATUSES, STATUS_LABEL, isOpen, mayDecide, mayWithdraw, requestLabel, sortRequests,
-  type ChangeRequest, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
+  PRIORITY_LABEL, REQUEST_DEPARTMENTS, STATUSES, STATUS_LABEL, isOpen, mayDecide, mayWithdraw, requestLabel, sortRequests,
+  type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
 } from '../../lib/changeRequests'
 import { fileDataUrl, latestReview, listFiles, listRequests, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
 
@@ -38,6 +38,7 @@ export function RequestsPage() {
   const [files, setFiles] = useState<RequestFileMeta[]>([])
   const [review, setReview] = useState<RequestReview | null>(null)
   const [shelf, setShelf] = useState<Shelf>('open')
+  const [dept, setDept] = useState<RequestDepartment | 'all'>('all')
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -60,7 +61,8 @@ export function RequestsPage() {
       declined: all.filter((r) => r.status === 'declined').length, all: all.length }
   }, [rows])
   const shown = useMemo(() => sortRequests((rows ?? []).filter((r) =>
-    shelf === 'all' ? true : shelf === 'open' ? isOpen(r.status) : r.status === shelf)), [rows, shelf])
+    (shelf === 'all' ? true : shelf === 'open' ? isOpen(r.status) : r.status === shelf)
+    && (dept === 'all' || r.department === dept))), [rows, shelf, dept])
   const byNumber = useMemo(() => new Map((rows ?? []).map((r) => [r.number, r])), [rows])
 
   return (
@@ -112,6 +114,11 @@ export function RequestsPage() {
             </button>
           ))}
         </div>
+        <select value={dept} onChange={(e) => setDept(e.target.value as RequestDepartment | 'all')} aria-label="Department"
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" data-testid="requests-department">
+          <option value="all">Every department</option>
+          {REQUEST_DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -172,16 +179,21 @@ function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, onChan
           {requestLabel(r)}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="min-w-0 truncate text-[15px] font-semibold text-slate-800" data-testid="request-title">{title}</p>
-          </div>
+          <p className="min-w-0 truncate text-[15px] font-semibold text-slate-800" data-testid="request-title">{title}</p>
+          {/* WHICH DEPARTMENT, WHICH PANE (the firm, 26 Oct): first thing under the title, so the list can be read by them. */}
+          {(r.department || r.pane) && (
+            <p className="mt-1 flex flex-wrap gap-1.5 text-[11px]" data-testid="request-where">
+              {r.department && <span className="rounded-full bg-gold-100 px-2 py-0.5 font-semibold text-navy-900">{r.department}</span>}
+              {r.pane && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{r.pane} pane</span>}
+            </p>
+          )}
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500" data-testid="request-asker">
             <span className="inline-flex items-center gap-1.5">
               <UserAvatar userId={r.created_by} size={18} />
               <span>Asked by <strong className="font-medium text-slate-700">{asker?.name ?? 'Somebody'}</strong>{asker?.role ? ` · ${asker.role}` : ''}</span>
             </span>
             <span>· {formatDateTime(r.created_at)}</span>
-            {r.page_title && <span>· on {r.page_title}</span>}
+            {r.page_title && !r.pane && <span>· on {r.page_title}</span>}
             {pictures > 0 && <span className="inline-flex items-center gap-0.5"><ImageIcon size={12} />{pictures} screenshot{pictures === 1 ? '' : 's'}</span>}
             {pdfs > 0 && <span className="inline-flex items-center gap-0.5"><FileText size={12} />{pdfs} PDF{pdfs === 1 ? '' : 's'}</span>}
           </div>

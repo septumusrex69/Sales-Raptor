@@ -26,6 +26,10 @@ export interface ChangeRequest {
   description: string
   page_path: string | null
   page_title: string | null
+  /** The pane it was sent from (paneOf), stored as it was then. Null on the first few requests. */
+  pane: string | null
+  /** The department it is for, chosen by the sender. Null on the first few requests. */
+  department: RequestDepartment | null
   status: RequestStatus
   priority: RequestPriority
   admin_note: string | null
@@ -59,6 +63,58 @@ export interface RequestReview {
   created_at: string
   summary: string
   groups: ReviewGroup[]
+}
+
+/*
+ * WHICH PANE, WHICH DEPARTMENT (the firm, 26 Oct): "it should be clear ... in which pane is it coming
+ * from, to which department is it relevant ... is it in collections, is it in sales, is it in comms
+ * ... or just an overall function." The pane is read off the address; the department is the
+ * sender's choice, suggested from the pane, because a liaison asking about the Accounts screen may
+ * be asking for the call centre or for herself. The database holds the same list
+ * (change_requests_department_known).
+ */
+export const REQUEST_DEPARTMENTS = ['Call centre', 'Sales', 'Communications', 'Finance', 'Administration', 'Whole system'] as const
+export type RequestDepartment = typeof REQUEST_DEPARTMENTS[number]
+export const DEPARTMENT_HINT: Record<RequestDepartment, string> = {
+  'Call centre': 'Collections: accounts, the diary, debtors, disputes',
+  Sales: 'Leads, deals, contacts, proposals',
+  Communications: 'Clients and their liaisons, handover sheets, news',
+  Finance: 'Trust, payovers, the business account',
+  Administration: 'People, leave, settings, the library',
+  'Whole system': 'Something everywhere: menus, mail, search, speed',
+}
+
+/** Most specific first: /dashboard/collections must not be read as the Dashboard. */
+const PANES: { test: RegExp; pane: string; department: RequestDepartment }[] = [
+  { test: /^\/dashboard\/collections/, pane: 'Collections dashboard', department: 'Call centre' },
+  { test: /^\/dashboard\/sales/, pane: 'Sales dashboard', department: 'Sales' },
+  { test: /^\/accounts/, pane: 'Accounts', department: 'Call centre' },
+  { test: /^\/diary/, pane: 'Diary', department: 'Call centre' },
+  { test: /^\/performance/, pane: 'Collections', department: 'Call centre' },
+  { test: /^\/queries/, pane: 'Disputes', department: 'Call centre' },
+  { test: /^\/leads/, pane: 'Leads', department: 'Sales' },
+  { test: /^\/deals/, pane: 'Deals', department: 'Sales' },
+  { test: /^\/contacts/, pane: 'Contacts', department: 'Sales' },
+  { test: /^\/reps/, pane: 'Rep performance', department: 'Sales' },
+  { test: /^\/companies/, pane: 'Clients', department: 'Communications' },
+  { test: /^\/(news|campaigns)/, pane: 'News & campaigns', department: 'Communications' },
+  { test: /^\/trust/, pane: 'Trust', department: 'Finance' },
+  { test: /^\/business/, pane: 'Business', department: 'Finance' },
+  { test: /^\/people/, pane: 'People', department: 'Administration' },
+  { test: /^\/settings/, pane: 'Settings', department: 'Administration' },
+  { test: /^\/library/, pane: 'Library', department: 'Administration' },
+  { test: /^\/reports/, pane: 'Reports', department: 'Whole system' },
+  { test: /^\/mail/, pane: 'Mail', department: 'Whole system' },
+  { test: /^\/(tasks|calendar|activities)/, pane: 'Tasks & calendar', department: 'Whole system' },
+  { test: /^\/requests/, pane: 'Requests', department: 'Whole system' },
+  { test: /^\/$/, pane: 'Dashboard', department: 'Whole system' },
+]
+
+/** The pane an address belongs to, and the department it suggests. Unknown pages: the whole system. */
+export function paneOf(path: string | null | undefined): { pane: string; department: RequestDepartment } {
+  const p = (path ?? '').split(/[?#]/)[0] || '/'
+  const hit = PANES.find((x) => x.test.test(p))
+  return hit ? { pane: hit.pane, department: hit.department } : { pane: 'Other', department: 'Whole system' }
 }
 
 /** In the order a request travels, and the words the screen uses. */

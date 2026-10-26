@@ -19,7 +19,7 @@ email someone). Report it in the review instead.
 ## Reading them (both jobs)
 
 ```sql
-select r.number, r.status, r.priority, r.description, r.page_path, r.page_title, r.created_at,
+select r.number, r.status, r.priority, r.department, r.pane, r.description, r.page_path, r.page_title, r.created_at,
        p.name as asked_by, p.role
   from public.change_requests r join public.profiles p on p.id = r.created_by
  where r.status in ('new', 'accepted', 'building')
@@ -49,7 +49,10 @@ about.
       and not exists (select 1 from public.change_request_reviews v where r.id = any(v.request_ids));
    ```
    **None: stop. Write nothing** -- an empty review every morning is a notification people learn to ignore.
-3. Read each one and its files (above). Group them: the same wish from different people, or several
+3. Read each one and its files (above). Every request says **which department it is for** (`department`:
+   Call centre, Sales, Communications, Finance, Administration, Whole system) and **which pane it came from**
+   (`pane`) -- the firm asked for both to be clear. Start every group's `title` with its department and pane,
+   e.g. "Call centre · Diary: broken promises stand out", and order the groups by department. Group them: the same wish from different people, or several
    wishes about the same screen, is one group. For each group say, in the firm's plain words: what they
    want (`what`), which requests (`request_numbers`), how big it is (`small` = an hour or two, `medium` = a
    day, `large` = more), and what Stephan must decide before it can be built (`questions`) -- e.g. two

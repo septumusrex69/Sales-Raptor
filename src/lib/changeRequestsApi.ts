@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 import {
   base64Bytes, parseReviewGroups,
-  type ChangeRequest, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
+  type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
 } from './changeRequests'
 
 /**
@@ -11,7 +11,7 @@ import {
  * screenshots to draw forty titles.
  */
 
-const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at'
+const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at'
 
 export async function listRequests(): Promise<ChangeRequest[]> {
   const { data, error } = await supabase.from('change_requests').select(REQUEST_COLUMNS).order('created_at', { ascending: false }).limit(500)
@@ -48,10 +48,10 @@ export interface OutgoingFile { name: string; mime: string; base64: string }
  * Send one. The request first, then its files; if a file is refused the request still stands --
  * the words are what matters, and the screen says which picture did not go.
  */
-export async function createRequest(input: { description: string; pagePath: string; pageTitle: string; files: OutgoingFile[] }):
+export async function createRequest(input: { description: string; pagePath: string; pageTitle: string; pane: string; department: RequestDepartment; files: OutgoingFile[] }):
 Promise<{ number: number; failedFiles: string[] }> {
   const { data, error } = await supabase.from('change_requests')
-    .insert({ description: input.description.trim(), page_path: input.pagePath, page_title: input.pageTitle || null })
+    .insert({ description: input.description.trim(), page_path: input.pagePath, page_title: input.pageTitle || null, pane: input.pane, department: input.department })
     .select('id, number').single()
   if (error) throw new Error(error.message)
   const row = data as { id: string; number: number }

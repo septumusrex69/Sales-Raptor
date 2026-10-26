@@ -1,4 +1,7 @@
-# Handoff — where Raptor stands
+# Raptor · Handoff 13 — where Raptor stands
+
+> **Every session, commit, handoff, brief and reply says "Raptor · Handoff N"** (CLAUDE.md, top). This file is
+> **Raptor Handoff 13**, written by S12, which started from Raptor Handoff 12. The next session is S13 and writes Handoff 14.
 
 > **S12 · No News** (`claude/s12-no-news`, from `claude/sales-raptor-review-p1pzx2` at `4afb3f3`, 26 Oct): a client
 > unsubscribed from our news as a whole. Its section is the first below.
@@ -50,6 +53,15 @@ new requests every night and then show them to me in the group list ... That's a
   the Supabase connector (see the scheduled task "Raptor: nightly change-request review").
 - Checks: `check-change-requests` (38), `e2e/change-requests` (11); each broken and seen failing.
   check-staging-clock lists `change_request_notify` and `purge_closed_request_files` as real-clock housekeeping.
+- **Raptor H12, later the same day**: each request says **which department** it is for (chosen by the sender from
+  Call centre / Sales / Communications / Finance / Administration / Whole system, suggested from the page) and
+  **which pane** it came from (`paneOf`); the list shows both and filters by department; the notification says
+  them. The description has the **microphone** (the same DictateButton as every note). The request card was
+  redrawn after Stephan: "I couldn't see that I need to be clicking on it" -- R-number block, title, "Asked by
+  <name> · <role>", "<status> by <name>", Open/Close. Migrations `change_request_pane_and_department`,
+  `change_request_notify_says_department`. **Rinda is an Administrator on staging**, so she can also accept and
+  decline, and is notified of every request. Her **R-3** (26 Oct) is waiting for Stephan -- do not build it
+  until he says. Stephan's R-2 was a test (declined).
 - **At go-live**: the requests live on STAGING (where the testers are). Decide then whether production gets its
   own, and point the nightly task at it.
 
@@ -295,7 +307,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`. Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`. Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

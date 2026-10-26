@@ -18,7 +18,7 @@ const t = makeRunner('change-requests')
 const TESTER = { ...PROFILE, id: 'u-ali', name: 'Alianna Botha', email: 'a@x.co.za', role: 'Pre-legal Agent' }
 const ADMIN = { ...PROFILE, id: 'u-stephan', name: 'Stephan', email: 's@x.co.za', role: 'Administrator' }
 const REQUESTS = [
-  { id: 'q1', number: 7, description: 'Diary: make broken promises red', page_path: '/diary', page_title: 'Diary', status: 'new', priority: 'normal',
+  { id: 'q1', number: 7, description: 'Diary: make broken promises red', page_path: '/diary', page_title: 'Diary', pane: 'Diary', department: 'Call centre', status: 'new', priority: 'normal',
     admin_note: null, done_in: null, created_by: TESTER.id, created_at: '2026-10-25T08:00:00Z', decided_by: null, decided_at: null, closed_at: null },
   { id: 'q2', number: 8, description: 'Diary: the same, but orange', page_path: '/diary', page_title: 'Diary', status: 'accepted', priority: 'high',
     admin_note: null, done_in: null, created_by: ADMIN.id, created_at: '2026-10-25T09:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-25T10:00:00Z', closed_at: null },
@@ -78,10 +78,18 @@ try {
   await bulb.waitFor({ timeout: 20000 })
   await bulb.click()
   t.ok('nothing is sent with no words', await page.getByTestId('request-change-send').isDisabled())
+  t.ok('it says which pane it is from', /From the Accounts pane/.test(await page.getByTestId('request-change-pane').innerText()))
+  const picker = page.getByTestId('request-change-department')
+  t.check('...and suggests the department from it', await picker.locator('[aria-checked="true"]').innerText(), 'Call centre')
+  /* Headless Chromium has no speech recognition, so the component says so instead -- either way it is there. */
+  t.ok('a microphone sits on the description', (await page.locator('button[title^="Talk instead of typing"]').count()
+    + await page.getByText('not in this browser').count()) === 1)
+  await picker.getByRole('radio', { name: 'Finance' }).click()
   await page.getByTestId('request-change-description').fill('The Paid column should show the date it was paid.')
   const bytes = await bigPng(page)
   await page.getByTestId('request-change-files').setInputFiles({ name: 'screenshot.png', mimeType: 'image/png', buffer: Buffer.from(bytes) })
   await page.locator('img[alt="screenshot.jpg"]').waitFor({ timeout: 10000 })
+  await t.shot(page, 'change-requests-0-form')
   await page.getByTestId('request-change-send').click()
   await page.getByTestId('request-change-sent').waitFor({ timeout: 10000 })
   const req = writes.find((w) => w.table === 'change_requests')
@@ -89,6 +97,7 @@ try {
     writes.filter((w) => w.table === 'change_requests').length === 1
     && req?.body.description === 'The Paid column should show the date it was paid.'
     && /^\/accounts(\?|$)/.test(req?.body.page_path ?? '') && req?.body.page_title === 'Accounts')
+  t.check('...with the pane and the department they chose', JSON.stringify([req?.body.pane, req?.body.department]), JSON.stringify(['Accounts', 'Finance']))
   const file = writes.find((w) => w.table === 'change_request_files')
   t.ok('ONE file on it, a JPEG', !!file && file.body.request_id === 'new-1' && file.body.mime === 'image/jpeg' && file.body.name === 'screenshot.jpg')
   const width = file ? await page.evaluate(async (b64) => {
@@ -114,6 +123,11 @@ try {
     /^R-8$/.test((await first.getByTestId('request-number').innerText()).trim())
     && /Asked by Stephan · Administrator/.test(await first.getByTestId('request-asker').innerText())
     && /Accepted by Stephan/.test(await first.getByTestId('request-decider').innerText()))
+  t.ok('the department and the pane are on the row', /Call centre/.test(await cards.nth(1).getByTestId('request-where').innerText())
+    && /Diary pane/.test(await cards.nth(1).getByTestId('request-where').innerText()))
+  await page.getByTestId('requests-department').selectOption('Sales')
+  t.check('...and the list filters by department', await cards.count(), 0)
+  await page.getByTestId('requests-department').selectOption('all')
   t.ok('...an undecided one has no "by" line', (await cards.nth(1).getByTestId('request-decider').count()) === 0
     && /Asked by Alianna Botha · Pre-legal Agent/.test(await cards.nth(1).getByTestId('request-asker').innerText()))
   await t.shot(page, 'change-requests-3-list')

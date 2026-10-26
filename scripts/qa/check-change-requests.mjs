@@ -14,7 +14,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  MAX_FILE_BYTES, PICTURE_MAX_SIDE, base64Bytes, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
+  MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
   parseReviewGroups, requestLabel, sortRequests,
 } from '../../src/lib/changeRequests.ts'
 
@@ -58,6 +58,15 @@ check('the list reads high first, then newest', sortRequests([
 ]).map((r) => r.number), [2, 3, 1, 4])
 check('the browser\'s cap matches the database\'s', MAX_FILE_BYTES, 5242880)
 
+/* ---------- which pane, which department (the firm, 26 Oct) ---------- */
+check('the pane and the department it suggests, read off the address', [
+  '/accounts/abc?x=1', '/diary', '/dashboard/collections', '/leads/1', '/companies/9', '/news', '/trust/payover', '/people', '/mail', '/', '/somewhere-new',
+].map((p) => { const r = paneOf(p); return `${r.pane}|${r.department}` }), [
+  'Accounts|Call centre', 'Diary|Call centre', 'Collections dashboard|Call centre', 'Leads|Sales', 'Clients|Communications',
+  'News & campaigns|Communications', 'Trust|Finance', 'People|Administration', 'Mail|Whole system', 'Dashboard|Whole system', 'Other|Whole system',
+])
+ok('...the most specific pane wins: the collections dashboard is not the Dashboard', paneOf('/dashboard/collections').pane !== 'Dashboard')
+
 /* ---------- the database ---------- */
 const schema = read('supabase/schema.sql')
 const block = schema.slice(schema.lastIndexOf('-- S12 (26 Oct): CHANGE REQUESTS'))
@@ -83,6 +92,12 @@ ok('...through triggers on the tables', /create or replace trigger change_reques
   && /create or replace trigger change_request_notify_update before update on public\.change_requests/.test(block)
   && /create or replace trigger change_request_review_notify after insert on public\.change_request_reviews/.test(block))
 
+const deptBlock = schema.slice(schema.lastIndexOf('change_requests_department_known'))
+check('the database knows the same departments as the screen',
+  (/department in \(([^)]*)\)/.exec(deptBlock)?.[1] ?? '').split(',').map((x) => x.trim().replace(/'/g, '')), [...REQUEST_DEPARTMENTS])
+const lastNotify = schema.slice(schema.lastIndexOf('create or replace function public.change_request_notify()'))
+ok('the new-request notification says the department and the pane', /coalesce\(', ' \|\| new\.department, ''\) \|\| coalesce\(' · ' \|\| new\.pane, ''\)/.test(lastNotify))
+
 /* ---------- the screens ---------- */
 ok('the button is in the top bar, so on every page', /<RequestChangeButton title=\{title\} \/>/.test(code('src/components/layout/Topbar.tsx')))
 ok('the page somebody was on goes with the request', /pagePath: page, pageTitle/.test(code('src/components/requests/RequestChangeButton.tsx')))
@@ -96,6 +111,14 @@ ok('the screen offers decisions only to an Administrator', /canDecide=\{mayDecid
 ok('...and a decline only with a note', /disabled=\{busy \|\| \(s === 'declined' && !note\.trim\(\)\)\}/.test(page))
 ok('the list does not pull every picture: files are fetched when a request is opened',
   /select\('id, request_id, name, mime, bytes, purged_at'\)/.test(code('src/lib/changeRequestsApi.ts')) && /fileDataUrl\(f\)/.test(page))
+
+const modal = code('src/components/requests/RequestChangeButton.tsx')
+ok('a request can be dictated: the microphone is on the description', /<DictateButton size="small" value=\{description\} onChange=\{setDescription\} \/>/.test(modal))
+ok('...it sends the pane and the chosen department, suggested from the pane',
+  /const \{ pane, department: suggested \} = paneOf\(location\.pathname\)/.test(modal) && /useState<RequestDepartment>\(suggested\)/.test(modal)
+  && /pageTitle, pane, department, files:/.test(modal))
+ok('the list shows them and can be filtered by department', /data-testid="request-where"/.test(read('src/pages/requests/RequestsPage.tsx'))
+  && /dept === 'all' \|\| r\.department === dept/.test(page))
 
 if (failures.length) {
   console.log(`check-change-requests: ${pass} passed, ${failures.length} failed`)

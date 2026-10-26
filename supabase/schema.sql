@@ -51203,3 +51203,67 @@ as $$
   select count(*)::int from gone
 $$;
 revoke all on function public.purge_closed_request_files() from public, anon, authenticated;
+
+-- ============================================================================
+-- Raptor · Handoff 12 (S12, 26 Oct): A CHANGE REQUEST SAYS WHICH PANE AND WHICH DEPARTMENT.
+-- Migration `change_request_pane_and_department`.
+--
+-- THE FIRM: "it should be clear ... in which pane is it coming from, to which department is it
+-- relevant ... is it in collections, is it in sales, is it in comms ... is it to do with a client
+-- sheet ... or just an overall function." The PANE is read off the page it was sent from
+-- (paneOf, src/lib/changeRequests.ts) and stored, so a renamed route does not re-file old
+-- requests; the DEPARTMENT is the sender's choice, suggested from the pane. Old rows have neither.
+-- ============================================================================
+alter table public.change_requests add column if not exists pane text;
+alter table public.change_requests add column if not exists department text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'change_requests_department_known') then
+    alter table public.change_requests add constraint change_requests_department_known
+      check (department is null or department in ('Call centre', 'Sales', 'Communications', 'Finance', 'Administration', 'Whole system'));
+  end if;
+end $$;
+
+-- Raptor · Handoff 12 (S12, 26 Oct): the new-request notification says the department and the pane,
+-- so "which department is it for" is answered before anybody opens it. Same function otherwise.
+create or replace function public.change_request_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_who text;
+  v_word text;
+begin
+  if tg_op = 'INSERT' then
+    select coalesce(name, 'Somebody') into v_who from public.profiles where id = new.created_by;
+    insert into public.notifications (user_id, type, message, link)
+    select p.id, 'change_request.new',
+           v_who || ' asked for a change (R-' || new.number
+             || coalesce(', ' || new.department, '') || coalesce(' · ' || new.pane, '') || '): '
+             || left(btrim(new.description), 90)
+             || case when length(btrim(new.description)) > 90 then '…' else '' end,
+           '/requests?r=' || new.number
+      from public.profiles p
+     where p.role = 'Administrator' and p.status = 'Active' and p.id <> new.created_by;
+    return new;
+  end if;
+  new.updated_at := now();
+  if new.status is distinct from old.status then
+    new.decided_by := auth.uid();
+    new.decided_at := now();
+    new.closed_at := case when new.status in ('done', 'declined') then coalesce(old.closed_at, now()) else null end;
+    if new.created_by is distinct from auth.uid() then
+      v_word := case new.status when 'accepted' then 'was accepted' when 'building' then 'is being built'
+                                when 'done' then 'is done — please test it' when 'declined' then 'was declined: ' || coalesce(new.admin_note, '')
+                                else 'is back to New' end;
+      insert into public.notifications (user_id, type, message, link)
+      values (new.created_by, 'change_request.status', 'Your request R-' || new.number || ' ' || v_word, '/requests?r=' || new.number);
+    end if;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_notify() from public, anon, authenticated;

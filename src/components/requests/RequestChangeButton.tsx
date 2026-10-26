@@ -3,7 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { FileText, ImagePlus, Lightbulb, Loader2, X } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
-import { ACCEPTED_MIME, MAX_FILES, fileProblem, fitWithin } from '../../lib/changeRequests'
+import { DictateButton } from '../ui/Dictate'
+import {
+  ACCEPTED_MIME, DEPARTMENT_HINT, MAX_FILES, REQUEST_DEPARTMENTS, fileProblem, fitWithin, paneOf, type RequestDepartment,
+} from '../../lib/changeRequests'
 import { createRequest, type OutgoingFile } from '../../lib/changeRequestsApi'
 
 /**
@@ -72,6 +75,9 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
   const location = useLocation()
   const navigate = useNavigate()
   const page = `${location.pathname}${location.search}`
+  /* The pane comes from the address; the department is suggested from it and theirs to change. */
+  const { pane, department: suggested } = paneOf(location.pathname)
+  const [department, setDepartment] = useState<RequestDepartment>(suggested)
   const [description, setDescription] = useState('')
   const [files, setFiles] = useState<Picked[]>([])
   const [busy, setBusy] = useState(false)
@@ -107,7 +113,7 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
   async function send() {
     setBusy(true); setError(null)
     try {
-      setSent(await createRequest({ description, pagePath: page, pageTitle, files: files.map(({ name, mime, base64 }) => ({ name, mime, base64 })) }))
+      setSent(await createRequest({ description, pagePath: page, pageTitle, pane, department, files: files.map(({ name, mime, base64 }) => ({ name, mime, base64 })) }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -137,7 +143,7 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
     <Modal title="Request a change" subtitle="What should Raptor do differently? A screenshot helps." onClose={onClose} width={560}
       footer={
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-400 truncate" title={page}>From: {pageTitle || page}</p>
+          <p className="text-xs text-slate-400 truncate" title={page} data-testid="request-change-pane">From the {pane} pane</p>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button variant="primary" disabled={busy || reading || !description.trim()} onClick={() => void send()} data-testid="request-change-send">
@@ -151,9 +157,29 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
         const pasted = Array.from(e.clipboardData.files)
         if (pasted.length) { e.preventDefault(); void add(pasted) }
       }}>
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} autoFocus
-          placeholder="e.g. On this page the Paid column should show the date it was paid, not only the amount."
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-change-description" />
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <label htmlFor="request-change-description" className="text-xs font-semibold text-slate-600">What should change?</label>
+            {/* TALK IT IN (the firm, 26 Oct: "they should be able to dictate"). The same microphone as
+                every other note in Raptor; the words land in the box as they are spoken. */}
+            <DictateButton size="small" value={description} onChange={setDescription} />
+          </div>
+          <textarea id="request-change-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={5} autoFocus
+            placeholder="Type, or press the microphone and say it. e.g. On this page the Paid column should show the date it was paid, not only the amount."
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-change-description" />
+        </div>
+        <div>
+          <p className="mb-1 text-xs font-semibold text-slate-600">Which department is it for?</p>
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Which department is it for?" data-testid="request-change-department">
+            {REQUEST_DEPARTMENTS.map((d) => (
+              <button key={d} type="button" role="radio" aria-checked={department === d} title={DEPARTMENT_HINT[d]} onClick={() => setDepartment(d)}
+                className={`rounded-full border px-2.5 py-1 text-xs ${department === d ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                {d}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-400">{DEPARTMENT_HINT[department]}</p>
+        </div>
         <div className="flex flex-wrap gap-2">
           {files.map((f, i) => (
             <div key={i} className="relative h-20 w-28 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">

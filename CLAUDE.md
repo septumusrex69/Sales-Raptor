@@ -7,6 +7,13 @@ one app.
 Read this before changing anything. Most of it is here because getting it wrong once cost real
 time, and a few items are here because getting them wrong would cost the firm money or a client.
 
+**SAY WHICH PROJECT AND WHICH HANDOFF, ON EVERYTHING.** The firm's administrator runs more than one
+project (Raptor, Remus) and asked, 26 Oct: *"for every little thing, just make sure that ... Remus or
+Raptor is mentioned clearly, and then the handoff number. Remus handoff 5 or ... Raptor handoff 6."*
+So every session, commit subject, handoff file, brief, pull request, scheduled task and reply to him
+carries **"Raptor · Handoff N"**, where N is the handoff the session started from (the session that
+started from Handoff 12 is S12 and writes Handoff 13). Commit subjects start `Raptor H12: ...`.
+
 **Then read `HANDOFF.md`.** This file is the law and moves slowly; HANDOFF.md is where the work
 stands today — what shipped last, what the firm has asked for and nobody has started, what they
 have not yet decided, and which tools in this repo fail in ways that look like success. It exists
