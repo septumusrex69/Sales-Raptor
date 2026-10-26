@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, Megaphone, MessageCircleQuestion, IdCard, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, Lightbulb, LayoutDashboard, Landmark, Library, LogOut, Megaphone, MessageCircleQuestion, IdCard, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
@@ -92,6 +92,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   { to: '/people', label: 'People', icon: IdCard },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  // CHANGE REQUESTS (S12): what testers asked Raptor to do differently, and last night's grouped review.
+  // Everybody's, at the firm's word: "anyone can see requests".
+  { to: '/requests', label: 'Requests', icon: Lightbulb },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 

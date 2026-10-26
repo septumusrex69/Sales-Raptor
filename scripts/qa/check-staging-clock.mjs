@@ -93,6 +93,9 @@ check('only the named audit and real-world functions read the real clock', still
   /* campaign_claim (S10): a claim older than ten minutes is a sender that died mid-send -- elapsed
      WALL time, which a staging clock jumped a week ahead must not turn into every claim at once. */
   'campaign_claim',
+  /* change_request_notify (S12): when somebody sent or decided a change request -- a fact about the
+     software being tested, not about any debtor or client, so the real clock. */
+  'change_request_notify',
   'clear_staging',
   /* discard_import_batch and protect_swordfish_import_run (S10): when an import run was taken back out
      or finished is an audit stamp about a person pressing a button, like updated_at -- not a business
@@ -114,6 +117,9 @@ check('only the named audit and real-world functions read the real clock', still
   'marketing_record_results', 'marketing_sender_today',
   'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
   'protect_swordfish_import_run',
+  /* purge_closed_request_files (S12): files are emptied 30 REAL days after a request closed -- storage
+     housekeeping, like touch_mail_pictures; staging's clock moved on must not empty them early. */
+  'purge_closed_request_files',
   'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',
   /* signing_accept (S9): the moment the debtor accepted, a real-world stamp like signing_sign's. */
   'signing_accept', 'signing_document',

@@ -51023,3 +51023,183 @@ begin
       check (send_from in ('news', 'liaison', 'reports'));
   end if;
 end $$;
+
+-- ============================================================================
+-- S12 (26 Oct): CHANGE REQUESTS -- "REQUEST A CHANGE" FROM INSIDE RAPTOR. Migration `change_requests`.
+--
+-- THE FIRM: "As people are testing the software, I want them to ... queue things for me so that I
+-- can code it ... You take a screenshot of what you need and then you put it in Raptor ... and a
+-- description of what changes you want. And then it would flag on my side." And: "Anyone can see
+-- requests" and "every session can check for new requests every night and then show them to me in
+-- the group list." The TS side is src/lib/changeRequests.ts; the screen is /requests.
+--
+-- WHO DOES WHAT. Anybody signed in sends one and sees all of them. Only an ADMINISTRATOR moves a
+-- request along (status, priority, note) -- the firm decides what gets built, so the policy is
+-- written on the role, not a capability somebody could be granted by accident. The person who sent
+-- it may withdraw it while it is still New.
+--
+-- PICTURES AND PDFs LIVE IN THE DATABASE, SMALL, AND NOT FOR EVER. The browser shrinks a screenshot
+-- to a phone photo's size before it is sent, and a PDF is capped. They are a column, not Storage,
+-- because a Claude session reads them through SQL -- it has no other way into a private bucket --
+-- and that is the point of the nightly review. purge_closed_request_files() empties a file 30 days
+-- after its request is Done or Declined; the nightly review runs it. Supabase ran out of room in
+-- October on pictures kept in user_emails, which is why the cap and the purge are not optional.
+--
+-- THE NIGHTLY REVIEW is a Claude session on a schedule, writing ONE row a night into
+-- change_request_reviews (as the database owner, through the MCP -- no app user may insert one). It
+-- groups the new requests, says what each wants and what it needs answered; it builds nothing.
+-- ============================================================================
+create table if not exists public.change_requests (
+  id uuid primary key default gen_random_uuid(),
+  number bigint generated always as identity unique,
+  description text not null check (length(btrim(description)) > 0),
+  page_path text,
+  page_title text,
+  status text not null default 'new' check (status in ('new', 'accepted', 'building', 'done', 'declined')),
+  priority text not null default 'normal' check (priority in ('low', 'normal', 'high')),
+  admin_note text,
+  -- What a Claude session built for it, e.g. "S14, commit 1a2b3c4" -- written when it is marked Done.
+  done_in text,
+  created_by uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  decided_by uuid references public.profiles (id) on delete set null,
+  decided_at timestamptz,
+  closed_at timestamptz,
+  updated_at timestamptz not null default now(),
+  -- A decline says why: the person who asked is told, and "no" with no reason reads as "ignored".
+  constraint change_requests_decline_says_why check (status <> 'declined' or length(btrim(coalesce(admin_note, ''))) > 0)
+);
+create index if not exists change_requests_status_idx on public.change_requests (status, created_at desc);
+alter table public.change_requests enable row level security;
+
+create table if not exists public.change_request_files (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid not null references public.change_requests (id) on delete cascade,
+  name text not null,
+  mime text not null check (mime in ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+  bytes integer not null check (bytes > 0 and bytes <= 5242880),
+  -- Base64. Null once purged (30 days after the request closed); the row stays, saying it was there.
+  data text check (data is null or length(data) <= 7000000),
+  created_at timestamptz not null default now(),
+  purged_at timestamptz
+);
+create index if not exists change_request_files_request_idx on public.change_request_files (request_id);
+alter table public.change_request_files enable row level security;
+
+create table if not exists public.change_request_reviews (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  -- A sentence or two for the top of the screen.
+  summary text not null,
+  -- [{ "title": "...", "request_numbers": [12, 15], "what": "...", "questions": ["..."], "size": "small|medium|large" }]
+  groups jsonb not null default '[]'::jsonb check (jsonb_typeof(groups) = 'array'),
+  request_ids uuid[] not null default '{}'
+);
+alter table public.change_request_reviews enable row level security;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'change_requests' and policyname = 'change_requests_select') then
+    create policy change_requests_select on public.change_requests for select to authenticated using (true);
+    create policy change_requests_insert on public.change_requests for insert to authenticated
+      with check (created_by = auth.uid() and status = 'new' and decided_by is null and done_in is null);
+    create policy change_requests_update on public.change_requests for update to authenticated
+      using (public.current_user_role() = 'Administrator') with check (public.current_user_role() = 'Administrator');
+    create policy change_requests_withdraw on public.change_requests for delete to authenticated
+      using (created_by = auth.uid() and status = 'new');
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'change_request_files' and policyname = 'change_request_files_select') then
+    create policy change_request_files_select on public.change_request_files for select to authenticated using (true);
+    create policy change_request_files_insert on public.change_request_files for insert to authenticated
+      with check (exists (select 1 from public.change_requests r
+                           where r.id = request_id and r.created_by = auth.uid() and r.status = 'new'));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'change_request_reviews' and policyname = 'change_request_reviews_select') then
+    create policy change_request_reviews_select on public.change_request_reviews for select to authenticated using (true);
+  end if;
+end $$;
+
+-- WHO IS TOLD. A new request: every active Administrator. A decision: the person who asked, unless
+-- they made it. A night's review: every active Administrator. Definer, because a tester may not
+-- write somebody else's notification.
+create or replace function public.change_request_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_who text;
+  v_word text;
+begin
+  if tg_op = 'INSERT' then
+    select coalesce(name, 'Somebody') into v_who from public.profiles where id = new.created_by;
+    insert into public.notifications (user_id, type, message, link)
+    select p.id, 'change_request.new',
+           v_who || ' asked for a change (R-' || new.number || '): ' || left(btrim(new.description), 90)
+             || case when length(btrim(new.description)) > 90 then '…' else '' end,
+           '/requests?r=' || new.number
+      from public.profiles p
+     where p.role = 'Administrator' and p.status = 'Active' and p.id <> new.created_by;
+    return new;
+  end if;
+  new.updated_at := now();
+  if new.status is distinct from old.status then
+    new.decided_by := auth.uid();
+    new.decided_at := now();
+    new.closed_at := case when new.status in ('done', 'declined') then coalesce(old.closed_at, now()) else null end;
+    if new.created_by is distinct from auth.uid() then
+      v_word := case new.status when 'accepted' then 'was accepted' when 'building' then 'is being built'
+                                when 'done' then 'is done — please test it' when 'declined' then 'was declined: ' || coalesce(new.admin_note, '')
+                                else 'is back to New' end;
+      insert into public.notifications (user_id, type, message, link)
+      values (new.created_by, 'change_request.status', 'Your request R-' || new.number || ' ' || v_word, '/requests?r=' || new.number);
+    end if;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_notify() from public, anon, authenticated;
+create or replace trigger change_request_notify_insert after insert on public.change_requests
+  for each row execute function public.change_request_notify();
+create or replace trigger change_request_notify_update before update on public.change_requests
+  for each row execute function public.change_request_notify();
+
+create or replace function public.change_request_review_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  insert into public.notifications (user_id, type, message, link)
+  select p.id, 'change_request.review',
+         'Last night''s review of the change requests is ready: ' || jsonb_array_length(new.groups) || ' group'
+           || case when jsonb_array_length(new.groups) = 1 then '' else 's' end || '.',
+         '/requests'
+    from public.profiles p
+   where p.role = 'Administrator' and p.status = 'Active';
+  return new;
+end
+$$;
+revoke all on function public.change_request_review_notify() from public, anon, authenticated;
+create or replace trigger change_request_review_notify after insert on public.change_request_reviews
+  for each row execute function public.change_request_review_notify();
+
+-- THE PURGE, 30 days after a request closed. The nightly review runs it; it says how many it emptied.
+create or replace function public.purge_closed_request_files()
+returns integer
+language sql
+security invoker
+set search_path to 'public'
+as $$
+  with gone as (
+    update public.change_request_files f
+       set data = null, purged_at = now()
+      from public.change_requests r
+     where r.id = f.request_id and f.data is not null
+       and r.status in ('done', 'declined') and r.closed_at < now() - interval '30 days'
+    returning f.id)
+  select count(*)::int from gone
+$$;
+revoke all on function public.purge_closed_request_files() from public, anon, authenticated;

@@ -100,6 +100,7 @@ const LibraryFirm = lazy(() => import('./pages/library/LibraryFirm').then((m) =>
 const CollectorProfile = lazy(() => import('./pages/CollectorProfile').then((m) => ({ default: m.CollectorProfile })))
 const DiaryPage = lazy(() => import('./pages/diary/DiaryPage').then((m) => ({ default: m.DiaryPage })))
 const MailPage = lazy(() => import('./pages/mail/MailPage').then((m) => ({ default: m.MailPage })))
+const RequestsPage = lazy(() => import('./pages/requests/RequestsPage').then((m) => ({ default: m.RequestsPage })))
 const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ default: m.TasksPage })))
 const CalendarPage = lazy(() => import('./pages/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const ActivitiesPage = lazy(() => import('./pages/activities/ActivitiesPage').then((m) => ({ default: m.ActivitiesPage })))
@@ -308,6 +309,8 @@ function App() {
                   opened the ACCOUNT -- which a query about a whole handover sheet does not have. */}
               <Route path="/queries/:id" element={<QueryDetail />} handle={{ title: 'Query' }} />
               <Route path="/tasks" element={<TasksPage />} handle={{ title: 'Tasks' }} />
+              {/* CHANGE REQUESTS (S12): open to everybody -- the firm, "anyone can see requests". */}
+              <Route path="/requests" element={<RequestsPage />} handle={{ title: 'Requests' }} />
               <Route path="/calendar" element={<CalendarPage />} handle={{ title: 'Calendar' }} />
               <Route path="/activities" element={<ActivitiesPage />} handle={{ title: 'Activities' }} />
               {/* The firm's own wording, kept apart from the machinery that sends it. Its own
