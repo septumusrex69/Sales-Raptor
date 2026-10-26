@@ -52,9 +52,9 @@ News card, the link in every newsletter). He then asked for it **client-wide**, 
 - Supabase "Email OTP Expiration" -> 86400: Stephan says done (26 Oct). Not readable through the MCP; the test is
   a password reset clicked more than an hour later. ~23 staff invited 22-23 Oct never accepted (links dead either
   way: re-invite). **Zanele's address is `zanele@breddellferreira.co.za` -- misspelt (double d)**; fix and re-invite.
-- bfnews.co.za: Resend says sending is verified, only the tracking CNAME `links` -> `links2.resend-dns.com`
-  is missing (re-verify started 26 Oct; still failed). Its DNS is not on Vercel and the session cannot reach DNS;
-  Stephan to add it at the DNS host (proxy off), then re-verify in Resend.
+- bfnews.co.za: **fully verified in Resend on 26 Oct, tracking included** -- Stephan added the CNAME `links` ->
+  `links2.resend-dns.com`. Open and click tracking are live for news. (A re-verify shows the other records as
+  "pending" for a few minutes and the dashboard keeps a stale "Missing SPF" banner until reloaded; neither is real.)
 
 ## S11 · LOADERS AND HANDERS -- WHERE IT STANDS (24 Oct)
 
@@ -123,7 +123,7 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
 - A.8 keep choosing the liaison on conversion (as built).
 - A.11 leave (B.1) still the next big build; A.12 call transfer parked; BuzzBox is Stephan's.
 - C: Supabase "Email OTP Expiration" 86400 -- Stephan says done (S12, 26 Oct); production too to confirm.
-- Resend: bfnews.co.za needs DNS CNAME `links` -> `links2.resend-dns.com` (Stephan) before tracking starts.
+- Resend: bfnews.co.za tracking CNAME added and verified (S12, 26 Oct).
 
 ### The next session starts here
 1. ~~Dormant clients out of campaigns~~ -- **overruled by the firm (S12)**: dormant clients still get news. Built
