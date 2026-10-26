@@ -114,6 +114,20 @@ R-5 was put back to Approved (it had been released by hand, nothing built); the 
 "released" notifications to Rinda were marked read, not deleted. **R-5 waits on Stephan's answers to the
 review's three questions** (which problems, import review only, preview before a bulk change) before Ask Claude.
 
+## S12 · R-5 BUILT: PERSON OR BUSINESS IN BULK ON A NEW HANDOVER (26 Oct, Raptor H12)
+
+Built by the scheduled builder (its first real run), which could not push -- the routine had no repository
+attached (403 from the git proxy); Stephan is attaching it. The work was recovered from its transcript, checked
+here and pushed from this session. On a NEW handover draft (Settings > Data Import and a client's Upload a
+batch -- both are HandoverImportCard; the client-query DraftTable gets no panel) a panel above the table groups
+the rows whose person-or-business is only a GUESS (a registered-looking name, no evidence at all, a word that is
+neither Person nor Business) and sets a whole group after saying how many and which names; the second press
+writes `debtor_kind` through `setDraftRowValue`, the same one-cell path as an edit. A stated answer, a
+registration number, a valid ID number and excluded rows are never offered; nothing outside the draft is
+reachable, so imported accounts and Swordfish are untouched (Swordfish later, separately -- Stephan).
+`handoverBulkKind.ts`, `BulkKindPanel.tsx`, check-handover-bulk-kind (13); e2e/upload-a-batch +5 (the panel
+seen on screen, which the builder had not tested) -- both broken once and seen failing.
+
 ## S12 · QUESTIONS WITH OPTIONS TO TICK (26 Oct, Raptor H12)
 
 Stephan, of the plain question on R-6: "Can't we build this like you have ... to choose the option by means of

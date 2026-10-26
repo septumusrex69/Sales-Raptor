@@ -33,6 +33,7 @@ import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
 import { HandoverSheetDownload } from './HandoverSheetDownload'
+import { BulkKindPanel } from './BulkKindPanel'
 import {
   fetchClientCommission, fetchExistingAccounts, fetchUnallocatedBatches,
   type UnallocatedBatch,
@@ -399,6 +400,15 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     if (draftId) await load(draftId)
   }
 
+  /* R-5: the same one-cell write, once per row, then ONE re-read of the draft. */
+  async function bulkKind(rowIds: string[], word: string) {
+    setError(null)
+    try {
+      for (const id of rowIds) await setDraftRowValue(id, 'debtor_kind', word)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    if (draftId) await load(draftId)
+  }
+
   async function exclude(rowId: string, excluded: boolean) {
     await updateDraftRow(rowId, { excluded })
     if (draftId) await load(draftId)
@@ -512,7 +522,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     <DraftTable
       judged={judged} busy={busyMessage} error={error}
       approving={busy?.job === 'approve' ? busy.message : null}
-      onEdit={edit} onExclude={exclude} onApprove={approve} onDecide={decide} rateBlock={rateBlock}
+      onEdit={edit} onBulkKind={bulkKind} onExclude={exclude} onApprove={approve} onDecide={decide} rateBlock={rateBlock}
       onBack={() => { setJudged(null); setDraftId(null) }}
       onDiscard={() => discard(judged.draft.id)} />
   )
@@ -1149,7 +1159,7 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
  * rules the other had moved on from.
  */
 export function DraftTable({
-  judged, busy, approving, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide,
+  judged, busy, approving, error, onEdit, onBulkKind, onExclude, onApprove, onBack, onDiscard, onDecide,
   backLabel, rateBlock,
 }: {
   judged: JudgedDraft
@@ -1171,6 +1181,8 @@ export function DraftTable({
   approving?: string | null
   error: string | null
   onEdit: (rowId: string, key: string, value: string) => Promise<void>
+  /** R-5: set person-or-business on many draft rows at once. */
+  onBulkKind?: (rowIds: string[], word: string) => Promise<void>
   onExclude: (rowId: string, excluded: boolean) => Promise<void>
   onApprove: () => Promise<void>
   onDecide: (
@@ -1278,6 +1290,11 @@ export function DraftTable({
       </div>
 
       {error && <p className="text-sm text-negative-700 mb-3">{error}</p>}
+
+      {onBulkKind && (
+        <BulkKindPanel busy={!!busy} onApply={onBulkKind}
+          rows={judged.rows.map((r) => ({ id: r.id, line: r.line, excluded: r.excluded, values: r.values }))} />
+      )}
 
       {/*
         SAID, AND UNDONE IN ONE PRESS. A table quietly missing columns is worse than a wide one:

@@ -248,7 +248,8 @@ const FULL_SHEET = [
    */
   'GPS3/10103,48250.00,2026/03/18,Person,Van Der Westhuizen,kagiso.molefe@example.co.za',
   'GPS3/10104,not money,2026/03/18,Person,Buitendag,',
-  'GPS3/10105,1200.00,2026/03/18,Person,Ndlovu,',
+  /* R-5 (Raptor H12): this row does NOT say person or business, so the bulk panel has a guess to offer. */
+  'GPS3/10105,1200.00,2026/03/18,,Ndlovu,',
 ].join('\n')
 
 
@@ -503,6 +504,23 @@ try {
   const okCell = cell(0, amount)
   t.ok('...and a cell that is fine is not marked',
     okCell ? !/negative|gold/.test((await okCell.getAttribute('class')) ?? '') : false)
+
+  /*
+   * PERSON OR BUSINESS, FOR MANY ROWS AT ONCE (R-5, Raptor H12). Only the row that does not say
+   * is offered; the choice shows the count and the names first, and the second press writes the
+   * one cell through the same path as an edit.
+   */
+  const bulk = page.getByTestId('bulk-kind')
+  t.ok('the rows that are only a guess are offered in bulk', (await bulk.count()) === 1
+    && /1 row/.test(await bulk.innerText()) && /does not say/.test(await bulk.innerText()))
+  await bulk.getByRole('button', { name: /are people/ }).click()
+  t.ok('...a choice first says what it will change', /Change 1 row to Person: .*Ndlovu/.test(await bulk.innerText()))
+  const ndlovu = () => draftRows.find((r) => r.line === 4)
+  t.check('...and writes nothing yet', ndlovu()?.values.debtor_kind ?? null, null)
+  await bulk.getByRole('button', { name: /Yes, change 1/ }).click()
+  await page.waitForTimeout(800)
+  t.check('...the second press sets it on that row', ndlovu()?.values.debtor_kind ?? null, 'Person')
+  t.check('...and once nothing is a guess the panel goes', await page.getByTestId('bulk-kind').count(), 0)
 
   /*
    * DATES ARE SHOWN THE WAY SOUTH AFRICA WRITES THEM.
