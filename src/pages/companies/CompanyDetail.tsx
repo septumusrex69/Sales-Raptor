@@ -1047,8 +1047,9 @@ export function CompanyDetail() {
             /* Who they are first: the summary card of the side column (S9). */
             companyInfoPanel,
             <ClientBookCard key="book" companyId={company.id} />,
-            /* News (S10): whether the client's own address has unsubscribed. Its people show theirs on their own records. */
-            <NewsPreferenceCard key="news" emails={[company.email]} />,
+            /* News (S10): whether the client's own address has unsubscribed. Its people show theirs on their own records.
+               And (S12) the whole client's no-news, recorded here for every address it has. */
+            <NewsPreferenceCard key="news" emails={[company.email]} client={company} own />,
             /*
               TWO SECTIONS, at the firm's instruction: "queries are for clients and disputes are
               for debtors ... there should be two different sections on the client portal about

@@ -20,7 +20,7 @@ import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
-import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
+import { formatCurrency, formatDate, formatDateTime } from '../../data/mockData'
 import { clockNow } from '../../lib/clock.ts'
 import { NewsPreferenceCard } from '../../components/record/NewsPreferenceCard'
 
@@ -28,7 +28,7 @@ type ContactTab = 'Overview' | 'Activity' | 'Notes' | 'Tasks'
 
 export function ContactDetail() {
   const { id } = useParams()
-  const { contacts, deals, activities, tasks, addActivity, updateContact } = useAppStore()
+  const { contacts, deals, activities, tasks, addActivity, updateContact, companyById, users } = useAppStore()
   const { currentUser } = useAuth()
   const contact = contacts.find((c) => c.id === id)
   const [tab, setTab] = useState<ContactTab>('Overview')
@@ -68,6 +68,7 @@ export function ContactDetail() {
     )
   }
 
+  /* The STORE's client, not mockData's: mockData's lists are empty, so the page never knew whose person this was. */
   const company = companyById(contact.companyId)
 
   /*
@@ -148,7 +149,7 @@ export function ContactDetail() {
         <Field label="Email" value={contact.email} />
         <Field label="Phone" value={contact.phone} />
         <Field label="Mobile" value={contact.mobile} />
-        <Field label="Owner" value={userById(contact.ownerId)?.name} />
+        <Field label="Owner" value={users.find((u) => u.id === contact.ownerId)?.name} />
         <Field label="Created" value={formatDate(contact.createdAt)} />
         <Field label="Last Contact" value={formatDate(contact.lastContactAt)} />
       </dl>
@@ -325,7 +326,7 @@ export function ContactDetail() {
           details={detailsPanel}
           /* Notes in the middle, and still on their own tab — both places, at the firm's asking. */
           main={<div className="space-y-5">{dealsPanel}{notesPanel}</div>}
-          side={[...(companyPanel ? [companyPanel] : []), <NewsPreferenceCard key="news" emails={[contact.email]} />]}
+          side={[...(companyPanel ? [companyPanel] : []), <NewsPreferenceCard key="news" emails={[contact.email]} client={company ?? undefined} />]}
         />
       )}
 

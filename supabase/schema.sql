@@ -50968,3 +50968,33 @@ on conflict (id) do nothing;
 -- teams.lead_id / department_head_of() Stephan asked for on 23 Oct. And the clear_staging live on
 -- staging is THIS one, not the last definition above it in this file.
 -- ============================================================================
+
+-- ============================================================================
+-- S12 (26 Oct): A CLIENT THAT ASKED FOR NO NEWS AT ALL. Migration `client_news_stopped`, staging first.
+--
+-- THE FIRM, on keeping dormant clients out of campaigns: "The client can be dormant but still
+-- receive information ... a client that ... doesn't even want to receive any information from us.
+-- I wouldn't really call them dormant ... We need to find a name for people that don't want to
+-- receive information. Like unsubscribes." So dormancy stops nothing, and this is the unsubscribe
+-- made once for the whole CLIENT -- its own address, every contact on it and every sub-account,
+-- including contacts added later -- which is why it is on the client and not one
+-- marketing_preferences row per address. News and campaigns only; reports and notices still go.
+-- The TS side is src/lib/clientNews.ts; the list (resolveAudience) and the drain both read it.
+--
+-- A RE-SUBSCRIPTION SAYS WHY, as it must for one address (marketing_preferences_resubscribe_says_why):
+-- overriding an objection POPIA s69 protects is the write somebody would be asked about.
+-- ============================================================================
+alter table public.companies add column if not exists news_stopped_at timestamptz;
+alter table public.companies add column if not exists news_stopped_reason text;
+alter table public.companies add column if not exists news_stopped_by uuid references public.profiles (id) on delete set null;
+alter table public.companies add column if not exists news_resumed_at timestamptz;
+alter table public.companies add column if not exists news_resumed_reason text;
+alter table public.companies add column if not exists news_resumed_by uuid references public.profiles (id) on delete set null;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'companies_news_resumed_says_why') then
+    alter table public.companies add constraint companies_news_resumed_says_why
+      check (news_resumed_at is null or length(btrim(coalesce(news_resumed_reason, ''))) > 0);
+  end if;
+end $$;

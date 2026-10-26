@@ -6,7 +6,7 @@ import { fetchAllRows } from '../../src/lib/fetchAll.js'
 import {
   DEFAULT_WARMUP_CEILING, LEAD_AUDIENCES, PROSPECT_SENDER_ENV, RESEND_BATCH_MAX, RESEND_MIN_GAP_MS, SENDER_ENV,
   isProspectKind, isSendableEmail, newsSender, newsletterActivitySubject, normaliseEmail, parseAudience, parseKind,
-  prospectSender, renderCampaignEmail, replyToFor, resolveAudience, sendBlockReason, warmupDailyCap, warmupWeek,
+  prospectSender, renderCampaignEmail, replyToFor, resolveAudience, sendBlockReason, stoppedClientEmails, warmupDailyCap, warmupWeek,
   type AudienceResult, type CampaignKind, type Recipient, type SenderChoice,
 } from '../../src/lib/marketing.js'
 
@@ -272,7 +272,7 @@ export async function resolveOnServer(
   try {
     const [companies, contacts, leads, activities, prefs, approached] = await Promise.all([
       fetchAllRows<Record<string, unknown>>(() => admin.from('companies')
-        .select('id, name, email, parent_company_id, services, contact_person').order('id'), { table: 'companies' }),
+        .select('id, name, email, parent_company_id, services, contact_person, news_stopped_at').order('id'), { table: 'companies' }),
       fetchAllRows<Record<string, unknown>>(() => admin.from('contacts')
         .select('id, first_name, email, company_id, lead_id').order('id'), { table: 'contacts' }),
       fetchAllRows<Record<string, unknown>>(() => admin.from('leads')
@@ -299,6 +299,7 @@ export async function resolveOnServer(
       companies: companies.map((c) => ({
         id: String(c.id), name: String(c.name ?? ''), email: s(c.email), parentCompanyId: s(c.parent_company_id),
         services: (Array.isArray(c.services) ? c.services : []) as never[], contactPerson: s(c.contact_person),
+        newsStoppedAt: s(c.news_stopped_at),
       })),
       contacts: contacts.map((c) => ({
         id: String(c.id), firstName: String(c.first_name ?? ''), email: s(c.email), companyId: s(c.company_id), leadId: s(c.lead_id),
@@ -320,6 +321,26 @@ export async function resolveOnServer(
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'The list could not be read.' }
   }
+}
+
+/**
+ * THE ADDRESSES OF EVERY CLIENT THAT SAID NO NEWS, read fresh. Nothing to read when no client has,
+ * which is the usual day: one small query, and the family and contacts only when there is a stop.
+ */
+async function clientStoppedEmails(admin: SupabaseClient): Promise<Set<string>> {
+  const { data: first } = await admin.from('companies').select('id').not('news_stopped_at', 'is', null).limit(1)
+  if (!first?.length) return new Set()
+  const [companies, contacts] = await Promise.all([
+    fetchAllRows<Record<string, unknown>>(() => admin.from('companies')
+      .select('id, email, parent_company_id, news_stopped_at').order('id'), { table: 'companies' }),
+    fetchAllRows<Record<string, unknown>>(() => admin.from('contacts')
+      .select('id, email, company_id').not('company_id', 'is', null).order('id'), { table: 'contacts' }),
+  ])
+  const s = (v: unknown) => (typeof v === 'string' ? v : undefined)
+  return stoppedClientEmails(
+    companies.map((c) => ({ id: String(c.id), email: s(c.email), parentCompanyId: s(c.parent_company_id), newsStoppedAt: s(c.news_stopped_at) })),
+    contacts.map((c) => ({ email: s(c.email), companyId: s(c.company_id) })),
+  )
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -506,6 +527,13 @@ export async function drainMarketing(
     const { data: prefRows } = await admin.from('marketing_preferences').select('email, status')
       .in('email', claimed.map((r) => r.email)).neq('status', 'subscribed')
     const stopped = new Map(((prefRows ?? []) as { email: string; status: string }[]).map((p) => [p.email, p.status]))
+    /*
+     * A CLIENT THAT SAID NO NEWS AFTER THE LIST WAS DRAWN (clientNews.ts) is held to it here, as one
+     * address's unsubscribe is. Read per chunk: a liaison recording it while a campaign is still
+     * going out must stop the rest of it, not the next one.
+     */
+    const clientStopped = await clientStoppedEmails(admin)
+    for (const email of clientStopped) if (!stopped.has(email)) stopped.set(email, 'client unsubscribed')
     /* THE LEAD AS IT STANDS NOW, for the consent rule. */
     const leadIds = [...new Set(claimed.map((r) => r.lead_id).filter((x): x is string => !!x))]
     const { data: leadRows } = leadIds.length
@@ -517,7 +545,9 @@ export async function drainMarketing(
     const toSend: { row: SendRow; email: OutgoingEmail }[] = []
     for (const row of claimed) {
       if (stopped.has(row.email)) {
-        results.push({ id: row.id, state: 'skipped', error: stopped.get(row.email) === 'undeliverable' ? 'Undeliverable' : 'Unsubscribed before it was sent' })
+        const why = stopped.get(row.email)
+        results.push({ id: row.id, state: 'skipped', error: why === 'undeliverable' ? 'Undeliverable'
+          : why === 'client unsubscribed' ? 'The client unsubscribed from our news' : 'Unsubscribed before it was sent' })
         continue
       }
       const block = sendBlockReason(

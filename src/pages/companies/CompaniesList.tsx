@@ -150,6 +150,11 @@ export function CompaniesList() {
                             </Link>
                             {kids.length > 0 && <span className="text-slate-400"> · {kids.length} sub-account{kids.length === 1 ? '' : 's'}</span>}
                           </span>
+                          {/* NO NEWS (S12, clientNews.ts): said on the row, so nobody adds them to a list by hand. */}
+                          {c.newsStoppedAt && (
+                            <span className="shrink-0 rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] text-red-700" data-testid="client-row-unsubscribed"
+                              title="Unsubscribed from our news: no newsletter or campaign goes to this client or its people">Unsubscribed</span>
+                          )}
                         </div>
                       </td>
                       <td className="px-2 py-1.5">

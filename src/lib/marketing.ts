@@ -32,6 +32,7 @@
 import type { Company, Contact, Lead, LeadSource, LeadStatus, ProductService } from '../types.js'
 import { emailBodyHtml, emailBodyStyle, type EmailFace } from './emailStyle.js'
 import { NEWSLETTER_SUBJECT_PREFIX } from './meaningfulActivity.js'
+import { newsStoppedBy, type NewsCompany } from './clientNews.js'
 
 /* ------------------------------------------------------------------------------------------------
  * Addresses
@@ -215,7 +216,7 @@ export interface Recipient {
 export type ExclusionReason =
   | 'no address' | 'address does not look right' | 'unsubscribed' | 'undeliverable'
   | 'no consent recorded' | 'already approached once' | 'on the list twice'
-  | 'already a client' | 'already said yes'
+  | 'already a client' | 'already said yes' | 'client unsubscribed'
 
 export interface AudienceInput {
   audience: Audience
@@ -226,7 +227,7 @@ export interface AudienceInput {
   firstApproach: boolean
   /** News when absent. A prospect kind never reaches a client and has its own rule for leads. */
   kind?: CampaignKind
-  companies: Pick<Company, 'id' | 'name' | 'email' | 'parentCompanyId' | 'services' | 'contactPerson'>[]
+  companies: Pick<Company, 'id' | 'name' | 'email' | 'parentCompanyId' | 'services' | 'contactPerson' | 'newsStoppedAt'>[]
   contacts: Pick<Contact, 'id' | 'firstName' | 'email' | 'companyId' | 'leadId'>[]
   leads: (Pick<Lead, 'id' | 'firstName' | 'companyName' | 'email' | 'status' | 'source' | 'createdAt'
     | 'lastContactAt' | 'rejectionReason'> & { statusChangedAt?: string; marketingConsentAt?: string; marketingListId?: string })[]
@@ -262,12 +263,15 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
   const seen = new Set<string>()
   const excluded: Partial<Record<ExclusionReason, number>> = {}
   const skip = (why: ExclusionReason) => { excluded[why] = (excluded[why] ?? 0) + 1 }
+  const clientStopped = stoppedClientEmails(input.companies, input.contacts)
 
   const offer = (raw: string | undefined, r: Omit<Recipient, 'email'>) => {
     const email = normaliseEmail(raw)
     if (!email) { skip('no address'); return }
     if (!isSendableEmail(email)) { skip('address does not look right'); return }
     if (seen.has(email)) { skip('on the list twice'); return }
+    /* THE CLIENT SAID NO NEWS (clientNews.ts) -- for every address it covers, however it was reached. */
+    if (clientStopped.has(email)) { seen.add(email); skip('client unsubscribed'); return }
     const pref = input.preferences.get(email)
     if (pref === 'unsubscribed') { seen.add(email); skip('unsubscribed'); return }
     if (pref === 'undeliverable') { seen.add(email); skip('undeliverable'); return }
@@ -414,6 +418,24 @@ export function resolveAudience(input: AudienceInput): AudienceResult {
     }
   }
   return { recipients: out, excluded }
+}
+
+/**
+ * EVERY ADDRESS A CLIENT-WIDE UNSUBSCRIBE COVERS (clientNews.ts): the client's own and its
+ * sub-accounts', and every contact on any of them. Keyed by ADDRESS because that is what a campaign
+ * de-duplicates on -- so the same person reached through a lead record, or picked by hand, is still
+ * not sent our news. The list is drawn with it and the drain reads it again before each send.
+ */
+export function stoppedClientEmails(
+  companies: (NewsCompany & Pick<Company, 'email'>)[],
+  contacts: Pick<Contact, 'email' | 'companyId'>[],
+): Set<string> {
+  const byId = new Map(companies.map((c) => [c.id, c]))
+  const out = new Set<string>()
+  for (const c of companies) if (c.email && newsStoppedBy(c.id, byId)) out.add(normaliseEmail(c.email))
+  for (const p of contacts) if (p.email && p.companyId && newsStoppedBy(p.companyId, byId)) out.add(normaliseEmail(p.email))
+  out.delete('')
+  return out
 }
 
 /* ------------------------------------------------------------------------------------------------

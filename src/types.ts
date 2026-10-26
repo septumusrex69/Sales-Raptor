@@ -419,6 +419,16 @@ export interface Company {
   dormantAt?: string | null
   dormantReason?: string | null
   dormantBy?: string | null
+  /**
+   * NO NEWS AT ALL (S12, clientNews.ts): the client asked for no newsletter or campaign to any of its
+   * people. Not dormancy, which stops nothing. A re-subscription keeps when, why and who.
+   */
+  newsStoppedAt?: string | null
+  newsStoppedReason?: string | null
+  newsStoppedBy?: string | null
+  newsResumedAt?: string | null
+  newsResumedReason?: string | null
+  newsResumedBy?: string | null
   /** Swordfish's own "Active / Dormant", as imported. */
   registerStatus?: string | null
   /**

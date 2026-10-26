@@ -1,5 +1,8 @@
 # Handoff — where Raptor stands
 
+> **S12 · No News** (`claude/s12-no-news`, from `claude/sales-raptor-review-p1pzx2` at `4afb3f3`, 26 Oct): a client
+> unsubscribed from our news as a whole. Its section is the first below.
+>
 > **S11 was two sessions in parallel on 24 Oct, both from `claude/sales-raptor-review-p1pzx2` at `ef4ae21`:**
 > **S11 · Lean Mail** (`claude/s11-lean-mail`, the mail clean-up) and **S11 · Loaders and Handers**
 > (`claude/new-session-8jcj9a`, the harness's name; S10's questions A.1-A.10 asked and answered, and built).
@@ -7,21 +10,53 @@
 > **Previous: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel.
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **24 October 2026, S11.** Read "S11 -- WHERE IT STANDS" below first, then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
+Last updated: **26 October 2026, S12.** Read S12 first, then "S11 -- WHERE IT STANDS", then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 
-## S11 · LOADERS AND HANDERS -- WHERE IT STANDS (24 Oct) -- READ THIS FIRST
+## S12 · NO NEWS (26 Oct) -- READ THIS FIRST
+
+**DORMANT IS NOT UNSUBSCRIBED -- the firm overruled S11's next item.** Stephan, asked about keeping dormant clients
+out of campaigns: "The client can be dormant but still receive information ... a client that ... doesn't even want to
+receive any information from us. I wouldn't really call them dormant ... We need to find a name for people that don't
+want to receive information. Like unsubscribes." So **dormancy stops nothing** (check-client-news asserts the campaign
+code never reads it) and the name is **Unsubscribed**, which already existed per ADDRESS (`marketing_preferences`, the
+News card, the link in every newsletter). He then asked for it **client-wide**, and that is what S12 built:
+
+- **`companies.news_stopped_at / _reason / _by`** (+ `news_resumed_at / _reason / _by`; constraint
+  `companies_news_resumed_says_why` refuses a re-subscription without a reason -- probed in a rolled-back
+  transaction). Migration **`client_news_stopped`**, staging only; md5 of the applied text = the schema.sql block.
+- **What it covers** (`src/lib/clientNews.ts`, `stoppedClientEmails` in `src/lib/marketing.ts`): the client's own
+  address, every contact on it, every sub-account and its contacts (a sub-account follows its parent), and contacts
+  added later. Keyed by ADDRESS in the campaign rule, so the same person reached as a lead or picked by hand is also
+  left out -- counted as "client unsubscribed" in the campaign preview. **The drain re-reads it per chunk**, so
+  recording it mid-campaign stops the rest. News and campaigns only: statements, reports, notices, the welcome still go.
+- **Screens**: the client's News card -- "Unsubscribe this client from our news" (optional reason) / "Record a
+  re-subscription for the whole client" (reason required); same people as dormancy (companies_update policy). The
+  clients list marks the row **Unsubscribed**. A contact's News card names the client that unsubscribed.
+- **Fixed on the way**: the contact page looked its client and owner up in `mockData` (empty lists), so it never
+  showed whose person it was. It reads the store now.
+- Checks: `check-client-news` (31), 8 new in `check-marketing`, `e2e/client-news` (11); each broken and seen failing.
+
+**Also this session (no code):**
+- Supabase "Email OTP Expiration" -> 86400: Stephan says done (26 Oct). Not readable through the MCP; the test is
+  a password reset clicked more than an hour later. ~23 staff invited 22-23 Oct never accepted (links dead either
+  way: re-invite). **Zanele's address is `zanele@breddellferreira.co.za` -- misspelt (double d)**; fix and re-invite.
+- bfnews.co.za: Resend says sending is verified, only the tracking CNAME `links` -> `links2.resend-dns.com`
+  is missing (re-verify started 26 Oct; still failed). Its DNS is not on Vercel and the session cannot reach DNS;
+  Stephan to add it at the DNS host (proxy off), then re-verify in Resend.
+
+## S11 · LOADERS AND HANDERS -- WHERE IT STANDS (24 Oct)
 
 Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Handers), fast-forwarded onto
 `claude/sales-raptor-review-p1pzx2` on 25 Oct with the firm's say-so. Stephan answered S10's list A.1-A.10 (his words are in the commits).
@@ -87,11 +122,12 @@ Branch `claude/new-session-8jcj9a` (the harness named it; S11 · Loaders and Han
   client paid over on the 11th of the next month.
 - A.8 keep choosing the liaison on conversion (as built).
 - A.11 leave (B.1) still the next big build; A.12 call transfer parked; BuzzBox is Stephan's.
-- C: Supabase "Email OTP Expiration" 86400 -- instructions given; not confirmed done.
+- C: Supabase "Email OTP Expiration" 86400 -- Stephan says done (S12, 26 Oct); production too to confirm.
 - Resend: bfnews.co.za needs DNS CNAME `links` -> `links2.resend-dns.com` (Stephan) before tracking starts.
 
 ### The next session starts here
-1. **Dormant clients out of campaigns and reminders** -- the firm: "a good idea"; said next, not yet built.
+1. ~~Dormant clients out of campaigns~~ -- **overruled by the firm (S12)**: dormant clients still get news. Built
+   instead: a client-wide Unsubscribed (S12 above).
 2. **Leave round two** (B.1) -- waiting on Stephan: is the carry-over right (6 days max into the new year, leave
    year from 1 Jan), and SimplePay's bulk-input template. **READ FIRST: its DATABASE half is already live on
    staging** -- migration `leave_round_two` (23 Oct, S10's stopped agent; found by S11 comparing staging with
@@ -217,7 +253,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema). Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`. Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

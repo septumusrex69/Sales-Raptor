@@ -133,6 +133,23 @@ check('leads by status and source', emails(run({ audience: { kind: 'leads_by', s
 check('a client and a lead on one address: the client basis wins',
   run({ audience: { kind: 'all_clients' } }).recipients.find((x) => x.email === 'anna@smit.co.za')?.via, 'contact')
 check('an undeliverable address is left out', run({ audience: { kind: 'all_clients' }, preferences: new Map([['anna@smit.co.za', 'undeliverable']]) }).excluded.undeliverable, 1)
+{
+  /*
+   * A CLIENT THAT SAID NO NEWS (S12, clientNews.ts) covers the family: its own address, a
+   * sub-account's people, its contacts -- and the same address reached as a lead or picked by hand.
+   */
+  const stoppedCompanies = base.companies.map((c) => (c.id === 'c1' ? { ...c, newsStoppedAt: daysAgo(1) } : c))
+  const r = run({ audience: { kind: 'all_clients' }, companies: stoppedCompanies })
+  check('a client-wide unsubscribe leaves the whole family out', emails(r), [])
+  check('...and counts each address under its own reason', r.excluded['client unsubscribed'], 3)
+  check('...the same address on a lead with consent is still not sent news',
+    emails(run({ audience: { kind: 'active_leads' }, companies: stoppedCompanies })).includes('anna@smit.co.za'), false)
+  check('...nor when picked by hand', emails(run({ audience: { kind: 'manual', picks: [{ type: 'contact', id: 'p2' }, { type: 'company', id: 'c1' }] }, companies: stoppedCompanies })), [])
+  const subOnly = base.companies.map((c) => (c.id === 'c1b' ? { ...c, newsStoppedAt: daysAgo(1) } : c))
+  check('a sub-account\'s own stop covers its people and not the parent\'s', emails(run({ audience: { kind: 'all_clients' }, companies: subOnly })),
+    ['accounts@smit.co.za', 'anna@smit.co.za'])
+  check('...an unmarked client is untouched', emails(run({ audience: { kind: 'all_clients' } })).length, 3)
+}
 check('a stored audience that is not one is refused, not read as everybody', M.parseAudience({ kind: 'everyone' }), null)
 check('...a dormant period that is nonsense falls back to 90', M.parseAudience({ kind: 'dormant_leads', days: 'x' }).days, 90)
 
@@ -228,6 +245,7 @@ function fakeAdmin(db) {
     const q = { table, filters: [] }
     const b = {
       select: () => b, eq: (c, v) => { q.filters.push(['eq', c, v]); return b }, neq: () => b, not: () => b, order: () => b,
+      limit: () => b, range: () => b,
       in: (c, v) => { q.filters.push(['in', c, v]); return b },
       insert: (rows) => { if (table === 'activities') log.activities.push(...rows); return Promise.resolve({ error: null }) },
       update: () => b, upsert: () => Promise.resolve({ error: null }),
@@ -235,7 +253,9 @@ function fakeAdmin(db) {
       then: (res) => res(table === 'marketing_preferences'
         ? { data: db.prefs.filter((p) => (q.filters.find((f) => f[0] === 'in')?.[2] ?? []).includes(p.email)) }
         : table === 'marketing_sends' ? { count: db.queue.length }
-          : table === 'marketing_campaigns' ? { data: db.campaign ? [db.campaign] : [] } : { data: [] }),
+          : table === 'marketing_campaigns' ? { data: db.campaign ? [db.campaign] : [] }
+            : table === 'companies' ? { data: db.companies ?? [], error: null }
+              : table === 'contacts' ? { data: db.contacts ?? [], error: null } : { data: [] }),
     }
     return b
   }
@@ -271,6 +291,22 @@ const campaign = { id: 'c', name: 'n', subject: 'October', preheader: '', body: 
   check('...from the configured sender, replies to the firm', [sent[0].from, sent[0].reply_to], ['Bredell Ferreira <news@example.test>', 'info@example.test'])
   check('one timeline line per email that went, under whoever pressed Send',
     admin.log.activities.map((a) => [a.type, a.subject, a.user_id, a.company_id]), [['Email', 'Newsletter: October', 'u2', 'c1']])
+}
+{
+  /* THE CLIENT SAID NO NEWS AFTER THE LIST WAS DRAWN (S12): the drain reads it again and skips them. */
+  const db = { campaign, queue: [row(1, 'a@x.co'), row(2, 'anna@smit.co.za', { company_id: 'c1b' })], prefs: [],
+    companies: [{ id: 'c1', email: 'accounts@smit.co.za', parent_company_id: null, news_stopped_at: daysAgo(0) },
+      { id: 'c1b', email: null, parent_company_id: 'c1', news_stopped_at: null }],
+    contacts: [{ id: 'p1', email: 'Anna@Smit.co.za', company_id: 'c1b' }] }
+  const admin = fakeAdmin(db)
+  const sent = []
+  await S.drainMarketing(admin, { budgetMs: 5000, host: 'raptor.test', fetchImpl: async (url, init) => {
+    const list = JSON.parse(init.body); sent.push(...(Array.isArray(list) ? list : [list]))
+    return { ok: true, status: 200, json: async () => (Array.isArray(list) ? { data: list.map((_, i) => ({ id: `re_${i}` })) } : { id: 're_0' }) }
+  } })
+  check('a client-wide unsubscribe recorded mid-campaign stops the rest of it', sent.map((m) => m.to[0]), ['a@x.co'])
+  check('...the covered person is skipped, and says why', [admin.log.records.find((r) => r.id === 's2')?.state, admin.log.records.find((r) => r.id === 's2')?.error],
+    ['skipped', 'The client unsubscribed from our news'])
 }
 {
   /* One bad address fails a batch at Resend: sent again one by one, only the bad one fails. */

@@ -210,7 +210,7 @@ function CampaignList() {
  * One campaign
  * ---------------------------------------------------------------------------------------------- */
 
-const EXCLUSION_ORDER = ['unsubscribed', 'undeliverable', 'no consent recorded', 'already approached once',
+const EXCLUSION_ORDER = ['unsubscribed', 'client unsubscribed', 'undeliverable', 'no consent recorded', 'already approached once',
   'already said yes', 'already a client', 'no address', 'address does not look right', 'on the list twice'] as const
 
 /** "12 (40%)": a count with its rate, or the count alone while there is nothing to divide by. */
