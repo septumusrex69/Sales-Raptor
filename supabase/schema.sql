@@ -50998,3 +50998,28 @@ begin
       check (news_resumed_at is null or length(btrim(coalesce(news_resumed_reason, ''))) > 0);
   end if;
 end $$;
+
+-- ============================================================================
+-- S12 (26 Oct): WHO A CAMPAIGN GOES OUT FROM. Migration `campaign_send_from`, staging first.
+--
+-- THE FIRM: bulk communication may go "from each liaison individually ... the client is for Nicole,
+-- it goes out from Nicole, but if the client is assigned to nobody, it just goes out from" reports@
+-- -- nicole@bredellferreira.co.za and reports@bredellferreira.co.za, and "the only one at BF News is
+-- news at BF News". The firm chose this over its 22 Oct rule that no bulk mail goes from the main
+-- domain (src/lib/marketing.ts FIRM_MAIN_MAIL_DOMAIN), knowing the reputation risk.
+--   'news'    -- news@bfnews.co.za, as before (the default, so every existing campaign is unchanged);
+--   'liaison' -- each client from its liaison's own address; clients with no liaison from reports@;
+--   'reports' -- everybody from reports@bredellferreira.co.za.
+-- Prepared for the marketer's session (docs/briefs/S13-reino-campaigns.md), which builds the screen
+-- and the sending; marketing_sends.sender already exists and records the address each row went from.
+-- ============================================================================
+alter table public.marketing_campaigns
+  add column if not exists send_from text not null default 'news';
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'marketing_campaigns_send_from_known') then
+    alter table public.marketing_campaigns add constraint marketing_campaigns_send_from_known
+      check (send_from in ('news', 'liaison', 'reports'));
+  end if;
+end $$;

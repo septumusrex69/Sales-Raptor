@@ -512,6 +512,11 @@ from `claude/sales-raptor-review-p1pzx2` and opens a pull request into it; a pul
 outside the sales area waits for the administrator's approval, by design. If the work genuinely
 needs a change outside the area, say so in the pull request rather than working round it.
 
+**A brief can widen the area for one assignment, and only the administrator writes one.** S13 · Campaigns
+(`docs/briefs/S13-reino-campaigns.md`, 26 Oct) gives Reino's session the whole News & campaigns section --
+including `src/lib/marketing.ts`, the campaign server in `api/` and the campaign checks -- and nothing else.
+The owned files in it still wait for the administrator's approval on the pull request; that is the design.
+
 ## Working in parallel
 
 Sessions cannot see each other and each starts cold. **One branch per session** — two sessions on

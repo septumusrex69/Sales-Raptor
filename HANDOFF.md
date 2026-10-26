@@ -10,7 +10,7 @@
 > **Previous: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`) · S13 Campaigns (Reino, `claude/s13-reino-campaigns`, see docs/briefs).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
@@ -23,6 +23,19 @@ Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
+
+## S13 · CAMPAIGNS -- HANDED TO REINO (26 Oct)
+
+Stephan gave the News & campaigns section to **Reino's** session: **`docs/briefs/S13-reino-campaigns.md`** is the
+whole brief (scope, what to build, tests, what Stephan does). In short: a **Send from** choice on News campaigns --
+BF News (news@bfnews.co.za, default) / **each client's liaison** (nicole@bredellferreira.co.za; clients with no
+liaison from reports@) / **reports@bredellferreira.co.za**; leads always from news@. The firm's words: "the only one
+at BF News is news at BF News"; "forget about team@". This OVERRIDES the 22 Oct rule that no bulk mail goes from
+the main domain, for these two senders only -- the firm decided it knowing the reputation risk. Prepared by S12:
+`marketing_campaigns.send_from` ('news' | 'liaison' | 'reports', default 'news'; migration **`campaign_send_from`**,
+staging, md5 = the schema.sql block). **Waiting on Stephan:** a Resend key for bredellferreira.co.za in Vercel as
+`RESEND_FIRM_API_KEY` (the current key is bfnews-only); whether to switch on tracking for bredellferreira.co.za.
+Reino's branch: `claude/s13-reino-campaigns`, PR into the preview branch.
 
 ## S12 · NO NEWS (26 Oct) -- READ THIS FIRST
 
@@ -253,7 +266,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`. Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`. Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow
