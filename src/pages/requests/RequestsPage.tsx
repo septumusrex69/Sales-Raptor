@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { FileText, Loader2, Paperclip } from 'lucide-react'
+import { ChevronDown, FileText, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
+import { UserAvatar } from '../../components/ui/Avatar'
 import { Button } from '../../components/ui/Button'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
-import { formatDate, timeAgo } from '../../data/mockData'
+import { formatDate, formatDateTime } from '../../data/mockData'
+import type { User } from '../../types'
 import {
   PRIORITY_LABEL, STATUSES, STATUS_LABEL, isOpen, mayDecide, mayWithdraw, requestLabel, sortRequests,
   type ChangeRequest, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
@@ -51,7 +53,7 @@ export function RequestsPage() {
     if (r && !isOpen(r.status)) setShelf(r.status === 'done' ? 'done' : 'declined')
   }, [focus, rows])
 
-  const nameOf = (id: string | null) => (id ? users.find((u) => u.id === id)?.name ?? 'Somebody' : 'Somebody')
+  const userOf = (id: string) => users.find((u) => u.id === id)
   const counts = useMemo(() => {
     const all = rows ?? []
     return { open: all.filter((r) => isOpen(r.status)).length, done: all.filter((r) => r.status === 'done').length,
@@ -119,9 +121,9 @@ export function RequestsPage() {
           {shelf === 'open' ? 'Nothing waiting. Press the light bulb at the top of any page to ask for a change.' : 'None here.'}
         </p>
       )}
-      <div className="space-y-3" data-testid="requests-list">
+      <div className="space-y-2.5" data-testid="requests-list">
         {shown.map((r) => (
-          <RequestCard key={r.id} r={r} files={files.filter((f) => f.request_id === r.id)} nameOf={nameOf}
+          <RequestCard key={r.id} r={r} files={files.filter((f) => f.request_id === r.id)} userOf={userOf}
             focused={focus === r.number} canDecide={mayDecide(currentUser)} canWithdraw={mayWithdraw(currentUser, r)} onChanged={load} />
         ))}
       </div>
@@ -129,8 +131,8 @@ export function RequestsPage() {
   )
 }
 
-function RequestCard({ r, files, nameOf, focused, canDecide, canWithdraw, onChanged }: {
-  r: ChangeRequest; files: RequestFileMeta[]; nameOf: (id: string | null) => string
+function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, onChanged }: {
+  r: ChangeRequest; files: RequestFileMeta[]; userOf: (id: string) => User | undefined
   focused: boolean; canDecide: boolean; canWithdraw: boolean; onChanged: () => void
 }) {
   const [open, setOpen] = useState(focused)
@@ -148,36 +150,81 @@ function RequestCard({ r, files, nameOf, focused, canDecide, canWithdraw, onChan
     status, admin_note: note.trim() || null, ...(status === 'done' ? { done_in: doneIn.trim() || null } : {}),
   }))
 
-  return (
-    <Card className={focused ? 'ring-2 ring-brand-300' : ''}>
-      <div data-testid="request-card" data-number={r.number}>
-        <button type="button" onClick={() => setOpen((o) => !o)} className="w-full text-left">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-mono font-semibold text-slate-700">{requestLabel(r)}</span>
-            <span className={`rounded-md px-1.5 py-0.5 ${STATUS_TONE[r.status]}`} data-testid="request-status">{STATUS_LABEL[r.status]}</span>
-            {r.priority !== 'normal' && <span className={`rounded-md px-1.5 py-0.5 ${r.priority === 'high' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{PRIORITY_LABEL[r.priority]}</span>}
-            <span className="text-slate-500">{nameOf(r.created_by)} · {timeAgo(r.created_at)}</span>
-            {files.length > 0 && <span className="inline-flex items-center gap-0.5 text-slate-400"><Paperclip size={12} />{files.length}</span>}
-          </div>
-          <p className={`mt-1.5 text-sm text-slate-800 whitespace-pre-wrap ${open ? '' : 'line-clamp-2'}`}>{r.description}</p>
-        </button>
-        {open && (
-          <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
-            {r.page_path && (
-              <p className="text-xs text-slate-500">Asked from <Link to={r.page_path} className="text-brand-700 hover:underline">{r.page_title || r.page_path}</Link></p>
-            )}
-            {files.length > 0 && <RequestFiles files={files} />}
-            {r.admin_note && !canDecide && <p className="text-sm text-slate-600"><span className="font-medium">Note:</span> {r.admin_note}</p>}
-            {r.done_in && <p className="text-xs text-emerald-700">Built in {r.done_in}</p>}
-            {r.decided_at && <p className="text-xs text-slate-400">{STATUS_LABEL[r.status]} by {nameOf(r.decided_by)} on {formatDate(r.decided_at)}</p>}
+  const asker = userOf(r.created_by)
+  const decider = r.decided_by ? userOf(r.decided_by) : null
+  const pictures = files.filter((f) => f.mime.startsWith('image/')).length
+  const pdfs = files.length - pictures
+  /* The first line is the title: people write "Diary: make broken promises red" and then explain. */
+  const [title, ...rest] = r.description.trim().split(/\n+/)
+  const more = rest.join('\n').trim()
 
-            {canDecide && (
+  return (
+    <div data-testid="request-card" data-number={r.number}
+      className={`overflow-hidden rounded-xl border bg-white shadow-sm transition ${focused ? 'border-brand-300 ring-2 ring-brand-200' : 'border-slate-200'} ${open ? '' : 'hover:border-slate-300 hover:shadow'}`}>
+      {/*
+        THE WHOLE ROW IS THE BUTTON, and it LOOKS like one (the firm, 26 Oct: "I couldn't see that I
+        need to be clicking on it"): a chevron that turns, a hover, and the words "Open" / "Close".
+      */}
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid="request-toggle"
+        className={`flex w-full items-start gap-3 px-4 py-3 text-left ${open ? 'bg-slate-50' : 'hover:bg-slate-50'}`}>
+        {/* The number people say out loud ("R-2"), as the notifications and the night's review say it. */}
+        <div className="flex h-10 min-w-[3rem] shrink-0 items-center justify-center rounded-lg bg-navy-900 px-2 font-mono text-sm font-bold text-white" data-testid="request-number">
+          {requestLabel(r)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="min-w-0 truncate text-[15px] font-semibold text-slate-800" data-testid="request-title">{title}</p>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500" data-testid="request-asker">
+            <span className="inline-flex items-center gap-1.5">
+              <UserAvatar userId={r.created_by} size={18} />
+              <span>Asked by <strong className="font-medium text-slate-700">{asker?.name ?? 'Somebody'}</strong>{asker?.role ? ` · ${asker.role}` : ''}</span>
+            </span>
+            <span>· {formatDateTime(r.created_at)}</span>
+            {r.page_title && <span>· on {r.page_title}</span>}
+            {pictures > 0 && <span className="inline-flex items-center gap-0.5"><ImageIcon size={12} />{pictures} screenshot{pictures === 1 ? '' : 's'}</span>}
+            {pdfs > 0 && <span className="inline-flex items-center gap-0.5"><FileText size={12} />{pdfs} PDF{pdfs === 1 ? '' : 's'}</span>}
+          </div>
+          {decider && r.decided_at && (
+            <p className="mt-1 text-xs text-slate-500" data-testid="request-decider">
+              {STATUS_LABEL[r.status]} by <strong className="font-medium text-slate-700">{decider.name}</strong> · {formatDateTime(r.decided_at)}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <div className="flex items-center gap-1.5">
+            {r.priority !== 'normal' && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${r.priority === 'high' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{PRIORITY_LABEL[r.priority]}</span>}
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[r.status]}`} data-testid="request-status">{STATUS_LABEL[r.status]}</span>
+          </div>
+          <span className="inline-flex items-center gap-0.5 text-xs font-medium text-brand-700">
+            {open ? 'Close' : 'Open'} <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+          </span>
+        </div>
+      </button>
+      {open && (
+        <div className="space-y-4 border-t border-slate-100 px-4 py-4 sm:pl-[4.75rem]">
+          <Section label="What they asked">
+            <p className="whitespace-pre-wrap text-sm text-slate-800">{more ? `${title}\n\n${more}` : title}</p>
+            {r.page_path && (
+              <p className="mt-1.5 text-xs text-slate-500">Asked from <Link to={r.page_path} className="font-medium text-brand-700 hover:underline">{r.page_title || r.page_path} →</Link></p>
+            )}
+          </Section>
+          {files.length > 0 && <Section label="Screenshots and files"><RequestFiles files={files} /></Section>}
+          {(r.admin_note || r.done_in) && !canDecide && (
+            <Section label="From the administrator">
+              {r.admin_note && <p className="text-sm text-slate-700">{r.admin_note}</p>}
+              {r.done_in && <p className="text-xs text-emerald-700">Built in {r.done_in}</p>}
+            </Section>
+          )}
+
+          {canDecide && (
+            <Section label="Decide">
               <div className="space-y-2 rounded-lg bg-slate-50 p-3" data-testid="request-decide">
                 <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="A note for the person who asked (a decline needs one)"
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" data-testid="request-note" />
                 <div className="flex flex-wrap items-center gap-2">
                   {STATUSES.filter((s) => s !== r.status && s !== 'new').map((s) => (
-                    <Button key={s} size="sm" variant={s === 'declined' ? 'danger' : 'secondary'} disabled={busy || (s === 'declined' && !note.trim())}
+                    <Button key={s} size="sm" variant={s === 'declined' ? 'danger' : s === 'done' ? 'primary' : 'secondary'} disabled={busy || (s === 'declined' && !note.trim())}
                       onClick={() => void move(s)} data-testid={`request-move-${s}`}>
                       {s === 'accepted' ? 'Accept' : s === 'building' ? 'Being built' : s === 'done' ? 'Mark done' : 'Decline'}
                     </Button>
@@ -193,16 +240,25 @@ function RequestCard({ r, files, nameOf, focused, canDecide, canWithdraw, onChan
                   )}
                 </div>
               </div>
-            )}
-            {canWithdraw && (
-              <button type="button" disabled={busy} onClick={() => void act(() => withdrawRequest(r.id))}
-                className="text-xs text-slate-500 hover:text-red-700" data-testid="request-withdraw">Withdraw this request</button>
-            )}
-            {error && <p className="text-xs text-red-600">{error}</p>}
-          </div>
-        )}
-      </div>
-    </Card>
+            </Section>
+          )}
+          {canWithdraw && (
+            <button type="button" disabled={busy} onClick={() => void act(() => withdrawRequest(r.id))}
+              className="text-xs text-slate-500 hover:text-red-700" data-testid="request-withdraw">Withdraw this request</button>
+          )}
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Section({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      {children}
+    </div>
   )
 }
 

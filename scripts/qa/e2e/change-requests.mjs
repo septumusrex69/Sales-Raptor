@@ -107,7 +107,18 @@ try {
     && /R-7/.test(await review.innerText()) && /Red or orange\?/.test(await review.innerText()))
   const cards = page.getByTestId('request-card')
   t.check('the list opens on the open ones, high first', JSON.stringify(await cards.evaluateAll((els) => els.map((e) => e.dataset.number))), JSON.stringify(['8', '7']))
-  await cards.first().locator('button').first().click()
+  const first = cards.first()
+  t.ok('a closed request says it can be opened', /Open/.test(await first.getByTestId('request-toggle').innerText())
+    && (await first.getByTestId('request-toggle').getAttribute('aria-expanded')) === 'false')
+  t.ok('...and says its number, who asked (with their role) and who decided',
+    /^R-8$/.test((await first.getByTestId('request-number').innerText()).trim())
+    && /Asked by Stephan · Administrator/.test(await first.getByTestId('request-asker').innerText())
+    && /Accepted by Stephan/.test(await first.getByTestId('request-decider').innerText()))
+  t.ok('...an undecided one has no "by" line', (await cards.nth(1).getByTestId('request-decider').count()) === 0
+    && /Asked by Alianna Botha · Pre-legal Agent/.test(await cards.nth(1).getByTestId('request-asker').innerText()))
+  await t.shot(page, 'change-requests-3-list')
+  await first.getByTestId('request-toggle').click()
+  t.ok('opening it turns the toggle to Close', /Close/.test(await first.getByTestId('request-toggle').innerText()))
   t.check('a tester sees no decision buttons', await page.getByTestId('request-decide').count(), 0)
   await page.context().close()
 
