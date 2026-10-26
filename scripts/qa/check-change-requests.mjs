@@ -226,6 +226,14 @@ check('only the person who asked answers, and only a question with choices',
   check('...and a closed one waits on nobody', [waitingOnAsker({ ...R, status: 'done' }, [ask]), waitingOnAsker({ ...R, id: 'other' }, [ask])].join(), 'false,false')
 }
 
+// "R-6" broke after its hyphen in a narrow table (Stephan's screenshot, Raptor H13): every place
+// that shows a request's number keeps it on one line.
+{
+  const shown = ['src/pages/requests/RequestsPage.tsx', 'src/components/requests/RequestPanel.tsx']
+    .flatMap((p) => code(p).match(/<span className="[^"]*"[^>]*>\{requestLabel\(r\)\}/g) ?? [])
+  check('every R-number on screen is kept on one line', [shown.length > 3, shown.every((s) => /\bwhitespace-nowrap\b/.test(s))].join(), 'true,true')
+}
+
 if (failures.length) {
   console.log(`check-change-requests: ${pass} passed, ${failures.length} failed`)
   for (const f of failures) console.log(`  ✗ ${f}`)

@@ -97,7 +97,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
     <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[30rem] flex-col border-l border-slate-200 bg-white shadow-2xl"
       data-testid="request-panel" data-number={r.number} aria-label={`Request ${requestLabel(r)}`}>
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
-        <span className="rounded-md bg-navy-900 px-2 py-1 font-mono text-xs font-bold text-white">{requestLabel(r)}</span>
+        <span className="whitespace-nowrap rounded-md bg-navy-900 px-2 py-1 font-mono text-xs font-bold text-white">{requestLabel(r)}</span>
         <StagePill r={r} feedbackFrom={events && waitingOnAsker(r, events) ? (asker?.name.split(' ')[0] ?? 'them') : null} />
         <div className="ml-auto flex items-center gap-1">
           <IconButton label="Previous request" disabled={!onPrev} onClick={() => onPrev?.()}><ChevronLeft size={16} /></IconButton>

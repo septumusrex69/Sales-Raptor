@@ -151,6 +151,12 @@ try {
     && /Reviewed/.test(await cards.nth(1).getByTestId('request-status').innerText())
     && /Alianna Botha/.test(await cards.nth(1).getByTestId('request-asker').innerText())
     && /Approved/.test(await cards.nth(0).getByTestId('request-status').innerText()))
+  // Stephan's iPad showed "R-" over "6": a squeezed column broke the number at its hyphen.
+  const wide = page.viewportSize()
+  await page.setViewportSize({ width: 900, height: wide.height })
+  t.ok('...and on a narrow screen the number stays on one line', (await cards.getByTestId('request-number').evaluateAll((els) =>
+    els.map((e) => e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight)))).every((lines) => lines < 1.9))
+  await page.setViewportSize(wide)
   await page.getByTestId('requests-tile-decision').click()
   t.check('a tile filters the tickets to what it counts', JSON.stringify(await cards.evaluateAll((els) => els.map((e) => e.dataset.number))), JSON.stringify(['7']))
   await page.getByTestId('requests-tile-filter').click()

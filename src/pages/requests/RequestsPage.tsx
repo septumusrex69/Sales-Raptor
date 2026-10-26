@@ -247,7 +247,7 @@ function WaitingOnYou({ rows, onOpen }: { rows: ChangeRequest[]; onOpen: (r: Cha
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {fresh.slice(0, 6).map((r) => (
           <button key={r.id} type="button" onClick={() => onOpen(r)} className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-slate-300 hover:shadow-sm">
-            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700">{requestLabel(r)}</span>
+            <span className="whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700">{requestLabel(r)}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-800">{titleOf(r)}</span>
               <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
@@ -293,7 +293,7 @@ function RequestTable({ rows, files, onOpen, openId, feedbackFrom }: {
             return (
               <tr key={r.id} onClick={() => onOpen(r)} data-testid="request-card" data-number={r.number}
                 className={`cursor-pointer border-b border-slate-50 hover:bg-slate-50 ${openId === r.id ? 'bg-gold-50' : ''}`}>
-                <td className="px-2 py-2.5"><span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700" data-testid="request-number">{requestLabel(r)}</span></td>
+                <td className="w-px px-2 py-2.5"><span className="whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700" data-testid="request-number">{requestLabel(r)}</span></td>
                 <td className="max-w-[22rem] px-2 py-2.5">
                   <span className="block truncate font-medium text-slate-800" data-testid="request-title">{titleOf(r)}</span>
                   {n > 0 && <span className="inline-flex items-center gap-0.5 text-[11px] text-slate-400"><Paperclip size={11} />{n}</span>}
@@ -347,7 +347,7 @@ function BoardCard({ r, n, onOpen, open, feedbackFrom }: { r: ChangeRequest; n: 
     <button type="button" onClick={() => onOpen(r)} data-testid="request-card" data-number={r.number}
       className={`w-full rounded-lg border bg-white p-2.5 text-left shadow-sm hover:shadow ${open ? 'border-gold-400' : 'border-slate-200'}`}>
       <span className="flex items-center justify-between gap-1">
-        <span className="font-mono text-[11px] font-semibold text-slate-500">{requestLabel(r)}</span>
+        <span className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-500">{requestLabel(r)}</span>
         {r.priority === 'high' && <span className="rounded-full bg-red-50 px-1.5 text-[10px] text-red-700">High</span>}
       </span>
       <span className="mt-1 block text-sm font-medium leading-snug text-slate-800">{titleOf(r)}</span>
