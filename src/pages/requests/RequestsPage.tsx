@@ -10,10 +10,10 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate, formatDateTime } from '../../data/mockData'
 import {
-  REQUEST_DEPARTMENTS, VERDICT_LABEL, onShelf, requestLabel, reviewTiles, sortRequests, titleOf,
+  REQUEST_DEPARTMENTS, VERDICT_LABEL, onShelf, waitingOnAsker, requestLabel, reviewTiles, sortRequests, titleOf,
   type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestReview, type ReviewVerdict, type Shelf,
 } from '../../lib/changeRequests'
-import { listFiles, listRequests, listReviews } from '../../lib/changeRequestsApi'
+import { listFiles, listQuestionThreads, listRequests, listReviews } from '../../lib/changeRequestsApi'
 
 /**
  * THE FEEDBACK CENTRE (Raptor H12) -- "Request a change", worked as a development queue.
@@ -53,9 +53,10 @@ export function RequestsPage() {
   const [reviewIndex, setReviewIndex] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [view, setViewState] = useState<View>(() => readView(currentUser?.id))
-  // The list opens on New, with All last as the option to put on (Stephan, Raptor H12): what is waiting
-  // to be decided is what somebody comes here for; everything else is one press away.
-  const [shelf, setShelf] = useState<Shelf>('new')
+  // The list opens on Open, with All last as the option to put on (Stephan, Raptor H12): what is not yet
+  // finished is what somebody comes here for; everything else is one press away.
+  const [shelf, setShelf] = useState<Shelf>('open')
+  const [threads, setThreads] = useState<Awaited<ReturnType<typeof listQuestionThreads>>>([])
   const [dept, setDept] = useState<RequestDepartment | 'all'>('all')
   const [search, setSearch] = useState('')
   const [tile, setTile] = useState<TileFilter>(null)
@@ -67,8 +68,8 @@ export function RequestsPage() {
   }
 
   const load = useCallback(() => {
-    Promise.all([listRequests(), listFiles(), listReviews()])
-      .then(([r, f, v]) => { setRows(r); setFiles(f); setReviews(v) })
+    Promise.all([listRequests(), listFiles(), listReviews(), listQuestionThreads()])
+      .then(([r, f, v, q]) => { setRows(r); setFiles(f); setReviews(v); setThreads(q) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
   useEffect(() => { load() }, [load])
@@ -88,8 +89,16 @@ export function RequestsPage() {
   const counts = useMemo(() => {
     const all = rows ?? []
     const n = (s: Shelf) => all.filter((r) => onShelf(r, s)).length
-    return { all: n('all'), new: n('new'), progress: n('progress'), done: n('done'), declined: n('declined') }
+    return { all: n('all'), open: n('open'), done: n('done'), declined: n('declined') }
   }, [rows])
+  /* Who each open request waits on, by first name, for the "Needs feedback from" pill. */
+  const feedbackFrom = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of rows ?? []) {
+      if (waitingOnAsker(r, threads)) m.set(r.id, users.find((u) => u.id === r.created_by)?.name.split(' ')[0] ?? 'them')
+    }
+    return m
+  }, [rows, threads, users])
 
   const open = focus ? (rows ?? []).find((r) => r.number === focus) ?? null : null
   const openAt = open ? shown.findIndex((r) => r.id === open.id) : -1
@@ -149,7 +158,7 @@ export function RequestsPage() {
           </div>
           {view !== 'board' && (
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Which requests" data-testid="requests-shelf">
-              {([['new', 'New'], ['progress', 'In progress'], ['done', 'Released'], ['declined', 'Declined'], ['all', 'All']] as const).map(([s, label]) => (
+              {([['open', 'Open'], ['done', 'Released'], ['declined', 'Declined'], ['all', 'All']] as const).map(([s, label]) => (
                 <button key={s} type="button" role="radio" aria-checked={shelf === s} onClick={() => { setShelf(s); setTile(null) }}
                   className={`rounded-lg border px-3 py-1 text-sm ${shelf === s && !tile ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                   {label} ({counts[s]})
@@ -164,8 +173,8 @@ export function RequestsPage() {
             </div>
           )}
           {view === 'board'
-            ? <RequestBoard rows={shown} files={files} onOpen={go} openId={open?.id ?? null} />
-            : <RequestTable rows={shown} files={files} onOpen={go} openId={open?.id ?? null} />}
+            ? <RequestBoard rows={shown} files={files} onOpen={go} openId={open?.id ?? null} feedbackFrom={feedbackFrom} />
+            : <RequestTable rows={shown} files={files} onOpen={go} openId={open?.id ?? null} feedbackFrom={feedbackFrom} />}
         </section>
       )}
 
@@ -260,8 +269,8 @@ function Asker({ id }: { id: string }) {
 }
 
 /** COMPACT ROWS: the whole list readable at a glance, one click to open. */
-function RequestTable({ rows, files, onOpen, openId }: {
-  rows: ChangeRequest[]; files: RequestFileMeta[]; onOpen: (r: ChangeRequest) => void; openId: string | null
+function RequestTable({ rows, files, onOpen, openId, feedbackFrom }: {
+  rows: ChangeRequest[]; files: RequestFileMeta[]; onOpen: (r: ChangeRequest) => void; openId: string | null; feedbackFrom: Map<string, string>
 }) {
   if (!rows.length) return <p className="py-6 text-center text-sm text-slate-400" data-testid="requests-empty">No requests here. Press the light bulb at the top of any page to ask for a change.</p>
   return (
@@ -291,7 +300,7 @@ function RequestTable({ rows, files, onOpen, openId }: {
                 </td>
                 <td className="px-2 py-2.5">{r.department ? <Chip tone="gold">{r.department}</Chip> : <span className="text-slate-300">—</span>}</td>
                 <td className="px-2 py-2.5">{r.review_size ? <Chip tone="slate">{r.review_size}</Chip> : <span className="text-slate-300">—</span>}</td>
-                <td className="px-2 py-2.5"><StagePill r={r} /></td>
+                <td className="px-2 py-2.5"><StagePill r={r} feedbackFrom={feedbackFrom.get(r.id)} /></td>
                 <td className="px-2 py-2.5 text-slate-700" data-testid="request-asker"><Asker id={r.created_by} /></td>
                 <td className="whitespace-nowrap px-2 py-2.5 text-xs text-slate-500">{formatDateTime(r.created_at)}</td>
               </tr>
@@ -304,8 +313,8 @@ function RequestTable({ rows, files, onOpen, openId }: {
 }
 
 /** THE WORKFLOW AS COLUMNS -- the development queue the firm asked for. Declined is left off the board. */
-function RequestBoard({ rows, files, onOpen, openId }: {
-  rows: ChangeRequest[]; files: RequestFileMeta[]; onOpen: (r: ChangeRequest) => void; openId: string | null
+function RequestBoard({ rows, files, onOpen, openId, feedbackFrom }: {
+  rows: ChangeRequest[]; files: RequestFileMeta[]; onOpen: (r: ChangeRequest) => void; openId: string | null; feedbackFrom: Map<string, string>
 }) {
   const cols: { title: string; pick: (r: ChangeRequest) => boolean }[] = [
     { title: 'Submitted', pick: (r) => r.status === 'new' && !r.reviewed_at },
@@ -323,7 +332,7 @@ function RequestBoard({ rows, files, onOpen, openId }: {
             <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{c.title} ({mine.length})</p>
             <div className="space-y-2">
               {mine.map((r) => (
-                <BoardCard key={r.id} r={r} n={files.filter((f) => f.request_id === r.id).length} onOpen={onOpen} open={openId === r.id} />
+                <BoardCard key={r.id} r={r} n={files.filter((f) => f.request_id === r.id).length} onOpen={onOpen} open={openId === r.id} feedbackFrom={feedbackFrom.get(r.id)} />
               ))}
             </div>
           </div>
@@ -333,7 +342,7 @@ function RequestBoard({ rows, files, onOpen, openId }: {
   )
 }
 
-function BoardCard({ r, n, onOpen, open }: { r: ChangeRequest; n: number; onOpen: (r: ChangeRequest) => void; open: boolean }): ReactNode {
+function BoardCard({ r, n, onOpen, open, feedbackFrom }: { r: ChangeRequest; n: number; onOpen: (r: ChangeRequest) => void; open: boolean; feedbackFrom?: string }): ReactNode {
   return (
     <button type="button" onClick={() => onOpen(r)} data-testid="request-card" data-number={r.number}
       className={`w-full rounded-lg border bg-white p-2.5 text-left shadow-sm hover:shadow ${open ? 'border-gold-400' : 'border-slate-200'}`}>
@@ -345,6 +354,7 @@ function BoardCard({ r, n, onOpen, open }: { r: ChangeRequest; n: number; onOpen
       <span className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
         {r.department && <Chip tone="gold">{r.department}</Chip>}
         {n > 0 && <span className="inline-flex items-center gap-0.5"><Paperclip size={10} />{n}</span>}
+        {feedbackFrom && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-medium text-amber-900" data-testid="request-feedback">Needs feedback from {feedbackFrom}</span>}
       </span>
       <span className="mt-1.5 block"><Asker id={r.created_by} /></span>
     </button>

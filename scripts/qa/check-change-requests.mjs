@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
-  STATUS_LABEL, OTHER_CHOICE, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, onShelf, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
+  STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, onShelf, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
 let pass = 0
@@ -155,8 +155,8 @@ check('the workflow words', ['new', 'accepted', 'building', 'done', 'declined'].
   ['Submitted', 'Approved', 'In development', 'Released', 'Declined'])
 check('...a Submitted request a night has read is Reviewed', [stageOf({ status: 'new', reviewed_at: 'x' }), stageOf({ status: 'new', reviewed_at: null })], ['Reviewed', 'Submitted'])
 check('the title is the night\'s where there is one, else the first line', [titleOf({ review_title: ' Call centre · Diary ', description: 'x' }), titleOf({ review_title: null, description: 'First\nsecond' })], ['Call centre · Diary', 'First'])
-check('the shelves', ['new', 'accepted', 'building', 'done', 'declined'].map((s) => ['new', 'progress', 'done', 'declined'].filter((sh) => onShelf({ status: s }, sh)).join('')),
-  ['new', 'progress', 'progress', 'done', 'declined'])
+check('the shelves: Submitted, Approved and In development are all Open', ['new', 'accepted', 'building', 'done', 'declined'].map((s) => ['open', 'done', 'declined'].filter((sh) => onShelf({ status: s }, sh)).join('')),
+  ['open', 'open', 'open', 'done', 'declined'])
 check('a night\'s tiles count only the requests it read, by verdict', reviewTiles([
   { id: 'a', review_verdict: 'ready' }, { id: 'b', review_verdict: 'decision' }, { id: 'c', review_verdict: 'decision' }, { id: 'd', review_verdict: 'blocked' },
 ], ['a', 'b', 'd']), { reviewed: 3, ready: 1, decision: 1, blocked: 1 })
@@ -211,6 +211,19 @@ check('only the person who asked answers, and only a question with choices',
   ok('...and an answer must answer a question with choices on the same request',
     /q\.id = change_request_events\.answers and q\.kind = 'question' and q\.choices is not null\s+and q\.request_id = change_request_events\.request_id/.test(m))
   ok('the history reads both columns', /by_id, at, choices, answers'/.test(read('src/lib/changeRequestsApi.ts')))
+}
+
+{
+  const R = { id: 'r1', created_by: 'asker', status: 'accepted' }
+  const ask = { id: 'q1', request_id: 'r1', kind: 'question', by_id: 'admin', at: '2026-10-26T10:00:00Z', answers: null, choices: null }
+  const tick = { ...ask, id: 'q2', choices: ['A', 'B'] }
+  const reply = (over) => ({ id: 'c', request_id: 'r1', kind: 'comment', by_id: 'asker', at: '2026-10-26T11:00:00Z', answers: null, choices: null, ...over })
+  check('an open request with an unanswered question needs feedback from the person who asked',
+    [waitingOnAsker(R, [ask]), waitingOnAsker(R, [ask, reply({})]), waitingOnAsker(R, [ask, reply({ at: '2026-10-26T09:00:00Z' })]),
+     waitingOnAsker(R, [ask, reply({ by_id: 'admin' })])].join(), 'true,false,true,true')
+  check('...a question with options waits for the tick, not any reply',
+    [waitingOnAsker(R, [tick, reply({})]), waitingOnAsker(R, [tick, reply({ answers: 'q2' })])].join(), 'true,false')
+  check('...and a closed one waits on nobody', [waitingOnAsker({ ...R, status: 'done' }, [ask]), waitingOnAsker({ ...R, id: 'other' }, [ask])].join(), 'false,false')
 }
 
 if (failures.length) {

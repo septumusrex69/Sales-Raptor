@@ -236,12 +236,32 @@ export function titleOf(r: Pick<ChangeRequest, 'review_title' | 'description'>):
 }
 
 /* THE SHELVES OF THE LIST: what is waiting, what is moving, what is finished. */
-export type Shelf = 'all' | 'new' | 'progress' | 'done' | 'declined'
+/*
+ * OPEN IS ONE SHELF (Stephan, Raptor H12: "instead of separating new and in progress, make one. Open --
+ * then mark them inside as new or in progress. (Need feedback from) or whatever."). Everything not yet
+ * released or declined is Open; the row's own pill says where in the workflow it is, and a second one
+ * says when it waits on the person who asked (waitingOnAsker).
+ */
+export type Shelf = 'open' | 'done' | 'declined' | 'all'
 export function onShelf(r: Pick<ChangeRequest, 'status'>, shelf: Shelf): boolean {
   if (shelf === 'all') return true
-  if (shelf === 'new') return r.status === 'new'
-  if (shelf === 'progress') return r.status === 'accepted' || r.status === 'building'
+  if (shelf === 'open') return r.status === 'new' || r.status === 'accepted' || r.status === 'building'
   return r.status === shelf
+}
+
+/**
+ * Is an open request waiting for the person who asked to answer a question? A question with options
+ * waits until it is ticked; a question for words waits until they write anything after it. Questions
+ * answer themselves no other way -- an Administrator's own note does not answer for them.
+ */
+export function waitingOnAsker(
+  r: Pick<ChangeRequest, 'id' | 'created_by' | 'status'>,
+  events: Pick<RequestEvent, 'id' | 'request_id' | 'kind' | 'by_id' | 'at' | 'answers' | 'choices'>[],
+): boolean {
+  if (!onShelf(r, 'open')) return false
+  const mine = events.filter((e) => e.request_id === r.id)
+  return mine.some((q) => q.kind === 'question' && !mine.some((a) => a.kind === 'comment' && (
+    (q.choices?.length ?? 0) >= 2 ? a.answers === q.id : (a.by_id === r.created_by && a.at > q.at))))
 }
 
 /** A night's tiles: how many of the requests it read are ready, need a decision, or are blocked. */

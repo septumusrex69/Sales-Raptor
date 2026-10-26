@@ -8,7 +8,7 @@ import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  MAX_CHOICES, OTHER_CHOICE, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayDecide, mayTest, mayWithdraw,
+  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayDecide, mayTest, mayWithdraw,
   parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
@@ -98,7 +98,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
       data-testid="request-panel" data-number={r.number} aria-label={`Request ${requestLabel(r)}`}>
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
         <span className="rounded-md bg-navy-900 px-2 py-1 font-mono text-xs font-bold text-white">{requestLabel(r)}</span>
-        <StagePill r={r} />
+        <StagePill r={r} feedbackFrom={events && waitingOnAsker(r, events) ? (asker?.name.split(' ')[0] ?? 'them') : null} />
         <div className="ml-auto flex items-center gap-1">
           <IconButton label="Previous request" disabled={!onPrev} onClick={() => onPrev?.()}><ChevronLeft size={16} /></IconButton>
           <IconButton label="Next request" disabled={!onNext} onClick={() => onNext?.()}><ChevronRight size={16} /></IconButton>
@@ -273,7 +273,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
 }
 
 /** Where a request stands, with the asker's test beside it once it is released. */
-export function StagePill({ r }: { r: ChangeRequest }) {
+export function StagePill({ r, feedbackFrom }: { r: ChangeRequest; feedbackFrom?: string | null }) {
   const stage = stageOf(r)
   const tone = r.status === 'done' ? 'bg-emerald-50 text-emerald-700' : r.status === 'declined' ? 'bg-slate-100 text-slate-600'
     : r.status === 'building' ? 'bg-amber-50 text-amber-800' : r.status === 'accepted' ? 'bg-indigo-50 text-indigo-700'
@@ -283,6 +283,7 @@ export function StagePill({ r }: { r: ChangeRequest }) {
     <span className="inline-flex items-center gap-1">
       <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`} data-testid="request-status">{stage}</span>
       {r.status === 'accepted' && r.build_requested_at && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="request-queued-pill">Queued for Claude</span>}
+      {feedbackFrom && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900" data-testid="request-feedback">Needs feedback from {feedbackFrom}</span>}
       {test === 'works' && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">Tested ✓</span>}
       {test === 'waiting' && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">To test</span>}
       {test === 'sent back' && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">Sent back</span>}

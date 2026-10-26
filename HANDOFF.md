@@ -126,6 +126,11 @@ constraints, and one clause added to the insert policy -- an answer must answer 
 SAME request (probed as Rinda, rolled back). Rules in `changeRequests.ts` (`parseChoices`, `answerBody`,
 `answerTo`, `tickedOf`, `mayAnswer`); check-change-requests +12, e2e/change-requests +7. The skill tells the
 builder and the nightly review to ask this way when the answer is one of a few.
+**One Open shelf** (Stephan: "instead of separating new and in progress, make one. Open -- then mark them inside
+as new or in progress. (Need feedback from)"): Open · Released · Declined · All, opening on Open; each row keeps
+its stage pill and gains **Needs feedback from <first name>** while a question to the asker is unanswered
+(`waitingOnAsker`: a question with options waits for its tick, a question for words for any reply of theirs
+after it). The list reads every question and reply without their words (`listQuestionThreads`).
 **R-6** now carries two such questions for Rinda (which reference; Diary or Accounts). It goes on the queue
 once she answers.
 

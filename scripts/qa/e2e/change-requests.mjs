@@ -136,10 +136,13 @@ try {
   t.ok('new requests waiting for a decision are listed under it', /R-7/.test(await page.getByTestId('requests-waiting').innerText()))
   const cards = page.getByTestId('request-card')
   const shelves = page.getByTestId('requests-shelf').getByRole('radio')
-  t.check('the list opens on New, with All last', JSON.stringify([await shelves.evaluateAll((els) => els.map((e) => e.textContent.replace(/ \(\d+\)/, ''))),
+  t.check('the list opens on Open -- new and in progress together -- with All last', JSON.stringify([await shelves.evaluateAll((els) => els.map((e) => e.textContent.replace(/ \(\d+\)/, ''))),
     await page.getByTestId('requests-shelf').getByRole('radio', { checked: true }).innerText(),
     await cards.evaluateAll((els) => els.map((e) => e.dataset.number))]),
-  JSON.stringify([['New', 'In progress', 'Released', 'Declined', 'All'], 'New (1)', ['7']]))
+  JSON.stringify([['Open', 'Released', 'Declined', 'All'], 'Open (2)', ['8', '7']]))
+  t.check('...each row says where it is, and who it waits on', JSON.stringify(await cards.evaluateAll((els) => els.map((e) =>
+    `${e.querySelector('[data-testid="request-status"]')?.textContent}|${e.querySelector('[data-testid="request-feedback"]')?.textContent ?? ''}`))),
+  JSON.stringify(['Approved|', 'Reviewed|Needs feedback from Alianna']))
   await shelves.filter({ hasText: /^All/ }).click()
   t.check('the tickets: high first, then newest', JSON.stringify(await cards.evaluateAll((els) => els.map((e) => e.dataset.number))), JSON.stringify(['8', '7', '5']))
   t.ok('each row says its number, title, department, status and who asked',

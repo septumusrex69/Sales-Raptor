@@ -43,6 +43,14 @@ export async function listReviews(): Promise<RequestReview[]> {
     .map((r) => ({ id: r.id, created_at: r.created_at, summary: r.summary, groups: parseReviewGroups(r.groups), request_ids: r.request_ids ?? [] }))
 }
 
+/** Every question and reply, without the words -- enough to say which requests wait on the person who asked. */
+export async function listQuestionThreads(): Promise<Pick<RequestEvent, 'id' | 'request_id' | 'kind' | 'by_id' | 'at' | 'answers' | 'choices'>[]> {
+  const { data, error } = await supabase.from('change_request_events').select('id, request_id, kind, by_id, at, answers, choices')
+    .in('kind', ['question', 'comment']).order('at').limit(5000)
+  if (error) throw new Error(error.message)
+  return (data ?? []) as Pick<RequestEvent, 'id' | 'request_id' | 'kind' | 'by_id' | 'at' | 'answers' | 'choices'>[]
+}
+
 /** One request's history, oldest first. */
 export async function listEvents(requestId: string): Promise<RequestEvent[]> {
   const { data, error } = await supabase.from('change_request_events').select('id, request_id, kind, body, from_status, to_status, by_id, at, choices, answers')
