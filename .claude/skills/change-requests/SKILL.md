@@ -34,8 +34,16 @@ select f.id, f.name, f.mime, f.bytes, f.data from public.change_request_files f
  where r.number = 12 and f.data is not null;
 ```
 
-Write each `data` to a file in your scratchpad with base64 decoding (e.g. `base64 -d`), then **look at it**
-with the Read tool -- pictures are the whole point, often the words only make sense with the screenshot.
+Write each `data` to a file in your scratchpad with base64 decoding, then **look at it** with the Read tool --
+pictures are the whole point, often the words only make sense with the screenshot. **Never skip this.**
+
+A screenshot's base64 is 70-200 kB, and the SQL tool will not print that inline. Two ways that work
+(Raptor H12 -- the first nightly run gave up here and reviewed words only):
+- **The tool saves an oversized result to a file and says the path.** Pull the base64 out of that file and
+  decode it: `python3 -I -c 'import re,base64,sys; t=open(sys.argv[1]).read(); m=re.search(r"\"data\\?\":\\?\"([A-Za-z0-9+/=]+)", t); open(sys.argv[2],"wb").write(base64.b64decode(m.group(1)))' <saved-result-file> shot.jpg`
+- **Or read it in slices** small enough to print: `select length(data) from change_request_files where id = '<id>'`,
+  then `select substr(data, 1, 30000)`, `substr(data, 30001, 30000)`, ... appending each slice to one text
+  file, and `base64 -d` it at the end.
 PDFs: Read with `pages`. Open the page the request came from (`page_path`) in the code to see what it is
 about.
 
