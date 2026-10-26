@@ -115,6 +115,13 @@ check('the database knows the same departments as the screen',
 const lastNotify = schema.slice(schema.lastIndexOf('create or replace function public.change_request_notify()'))
 ok('the new-request notification says the department and the pane', /coalesce\(', ' \|\| new\.department, ''\) \|\| coalesce\(' · ' \|\| new\.pane, ''\)/.test(lastNotify))
 
+// Raptor H12: the builder and the nightly review comment with by_id null. SELECT INTO over no profile
+// row left the name NULL, the notification's message NULL, and the comment itself refused.
+const lastEventNotify = schema.slice(schema.lastIndexOf('create or replace function public.change_request_event_notify()'))
+ok('a comment by Claude (no author) is named Claude, not refused', lastEventNotify.length > 0
+  && /when new\.by_id is null then 'Claude'/.test(lastEventNotify)
+  && !/into v_who from public\.profiles where id = new\.by_id/.test(lastEventNotify.slice(0, lastEventNotify.indexOf('$$;'))))
+
 /* ---------- the screens ---------- */
 ok('the button is in the top bar, so on every page', /<RequestChangeButton title=\{title\} \/>/.test(code('src/components/layout/Topbar.tsx')))
 ok('the page somebody was on goes with the request', /pagePath: page, pageTitle/.test(code('src/components/requests/RequestChangeButton.tsx')))

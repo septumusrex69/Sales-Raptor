@@ -51602,3 +51602,42 @@ end $$;
 alter table public.change_requests add column if not exists build_requested_at timestamptz;
 alter table public.change_requests add column if not exists build_requested_by uuid references public.profiles (id) on delete set null;
 create index if not exists change_requests_build_queue_idx on public.change_requests (build_requested_at) where build_requested_at is not null;
+
+-- Raptor H12 (migration change_request_comment_by_claude): a comment by Claude (by_id null) names Claude.
+create or replace function public.change_request_event_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r public.change_requests;
+  v_who text;
+begin
+  if new.kind not in ('comment', 'question') then
+    return new;
+  end if;
+  select * into r from public.change_requests where id = new.request_id;
+  -- A comment with no author is the builder or the nightly review writing (Raptor H12). SELECT INTO
+  -- finds no profile row for a null by_id and leaves v_who NULL -- the coalesce inside never runs --
+  -- and a NULL message is refused, which took the builder's "Claude needs an answer" down with it.
+  v_who := case when new.by_id is null then 'Claude'
+                else coalesce((select name from public.profiles where id = new.by_id), 'Somebody') end;
+  if new.by_id is distinct from r.created_by then
+    insert into public.notifications (user_id, type, message, link)
+    values (r.created_by, 'change_request.' || new.kind,
+            case when new.kind = 'question' then v_who || ' has a question about your request R-' || r.number || ': '
+                 else v_who || ' wrote on your request R-' || r.number || ': ' end || left(btrim(new.body), 120),
+            '/requests?r=' || r.number);
+  else
+    insert into public.notifications (user_id, type, message, link)
+    select p.id, 'change_request.reply', v_who || ' replied on R-' || r.number || ': ' || left(btrim(new.body), 120), '/requests?r=' || r.number
+      from public.profiles p
+     where p.role = 'Administrator' and p.status = 'Active' and p.id is distinct from new.by_id;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_event_notify() from public, anon, authenticated;
+create or replace trigger change_request_event_notify after insert on public.change_request_events
+  for each row execute function public.change_request_event_notify();

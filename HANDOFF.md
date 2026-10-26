@@ -104,7 +104,15 @@ request a run, oldest queued; unclear -> a comment and off the queue; else build
 -> Released with how to test; a failure goes back to Approved with why. Scheduled task **"Raptor · builder"**,
 hourly 07:13-18:13 weekdays SAST, fresh session; it needs the Supabase connector (and the repository, to push)
 attached in Scheduled -> Edit, as the nightly one did. History lines with nobody's name read "Claude".
-R-5 was put back to Approved (it had been released by hand, nothing built).
+Supabase is attached to the builder (seen 26 Oct, 18:09). **Its first real build is the test of whether it can PUSH**
+-- no repository was offered on the Edit screen; if it cannot, it stops and says so in one line.
+**Comments by Claude (`by_id` null) were refused** -- `change_request_event_notify` SELECTed the name INTO
+v_who, no profile row left it NULL, and a NULL notification message failed the whole insert. That would have
+broken the builder's "Claude needs an answer" step on its first unclear request. Fixed (migration
+`change_request_comment_by_claude`, md5 matched); check-change-requests holds it.
+R-5 was put back to Approved (it had been released by hand, nothing built); the wrong "in development" and
+"released" notifications to Rinda were marked read, not deleted. **R-5 waits on Stephan's answers to the
+review's three questions** (which problems, import review only, preview before a bulk change) before Ask Claude.
 
 ## S12 · DEBTOR CAMPAIGNS: WHO THEY COME FROM, AND THE WRITTEN-OFF BOOK (26 Oct, Raptor H12)
 
