@@ -23,7 +23,8 @@ const REQUESTS = [
   { id: 'q2', number: 8, description: 'Diary: the same, but orange', page_path: '/diary', page_title: 'Diary', status: 'accepted', priority: 'high',
     admin_note: null, done_in: null, created_by: ADMIN.id, created_at: '2026-10-25T09:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-25T10:00:00Z', closed_at: null },
   { id: 'q3', number: 5, description: 'Old, done', page_path: '/', page_title: 'Dashboard', status: 'done', priority: 'normal',
-    admin_note: null, done_in: 'S12', created_by: TESTER.id, created_at: '2026-10-20T08:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-21T08:00:00Z', closed_at: '2026-10-21T08:00:00Z' },
+    admin_note: null, done_in: 'Raptor H12', created_by: TESTER.id, created_at: '2026-10-20T08:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-21T08:00:00Z', closed_at: '2026-10-21T08:00:00Z',
+    tested_ok: null, tested_note: null, tested_at: null, tested_by: null },
 ]
 const REVIEW = { id: 'v1', created_at: '2026-10-26T02:00:00Z', summary: 'Two requests about the diary, one decision needed.',
   groups: [{ title: 'Broken promises stand out in the diary', request_numbers: [7, 8], what: 'Colour the broken-promise rows.', questions: ['Red or orange?'], size: 'small' }] }
@@ -57,6 +58,10 @@ const handlers = (who, writes) => [
   [(u, req) => req.method() === 'PATCH' && u.includes('/rest/v1/change_requests'), (u, req) => {
     writes.push({ table: 'patch', url: decodeURIComponent(u), body: req.postDataJSON() })
     return { status: 200, body: [] }
+  }],
+  [(u, req) => u.includes('/rpc/change_request_tested'), (u, req) => {
+    writes.push({ table: 'tested', body: req.postDataJSON() })
+    return { status: 200, body: null }
   }],
   [(u) => u.includes('/rest/v1/change_request_reviews'), () => ({ body: REVIEW })],
   [(u) => u.includes('/rest/v1/change_request_files'), () => ({ body: [] })],
@@ -134,6 +139,21 @@ try {
   await first.getByTestId('request-toggle').click()
   t.ok('opening it turns the toggle to Close', /Close/.test(await first.getByTestId('request-toggle').innerText()))
   t.check('a tester sees no decision buttons', await page.getByTestId('request-decide').count(), 0)
+
+  /* Their own Done request asks them to test it. */
+  await page.getByTestId('requests-shelf').getByRole('radio', { name: /Done/ }).click()
+  const done = page.locator('[data-testid="request-card"][data-number="5"]')
+  t.ok('a Done request says it is waiting for a test', /Waiting for a test/.test(await done.innerText()))
+  await done.getByTestId('request-toggle').click()
+  t.ok('...and asks the person who asked to test it', /This is done\. Please test it\./.test(await done.getByTestId('request-test').innerText()))
+  await done.getByTestId('request-test-not-right').click()
+  t.ok('"Not right yet" needs to say what', await done.getByTestId('request-test-send-back').isDisabled())
+  await done.getByTestId('request-test-note').fill('The reference is still missing on disputes.')
+  await done.getByTestId('request-test-send-back').click()
+  await page.waitForTimeout(500)
+  t.check('...and sends it back with that', JSON.stringify(writes.find((w) => w.table === 'tested')?.body),
+    JSON.stringify({ p_number: 5, p_ok: false, p_note: 'The reference is still missing on disputes.' }))
+  await t.shot(page, 'change-requests-4-test')
   await page.context().close()
 
   /* 3. An Administrator declines one. */

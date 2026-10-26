@@ -11,7 +11,7 @@ import {
  * screenshots to draw forty titles.
  */
 
-const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at'
+const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by'
 
 export async function listRequests(): Promise<ChangeRequest[]> {
   const { data, error } = await supabase.from('change_requests').select(REQUEST_COLUMNS).order('created_at', { ascending: false }).limit(500)
@@ -71,5 +71,11 @@ export async function updateRequest(id: string, patch: Partial<{ status: Request
 
 export async function withdrawRequest(id: string): Promise<void> {
   const { error } = await supabase.from('change_requests').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** The asker's answer once it is Done: it works, or it goes back with what is wrong. */
+export async function answerTest(number: number, ok: boolean, note: string): Promise<void> {
+  const { error } = await supabase.rpc('change_request_tested', { p_number: number, p_ok: ok, p_note: note.trim() || null })
   if (error) throw new Error(error.message)
 }

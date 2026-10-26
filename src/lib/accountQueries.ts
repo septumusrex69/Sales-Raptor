@@ -361,7 +361,7 @@ export async function fetchQueriesForClient(companyId: string): Promise<QueueRow
 export async function fetchQuery(id: string): Promise<{
   query: AccountQuery
   /** The account it is about, where it is about one. */
-  account: { id: string; accountNumber: string | null; debtorName: string; companyId: string } | null
+  account: { id: string; accountNumber: string | null; clientReference: string | null; debtorName: string; companyId: string } | null
   /** The batch it is about, where it is about a sheet. */
   batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null
   clientName: string | null
@@ -404,17 +404,18 @@ export async function fetchQuery(id: string): Promise<{
   const q = toQuery(data)
 
   let companyId: string | null = null
-  let acc: { id: string; accountNumber: string | null; debtorName: string; companyId: string } | null = null
+  let acc: { id: string; accountNumber: string | null; clientReference: string | null; debtorName: string; companyId: string } | null = null
   let batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null = null
 
   if (q.accountId) {
     const { data: a } = await supabase.from('debtor_accounts')
-      .select('id, account_number, debtor_first_name, debtor_surname, company_id')
+      .select('id, account_number, client_reference, debtor_first_name, debtor_surname, company_id')
       .eq('id', q.accountId).maybeSingle()
     if (a) {
       acc = {
         id: a.id as string,
         accountNumber: (a.account_number as string | null) ?? null,
+        clientReference: (a.client_reference as string | null) ?? null,
         debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
         companyId: a.company_id as string,
       }

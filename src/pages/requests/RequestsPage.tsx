@@ -10,10 +10,10 @@ import { useAuth } from '../../store/AuthContext'
 import { formatDate, formatDateTime } from '../../data/mockData'
 import type { User } from '../../types'
 import {
-  PRIORITY_LABEL, REQUEST_DEPARTMENTS, STATUSES, STATUS_LABEL, isOpen, mayDecide, mayWithdraw, requestLabel, sortRequests,
+  PRIORITY_LABEL, REQUEST_DEPARTMENTS, STATUSES, STATUS_LABEL, isOpen, mayDecide, mayTest, mayWithdraw, testState, requestLabel, sortRequests,
   type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
 } from '../../lib/changeRequests'
-import { fileDataUrl, latestReview, listFiles, listRequests, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
+import { answerTest, fileDataUrl, latestReview, listFiles, listRequests, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
 
 /**
  * CHANGE REQUESTS (S12, changeRequests.ts): everything people asked Raptor to do differently.
@@ -131,16 +131,17 @@ export function RequestsPage() {
       <div className="space-y-2.5" data-testid="requests-list">
         {shown.map((r) => (
           <RequestCard key={r.id} r={r} files={files.filter((f) => f.request_id === r.id)} userOf={userOf}
-            focused={focus === r.number} canDecide={mayDecide(currentUser)} canWithdraw={mayWithdraw(currentUser, r)} onChanged={load} />
+            focused={focus === r.number} canDecide={mayDecide(currentUser)} canWithdraw={mayWithdraw(currentUser, r)}
+            canTest={mayTest(currentUser, r)} isAsker={currentUser?.id === r.created_by} onChanged={load} />
         ))}
       </div>
     </div>
   )
 }
 
-function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, onChanged }: {
+function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, canTest, isAsker, onChanged }: {
   r: ChangeRequest; files: RequestFileMeta[]; userOf: (id: string) => User | undefined
-  focused: boolean; canDecide: boolean; canWithdraw: boolean; onChanged: () => void
+  focused: boolean; canDecide: boolean; canWithdraw: boolean; canTest: boolean; isAsker: boolean; onChanged: () => void
 }) {
   const [open, setOpen] = useState(focused)
   const [note, setNote] = useState(r.admin_note ?? '')
@@ -160,6 +161,10 @@ function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, onChan
   const asker = userOf(r.created_by)
   const decider = r.decided_by ? userOf(r.decided_by) : null
   const pictures = files.filter((f) => f.mime.startsWith('image/')).length
+  const test = testState(r)
+  const tester = r.tested_by ? userOf(r.tested_by) : null
+  const [testNote, setTestNote] = useState('')
+  const [sayingNo, setSayingNo] = useState(false)
   const pdfs = files.length - pictures
   /* The first line is the title: people write "Diary: make broken promises red" and then explain. */
   const [title, ...rest] = r.description.trim().split(/\n+/)
@@ -197,16 +202,26 @@ function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, onChan
             {pictures > 0 && <span className="inline-flex items-center gap-0.5"><ImageIcon size={12} />{pictures} screenshot{pictures === 1 ? '' : 's'}</span>}
             {pdfs > 0 && <span className="inline-flex items-center gap-0.5"><FileText size={12} />{pdfs} PDF{pdfs === 1 ? '' : 's'}</span>}
           </div>
-          {decider && r.decided_at && (
+          {test === 'sent back' && tester && r.tested_at ? (
+            <p className="mt-1 text-xs text-red-700" data-testid="request-decider">
+              Sent back by <strong className="font-medium">{tester.name}</strong> after testing · {formatDateTime(r.tested_at)}
+            </p>
+          ) : decider && r.decided_at ? (
             <p className="mt-1 text-xs text-slate-500" data-testid="request-decider">
               {STATUS_LABEL[r.status]} by <strong className="font-medium text-slate-700">{decider.name}</strong> · {formatDateTime(r.decided_at)}
             </p>
+          ) : null}
+          {test === 'works' && tester && r.tested_at && (
+            <p className="mt-0.5 text-xs text-emerald-700">Tested and working, said by <strong className="font-medium">{tester.name}</strong> · {formatDateTime(r.tested_at)}</p>
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-1.5">
             {r.priority !== 'normal' && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${r.priority === 'high' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{PRIORITY_LABEL[r.priority]}</span>}
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[r.status]}`} data-testid="request-status">{STATUS_LABEL[r.status]}</span>
+            {test === 'works' && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white" data-testid="request-tested">Tested ✓</span>}
+            {test === 'waiting' && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Waiting for a test</span>}
+            {test === 'sent back' && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">Sent back</span>}
           </div>
           <span className="inline-flex items-center gap-0.5 text-xs font-medium text-brand-700">
             {open ? 'Close' : 'Open'} <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -222,7 +237,53 @@ function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, onChan
             )}
           </Section>
           {files.length > 0 && <Section label="Screenshots and files"><RequestFiles files={files} /></Section>}
-          {(r.admin_note || r.done_in) && !canDecide && (
+
+          {/*
+            TEST IT (the firm: "so that she can test it and approve that ... it works"). Done is the
+            builder's word; this is the asker's. It works closes it; Not right yet sends it back to
+            Accepted with what is wrong, and the administrators are told either way.
+          */}
+          {test === 'waiting' && canTest && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="request-test">
+              <p className="text-sm font-semibold text-amber-900">{isAsker ? 'This is done. Please test it.' : `Waiting for ${asker?.name ?? 'the person who asked'} to test it.`}</p>
+              {/* HOW TO TEST is the note written when it was marked Done -- the page it was asked from is
+                  often not where the change landed (R-3 was asked from the Dashboard). */}
+              <p className="mt-0.5 text-xs text-amber-900/80" data-testid="request-test-how">
+                {r.admin_note
+                  ? <><strong className="font-medium">How to test:</strong> {r.admin_note}</>
+                  : r.page_path
+                    ? <>Open <Link to={r.page_path} className="font-medium underline">{r.page_title || r.page_path}</Link>, try what you asked for, then say here whether it works.</>
+                    : 'Try what you asked for, then say here whether it works.'}
+                {r.done_in ? ` (${r.done_in})` : ''}
+              </p>
+              {sayingNo && (
+                <textarea value={testNote} onChange={(e) => setTestNote(e.target.value)} rows={2} autoFocus data-testid="request-test-note"
+                  placeholder="What is still not right?" className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" />
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {!sayingNo ? (
+                  <>
+                    <Button size="sm" variant="primary" disabled={busy} data-testid="request-test-works"
+                      onClick={() => void act(() => answerTest(r.number, true, ''))}>It works</Button>
+                    <Button size="sm" variant="secondary" disabled={busy} data-testid="request-test-not-right"
+                      onClick={() => setSayingNo(true)}>Not right yet</Button>
+                  </>
+                ) : (
+                  <>
+                    <Button size="sm" variant="danger" disabled={busy || !testNote.trim()} data-testid="request-test-send-back"
+                      onClick={() => void act(() => answerTest(r.number, false, testNote))}>Send it back</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setSayingNo(false)}>Cancel</Button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          {(test === 'works' || test === 'sent back') && r.tested_note && (
+            <Section label={test === 'works' ? 'What they said when they tested it' : 'What is still not right'}>
+              <p className={`text-sm ${test === 'works' ? 'text-emerald-800' : 'text-red-800'}`}>{r.tested_note}</p>
+            </Section>
+          )}
+          {(r.admin_note || r.done_in) && !canDecide && test !== 'waiting' && (
             <Section label="From the administrator">
               {r.admin_note && <p className="text-sm text-slate-700">{r.admin_note}</p>}
               {r.done_in && <p className="text-xs text-emerald-700">Built in {r.done_in}</p>}

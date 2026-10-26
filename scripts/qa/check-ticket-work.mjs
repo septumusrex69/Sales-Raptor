@@ -102,6 +102,22 @@ ok('...signed by whoever is sending it', body.trimEnd().endsWith('Nicole Loder')
  * credit provider being asked for a document. A brace reaching a client's inbox would mean the two
  * vocabularies had been crossed, and the next thing crossed would go to a debtor.
  */
+/*
+ * THE CLIENT'S OWN REFERENCE, BESIDE OURS (Raptor H12, change request R-3 -- Rinda: "Please add the
+ * client reference also to the email"). Beside, never instead: 21% of client references are shared.
+ */
+const THEIRS = { ...REQUEST, clientReference: 'INV-7731' }
+check('the subject carries the client\'s own reference after the account number',
+  ticketSubject(THEIRS), 'Proof of communication — Ofentse Thema — RRC00008 — your ref INV-7731')
+ok('...and so does the body', ticketBody(THEIRS).includes('Ofentse Thema (RRC00008, your reference INV-7731)'))
+ok('...a dispute names the account and both references too',
+  ticketBody({ ...THEIRS, kind: 'dispute', requestFor: null }).includes('Ofentse Thema (RRC00008, your reference INV-7731) has disputed this account'))
+check('...left out where it only repeats the account number', ticketSubject({ ...REQUEST, clientReference: ' rrc00008 ' }), ticketSubject(REQUEST))
+ok('...or where there is none', ticketBody({ ...REQUEST, clientReference: '' }) === ticketBody(REQUEST))
+ok('the dispute page reads it off the account and hands it to both',
+  /select\('id, account_number, client_reference, debtor_first_name/.test(read('src/lib/accountQueries.ts'))
+  && (page.match(/clientReference: data\.account\?\.clientReference \?\? null/g) ?? []).length === 2)
+
 ok('nothing in it is a merge field', !/\{\{|\}\}/.test(body + ticketSubject(REQUEST)))
 ok('...and it is not drawn from the template library', !/fetchLibrary|renderTemplate/.test(letter))
 /*

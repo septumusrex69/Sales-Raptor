@@ -96,6 +96,8 @@ check('only the named audit and real-world functions read the real clock', still
   /* change_request_notify (S12): when somebody sent or decided a change request -- a fact about the
      software being tested, not about any debtor or client, so the real clock. */
   'change_request_notify',
+  /* change_request_tested (Raptor H12): when the asker tested a change -- same kind of fact. */
+  'change_request_tested',
   'clear_staging',
   /* discard_import_batch and protect_swordfish_import_run (S10): when an import run was taken back out
      or finished is an audit stamp about a person pressing a button, like updated_at -- not a business

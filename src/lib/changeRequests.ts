@@ -39,6 +39,11 @@ export interface ChangeRequest {
   decided_by: string | null
   decided_at: string | null
   closed_at: string | null
+  /** The asker's answer once it is Done (change_request_tested): true works, false sent back. */
+  tested_ok: boolean | null
+  tested_note: string | null
+  tested_at: string | null
+  tested_by: string | null
 }
 
 export interface RequestFileMeta {
@@ -137,6 +142,24 @@ export function mayDecide(user: Pick<User, 'role'> | null | undefined): boolean 
 /** The person who sent it may take it back while nobody has looked at it. */
 export function mayWithdraw(user: Pick<User, 'id'> | null | undefined, r: Pick<ChangeRequest, 'created_by' | 'status'>): boolean {
   return !!user && r.created_by === user.id && r.status === 'new'
+}
+
+/*
+ * TESTED IS THE ASKER'S WORD, DONE IS THE BUILDER'S (Raptor H12; the firm: "so that she can test it
+ * and approve that ... it works"). An answer counts only if it came AFTER the request was last
+ * marked Done -- a request sent back, rebuilt and marked Done again is waiting for a new answer,
+ * whatever the old one said.
+ */
+export type TestState = 'not done' | 'waiting' | 'works' | 'sent back'
+export function testState(r: Pick<ChangeRequest, 'status' | 'tested_ok' | 'tested_at' | 'decided_at'>): TestState {
+  if (r.status !== 'done') return r.tested_ok === false && r.status === 'accepted' ? 'sent back' : 'not done'
+  const fresh = !!r.tested_at && (!r.decided_at || r.tested_at >= r.decided_at)
+  return fresh && r.tested_ok === true ? 'works' : 'waiting'
+}
+
+/** Who may answer: the person who asked, or an Administrator answering for them. */
+export function mayTest(user: Pick<User, 'id' | 'role'> | null | undefined, r: Pick<ChangeRequest, 'created_by'>): boolean {
+  return !!user && (user.id === r.created_by || user.role === 'Administrator')
 }
 
 /** "R-12": what people say out loud, and what the night's review groups by. */

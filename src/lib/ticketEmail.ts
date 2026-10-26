@@ -25,8 +25,14 @@
  *
  * NOTHING IS QUOTED THAT THE CLIENT CANNOT MATCH. The account number and the debtor's name are what
  * the firm's own letters quote and what a client searches their system by. Raptor's case number is
- * deliberately NOT here: it is ours, it means nothing at the client's end, and 21% of the book
- * cannot be identified by the client's own reference anyway — see CLAUDE.md on the three numbers.
+ * deliberately NOT here: it is ours, it means nothing at the client's end — see CLAUDE.md on the
+ * three numbers.
+ *
+ * AND THE CLIENT'S OWN REFERENCE IS (Raptor H12, change request R-3, Rinda, 26 Oct: "Please add the
+ * client reference also to the email"). It is the client's own filing number, the one their system
+ * finds the account by. It goes BESIDE the account number, never instead of it: 21% of the book's
+ * client references are shared by more than one account, so on its own it can name the wrong one.
+ * Left out where there is none, or where it is the account number written again.
  *
  * PURE: no clock, no database. The subject and the body are decided by what the ticket says, so a
  * check can hold the words without a browser.
@@ -43,6 +49,8 @@ export interface TicketLetterInput {
   debtorName?: string | null
   /** The reference on every letter about this account. */
   accountNumber?: string | null
+  /** The CLIENT's own reference for the account (debtor_accounts.client_reference). */
+  clientReference?: string | null
   /** Who to address, where the client record names somebody. */
   contact?: string | null
   /** Who is sending it. */
@@ -51,6 +59,12 @@ export interface TicketLetterInput {
 
 /** A sentence a person would actually say, with no trailing full stop to double up on. */
 const trim = (s: string | null | undefined) => (s ?? '').trim()
+
+/** The client's reference, or '' where there is none or it only repeats the account number. */
+function clientRef(input: TicketLetterInput): string {
+  const c = trim(input.clientReference)
+  return c && c.toLowerCase() !== trim(input.accountNumber).toLowerCase() ? c : ''
+}
 
 /**
  * THE SUBJECT, AND WHY IT LEADS WITH WHAT IS WANTED.
@@ -67,7 +81,8 @@ export function ticketSubject(input: TicketLetterInput): string {
     : input.kind === 'dispute' ? 'Account disputed' : 'Query'
   /* NEITHER PIECE IS ASSUMED. A ticket on an account with no number, or a debtor whose name never
      arrived, still produces a subject rather than "Information needed —  — ". */
-  return [lead, who, ref].filter(Boolean).join(' — ')
+  const theirs = clientRef(input)
+  return [lead, who, ref, theirs ? `your ref ${theirs}` : ''].filter(Boolean).join(' — ')
 }
 
 /**
@@ -84,14 +99,16 @@ export function ticketBody(input: TicketLetterInput): string {
   const who = trim(input.debtorName) || 'this debtor'
   const ref = trim(input.accountNumber)
   const greeting = trim(input.contact) ? `Dear ${trim(input.contact)}` : 'Good day'
-  const about = ref ? `${who} (${ref})` : who
+  const theirs = clientRef(input)
+  const refs = [ref, theirs ? `your reference ${theirs}` : ''].filter(Boolean).join(', ')
+  const about = refs ? `${who} (${refs})` : who
 
   const ask = input.kind === 'request'
     ? (trim(input.requestFor)
       ? `We need ${trim(input.requestFor).toLowerCase()} on ${about} to carry on collecting.`
       : `We need something from you on ${about} to carry on collecting.`)
     : input.kind === 'dispute'
-      ? `${who} has disputed this account and we need your help to answer it.`
+      ? `${about} has disputed this account and we need your help to answer it.`
       : `We have a query on ${about}.`
 
   /* THE CLERK'S OWN WORDS, MARKED AS QUOTED. A client reading this has to be able to tell what the

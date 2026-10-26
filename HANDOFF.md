@@ -62,6 +62,18 @@ new requests every night and then show them to me in the group list ... That's a
   `change_request_notify_says_department`. **Rinda is an Administrator on staging**, so she can also accept and
   decline, and is notified of every request. Her **R-3** (26 Oct) is waiting for Stephan -- do not build it
   until he says. Stephan's R-2 was a test (declined).
+- **Raptor H12, the loop closed: TESTED.** Stephan: "how do we give her feedback ... so that she can test it and
+  approve that ... it works." Done is the builder's word, Tested the asker's: a Done request shows the person
+  who asked a yellow "This is done. Please test it." box with **How to test** (the `admin_note` written when it
+  is marked Done) and **It works** / **Not right yet** (needs what is wrong -> back to Accepted with
+  `tested_ok = false`, `tested_note`). Administrators are told either way. `change_request_tested()` (definer:
+  only the asker or an Administrator, only when Done). Badges: Waiting for a test / Tested ✓ / Sent back.
+  Migration `change_request_tested`. The skill says how a session marks Done (with how to test) and that a
+  sent-back request comes first next time.
+- **R-3 (Rinda): BUILT** -- the email a dispute or request sends to the client now carries the client's own
+  reference beside ours ("BOP00013, your reference X" in the body; "— your ref X" in the subject); left out when
+  there is none or it repeats the account number. `ticketEmail.ts`, `accountQueries.ts`, `QueryDetail.tsx`;
+  check-ticket-work +6. Marked Done on staging with how to test; waiting for Rinda's test.
 - **At go-live**: the requests live on STAGING (where the testers are). Decide then whether production gets its
   own, and point the nightly task at it.
 
@@ -307,7 +319,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`. Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`. Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

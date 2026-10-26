@@ -51267,3 +51267,70 @@ begin
 end
 $$;
 revoke all on function public.change_request_notify() from public, anon, authenticated;
+
+-- ============================================================================
+-- Raptor · Handoff 12 (S12, 26 Oct): THE PERSON WHO ASKED TESTS IT, AND SAYS SO.
+-- Migration `change_request_tested`.
+--
+-- THE FIRM: "how do we give her feedback on this? So that she can test it and approve that ...
+-- it works." Done is the builder's word; TESTED is the asker's. Once a request is Done, the person
+-- who asked (or an Administrator, for somebody who cannot) answers through change_request_tested():
+--   it works      -> tested_ok = true, and the administrators are told;
+--   not right yet -> it goes back to Accepted with what is wrong (a note is required), and the
+--                    administrators are told, so the next session builds it again.
+-- A definer function rather than an update policy, because the asker may change exactly these
+-- columns of exactly their own request and nothing else -- the status stays the administrator's.
+-- ============================================================================
+alter table public.change_requests add column if not exists tested_ok boolean;
+alter table public.change_requests add column if not exists tested_note text;
+alter table public.change_requests add column if not exists tested_at timestamptz;
+alter table public.change_requests add column if not exists tested_by uuid references public.profiles (id) on delete set null;
+
+create or replace function public.change_request_tested(p_number bigint, p_ok boolean, p_note text default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r public.change_requests;
+  v_who text;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  select * into r from public.change_requests where number = p_number;
+  if r.id is null then
+    raise exception 'There is no request R-%.', p_number;
+  end if;
+  if auth.uid() is distinct from r.created_by and coalesce(public.current_user_role(), '') <> 'Administrator' then
+    raise exception 'Only the person who asked for R-% can say whether it works.', p_number;
+  end if;
+  if r.status <> 'done' then
+    raise exception 'R-% is not done yet, so there is nothing to test.', p_number;
+  end if;
+  if not p_ok and v_note is null then
+    raise exception 'Say what is still not right, so it can be fixed.';
+  end if;
+  select coalesce(name, 'Somebody') into v_who from public.profiles where id = auth.uid();
+
+  if p_ok then
+    update public.change_requests
+       set tested_ok = true, tested_note = v_note, tested_at = now(), tested_by = auth.uid()
+     where id = r.id;
+  else
+    -- Back to Accepted: the request is open again, and the note says what to fix.
+    update public.change_requests
+       set status = 'accepted', tested_ok = false, tested_note = v_note, tested_at = now(), tested_by = auth.uid()
+     where id = r.id;
+  end if;
+
+  insert into public.notifications (user_id, type, message, link)
+  select p.id, 'change_request.tested',
+         case when p_ok then v_who || ' tested R-' || p_number || ' and it works' || coalesce(': ' || v_note, '.')
+              else v_who || ' tested R-' || p_number || ' and it is not right yet: ' || v_note end,
+         '/requests?r=' || p_number
+    from public.profiles p
+   where p.role = 'Administrator' and p.status = 'Active' and p.id is distinct from auth.uid();
+end
+$$;
+revoke all on function public.change_request_tested(bigint, boolean, text) from public, anon;
+grant execute on function public.change_request_tested(bigint, boolean, text) to authenticated;

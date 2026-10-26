@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
-  parseReviewGroups, requestLabel, sortRequests,
+  mayTest, parseReviewGroups, requestLabel, sortRequests, testState,
 } from '../../src/lib/changeRequests.ts'
 
 let pass = 0
@@ -66,6 +66,23 @@ check('the pane and the department it suggests, read off the address', [
   'News & campaigns|Communications', 'Trust|Finance', 'People|Administration', 'Mail|Whole system', 'Dashboard|Whole system', 'Other|Whole system',
 ])
 ok('...the most specific pane wins: the collections dashboard is not the Dashboard', paneOf('/dashboard/collections').pane !== 'Dashboard')
+
+/* ---------- tested by the person who asked (Raptor H12) ---------- */
+const D = '2026-10-26T10:00:00Z', LATER = '2026-10-26T12:00:00Z', EARLIER = '2026-10-26T09:00:00Z'
+check('a Done request waits for the asker\'s test', testState({ status: 'done', tested_ok: null, tested_at: null, decided_at: D }), 'waiting')
+check('..."it works" after it was marked Done counts', testState({ status: 'done', tested_ok: true, tested_at: LATER, decided_at: D }), 'works')
+check('...an answer from BEFORE it was last marked Done does not', testState({ status: 'done', tested_ok: true, tested_at: EARLIER, decided_at: D }), 'waiting')
+check('...sent back reads as sent back while it is open again', testState({ status: 'accepted', tested_ok: false, tested_at: LATER, decided_at: LATER }), 'sent back')
+check('...and an ordinary open one is just not done', testState({ status: 'new', tested_ok: null, tested_at: null, decided_at: null }), 'not done')
+ok('the asker may answer, or an Administrator for them, nobody else', mayTest({ id: 'u', role: 'Liaison' }, { created_by: 'u' })
+  && mayTest({ id: 'a', role: 'Administrator' }, { created_by: 'u' }) && !mayTest({ id: 'x', role: 'Liaison Manager' }, { created_by: 'u' }))
+{
+  const fn = read('supabase/schema.sql').slice(read('supabase/schema.sql').lastIndexOf('create or replace function public.change_request_tested('))
+  ok('the database lets only the asker or an Administrator answer', /auth\.uid\(\) is distinct from r\.created_by and coalesce\(public\.current_user_role\(\), ''\) <> 'Administrator'/.test(fn))
+  ok('...only once it is Done', /if r\.status <> 'done' then/.test(fn))
+  ok('..."not right yet" needs a reason and reopens it', /if not p_ok and v_note is null then/.test(fn) && /set status = 'accepted', tested_ok = false/.test(fn))
+  ok('...and the administrators are told either way', /'change_request\.tested'/.test(fn) && /where p\.role = 'Administrator' and p\.status = 'Active'/.test(fn))
+}
 
 /* ---------- the database ---------- */
 const schema = read('supabase/schema.sql')

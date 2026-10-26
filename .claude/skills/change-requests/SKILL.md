@@ -19,11 +19,11 @@ email someone). Report it in the review instead.
 ## Reading them (both jobs)
 
 ```sql
-select r.number, r.status, r.priority, r.department, r.pane, r.description, r.page_path, r.page_title, r.created_at,
+select r.number, r.status, r.priority, r.department, r.pane, r.tested_ok, r.tested_note, r.description, r.page_path, r.page_title, r.created_at,
        p.name as asked_by, p.role
   from public.change_requests r join public.profiles p on p.id = r.created_by
  where r.status in ('new', 'accepted', 'building')
- order by r.number;
+ order by (r.tested_ok = false) desc, r.number;   -- sent back after testing comes first
 ```
 
 Files, one request at a time (they can be large):
@@ -77,8 +77,18 @@ about.
 2. Name the session per HANDOFF.md (`S<n> · Theme`), branch from `claude/sales-raptor-review-p1pzx2`,
    follow CLAUDE.md as for any work: checks broken and seen failing, `npm run qa`, migrations mirrored.
 3. As you start one: `update public.change_requests set status = 'building' where number = 12;`
-   When it is on the preview branch:
-   `update public.change_requests set status = 'done', done_in = 'S14, commit 1a2b3c4' where number = 12;`
-   The person who asked is notified by the trigger and asked to test it. If Stephan says no:
-   `status = 'declined', admin_note = '<why, in a sentence they will understand>'` (a decline needs one).
+   When it is on the preview branch AND the preview has rebuilt, mark it Done with **how to test it** in
+   `admin_note` -- the person who asked reads it in a yellow "Please test it" box, and the page they asked
+   from is often not where the change landed. Plain words, where to click, what they should now see:
+   ```sql
+   update public.change_requests
+      set status = 'done', done_in = 'Raptor H12, commit 1a2b3c4',
+          admin_note = $n$Open a dispute on any account and press Email the client: the subject and the first line now show the client's own reference after ours.$n$
+    where number = 12;
+   ```
+   The trigger notifies them ("is done — please test it"). **Done is not finished: TESTED is.** They answer
+   with It works (closed; administrators told) or Not right yet with what is wrong (it goes back to
+   Accepted with `tested_ok = false` and `tested_note`; administrators told). A sent-back request is the
+   first thing the next "work the list" picks up -- read `tested_note`, fix it, mark Done again.
+   If Stephan says no: `status = 'declined', admin_note = '<why, in a sentence they will understand>'`.
 4. Note what you built in HANDOFF.md as usual.

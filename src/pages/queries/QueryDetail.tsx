@@ -755,6 +755,7 @@ export function QueryDetail() {
               description: q.description,
               debtorName: data.account?.debtorName ?? null,
               accountNumber: data.account?.accountNumber ?? null,
+              clientReference: data.account?.clientReference ?? null,
             })}
           initialBody={forwarding
             ? forwardBody(
@@ -779,6 +780,7 @@ export function QueryDetail() {
               description: q.description,
               debtorName: data.account?.debtorName ?? null,
               accountNumber: data.account?.accountNumber ?? null,
+              clientReference: data.account?.clientReference ?? null,
               contact: data.clientContact,
               from: currentUser?.name ?? null,
             })}
