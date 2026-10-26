@@ -44,6 +44,36 @@ export interface ChangeRequest {
   tested_note: string | null
   tested_at: string | null
   tested_by: string | null
+  /** Who is building or answering it (feedback_centre). */
+  assigned_to: string | null
+  /*
+   * THE NIGHTLY REVIEW'S READING OF IT -- not its status (the firm: "a request can be Accepted while
+   * Claude's review says Needs clarification. Those are two different things"). Written by the
+   * scheduled session; null until a night has read it.
+   */
+  review_title: string | null
+  review_verdict: ReviewVerdict | null
+  review_size: 'small' | 'medium' | 'large' | null
+  review_summary: string | null
+  review_questions: string[]
+  reviewed_at: string | null
+}
+
+export type ReviewVerdict = 'ready' | 'decision' | 'blocked'
+export const VERDICT_LABEL: Record<ReviewVerdict, string> = {
+  ready: 'Ready to implement', decision: 'Needs your decision', blocked: 'Blocked',
+}
+
+/** One line of a request's history (change_request_events). */
+export interface RequestEvent {
+  id: string
+  request_id: string
+  kind: 'sent' | 'reviewed' | 'status' | 'tested' | 'assigned' | 'comment' | 'question'
+  body: string | null
+  from_status: RequestStatus | null
+  to_status: RequestStatus | null
+  by_id: string | null
+  at: string
 }
 
 export interface RequestFileMeta {
@@ -68,6 +98,8 @@ export interface RequestReview {
   created_at: string
   summary: string
   groups: ReviewGroup[]
+  /** Every request the night read -- what its tiles count and filter to. */
+  request_ids: string[]
 }
 
 /*
@@ -124,8 +156,44 @@ export function paneOf(path: string | null | undefined): { pane: string; departm
 
 /** In the order a request travels, and the words the screen uses. */
 export const STATUSES: RequestStatus[] = ['new', 'accepted', 'building', 'done', 'declined']
+/*
+ * THE FIRM'S WORKFLOW WORDS (Raptor H12): "Submitted, Reviewed, Approved, In development, Released."
+ * The stored values stay what they were (new / accepted / building / done) -- the policies, the
+ * triggers and every row already say them -- and only the words change. "Reviewed" is not a status
+ * anybody sets: it is a Submitted request a night has read (stageOf).
+ */
 export const STATUS_LABEL: Record<RequestStatus, string> = {
-  new: 'New', accepted: 'Accepted', building: 'Being built', done: 'Done', declined: 'Declined',
+  new: 'Submitted', accepted: 'Approved', building: 'In development', done: 'Released', declined: 'Declined',
+}
+
+/** Where a request stands in the workflow, Reviewed included. */
+export function stageOf(r: Pick<ChangeRequest, 'status' | 'reviewed_at'>): string {
+  return r.status === 'new' && r.reviewed_at ? 'Reviewed' : STATUS_LABEL[r.status]
+}
+
+/** Its title: the night's short title where there is one, else the first line the person wrote. */
+export function titleOf(r: Pick<ChangeRequest, 'review_title' | 'description'>): string {
+  return (r.review_title ?? '').trim() || r.description.trim().split(/\n+/)[0] || 'Untitled request'
+}
+
+/* THE SHELVES OF THE LIST: what is waiting, what is moving, what is finished. */
+export type Shelf = 'all' | 'new' | 'progress' | 'done' | 'declined'
+export function onShelf(r: Pick<ChangeRequest, 'status'>, shelf: Shelf): boolean {
+  if (shelf === 'all') return true
+  if (shelf === 'new') return r.status === 'new'
+  if (shelf === 'progress') return r.status === 'accepted' || r.status === 'building'
+  return r.status === shelf
+}
+
+/** A night's tiles: how many of the requests it read are ready, need a decision, or are blocked. */
+export function reviewTiles(rows: Pick<ChangeRequest, 'id' | 'review_verdict'>[], ids: string[]): Record<'reviewed' | ReviewVerdict, number> {
+  const mine = rows.filter((r) => ids.includes(r.id))
+  return {
+    reviewed: ids.length,
+    ready: mine.filter((r) => r.review_verdict === 'ready').length,
+    decision: mine.filter((r) => r.review_verdict === 'decision').length,
+    blocked: mine.filter((r) => r.review_verdict === 'blocked').length,
+  }
 }
 export const PRIORITY_LABEL: Record<RequestPriority, string> = { low: 'Low', normal: 'Normal', high: 'High' }
 

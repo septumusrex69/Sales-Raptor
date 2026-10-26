@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
-  mayTest, parseReviewGroups, requestLabel, sortRequests, testState,
+  STATUS_LABEL, mayTest, onShelf, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
 let pass = 0
@@ -124,17 +124,46 @@ ok('/requests is routed and in the menu for everybody', /path="\/requests" eleme
   && /\{ to: '\/requests', label: 'Requests', icon: Lightbulb \}/.test(code('src/components/layout/Sidebar.tsx'))
   && !/n\.to !== '\/requests'/.test(code('src/components/layout/Sidebar.tsx')))
 const page = code('src/pages/requests/RequestsPage.tsx')
-ok('the screen offers decisions only to an Administrator', /canDecide=\{mayDecide\(currentUser\)\}/.test(page) && /\{canDecide && \(/.test(page))
-ok('...and a decline only with a note', /disabled=\{busy \|\| \(s === 'declined' && !note\.trim\(\)\)\}/.test(page))
+const panel = code('src/components/requests/RequestPanel.tsx')
+ok('the panel offers decisions only to an Administrator', /const admin = mayDecide\(me\)/.test(panel) && /\{admin && composing === null && \(/.test(panel))
+ok('...a decline, a question and a release each need words', /disabled=\{busy \|\| !words\.trim\(\)\}/.test(panel)
+  && /composing === 'decline'\) void move\('declined', w\)/.test(panel) && /status: 'done', admin_note: w/.test(panel))
 ok('the list does not pull every picture: files are fetched when a request is opened',
-  /select\('id, request_id, name, mime, bytes, purged_at'\)/.test(code('src/lib/changeRequestsApi.ts')) && /fileDataUrl\(f\)/.test(page))
+  /select\('id, request_id, name, mime, bytes, purged_at'\)/.test(code('src/lib/changeRequestsApi.ts')) && /fileDataUrl\(f\)/.test(panel) && !/fileDataUrl/.test(page))
+
+/* ---------- the Feedback Centre (Raptor H12) ---------- */
+check('the workflow words', ['new', 'accepted', 'building', 'done', 'declined'].map((s) => STATUS_LABEL[s]),
+  ['Submitted', 'Approved', 'In development', 'Released', 'Declined'])
+check('...a Submitted request a night has read is Reviewed', [stageOf({ status: 'new', reviewed_at: 'x' }), stageOf({ status: 'new', reviewed_at: null })], ['Reviewed', 'Submitted'])
+check('the title is the night\'s where there is one, else the first line', [titleOf({ review_title: ' Call centre · Diary ', description: 'x' }), titleOf({ review_title: null, description: 'First\nsecond' })], ['Call centre · Diary', 'First'])
+check('the shelves', ['new', 'accepted', 'building', 'done', 'declined'].map((s) => ['new', 'progress', 'done', 'declined'].filter((sh) => onShelf({ status: s }, sh)).join('')),
+  ['new', 'progress', 'progress', 'done', 'declined'])
+check('a night\'s tiles count only the requests it read, by verdict', reviewTiles([
+  { id: 'a', review_verdict: 'ready' }, { id: 'b', review_verdict: 'decision' }, { id: 'c', review_verdict: 'decision' }, { id: 'd', review_verdict: 'blocked' },
+], ['a', 'b', 'd']), { reviewed: 3, ready: 1, decision: 1, blocked: 1 })
+ok('the view is remembered per person, and a failure to remember is silent',
+  /raptor\.requests\.view\.\$\{uid \?\? 'anon'\}/.test(page) && /try \{ window\.localStorage\.setItem/.test(page))
+ok('a tile filters the tickets', /onTile=\{pickTile\}/.test(page) && /tileIds\.includes\(r\.id\)/.test(page))
+ok('reviews are kept and can be read back by night', /listReviews\(\)/.test(page) && /aria-label="Which night"/.test(page))
+ok('no photograph on this header: only the company dashboard wears one', /<DashboardHero /.test(page) && !/CollectionsHero/.test(page))
+{
+  const fc = schema.slice(schema.lastIndexOf('Migration `feedback_centre`'))
+  ok('the review\'s verdict is its own column, not the status', /add column if not exists review_verdict text/.test(fc)
+    && /review_verdict in \('ready', 'decision', 'blocked'\)/.test(fc))
+  ok('the history writes itself on a status move, a review, a test and an assignment', /create or replace trigger change_request_history_update after update/.test(fc)
+    && ['sent', 'status', 'reviewed', 'tested', 'assigned'].every((k) => fc.includes(`'${k}'`)))
+  ok('only an Administrator asks a question; the asker and Administrators may comment', /kind = 'question' and public\.current_user_role\(\) = 'Administrator'/.test(fc)
+    && /r\.created_by = auth\.uid\(\)/.test(fc))
+  ok('a question notifies the asker, a reply the Administrators', /has a question about your request R-/.test(fc) && /'change_request\.reply'/.test(fc))
+  ok('the notification uses the workflow words', /'was approved'/.test(fc) && /'is released — please test it'/.test(fc))
+}
 
 const modal = code('src/components/requests/RequestChangeButton.tsx')
 ok('a request can be dictated: the microphone is on the description', /<DictateButton size="small" value=\{description\} onChange=\{setDescription\} \/>/.test(modal))
 ok('...it sends the pane and the chosen department, suggested from the pane',
   /const \{ pane, department: suggested \} = paneOf\(location\.pathname\)/.test(modal) && /useState<RequestDepartment>\(suggested\)/.test(modal)
   && /pageTitle, pane, department, files:/.test(modal))
-ok('the list shows them and can be filtered by department', /data-testid="request-where"/.test(read('src/pages/requests/RequestsPage.tsx'))
+ok('the list shows the department and can be filtered by it', /<Chip tone="gold">\{r\.department\}<\/Chip>/.test(page)
   && /dept === 'all' \|\| r\.department === dept/.test(page))
 
 if (failures.length) {

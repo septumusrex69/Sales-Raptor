@@ -51334,3 +51334,195 @@ end
 $$;
 revoke all on function public.change_request_tested(bigint, boolean, text) from public, anon;
 grant execute on function public.change_request_tested(bigint, boolean, text) to authenticated;
+
+-- ============================================================================
+-- Raptor · Handoff 12 (S12, 26 Oct): THE FEEDBACK CENTRE. Migration `feedback_centre`.
+--
+-- THE FIRM, of the Requests page: "Raptor is currently treating the Requests page like a report,
+-- rather than a proper feedback and development management system ... I'd separate request status
+-- from nightly review status ... A request can be Accepted while Claude's review says Needs
+-- clarification ... the nightly review should not disappear the following morning ... a chronological
+-- activity history ... accept, decline, request clarification, assign someone."
+--
+--   * THE REVIEW'S VERDICT ON EACH REQUEST lives on the request (review_*), written by the nightly
+--     session as the owner: ready / decision / blocked, a short title, a size, a summary and its
+--     questions. It is NOT the status: status is the firm's decision (Submitted -> Approved -> In
+--     development -> Released, or Declined); the verdict is Claude's reading of it.
+--   * ASSIGNED TO: who is building or answering it. Administrators set it (the update policy).
+--   * AN ACTIVITY HISTORY, change_request_events: written by triggers for what happens to a request
+--     (sent, reviewed, its status, a test) and by people for what they say -- a COMMENT, or a QUESTION
+--     an Administrator asks the person who asked ("Request info"). Whoever is asked is notified, and
+--     a reply notifies the Administrators. Only the asker and Administrators may write on a request:
+--     everybody may read it, as with the requests themselves.
+-- ============================================================================
+alter table public.change_requests add column if not exists assigned_to uuid references public.profiles (id) on delete set null;
+alter table public.change_requests add column if not exists review_title text;
+alter table public.change_requests add column if not exists review_verdict text;
+alter table public.change_requests add column if not exists review_size text;
+alter table public.change_requests add column if not exists review_summary text;
+alter table public.change_requests add column if not exists review_questions text[] not null default '{}';
+alter table public.change_requests add column if not exists reviewed_at timestamptz;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'change_requests_review_verdict_known') then
+    alter table public.change_requests add constraint change_requests_review_verdict_known
+      check (review_verdict is null or review_verdict in ('ready', 'decision', 'blocked'));
+    alter table public.change_requests add constraint change_requests_review_size_known
+      check (review_size is null or review_size in ('small', 'medium', 'large'));
+  end if;
+end $$;
+
+create table if not exists public.change_request_events (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid not null references public.change_requests (id) on delete cascade,
+  kind text not null check (kind in ('sent', 'reviewed', 'status', 'tested', 'assigned', 'comment', 'question')),
+  body text,
+  from_status text,
+  to_status text,
+  by_id uuid default auth.uid() references public.profiles (id) on delete set null,
+  at timestamptz not null default now(),
+  -- What people write must say something; what the triggers write may be only a status move.
+  constraint change_request_events_words check (kind not in ('comment', 'question') or length(btrim(coalesce(body, ''))) > 0)
+);
+create index if not exists change_request_events_request_idx on public.change_request_events (request_id, at);
+alter table public.change_request_events enable row level security;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'change_request_events' and policyname = 'change_request_events_select') then
+    create policy change_request_events_select on public.change_request_events for select to authenticated using (true);
+    -- People write comments and questions only, as themselves, on a request that is theirs -- or any
+    -- request if they are an Administrator; only an Administrator asks a question.
+    create policy change_request_events_insert on public.change_request_events for insert to authenticated
+      with check (
+        by_id = auth.uid()
+        and (kind = 'comment' or (kind = 'question' and public.current_user_role() = 'Administrator'))
+        and (public.current_user_role() = 'Administrator'
+             or exists (select 1 from public.change_requests r where r.id = request_id and r.created_by = auth.uid())));
+  end if;
+end $$;
+
+-- THE HISTORY WRITES ITSELF for what happens to a request. Definer: the person whose press caused it
+-- may not be allowed to insert an event of that kind themselves.
+create or replace function public.change_request_history()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.change_request_events (request_id, kind, by_id, at) values (new.id, 'sent', new.created_by, new.created_at);
+    return new;
+  end if;
+  if new.status is distinct from old.status then
+    insert into public.change_request_events (request_id, kind, from_status, to_status, body, by_id)
+    values (new.id, 'status', old.status, new.status,
+            case when new.status in ('declined', 'done') then nullif(btrim(coalesce(new.admin_note, '')), '') end, auth.uid());
+  end if;
+  if new.reviewed_at is distinct from old.reviewed_at and new.reviewed_at is not null then
+    insert into public.change_request_events (request_id, kind, body, by_id, at)
+    values (new.id, 'reviewed', new.review_summary, null, new.reviewed_at);
+  end if;
+  if new.tested_at is distinct from old.tested_at and new.tested_at is not null then
+    insert into public.change_request_events (request_id, kind, body, by_id, at)
+    values (new.id, 'tested', case when new.tested_ok then 'It works' else 'Not right yet' end
+                              || coalesce(': ' || nullif(btrim(coalesce(new.tested_note, '')), ''), ''), new.tested_by, new.tested_at);
+  end if;
+  if new.assigned_to is distinct from old.assigned_to then
+    insert into public.change_request_events (request_id, kind, body, by_id)
+    values (new.id, 'assigned', (select name from public.profiles where id = new.assigned_to), auth.uid());
+    if new.assigned_to is not null and new.assigned_to is distinct from auth.uid() then
+      insert into public.notifications (user_id, type, message, link)
+      values (new.assigned_to, 'change_request.assigned', 'R-' || new.number || ' was given to you: ' || coalesce(new.review_title, left(btrim(new.description), 90)),
+              '/requests?r=' || new.number);
+    end if;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_history() from public, anon, authenticated;
+create or replace trigger change_request_history_insert after insert on public.change_requests
+  for each row execute function public.change_request_history();
+create or replace trigger change_request_history_update after update on public.change_requests
+  for each row execute function public.change_request_history();
+
+-- A QUESTION GOES TO THE PERSON WHO ASKED; their reply (a comment) goes to the Administrators.
+create or replace function public.change_request_event_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r public.change_requests;
+  v_who text;
+begin
+  if new.kind not in ('comment', 'question') then
+    return new;
+  end if;
+  select * into r from public.change_requests where id = new.request_id;
+  select coalesce(name, 'Somebody') into v_who from public.profiles where id = new.by_id;
+  if new.by_id is distinct from r.created_by then
+    insert into public.notifications (user_id, type, message, link)
+    values (r.created_by, 'change_request.' || new.kind,
+            case when new.kind = 'question' then v_who || ' has a question about your request R-' || r.number || ': '
+                 else v_who || ' wrote on your request R-' || r.number || ': ' end || left(btrim(new.body), 120),
+            '/requests?r=' || r.number);
+  else
+    insert into public.notifications (user_id, type, message, link)
+    select p.id, 'change_request.reply', v_who || ' replied on R-' || r.number || ': ' || left(btrim(new.body), 120), '/requests?r=' || r.number
+      from public.profiles p
+     where p.role = 'Administrator' and p.status = 'Active' and p.id is distinct from new.by_id;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_event_notify() from public, anon, authenticated;
+create or replace trigger change_request_event_notify after insert on public.change_request_events
+  for each row execute function public.change_request_event_notify();
+
+-- THE STATUS WORDS FOLLOW THE FIRM'S WORKFLOW: Submitted -> Approved -> In development -> Released.
+-- The stored values do not change (new / accepted / building / done); the notification says them
+-- the way the screen now does. Same function as change_request_notify_says_department otherwise.
+create or replace function public.change_request_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_who text;
+  v_word text;
+begin
+  if tg_op = 'INSERT' then
+    select coalesce(name, 'Somebody') into v_who from public.profiles where id = new.created_by;
+    insert into public.notifications (user_id, type, message, link)
+    select p.id, 'change_request.new',
+           v_who || ' asked for a change (R-' || new.number
+             || coalesce(', ' || new.department, '') || coalesce(' · ' || new.pane, '') || '): '
+             || left(btrim(new.description), 90)
+             || case when length(btrim(new.description)) > 90 then '…' else '' end,
+           '/requests?r=' || new.number
+      from public.profiles p
+     where p.role = 'Administrator' and p.status = 'Active' and p.id <> new.created_by;
+    return new;
+  end if;
+  new.updated_at := now();
+  if new.status is distinct from old.status then
+    new.decided_by := auth.uid();
+    new.decided_at := now();
+    new.closed_at := case when new.status in ('done', 'declined') then coalesce(old.closed_at, now()) else null end;
+    if new.created_by is distinct from auth.uid() then
+      v_word := case new.status when 'accepted' then 'was approved' when 'building' then 'is in development'
+                                when 'done' then 'is released — please test it' when 'declined' then 'was declined: ' || coalesce(new.admin_note, '')
+                                else 'is back to Submitted' end;
+      insert into public.notifications (user_id, type, message, link)
+      values (new.created_by, 'change_request.status', 'Your request R-' || new.number || ' ' || v_word, '/requests?r=' || new.number);
+    end if;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_notify() from public, anon, authenticated;

@@ -74,6 +74,21 @@ new requests every night and then show them to me in the group list ... That's a
   reference beside ours ("BOP00013, your reference X" in the body; "— your ref X" in the subject); left out when
   there is none or it repeats the account number. `ticketEmail.ts`, `accountQueries.ts`, `QueryDetail.tsx`;
   check-ticket-work +6. Marked Done on staging with how to test; waiting for Rinda's test.
+- **Raptor H12: THE FEEDBACK CENTRE** (Stephan's design, with a mock-up: "treating the Requests page like a report,
+  rather than a proper feedback and development management system"). /requests is now: the ordinary dark header
+  (his mock-up had a photograph; CLAUDE.md gives that to the company dashboard only), **Overview / List / Board**
+  (remembered per person, localStorage), **the night's review** with four tiles that filter the tickets (read /
+  ready / needs your decision / blocked) and a **history of nights** (reviews are kept), **New requests waiting**,
+  then the ticket table (shelves All / New / In progress / Released / Declined, search, department). A ticket
+  opens in a **side panel** (`RequestPanel`, ?r=N): details, the night's reading (verdict, summary, questions --
+  kept apart from the status), files, **activity history**, and the next step: Approve / Request info / Decline;
+  Start development; Release (with how to test); Reopen; assign; priority. **Workflow words**: Submitted ->
+  Reviewed (a night read it) -> Approved -> In development -> Released -> Tested ✓ (stored values unchanged:
+  new/accepted/building/done). Migration **`feedback_centre`**: `review_*` + `assigned_to` on the request,
+  `change_request_events` (sent/reviewed/status/tested/assigned written by triggers; comment/question by people --
+  only Administrators ask; a question notifies the asker, a reply the Administrators), notification wording.
+  Probed in a rolled-back transaction. The skill now has the night write its verdict onto each request
+  (`review_*`); R-5 and R-6 were backfilled from the first night's groups.
 - **At go-live**: the requests live on STAGING (where the testers are). Decide then whether production gets its
   own, and point the nightly task at it.
 
@@ -319,7 +334,7 @@ Migrations applied to staging only and needed on production, in order, are liste
 `people_payday_payover_release_and_carried`, `leave_and_employee_number`, `leave_opening_quarter_days`,
 `departments_and_teams`, `departments_heads_from_managers`, `handover_upload_for_liaisons`,
 `client_code_on_won_and_welcome_sent_by` (+ the commented, firm-reviewed client-code fill); S11: `leave_round_two` (S10's, unrecorded until S11 -- see the leave note), `hand_out_for_loaders_and_desk_guard`,
-`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`. Also: repoint the Resend
+`handout_reminder`, `user_emails_unread_by_folder`, `s11_mail_picture_store` (Lean Mail, + its `mail-pictures` bucket), `client_dormant`, and the user_emails picture clean-up (data, not schema); S12: `client_news_stopped`, `campaign_send_from`, `change_requests`, `change_request_pane_and_department`, `change_request_notify_says_department`, `change_request_tested`, `feedback_centre`. Also: repoint the Resend
 webhook to production; the read-only production check for set-off catch-up; merge into main.
 
 ### Start here tomorrow

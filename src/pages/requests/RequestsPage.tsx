@@ -1,32 +1,45 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { ChevronDown, FileText, Image as ImageIcon, Loader2 } from 'lucide-react'
-import { Card, CardHeader } from '../../components/ui/Card'
+import { useSearchParams } from 'react-router-dom'
+import {
+  AlertTriangle, CheckCircle2, ChevronDown, Columns3, FileText, Hourglass, LayoutDashboard, Lightbulb, List, Loader2, Moon, Paperclip, Search,
+} from 'lucide-react'
+import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { UserAvatar } from '../../components/ui/Avatar'
-import { Button } from '../../components/ui/Button'
-import { ZoomableImage } from '../../components/ui/ZoomableImage'
+import { Chip, RequestPanel, StagePill } from '../../components/requests/RequestPanel'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate, formatDateTime } from '../../data/mockData'
-import type { User } from '../../types'
 import {
-  PRIORITY_LABEL, REQUEST_DEPARTMENTS, STATUSES, STATUS_LABEL, isOpen, mayDecide, mayTest, mayWithdraw, testState, requestLabel, sortRequests,
-  type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
+  REQUEST_DEPARTMENTS, VERDICT_LABEL, onShelf, requestLabel, reviewTiles, sortRequests, titleOf,
+  type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestReview, type ReviewVerdict, type Shelf,
 } from '../../lib/changeRequests'
-import { answerTest, fileDataUrl, latestReview, listFiles, listRequests, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
+import { listFiles, listRequests, listReviews } from '../../lib/changeRequestsApi'
 
 /**
- * CHANGE REQUESTS (S12, changeRequests.ts): everything people asked Raptor to do differently.
+ * THE FEEDBACK CENTRE (Raptor H12) -- "Request a change", worked as a development queue.
  *
- * LAST NIGHT'S REVIEW FIRST, when there is one: the firm asked for the requests "in the group list",
- * and the groups are what somebody deciding reads -- the list underneath is where one request is
- * found. The list opens on the OPEN ones; Done and Declined are a tap away, never mixed in.
+ * THE FIRM: "Raptor is currently treating the Requests page like a report, rather than a proper
+ * feedback and development management system ... Nightly Review -- what was reviewed, what can
+ * proceed, what needs your decision, and any blockers. New Requests ... All Tickets ... Clicking a
+ * number should filter the relevant tickets ... the nightly review should not disappear the following
+ * morning ... The selected view should be remembered for each user ... keep the existing Raptor
+ * sidebar and overall branding."
+ *
+ * THREE VIEWS OF ONE LIST, AND ONE FILTER OVER ALL THREE: Overview (the night, what waits, the
+ * tickets), List (compact rows), Board (the workflow's columns). Switching keeps the search, the
+ * shelf and the department. A ticket opens in RequestPanel beside whichever is showing, and its
+ * address (?r=12) is what every notification links to.
+ *
+ * NO PHOTOGRAPH IN THE HEADER, though the firm's mock-up had one: "there should only be one very
+ * special page" (CLAUDE.md, the company dashboard). This wears the ordinary DashboardHero.
  */
-type Shelf = 'open' | 'done' | 'declined' | 'all'
+type View = 'overview' | 'list' | 'board'
+type TileFilter = { reviewId: string; verdict: ReviewVerdict | 'reviewed' } | null
 
-const STATUS_TONE: Record<RequestStatus, string> = {
-  new: 'bg-sky-50 text-sky-700', accepted: 'bg-indigo-50 text-indigo-700', building: 'bg-amber-50 text-amber-800',
-  done: 'bg-emerald-50 text-emerald-700', declined: 'bg-slate-100 text-slate-600',
+const VIEW_KEY = (uid: string | undefined) => `raptor.requests.view.${uid ?? 'anon'}`
+/* Remembered per person on this device: a convenience, so a failure to read or write it is silent. */
+function readView(uid: string | undefined): View {
+  try { const v = window.localStorage.getItem(VIEW_KEY(uid)); return v === 'list' || v === 'board' ? v : 'overview' } catch { return 'overview' }
 }
 
 export function RequestsPage() {
@@ -36,333 +49,302 @@ export function RequestsPage() {
   const focus = Number(params.get('r')) || null
   const [rows, setRows] = useState<ChangeRequest[] | null>(null)
   const [files, setFiles] = useState<RequestFileMeta[]>([])
-  const [review, setReview] = useState<RequestReview | null>(null)
-  const [shelf, setShelf] = useState<Shelf>('open')
-  const [dept, setDept] = useState<RequestDepartment | 'all'>('all')
+  const [reviews, setReviews] = useState<RequestReview[]>([])
+  const [reviewIndex, setReviewIndex] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [view, setViewState] = useState<View>(() => readView(currentUser?.id))
+  const [shelf, setShelf] = useState<Shelf>('all')
+  const [dept, setDept] = useState<RequestDepartment | 'all'>('all')
+  const [search, setSearch] = useState('')
+  const [tile, setTile] = useState<TileFilter>(null)
+
+  useEffect(() => { setViewState(readView(currentUser?.id)) }, [currentUser?.id])
+  const setView = (v: View) => {
+    setViewState(v)
+    try { window.localStorage.setItem(VIEW_KEY(currentUser?.id), v) } catch { /* a convenience only */ }
+  }
 
   const load = useCallback(() => {
-    Promise.all([listRequests(), listFiles(), latestReview()])
-      .then(([r, f, v]) => { setRows(r); setFiles(f); setReview(v) })
+    Promise.all([listRequests(), listFiles(), listReviews()])
+      .then(([r, f, v]) => { setRows(r); setFiles(f); setReviews(v) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
   useEffect(() => { load() }, [load])
 
-  /* A link to one request (a notification, a review group) opens its shelf, whatever it is on. */
-  useEffect(() => {
-    const r = focus && rows?.find((x) => x.number === focus)
-    if (r && !isOpen(r.status)) setShelf(r.status === 'done' ? 'done' : 'declined')
-  }, [focus, rows])
+  const review = reviews[reviewIndex] ?? null
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const nameOf = (id: string) => users.find((u) => u.id === id)?.name ?? ''
+    const tileIds = tile ? reviews.find((v) => v.id === tile.reviewId)?.request_ids ?? [] : null
+    return sortRequests((rows ?? []).filter((r) =>
+      onShelf(r, shelf)
+      && (dept === 'all' || r.department === dept)
+      && (!tileIds || (tileIds.includes(r.id) && (tile?.verdict === 'reviewed' || r.review_verdict === tile?.verdict)))
+      && (!q || `${requestLabel(r)} ${titleOf(r)} ${r.description} ${nameOf(r.created_by)} ${r.pane ?? ''}`.toLowerCase().includes(q))))
+  }, [rows, shelf, dept, search, tile, reviews, users])
 
-  const userOf = (id: string) => users.find((u) => u.id === id)
   const counts = useMemo(() => {
     const all = rows ?? []
-    return { open: all.filter((r) => isOpen(r.status)).length, done: all.filter((r) => r.status === 'done').length,
-      declined: all.filter((r) => r.status === 'declined').length, all: all.length }
+    const n = (s: Shelf) => all.filter((r) => onShelf(r, s)).length
+    return { all: n('all'), new: n('new'), progress: n('progress'), done: n('done'), declined: n('declined') }
   }, [rows])
-  const shown = useMemo(() => sortRequests((rows ?? []).filter((r) =>
-    (shelf === 'all' ? true : shelf === 'open' ? isOpen(r.status) : r.status === shelf)
-    && (dept === 'all' || r.department === dept))), [rows, shelf, dept])
-  const byNumber = useMemo(() => new Map((rows ?? []).map((r) => [r.number, r])), [rows])
+
+  const open = focus ? (rows ?? []).find((r) => r.number === focus) ?? null : null
+  const openAt = open ? shown.findIndex((r) => r.id === open.id) : -1
+  const go = (r: ChangeRequest | undefined) => { if (r) setParams({ r: String(r.number) }) }
+  const close = () => setParams({})
+
+  function pickTile(verdict: ReviewVerdict | 'reviewed') {
+    if (!review) return
+    setTile({ reviewId: review.id, verdict }); setShelf('all'); setDept('all'); setSearch('')
+    if (view === 'board') setView('list')
+  }
 
   return (
-    <div className="space-y-5 max-w-5xl">
-      <p className="text-sm text-slate-500">
-        What people have asked Raptor to do differently. Press the light bulb at the top of any page to add one.
-      </p>
-
-      {/* No review, no card: a "nothing new" box every morning is a box people learn to skip. */}
-      {review && review.groups.length > 0 && (
-        <Card>
-          <div data-testid="requests-review">
-            <CardHeader title={`The night's review · ${formatDate(review.created_at)}`} subtitle={review.summary} />
-            <div className="grid gap-3 sm:grid-cols-2">
-              {review.groups.map((g, i) => (
-                <div key={i} className="rounded-lg border border-slate-200 p-3 text-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-semibold text-slate-800">{g.title}</p>
-                    {g.size && <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{g.size}</span>}
-                  </div>
-                  {g.what && <p className="mt-1 text-slate-600">{g.what}</p>}
-                  {g.request_numbers.length > 0 && (
-                    <p className="mt-1.5 flex flex-wrap gap-1.5">
-                      {g.request_numbers.map((n) => (
-                        <button key={n} type="button" onClick={() => setParams({ r: String(n) })}
-                          className="rounded-md bg-brand-50 px-1.5 py-0.5 text-xs font-medium text-brand-700 hover:underline"
-                          title={byNumber.get(n)?.description}>R-{n}</button>
-                      ))}
-                    </p>
-                  )}
-                  {g.questions.length > 0 && (
-                    <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-amber-800">
-                      {g.questions.map((q, j) => <li key={j}>{q}</li>)}
-                    </ul>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
-      )}
+    <div className="max-w-6xl space-y-5">
+      <DashboardHero eyebrow="Feedback centre" title="Build a better Raptor"
+        subtitle="Ideas, feedback and changes asked for by the team. Press the light bulb at the top of any page to add one." />
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs" role="radiogroup" aria-label="Which requests" data-testid="requests-shelf">
-          {(['open', 'done', 'declined', 'all'] as const).map((v) => (
-            <button key={v} type="button" role="radio" aria-checked={shelf === v} onClick={() => setShelf(v)}
-              className={`rounded-md px-2.5 py-1 ${shelf === v ? 'bg-navy-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}>
-              {v === 'open' ? 'Open' : v === 'done' ? 'Done' : v === 'declined' ? 'Declined' : 'All'} ({counts[v]})
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1" role="tablist" aria-label="View" data-testid="requests-views">
+          {([['overview', 'Overview', LayoutDashboard], ['list', 'List', List], ['board', 'Board', Columns3]] as const).map(([v, label, Icon]) => (
+            <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${view === v ? 'bg-gold-100 font-semibold text-navy-900' : 'text-slate-600 hover:text-slate-900'}`}>
+              <Icon size={15} /> {label}
             </button>
           ))}
         </div>
-        <select value={dept} onChange={(e) => setDept(e.target.value as RequestDepartment | 'all')} aria-label="Department"
-          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" data-testid="requests-department">
-          <option value="all">Every department</option>
-          {REQUEST_DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {rows === null && !error && <p className="text-sm text-slate-400"><Loader2 size={14} className="inline animate-spin" /> Reading the requests…</p>}
-      {rows !== null && shown.length === 0 && (
-        <p className="text-sm text-slate-400" data-testid="requests-empty">
-          {shelf === 'open' ? 'Nothing waiting. Press the light bulb at the top of any page to ask for a change.' : 'None here.'}
-        </p>
+
+      {rows !== null && view === 'overview' && (
+        <>
+          <NightlyReview review={review} index={reviewIndex} count={reviews.length} rows={rows} onPick={setReviewIndex} onTile={pickTile} active={tile} />
+          <WaitingOnYou rows={rows} onOpen={go} />
+        </>
       )}
-      <div className="space-y-2.5" data-testid="requests-list">
-        {shown.map((r) => (
-          <RequestCard key={r.id} r={r} files={files.filter((f) => f.request_id === r.id)} userOf={userOf}
-            focused={focus === r.number} canDecide={mayDecide(currentUser)} canWithdraw={mayWithdraw(currentUser, r)}
-            canTest={mayTest(currentUser, r)} isAsker={currentUser?.id === r.created_by} onChanged={load} />
-        ))}
-      </div>
-    </div>
-  )
-}
 
-function RequestCard({ r, files, userOf, focused, canDecide, canWithdraw, canTest, isAsker, onChanged }: {
-  r: ChangeRequest; files: RequestFileMeta[]; userOf: (id: string) => User | undefined
-  focused: boolean; canDecide: boolean; canWithdraw: boolean; canTest: boolean; isAsker: boolean; onChanged: () => void
-}) {
-  const [open, setOpen] = useState(focused)
-  const [note, setNote] = useState(r.admin_note ?? '')
-  const [doneIn, setDoneIn] = useState(r.done_in ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => { if (focused) setOpen(true) }, [focused])
-
-  async function act(fn: () => Promise<void>) {
-    setBusy(true); setError(null)
-    try { await fn(); onChanged() } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
-  }
-  const move = (status: RequestStatus) => act(() => updateRequest(r.id, {
-    status, admin_note: note.trim() || null, ...(status === 'done' ? { done_in: doneIn.trim() || null } : {}),
-  }))
-
-  const asker = userOf(r.created_by)
-  const decider = r.decided_by ? userOf(r.decided_by) : null
-  const pictures = files.filter((f) => f.mime.startsWith('image/')).length
-  const test = testState(r)
-  const tester = r.tested_by ? userOf(r.tested_by) : null
-  const [testNote, setTestNote] = useState('')
-  const [sayingNo, setSayingNo] = useState(false)
-  const pdfs = files.length - pictures
-  /* The first line is the title: people write "Diary: make broken promises red" and then explain. */
-  const [title, ...rest] = r.description.trim().split(/\n+/)
-  const more = rest.join('\n').trim()
-
-  return (
-    <div data-testid="request-card" data-number={r.number}
-      className={`overflow-hidden rounded-xl border bg-white shadow-sm transition ${focused ? 'border-brand-300 ring-2 ring-brand-200' : 'border-slate-200'} ${open ? '' : 'hover:border-slate-300 hover:shadow'}`}>
-      {/*
-        THE WHOLE ROW IS THE BUTTON, and it LOOKS like one (the firm, 26 Oct: "I couldn't see that I
-        need to be clicking on it"): a chevron that turns, a hover, and the words "Open" / "Close".
-      */}
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid="request-toggle"
-        className={`flex w-full items-start gap-3 px-4 py-3 text-left ${open ? 'bg-slate-50' : 'hover:bg-slate-50'}`}>
-        {/* The number people say out loud ("R-2"), as the notifications and the night's review say it. */}
-        <div className="flex h-10 min-w-[3rem] shrink-0 items-center justify-center rounded-lg bg-navy-900 px-2 font-mono text-sm font-bold text-white" data-testid="request-number">
-          {requestLabel(r)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="min-w-0 truncate text-[15px] font-semibold text-slate-800" data-testid="request-title">{title}</p>
-          {/* WHICH DEPARTMENT, WHICH PANE (the firm, 26 Oct): first thing under the title, so the list can be read by them. */}
-          {(r.department || r.pane) && (
-            <p className="mt-1 flex flex-wrap gap-1.5 text-[11px]" data-testid="request-where">
-              {r.department && <span className="rounded-full bg-gold-100 px-2 py-0.5 font-semibold text-navy-900">{r.department}</span>}
-              {r.pane && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{r.pane} pane</span>}
-            </p>
-          )}
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500" data-testid="request-asker">
-            <span className="inline-flex items-center gap-1.5">
-              <UserAvatar userId={r.created_by} size={18} />
-              <span>Asked by <strong className="font-medium text-slate-700">{asker?.name ?? 'Somebody'}</strong>{asker?.role ? ` · ${asker.role}` : ''}</span>
-            </span>
-            <span>· {formatDateTime(r.created_at)}</span>
-            {r.page_title && !r.pane && <span>· on {r.page_title}</span>}
-            {pictures > 0 && <span className="inline-flex items-center gap-0.5"><ImageIcon size={12} />{pictures} screenshot{pictures === 1 ? '' : 's'}</span>}
-            {pdfs > 0 && <span className="inline-flex items-center gap-0.5"><FileText size={12} />{pdfs} PDF{pdfs === 1 ? '' : 's'}</span>}
+      {rows !== null && (
+        <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800">{view === 'board' ? 'The workflow' : 'Requests'}</h2>
+              <p className="text-xs text-slate-500">Submitted → Reviewed → Approved → In development → Released → tested by the person who asked.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm">
+                <Search size={14} className="text-slate-400" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search requests…" className="w-40 outline-none" data-testid="requests-search" />
+              </label>
+              <select value={dept} onChange={(e) => setDept(e.target.value as RequestDepartment | 'all')} aria-label="Department"
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700" data-testid="requests-department">
+                <option value="all">Every department</option>
+                {REQUEST_DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
           </div>
-          {test === 'sent back' && tester && r.tested_at ? (
-            <p className="mt-1 text-xs text-red-700" data-testid="request-decider">
-              Sent back by <strong className="font-medium">{tester.name}</strong> after testing · {formatDateTime(r.tested_at)}
-            </p>
-          ) : decider && r.decided_at ? (
-            <p className="mt-1 text-xs text-slate-500" data-testid="request-decider">
-              {STATUS_LABEL[r.status]} by <strong className="font-medium text-slate-700">{decider.name}</strong> · {formatDateTime(r.decided_at)}
-            </p>
-          ) : null}
-          {test === 'works' && tester && r.tested_at && (
-            <p className="mt-0.5 text-xs text-emerald-700">Tested and working, said by <strong className="font-medium">{tester.name}</strong> · {formatDateTime(r.tested_at)}</p>
-          )}
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <div className="flex items-center gap-1.5">
-            {r.priority !== 'normal' && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${r.priority === 'high' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{PRIORITY_LABEL[r.priority]}</span>}
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[r.status]}`} data-testid="request-status">{STATUS_LABEL[r.status]}</span>
-            {test === 'works' && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white" data-testid="request-tested">Tested ✓</span>}
-            {test === 'waiting' && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Waiting for a test</span>}
-            {test === 'sent back' && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">Sent back</span>}
-          </div>
-          <span className="inline-flex items-center gap-0.5 text-xs font-medium text-brand-700">
-            {open ? 'Close' : 'Open'} <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
-          </span>
-        </div>
-      </button>
-      {open && (
-        <div className="space-y-4 border-t border-slate-100 px-4 py-4 sm:pl-[4.75rem]">
-          <Section label="What they asked">
-            <p className="whitespace-pre-wrap text-sm text-slate-800">{more ? `${title}\n\n${more}` : title}</p>
-            {r.page_path && (
-              <p className="mt-1.5 text-xs text-slate-500">Asked from <Link to={r.page_path} className="font-medium text-brand-700 hover:underline">{r.page_title || r.page_path} →</Link></p>
-            )}
-          </Section>
-          {files.length > 0 && <Section label="Screenshots and files"><RequestFiles files={files} /></Section>}
-
-          {/*
-            TEST IT (the firm: "so that she can test it and approve that ... it works"). Done is the
-            builder's word; this is the asker's. It works closes it; Not right yet sends it back to
-            Accepted with what is wrong, and the administrators are told either way.
-          */}
-          {test === 'waiting' && canTest && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="request-test">
-              <p className="text-sm font-semibold text-amber-900">{isAsker ? 'This is done. Please test it.' : `Waiting for ${asker?.name ?? 'the person who asked'} to test it.`}</p>
-              {/* HOW TO TEST is the note written when it was marked Done -- the page it was asked from is
-                  often not where the change landed (R-3 was asked from the Dashboard). */}
-              <p className="mt-0.5 text-xs text-amber-900/80" data-testid="request-test-how">
-                {r.admin_note
-                  ? <><strong className="font-medium">How to test:</strong> {r.admin_note}</>
-                  : r.page_path
-                    ? <>Open <Link to={r.page_path} className="font-medium underline">{r.page_title || r.page_path}</Link>, try what you asked for, then say here whether it works.</>
-                    : 'Try what you asked for, then say here whether it works.'}
-                {r.done_in ? ` (${r.done_in})` : ''}
-              </p>
-              {sayingNo && (
-                <textarea value={testNote} onChange={(e) => setTestNote(e.target.value)} rows={2} autoFocus data-testid="request-test-note"
-                  placeholder="What is still not right?" className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" />
+          {view !== 'board' && (
+            <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Which requests" data-testid="requests-shelf">
+              {([['all', 'All'], ['new', 'New'], ['progress', 'In progress'], ['done', 'Released'], ['declined', 'Declined']] as const).map(([s, label]) => (
+                <button key={s} type="button" role="radio" aria-checked={shelf === s} onClick={() => { setShelf(s); setTile(null) }}
+                  className={`rounded-lg border px-3 py-1 text-sm ${shelf === s && !tile ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                  {label} ({counts[s]})
+                </button>
+              ))}
+              {tile && (
+                <button type="button" onClick={() => setTile(null)} data-testid="requests-tile-filter"
+                  className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1 text-sm text-violet-800">
+                  {tile.verdict === 'reviewed' ? 'Read by the night' : VERDICT_LABEL[tile.verdict]} ✕
+                </button>
               )}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {!sayingNo ? (
-                  <>
-                    <Button size="sm" variant="primary" disabled={busy} data-testid="request-test-works"
-                      onClick={() => void act(() => answerTest(r.number, true, ''))}>It works</Button>
-                    <Button size="sm" variant="secondary" disabled={busy} data-testid="request-test-not-right"
-                      onClick={() => setSayingNo(true)}>Not right yet</Button>
-                  </>
-                ) : (
-                  <>
-                    <Button size="sm" variant="danger" disabled={busy || !testNote.trim()} data-testid="request-test-send-back"
-                      onClick={() => void act(() => answerTest(r.number, false, testNote))}>Send it back</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setSayingNo(false)}>Cancel</Button>
-                  </>
-                )}
-              </div>
             </div>
           )}
-          {(test === 'works' || test === 'sent back') && r.tested_note && (
-            <Section label={test === 'works' ? 'What they said when they tested it' : 'What is still not right'}>
-              <p className={`text-sm ${test === 'works' ? 'text-emerald-800' : 'text-red-800'}`}>{r.tested_note}</p>
-            </Section>
-          )}
-          {(r.admin_note || r.done_in) && !canDecide && test !== 'waiting' && (
-            <Section label="From the administrator">
-              {r.admin_note && <p className="text-sm text-slate-700">{r.admin_note}</p>}
-              {r.done_in && <p className="text-xs text-emerald-700">Built in {r.done_in}</p>}
-            </Section>
-          )}
+          {view === 'board'
+            ? <RequestBoard rows={shown} files={files} onOpen={go} openId={open?.id ?? null} />
+            : <RequestTable rows={shown} files={files} onOpen={go} openId={open?.id ?? null} />}
+        </section>
+      )}
 
-          {canDecide && (
-            <Section label="Decide">
-              <div className="space-y-2 rounded-lg bg-slate-50 p-3" data-testid="request-decide">
-                <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="A note for the person who asked (a decline needs one)"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" data-testid="request-note" />
-                <div className="flex flex-wrap items-center gap-2">
-                  {STATUSES.filter((s) => s !== r.status && s !== 'new').map((s) => (
-                    <Button key={s} size="sm" variant={s === 'declined' ? 'danger' : s === 'done' ? 'primary' : 'secondary'} disabled={busy || (s === 'declined' && !note.trim())}
-                      onClick={() => void move(s)} data-testid={`request-move-${s}`}>
-                      {s === 'accepted' ? 'Accept' : s === 'building' ? 'Being built' : s === 'done' ? 'Mark done' : 'Decline'}
-                    </Button>
-                  ))}
-                  <select value={r.priority} disabled={busy} aria-label="Priority"
-                    onChange={(e) => void act(() => updateRequest(r.id, { priority: e.target.value as RequestPriority }))}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
-                    {(['high', 'normal', 'low'] as const).map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]} priority</option>)}
-                  </select>
-                  {r.status !== 'done' && (
-                    <input value={doneIn} onChange={(e) => setDoneIn(e.target.value)} placeholder="Built in (optional, e.g. S14)"
-                      className="min-w-[10rem] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                  )}
-                </div>
-              </div>
-            </Section>
-          )}
-          {canWithdraw && (
-            <button type="button" disabled={busy} onClick={() => void act(() => withdrawRequest(r.id))}
-              className="text-xs text-slate-500 hover:text-red-700" data-testid="request-withdraw">Withdraw this request</button>
-          )}
-          {error && <p className="text-xs text-red-600">{error}</p>}
-        </div>
+      {open && (
+        <RequestPanel key={open.id} r={open} files={files.filter((f) => f.request_id === open.id)} users={users} me={currentUser}
+          onClose={close} onChanged={load}
+          onPrev={openAt > 0 ? () => go(shown[openAt - 1]) : null}
+          onNext={openAt >= 0 && openAt < shown.length - 1 ? () => go(shown[openAt + 1]) : null} />
       )}
     </div>
   )
 }
 
-function Section({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * LAST NIGHT'S REVIEW, AND EVERY NIGHT BEFORE IT. Four tiles a person acts on, each a filter on the
+ * tickets below; the night's own words under them, short. No review yet: one quiet line, not a box.
+ */
+function NightlyReview({ review, index, count, rows, onPick, onTile, active }: {
+  review: RequestReview | null; index: number; count: number; rows: ChangeRequest[]
+  onPick: (i: number) => void; onTile: (v: ReviewVerdict | 'reviewed') => void; active: TileFilter
+}) {
+  if (!review) return <p className="text-sm text-slate-500"><Moon size={14} className="mr-1 inline" /> No nightly review yet. The first one runs at 01:47.</p>
+  const t = reviewTiles(rows, review.request_ids)
+  const tiles: { v: ReviewVerdict | 'reviewed'; n: number; label: string; hint: string; tone: string; Icon: typeof FileText }[] = [
+    { v: 'reviewed', n: t.reviewed, label: 'Requests read', hint: 'Reviewed overnight', tone: 'bg-sky-50 text-sky-900', Icon: FileText },
+    { v: 'ready', n: t.ready, label: 'Ready to implement', hint: 'Can proceed', tone: 'bg-emerald-50 text-emerald-900', Icon: CheckCircle2 },
+    { v: 'decision', n: t.decision, label: 'Need your decision', hint: 'Questions to answer', tone: 'bg-amber-50 text-amber-900', Icon: Hourglass },
+    { v: 'blocked', n: t.blocked, label: 'Blocked', hint: 'Missing information', tone: 'bg-red-50 text-red-900', Icon: AlertTriangle },
+  ]
   return (
-    <div>
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      {children}
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="requests-review">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-navy-900 text-gold-300"><Moon size={20} /></span>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800">{index === 0 ? 'Last night’s review' : 'An earlier review'}</h2>
+            <label className="relative inline-flex items-center text-sm text-slate-500">
+              <select value={index} onChange={(e) => onPick(Number(e.target.value))} aria-label="Which night" data-testid="requests-review-night"
+                className="appearance-none bg-transparent pr-5 outline-none">
+                {Array.from({ length: count }, (_, i) => i).map((i) => <option key={i} value={i}>{i === index ? formatDate(review.created_at) : `Review ${count - i}`}</option>)}
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-0" />
+            </label>
+          </div>
+        </div>
+        <p className="text-xs text-slate-400">{count} review{count === 1 ? '' : 's'} kept</p>
+      </div>
+      <p className="mt-3 max-w-3xl text-sm text-slate-600">{review.summary}</p>
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {tiles.map(({ v, n, label, hint, tone, Icon }) => (
+          <button key={v} type="button" onClick={() => onTile(v)} data-testid={`requests-tile-${v}`}
+            className={`rounded-xl p-4 text-left transition hover:shadow ${tone} ${active?.reviewId === review.id && active.verdict === v ? 'ring-2 ring-navy-900' : ''}`}>
+            <Icon size={18} className="opacity-70" />
+            <p className="mt-2 flex items-baseline gap-2"><span className="text-2xl font-bold">{n}</span><span className="text-sm font-medium">{label}</span></p>
+            <p className="text-xs opacity-70">{hint}</p>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/** WHAT WAITS ON SOMEBODY: new requests to decide, and released ones still to be tested. */
+function WaitingOnYou({ rows, onOpen }: { rows: ChangeRequest[]; onOpen: (r: ChangeRequest) => void }) {
+  const fresh = sortRequests(rows.filter((r) => r.status === 'new'))
+  if (!fresh.length) return null
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="requests-waiting">
+      <h2 className="flex items-center gap-2 text-base font-semibold text-slate-800"><Lightbulb size={17} className="text-gold-500" /> New requests waiting for a decision ({fresh.length})</h2>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {fresh.slice(0, 6).map((r) => (
+          <button key={r.id} type="button" onClick={() => onOpen(r)} className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-slate-300 hover:shadow-sm">
+            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700">{requestLabel(r)}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-slate-800">{titleOf(r)}</span>
+              <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                {r.department && <Chip tone="gold">{r.department}</Chip>}
+                {r.review_verdict && <span>{VERDICT_LABEL[r.review_verdict]}</span>}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function Asker({ id }: { id: string }) {
+  const { users } = useAppStore()
+  const u = users.find((x) => x.id === id)
+  return <span className="inline-flex items-center gap-1.5"><UserAvatar userId={id} size={22} /><span className="truncate">{u?.name ?? 'Somebody'}</span></span>
+}
+
+/** COMPACT ROWS: the whole list readable at a glance, one click to open. */
+function RequestTable({ rows, files, onOpen, openId }: {
+  rows: ChangeRequest[]; files: RequestFileMeta[]; onOpen: (r: ChangeRequest) => void; openId: string | null
+}) {
+  if (!rows.length) return <p className="py-6 text-center text-sm text-slate-400" data-testid="requests-empty">No requests here. Press the light bulb at the top of any page to ask for a change.</p>
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm" data-testid="requests-list">
+        <thead>
+          <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+            <th className="px-2 py-2 font-medium">#</th>
+            <th className="px-2 py-2 font-medium">Title</th>
+            <th className="px-2 py-2 font-medium">Department</th>
+            <th className="px-2 py-2 font-medium">Size</th>
+            <th className="px-2 py-2 font-medium">Status</th>
+            <th className="px-2 py-2 font-medium">Requested by</th>
+            <th className="px-2 py-2 font-medium">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const n = files.filter((f) => f.request_id === r.id).length
+            return (
+              <tr key={r.id} onClick={() => onOpen(r)} data-testid="request-card" data-number={r.number}
+                className={`cursor-pointer border-b border-slate-50 hover:bg-slate-50 ${openId === r.id ? 'bg-gold-50' : ''}`}>
+                <td className="px-2 py-2.5"><span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700" data-testid="request-number">{requestLabel(r)}</span></td>
+                <td className="max-w-[22rem] px-2 py-2.5">
+                  <span className="block truncate font-medium text-slate-800" data-testid="request-title">{titleOf(r)}</span>
+                  {n > 0 && <span className="inline-flex items-center gap-0.5 text-[11px] text-slate-400"><Paperclip size={11} />{n}</span>}
+                </td>
+                <td className="px-2 py-2.5">{r.department ? <Chip tone="gold">{r.department}</Chip> : <span className="text-slate-300">—</span>}</td>
+                <td className="px-2 py-2.5">{r.review_size ? <Chip tone="slate">{r.review_size}</Chip> : <span className="text-slate-300">—</span>}</td>
+                <td className="px-2 py-2.5"><StagePill r={r} /></td>
+                <td className="px-2 py-2.5 text-slate-700" data-testid="request-asker"><Asker id={r.created_by} /></td>
+                <td className="whitespace-nowrap px-2 py-2.5 text-xs text-slate-500">{formatDateTime(r.created_at)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
 
-/** The pictures and PDFs, read only when the request is opened. */
-function RequestFiles({ files }: { files: RequestFileMeta[] }) {
-  const [urls, setUrls] = useState<Record<string, string | null>>({})
-  useEffect(() => {
-    let live = true
-    for (const f of files) {
-      if (f.purged_at) continue
-      void fileDataUrl(f).then((u) => { if (live) setUrls((cur) => ({ ...cur, [f.id]: u })) }).catch(() => undefined)
-    }
-    return () => { live = false }
-  }, [files])
+/** THE WORKFLOW AS COLUMNS -- the development queue the firm asked for. Declined is left off the board. */
+function RequestBoard({ rows, files, onOpen, openId }: {
+  rows: ChangeRequest[]; files: RequestFileMeta[]; onOpen: (r: ChangeRequest) => void; openId: string | null
+}) {
+  const cols: { title: string; pick: (r: ChangeRequest) => boolean }[] = [
+    { title: 'Submitted', pick: (r) => r.status === 'new' && !r.reviewed_at },
+    { title: 'Reviewed', pick: (r) => r.status === 'new' && !!r.reviewed_at },
+    { title: 'Approved', pick: (r) => r.status === 'accepted' },
+    { title: 'In development', pick: (r) => r.status === 'building' },
+    { title: 'Released', pick: (r) => r.status === 'done' },
+  ]
   return (
-    <div className="flex flex-wrap gap-2" data-testid="request-files">
-      {files.map((f) => {
-        if (f.purged_at) return <span key={f.id} className="text-xs text-slate-400">{f.name} (removed 30 days after it closed)</span>
-        const url = urls[f.id]
-        if (f.mime.startsWith('image/')) {
-          return url
-            ? <ZoomableImage key={f.id} src={url} alt={f.name} className="h-28 w-40 rounded-lg border border-slate-200 object-cover" />
-            : <div key={f.id} className="flex h-28 w-40 items-center justify-center rounded-lg border border-slate-200 bg-slate-50"><Loader2 size={16} className="animate-spin text-slate-400" /></div>
-        }
+    <div className="grid gap-3 overflow-x-auto md:grid-cols-5" data-testid="requests-board">
+      {cols.map((c) => {
+        const mine = rows.filter(c.pick)
         return (
-          <a key={f.id} href={url ?? undefined} download={f.name} target="_blank" rel="noreferrer"
-            className="flex h-28 w-40 flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-center text-xs text-slate-600 hover:bg-slate-100">
-            <FileText size={20} /><span className="w-full truncate">{f.name}</span>
-          </a>
+          <div key={c.title} className="min-w-[12rem] rounded-xl bg-slate-50 p-2" data-testid="requests-board-column" data-column={c.title}>
+            <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{c.title} ({mine.length})</p>
+            <div className="space-y-2">
+              {mine.map((r) => (
+                <BoardCard key={r.id} r={r} n={files.filter((f) => f.request_id === r.id).length} onOpen={onOpen} open={openId === r.id} />
+              ))}
+            </div>
+          </div>
         )
       })}
     </div>
+  )
+}
+
+function BoardCard({ r, n, onOpen, open }: { r: ChangeRequest; n: number; onOpen: (r: ChangeRequest) => void; open: boolean }): ReactNode {
+  return (
+    <button type="button" onClick={() => onOpen(r)} data-testid="request-card" data-number={r.number}
+      className={`w-full rounded-lg border bg-white p-2.5 text-left shadow-sm hover:shadow ${open ? 'border-gold-400' : 'border-slate-200'}`}>
+      <span className="flex items-center justify-between gap-1">
+        <span className="font-mono text-[11px] font-semibold text-slate-500">{requestLabel(r)}</span>
+        {r.priority === 'high' && <span className="rounded-full bg-red-50 px-1.5 text-[10px] text-red-700">High</span>}
+      </span>
+      <span className="mt-1 block text-sm font-medium leading-snug text-slate-800">{titleOf(r)}</span>
+      <span className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+        {r.department && <Chip tone="gold">{r.department}</Chip>}
+        {n > 0 && <span className="inline-flex items-center gap-0.5"><Paperclip size={10} />{n}</span>}
+      </span>
+      <span className="mt-1.5 block"><Asker id={r.created_by} /></span>
+    </button>
   )
 }

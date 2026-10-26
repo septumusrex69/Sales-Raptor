@@ -76,7 +76,22 @@ about.
    ```
    The administrators are notified by a trigger. `request_ids` must list every request you read, so
    tomorrow's review does not read them again.
-5. **Do not** change any request's status, write anything else, edit code, commit or push.
+4b. **And write your reading onto EACH request you read** -- the Feedback Centre's tiles, rows and panel
+   read these, not the JSON (Raptor H12). This is the review's verdict, NOT the status: never touch `status`.
+   ```sql
+   update public.change_requests
+      set review_title = $t$Call centre · Diary: debtor details$t$,      -- department · pane: short title
+          review_verdict = 'decision',   -- 'ready' (can be built as asked) | 'decision' (Stephan must answer) | 'blocked' (missing information)
+          review_size = 'small',         -- small | medium | large
+          review_summary = $s$One or two sentences: what they want, in the firm's words.$s$,
+          review_questions = array[$q$Which reference: ours or the client's?$q$],   -- '{}' when none
+          reviewed_at = now()
+    where number = 12;
+   ```
+   Every request in the review row gets this update; the history line ("The nightly review read it") is
+   written by a trigger.
+5. **Do not** change any request's status, write anything else (beyond the review row and the `review_*`
+   columns above), edit code, commit or push.
 
 ## Job 2 -- working the list (only when Stephan asks)
 

@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 import {
   base64Bytes, parseReviewGroups,
-  type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
+  type ChangeRequest, type RequestDepartment, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestReview, type RequestStatus,
 } from './changeRequests'
 
 /**
@@ -11,7 +11,7 @@ import {
  * screenshots to draw forty titles.
  */
 
-const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by'
+const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by, assigned_to, review_title, review_verdict, review_size, review_summary, review_questions, reviewed_at'
 
 export async function listRequests(): Promise<ChangeRequest[]> {
   const { data, error } = await supabase.from('change_requests').select(REQUEST_COLUMNS).order('created_at', { ascending: false }).limit(500)
@@ -33,13 +33,27 @@ export async function fileDataUrl(f: Pick<RequestFileMeta, 'id' | 'mime'>): Prom
   return b64 ? `data:${f.mime};base64,${b64}` : null
 }
 
-export async function latestReview(): Promise<RequestReview | null> {
-  const { data, error } = await supabase.from('change_request_reviews').select('id, created_at, summary, groups')
-    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+/** The nights' reviews, newest first -- they are kept, not replaced (the firm: "keep a review history"). */
+export async function listReviews(): Promise<RequestReview[]> {
+  const { data, error } = await supabase.from('change_request_reviews').select('id, created_at, summary, groups, request_ids')
+    .order('created_at', { ascending: false }).limit(60)
   if (error) throw new Error(error.message)
-  if (!data) return null
-  const r = data as { id: string; created_at: string; summary: string; groups: unknown }
-  return { id: r.id, created_at: r.created_at, summary: r.summary, groups: parseReviewGroups(r.groups) }
+  return ((data ?? []) as { id: string; created_at: string; summary: string; groups: unknown; request_ids: string[] | null }[])
+    .map((r) => ({ id: r.id, created_at: r.created_at, summary: r.summary, groups: parseReviewGroups(r.groups), request_ids: r.request_ids ?? [] }))
+}
+
+/** One request's history, oldest first. */
+export async function listEvents(requestId: string): Promise<RequestEvent[]> {
+  const { data, error } = await supabase.from('change_request_events').select('id, request_id, kind, body, from_status, to_status, by_id, at')
+    .eq('request_id', requestId).order('at')
+  if (error) throw new Error(error.message)
+  return (data ?? []) as RequestEvent[]
+}
+
+/** A comment, or (an Administrator's) question to the person who asked -- they are notified. */
+export async function addEvent(requestId: string, kind: 'comment' | 'question', body: string, byId: string): Promise<void> {
+  const { error } = await supabase.from('change_request_events').insert({ request_id: requestId, kind, body: body.trim(), by_id: byId })
+  if (error) throw new Error(error.message)
 }
 
 export interface OutgoingFile { name: string; mime: string; base64: string }
@@ -64,7 +78,7 @@ Promise<{ number: number; failedFiles: string[] }> {
   return { number: row.number, failedFiles }
 }
 
-export async function updateRequest(id: string, patch: Partial<{ status: RequestStatus; priority: RequestPriority; admin_note: string | null; done_in: string | null }>): Promise<void> {
+export async function updateRequest(id: string, patch: Partial<{ status: RequestStatus; priority: RequestPriority; admin_note: string | null; done_in: string | null; assigned_to: string | null }>): Promise<void> {
   const { error } = await supabase.from('change_requests').update(patch).eq('id', id)
   if (error) throw new Error(error.message)
 }

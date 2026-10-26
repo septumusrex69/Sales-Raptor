@@ -17,17 +17,23 @@ import { PROFILE, TEAM } from './fixtures.mjs'
 const t = makeRunner('change-requests')
 const TESTER = { ...PROFILE, id: 'u-ali', name: 'Alianna Botha', email: 'a@x.co.za', role: 'Pre-legal Agent' }
 const ADMIN = { ...PROFILE, id: 'u-stephan', name: 'Stephan', email: 's@x.co.za', role: 'Administrator' }
+const NONE = { tested_ok: null, tested_note: null, tested_at: null, tested_by: null, assigned_to: null,
+  review_title: null, review_verdict: null, review_size: null, review_summary: null, review_questions: [], reviewed_at: null }
 const REQUESTS = [
-  { id: 'q1', number: 7, description: 'Diary: make broken promises red', page_path: '/diary', page_title: 'Diary', pane: 'Diary', department: 'Call centre', status: 'new', priority: 'normal',
-    admin_note: null, done_in: null, created_by: TESTER.id, created_at: '2026-10-25T08:00:00Z', decided_by: null, decided_at: null, closed_at: null },
-  { id: 'q2', number: 8, description: 'Diary: the same, but orange', page_path: '/diary', page_title: 'Diary', status: 'accepted', priority: 'high',
-    admin_note: null, done_in: null, created_by: ADMIN.id, created_at: '2026-10-25T09:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-25T10:00:00Z', closed_at: null },
-  { id: 'q3', number: 5, description: 'Old, done', page_path: '/', page_title: 'Dashboard', status: 'done', priority: 'normal',
-    admin_note: null, done_in: 'Raptor H12', created_by: TESTER.id, created_at: '2026-10-20T08:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-21T08:00:00Z', closed_at: '2026-10-21T08:00:00Z',
-    tested_ok: null, tested_note: null, tested_at: null, tested_by: null },
+  { ...NONE, id: 'q1', number: 7, description: 'Diary: make broken promises red', page_path: '/diary', page_title: 'Diary', pane: 'Diary', department: 'Call centre', status: 'new', priority: 'normal',
+    admin_note: null, done_in: null, created_by: TESTER.id, created_at: '2026-10-25T08:00:00Z', decided_by: null, decided_at: null, closed_at: null,
+    review_title: 'Call centre · Diary: broken promises stand out', review_verdict: 'decision', review_size: 'small',
+    review_summary: 'Colour the broken-promise rows.', review_questions: ['Red or orange?'], reviewed_at: '2026-10-26T02:00:00Z' },
+  { ...NONE, id: 'q2', number: 8, description: 'Diary: the same, but orange', page_path: '/diary', page_title: 'Diary', pane: 'Diary', department: 'Call centre', status: 'accepted', priority: 'high',
+    admin_note: null, done_in: null, created_by: ADMIN.id, created_at: '2026-10-25T09:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-25T10:00:00Z', closed_at: null,
+    review_verdict: 'ready', review_size: 'small', reviewed_at: '2026-10-26T02:00:00Z' },
+  { ...NONE, id: 'q3', number: 5, description: 'Old, done', page_path: '/', page_title: 'Dashboard', pane: 'Dashboard', department: 'Whole system', status: 'done', priority: 'normal',
+    admin_note: 'Open the Dashboard and look at the top.', done_in: 'Raptor H12', created_by: TESTER.id, created_at: '2026-10-20T08:00:00Z', decided_by: ADMIN.id, decided_at: '2026-10-21T08:00:00Z', closed_at: '2026-10-21T08:00:00Z' },
 ]
-const REVIEW = { id: 'v1', created_at: '2026-10-26T02:00:00Z', summary: 'Two requests about the diary, one decision needed.',
-  groups: [{ title: 'Broken promises stand out in the diary', request_numbers: [7, 8], what: 'Colour the broken-promise rows.', questions: ['Red or orange?'], size: 'small' }] }
+const REVIEWS = [{ id: 'v1', created_at: '2026-10-26T02:00:00Z', summary: 'Two requests about the diary, one decision needed.', request_ids: ['q1', 'q2'],
+  groups: [{ title: 'Broken promises stand out in the diary', request_numbers: [7, 8], what: 'Colour the broken-promise rows.', questions: ['Red or orange?'], size: 'small' }] }]
+const EVENTS = [{ id: 'e1', request_id: 'q1', kind: 'sent', body: null, from_status: null, to_status: null, by_id: TESTER.id, at: '2026-10-25T08:00:00Z' },
+  { id: 'e2', request_id: 'q1', kind: 'reviewed', body: 'Colour the broken-promise rows.', from_status: null, to_status: null, by_id: null, at: '2026-10-26T02:00:00Z' }]
 
 const open = async (page, path) => {
   for (let i = 0; i < 60; i += 1) {
@@ -63,7 +69,12 @@ const handlers = (who, writes) => [
     writes.push({ table: 'tested', body: req.postDataJSON() })
     return { status: 200, body: null }
   }],
-  [(u) => u.includes('/rest/v1/change_request_reviews'), () => ({ body: REVIEW })],
+  [(u, req) => req.method() === 'POST' && u.includes('/rest/v1/change_request_events'), (u, req) => {
+    writes.push({ table: 'event', body: req.postDataJSON() })
+    return { status: 201, body: [] }
+  }],
+  [(u) => u.includes('/rest/v1/change_request_events'), () => ({ body: EVENTS })],
+  [(u) => u.includes('/rest/v1/change_request_reviews'), () => ({ body: REVIEWS })],
   [(u) => u.includes('/rest/v1/change_request_files'), () => ({ body: [] })],
   [(u) => u.includes('/rest/v1/change_requests'), () => ({ body: REQUESTS })],
   [(u) => /\/rest\/v1\/profiles.*id=eq\./.test(u), () => ({ body: [who] })],
@@ -113,61 +124,79 @@ try {
   t.ok('the screen gives its number', /R-9/.test(await page.getByTestId('request-change-sent').innerText()))
   await t.shot(page, 'change-requests-1-sent')
 
-  /* 2. The Requests screen, as the tester. */
+  /* 2. The Feedback Centre, as the tester. */
   await open(page, '/requests')
   const review = page.getByTestId('requests-review')
   await review.waitFor({ timeout: 20000 })
-  t.ok('the night\'s review is on top, grouped, with its question', /Broken promises stand out in the diary/.test(await review.innerText())
-    && /R-7/.test(await review.innerText()) && /Red or orange\?/.test(await review.innerText()))
+  t.ok('the night\'s review is on top, with its summary', /Last night.s review/.test(await review.innerText()) && /one decision needed/.test(await review.innerText()))
+  t.check('...its tiles count what it read, by verdict', JSON.stringify(await Promise.all(['reviewed', 'ready', 'decision', 'blocked']
+    .map(async (v) => (/^\s*(\d+)/.exec(await page.getByTestId(`requests-tile-${v}`).innerText()) ?? [])[1]))), JSON.stringify(['2', '1', '1', '0']))
+  t.ok('new requests waiting for a decision are listed under it', /R-7/.test(await page.getByTestId('requests-waiting').innerText()))
   const cards = page.getByTestId('request-card')
-  t.check('the list opens on the open ones, high first', JSON.stringify(await cards.evaluateAll((els) => els.map((e) => e.dataset.number))), JSON.stringify(['8', '7']))
-  const first = cards.first()
-  t.ok('a closed request says it can be opened', /Open/.test(await first.getByTestId('request-toggle').innerText())
-    && (await first.getByTestId('request-toggle').getAttribute('aria-expanded')) === 'false')
-  t.ok('...and says its number, who asked (with their role) and who decided',
-    /^R-8$/.test((await first.getByTestId('request-number').innerText()).trim())
-    && /Asked by Stephan · Administrator/.test(await first.getByTestId('request-asker').innerText())
-    && /Accepted by Stephan/.test(await first.getByTestId('request-decider').innerText()))
-  t.ok('the department and the pane are on the row', /Call centre/.test(await cards.nth(1).getByTestId('request-where').innerText())
-    && /Diary pane/.test(await cards.nth(1).getByTestId('request-where').innerText()))
+  t.check('the tickets: high first, then newest', JSON.stringify(await cards.evaluateAll((els) => els.map((e) => e.dataset.number))), JSON.stringify(['8', '7', '5']))
+  t.ok('each row says its number, title, department, status and who asked',
+    /^R-7$/.test((await cards.nth(1).getByTestId('request-number').innerText()).trim())
+    && /Call centre · Diary: broken promises stand out/.test(await cards.nth(1).getByTestId('request-title').innerText())
+    && /Reviewed/.test(await cards.nth(1).getByTestId('request-status').innerText())
+    && /Alianna Botha/.test(await cards.nth(1).getByTestId('request-asker').innerText())
+    && /Approved/.test(await cards.nth(0).getByTestId('request-status').innerText()))
+  await page.getByTestId('requests-tile-decision').click()
+  t.check('a tile filters the tickets to what it counts', JSON.stringify(await cards.evaluateAll((els) => els.map((e) => e.dataset.number))), JSON.stringify(['7']))
+  await page.getByTestId('requests-tile-filter').click()
   await page.getByTestId('requests-department').selectOption('Sales')
-  t.check('...and the list filters by department', await cards.count(), 0)
+  t.check('...and so does the department', await cards.count(), 0)
   await page.getByTestId('requests-department').selectOption('all')
-  t.ok('...an undecided one has no "by" line', (await cards.nth(1).getByTestId('request-decider').count()) === 0
-    && /Asked by Alianna Botha · Pre-legal Agent/.test(await cards.nth(1).getByTestId('request-asker').innerText()))
-  await t.shot(page, 'change-requests-3-list')
-  await first.getByTestId('request-toggle').click()
-  t.ok('opening it turns the toggle to Close', /Close/.test(await first.getByTestId('request-toggle').innerText()))
-  t.check('a tester sees no decision buttons', await page.getByTestId('request-decide').count(), 0)
+  await t.shot(page, 'change-requests-3-overview')
 
-  /* Their own Done request asks them to test it. */
-  await page.getByTestId('requests-shelf').getByRole('radio', { name: /Done/ }).click()
-  const done = page.locator('[data-testid="request-card"][data-number="5"]')
-  t.ok('a Done request says it is waiting for a test', /Waiting for a test/.test(await done.innerText()))
-  await done.getByTestId('request-toggle').click()
-  t.ok('...and asks the person who asked to test it', /This is done\. Please test it\./.test(await done.getByTestId('request-test').innerText()))
-  await done.getByTestId('request-test-not-right').click()
-  t.ok('"Not right yet" needs to say what', await done.getByTestId('request-test-send-back').isDisabled())
-  await done.getByTestId('request-test-note').fill('The reference is still missing on disputes.')
-  await done.getByTestId('request-test-send-back').click()
+  await page.getByTestId('requests-views').getByRole('tab', { name: /Board/ }).click()
+  t.check('the board puts each in its workflow column', JSON.stringify(await page.getByTestId('requests-board-column').evaluateAll((cols) =>
+    cols.map((c) => `${c.dataset.column}:${[...c.querySelectorAll('[data-testid="request-card"]')].map((x) => x.dataset.number).join(',')}`))),
+  JSON.stringify(['Submitted:', 'Reviewed:7', 'Approved:8', 'In development:', 'Released:5']))
+  await t.shot(page, 'change-requests-5-board')
+  await open(page, '/requests')
+  await page.getByTestId('requests-board').waitFor({ timeout: 20000 })
+  t.ok('...and the view is remembered', (await page.getByTestId('requests-board').count()) === 1)
+
+  /* Their own released request asks them to test it, in the panel. */
+  await page.locator('[data-testid="request-card"][data-number="5"]').click()
+  const panel = page.getByTestId('request-panel')
+  await panel.waitFor({ timeout: 10000 })
+  t.ok('a ticket opens in a panel beside the list, with its number in the address', /r=5/.test(page.url()) && (await page.getByTestId('requests-board').count()) === 1)
+  t.check('a tester sees no decision buttons', await panel.getByTestId('request-actions').count(), 0)
+  t.ok('...and is asked to test what was released, with how', /This is released\. Please test it\./.test(await panel.getByTestId('request-test').innerText())
+    && /How to test: Open the Dashboard/.test(await panel.getByTestId('request-test-how').innerText()))
+  await panel.getByTestId('request-test-not-right').click()
+  t.ok('"Not right yet" needs to say what', await panel.getByTestId('request-compose-send').isDisabled())
+  await panel.getByTestId('request-compose-words').fill('The reference is still missing on disputes.')
+  await panel.getByTestId('request-compose-send').click()
   await page.waitForTimeout(500)
   t.check('...and sends it back with that', JSON.stringify(writes.find((w) => w.table === 'tested')?.body),
     JSON.stringify({ p_number: 5, p_ok: false, p_note: 'The reference is still missing on disputes.' }))
   await t.shot(page, 'change-requests-4-test')
   await page.context().close()
 
-  /* 3. An Administrator declines one. */
+  /* 3. An Administrator works a ticket from the panel. */
   const adminWrites = []
   const { page: ap } = await signedInPage(browser, ADMIN, handlers(ADMIN, adminWrites), [], { now: '2026-10-26T10:00:00+02:00' })
   await open(ap, '/requests?r=7')
-  const card = ap.locator('[data-testid="request-card"][data-number="7"]')
-  await card.getByTestId('request-decide').waitFor({ timeout: 20000 })
-  t.ok('a decline needs a note', await card.getByTestId('request-move-declined').isDisabled())
-  await card.getByTestId('request-note').fill('Covered by R-8.')
-  await card.getByTestId('request-move-declined').click()
+  const ad = ap.getByTestId('request-panel')
+  await ad.getByTestId('request-actions').waitFor({ timeout: 20000 })
+  t.ok('the panel shows the night\'s reading apart from the status', /Needs your decision/.test(await ad.getByTestId('request-panel-review').innerText())
+    && /Red or orange\?/.test(await ad.getByTestId('request-panel-review').innerText()))
+  t.ok('...and the history', /sent the request/.test(await ad.getByTestId('request-activity').innerText()) && /The nightly review/.test(await ad.getByTestId('request-activity').innerText()))
+  await ad.getByTestId('request-ask').click()
+  await ad.getByTestId('request-compose-words').fill('Red or orange?')
+  await ad.getByTestId('request-compose-send').click()
+  await ap.waitForTimeout(500)
+  t.check('Request info asks the person who asked, as a question on the request', JSON.stringify(adminWrites.find((w) => w.table === 'event')?.body),
+    JSON.stringify({ request_id: 'q1', kind: 'question', body: 'Red or orange?', by_id: ADMIN.id }))
+  await ad.getByTestId('request-decline').click()
+  t.ok('a decline needs a reason', await ad.getByTestId('request-compose-send').isDisabled())
+  await ad.getByTestId('request-compose-words').fill('Covered by R-8.')
+  await ad.getByTestId('request-compose-send').click()
   await ap.waitForTimeout(600)
   const patch = adminWrites.find((w) => w.table === 'patch')
-  t.ok('...and with one it writes the status and the note to that request', !!patch && /id=eq\.q1/.test(patch.url)
+  t.ok('...and with one it writes the status and the reason to that request', !!patch && /id=eq\.q1/.test(patch.url)
     && patch.body.status === 'declined' && patch.body.admin_note === 'Covered by R-8.')
   await t.shot(ap, 'change-requests-2-admin')
   await ap.context().close()
@@ -177,5 +206,5 @@ try {
   await browser.close()
   await stopServer(server)
 }
-const good = t.finish('A request is sent with its page and a shrunk screenshot; the night\'s review and the open list show; only an Administrator decides, and a decline says why.')
+const good = t.finish('A request is sent with its page and a shrunk screenshot; the Feedback Centre shows the night\'s review, its tiles filter, the board and the panel work, the asker tests, and only an Administrator decides.')
 process.exit(good ? 0 : 1)
