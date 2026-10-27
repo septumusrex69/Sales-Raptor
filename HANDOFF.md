@@ -122,6 +122,7 @@ time open -- on the ticket and as each agent's averages (first response, resolut
   `check-reload-unsaved` (9), broken and seen failing.
 - **R-6** is "Queued for Claude" while Rinda's two questions are unanswered: the builder will most likely take it
   off the queue with a comment. Its queue time reads 23 Oct because staging's clock is set to 23 Oct -- not a bug.
+- **R-8 BUILT (27 Oct, builder, Raptor H13, commit ffe55de):** a forward keeps the message's attachments. `ComposeEmailModal` takes `forwardAttachments` and fetches the files out of the mailbox when it opens (Send waits for them); each can still be removed; any that do not fit under the 3 MB ceiling are named, not dropped quietly. Wired into the mail page, the account email panel and the dispute ticket. `forwardAttachments.ts`, check-forward-attachments (10), broken once and seen failing.
 
 ## S12 -- WHERE IT STANDS, AND WHERE S13 STARTS (Raptor · Handoff 13)
 
