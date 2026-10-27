@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
-  STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, onShelf, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
+  STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, onShelf, SHELVES, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
 let pass = 0
@@ -155,8 +155,16 @@ check('the workflow words', ['new', 'accepted', 'building', 'done', 'declined'].
   ['Submitted', 'Approved', 'In development', 'Released', 'Declined'])
 check('...a Submitted request a night has read is Reviewed', [stageOf({ status: 'new', reviewed_at: 'x' }), stageOf({ status: 'new', reviewed_at: null })], ['Reviewed', 'Submitted'])
 check('the title is the night\'s where there is one, else the first line', [titleOf({ review_title: ' Call centre · Diary ', description: 'x' }), titleOf({ review_title: null, description: 'First\nsecond' })], ['Call centre · Diary', 'First'])
-check('the shelves: Submitted, Approved and In development are all Open', ['new', 'accepted', 'building', 'done', 'declined'].map((s) => ['open', 'done', 'declined'].filter((sh) => onShelf({ status: s }, sh)).join('')),
-  ['open', 'open', 'open', 'done', 'declined'])
+/* S14 (Stephan): the shelves say whose move it is. Each request sits on exactly one, plus All. */
+{
+  const R = (status, extra = {}) => ({ status, build_requested_at: null, tested_ok: null, ...extra })
+  const where = (r) => ['decide', 'claude', 'test', 'finished', 'declined'].filter((sh) => onShelf(r, sh))
+  check('the shelves say whose move it is', [
+    R('new'), R('accepted'), R('accepted', { build_requested_at: '2026-10-27T08:00:00Z' }), R('building'),
+    R('done'), R('done', { tested_ok: true }), R('accepted', { tested_ok: false }), R('declined'),
+  ].map((r) => where(r).join('+')), ['decide', 'decide', 'claude', 'claude', 'test', 'finished', 'decide', 'declined'])
+  check('...in this order, All last', SHELVES.map(([s]) => s), ['decide', 'claude', 'test', 'finished', 'declined', 'all'])
+}
 check('a night\'s tiles count only the requests it read, by verdict', reviewTiles([
   { id: 'a', review_verdict: 'ready' }, { id: 'b', review_verdict: 'decision' }, { id: 'c', review_verdict: 'decision' }, { id: 'd', review_verdict: 'blocked' },
 ], ['a', 'b', 'd']), { reviewed: 3, ready: 1, decision: 1, blocked: 1 })

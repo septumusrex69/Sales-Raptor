@@ -10,7 +10,7 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate, formatDateTime } from '../../data/mockData'
 import {
-  REQUEST_DEPARTMENTS, VERDICT_LABEL, onShelf, waitingOnAsker, requestLabel, reviewTiles, sortRequests, titleOf,
+  REQUEST_DEPARTMENTS, SHELVES, VERDICT_LABEL, onShelf, waitingOnAsker, requestLabel, reviewTiles, sortRequests, titleOf,
   type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestReview, type ReviewVerdict, type Shelf,
 } from '../../lib/changeRequests'
 import { listFiles, listQuestionThreads, listRequests, listReviews } from '../../lib/changeRequestsApi'
@@ -55,7 +55,7 @@ export function RequestsPage() {
   const [view, setViewState] = useState<View>(() => readView(currentUser?.id))
   // The list opens on Open, with All last as the option to put on (Stephan, Raptor H12): what is not yet
   // finished is what somebody comes here for; everything else is one press away.
-  const [shelf, setShelf] = useState<Shelf>('open')
+  const [shelf, setShelf] = useState<Shelf>('decide')
   const [threads, setThreads] = useState<Awaited<ReturnType<typeof listQuestionThreads>>>([])
   const [dept, setDept] = useState<RequestDepartment | 'all'>('all')
   const [search, setSearch] = useState('')
@@ -89,7 +89,7 @@ export function RequestsPage() {
   const counts = useMemo(() => {
     const all = rows ?? []
     const n = (s: Shelf) => all.filter((r) => onShelf(r, s)).length
-    return { all: n('all'), open: n('open'), done: n('done'), declined: n('declined') }
+    return Object.fromEntries(SHELVES.map(([s]) => [s, n(s)])) as Record<Shelf, number>
   }, [rows])
   /* Who each open request waits on, by first name, for the "Needs feedback from" pill. */
   const feedbackFrom = useMemo(() => {
@@ -142,7 +142,7 @@ export function RequestsPage() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-800">{view === 'board' ? 'The workflow' : 'Requests'}</h2>
-              <p className="text-xs text-slate-500">Submitted → Reviewed → Approved → In development → Released → tested by the person who asked.</p>
+              <p className="text-xs text-slate-500">Needs a decision (yours) → With Claude (being built) → To test (the person who asked) → Done.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm">
@@ -158,7 +158,7 @@ export function RequestsPage() {
           </div>
           {view !== 'board' && (
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Which requests" data-testid="requests-shelf">
-              {([['open', 'Open'], ['done', 'Released'], ['declined', 'Declined'], ['all', 'All']] as const).map(([s, label]) => (
+              {SHELVES.map(([s, label]) => (
                 <button key={s} type="button" role="radio" aria-checked={shelf === s} onClick={() => { setShelf(s); setTile(null) }}
                   className={`rounded-lg border px-3 py-1 text-sm ${shelf === s && !tile ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                   {label} ({counts[s]})

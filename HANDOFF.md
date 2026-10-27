@@ -51,6 +51,19 @@ each looked to be in the future. Now (`src/lib/notificationGroups.ts`): a real d
 badge counts lines); and opening a page a notification links to marks it read (`linkIsOpen`, watched from the bell,
 so every link works without the page knowing). check-notification-groups (18), e2e/change-requests +4 -- both seen failing.
 
+**REQUESTS: THE SHELVES SAY WHOSE MOVE IT IS (27 Oct).** Stephan found Open / Released / Declined confusing. Now
+**Needs a decision** (new, or approved and not given to Claude) · **With Claude** (queued or building) · **To test**
+(released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
+unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
+
+**NEXT, AGREED 27 OCT -- DISPUTE TICKETS** (Stephan, on BOP00005 Boitsoko Mose): every dispute, query and request
+gets a ticket number **T-1042** (one series), quoted in the subject beside our account number and the client's
+reference, so a NEW email quoting it is filed on the ticket (replies already thread by Message-ID, emailSync
+findAccount); every email both ways lives on the ticket and shows on the client's page; a client email can be
+filed onto a ticket by hand; "Client answered" becomes a running conversation until resolved; and a **timer** on
+every ticket, with **both** figures -- time with us (paused while waiting on the client, working hours) and whole
+time open -- on the ticket and as each agent's averages (first response, resolution) on the Communications dashboard.
+
 **Stephan's other answers (27 Oct):** A.1 -- a handover row with no client reference **keeps being refused**
 (Rinda's Bonnitta sheet needs the references). A.2 -- "Client Division" ignored: **already done by S11**.
 
