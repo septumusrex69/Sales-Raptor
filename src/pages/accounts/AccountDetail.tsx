@@ -2634,6 +2634,9 @@ function AccountPage() {
             )
             : undefined}
           initialCc={composeCc}
+          forwardAttachments={forwardOf
+            ? { accountEmailId: forwardOf.id, names: forwardOf.attachmentNames }
+            : undefined}
           /* THE BUTTON, under whatever they type. See ComposeEmailModal.appendHtml for why it
              cannot travel in the body. */
           appendHtml={signingEmail?.appendHtml}

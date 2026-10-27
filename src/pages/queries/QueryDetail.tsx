@@ -765,6 +765,9 @@ export function QueryDetail() {
             is already on the box behind "Add Cc", and it takes the same list.
           */
           recipients={data.clientPeople}
+          forwardAttachments={forwarding
+            ? { accountEmailId: forwarding.id, names: forwarding.attachmentNames }
+            : undefined}
           initialSubject={forwarding
             ? forwardSubject(forwarding.subject)
             : ticketSubject({

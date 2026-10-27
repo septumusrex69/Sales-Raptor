@@ -1831,6 +1831,7 @@ export function MailPage() {
         <ComposeEmailModal
           title="Forward"
           initialSubject={forwardSubject(forwarding.mail.subject)}
+          forwardAttachments={{ mailId: forwarding.mail.id, names: forwarding.mail.attachmentNames }}
           /*
             THE MARKUP WHERE THERE IS ANY. With HTML the original rides underneath as itself --
             tables and all -- and the box above starts empty for a covering note. Without it,

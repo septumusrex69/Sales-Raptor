@@ -13,6 +13,8 @@ import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
 import { FIRM_UNSET, emailBodyCss, fetchFirmSettings, type FirmSettings } from '../lib/firmSettings'
 import { emailBodyHtml } from '../lib/emailStyle.ts'
+import { fetchAttachment } from '../lib/userMail'
+import { fetchForwardAttachments, leftOffNote } from '../lib/forwardAttachments'
 
 /**
  * How much may travel with one message.
@@ -47,6 +49,7 @@ export function ComposeEmailModal({
   initialSubject,
   initialBody,
   initialAttachments,
+  forwardAttachments,
   initialMissing,
   quotedHtml,
   appendHtml,
@@ -125,6 +128,13 @@ export function ComposeEmailModal({
    * longer mean.
    */
   initialAttachments?: Attached[]
+  /**
+   * THE FILES ON A MESSAGE BEING FORWARDED, fetched out of the mailbox when the box opens (the
+   * firm, R-8: a forward "removes the attachment"). Seeded into the same list as everything else,
+   * so each can still be removed by hand, and sending waits until they have arrived -- a forward
+   * that goes before its files do is the bug this fixes.
+   */
+  forwardAttachments?: { mailId?: string; accountEmailId?: string; names: string[] }
   /**
    * Fields the caller's own merge could not fill, where it merged the wording itself.
    *
@@ -233,6 +243,25 @@ export function ComposeEmailModal({
    * usable in the fallback face for the moment the fetch takes rather than blank or jumping in
    * from something obviously wrong.
    */
+  const [fetchingForward, setFetchingForward] = useState((forwardAttachments?.names.length ?? 0) > 0)
+  const [forwardNote, setForwardNote] = useState('')
+  useEffect(() => {
+    const wanted = forwardAttachments
+    const token = session?.access_token
+    if (!wanted || wanted.names.length === 0) return
+    if (!token) { setForwardNote(leftOffNote(wanted.names)); setFetchingForward(false); return }
+    let cancelled = false
+    void fetchForwardAttachments({ ...wanted, accessToken: token, maxBytes: MAX_ATTACHMENT_BYTES, fetchOne: fetchAttachment })
+      .then(({ files: got, left }) => {
+        if (cancelled) return
+        setFiles((list) => [...list, ...got])
+        setForwardNote(leftOffNote(left))
+        setFetchingForward(false)
+      })
+    return () => { cancelled = true }
+    // Once, on open: the message being forwarded does not change under an open box.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [firm, setFirm] = useState<FirmSettings>(FIRM_UNSET)
   useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
   const [submitting, setSubmitting] = useState(false)
@@ -636,6 +665,12 @@ export function ComposeEmailModal({
               onError={setError}
               onAttached={addAttachment} />
           )}
+          {fetchingForward && (
+            <span className="text-xs text-slate-500">Fetching the attachments{'\u2026'}</span>
+          )}
+          {forwardNote && (
+            <span role="status" className="basis-full text-xs text-negative-700">{forwardNote}</span>
+          )}
           {files.length > 0 && (
             <div className="mt-2 basis-full flex flex-wrap gap-1.5">
               {files.map((f, i) => (
@@ -690,7 +725,7 @@ export function ComposeEmailModal({
           <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
             Cancel
           </button>
-          <button type="submit" disabled={submitting} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <button type="submit" disabled={submitting || fetchingForward} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             {submitting ? 'Sending…' : 'Send'}
           </button>
         </div>
