@@ -51891,3 +51891,20 @@ begin
   insert into public.change_request_events (request_id, kind, body, by_id)
   values (r.id, 'edited', r.description, auth.uid());
 end $$;
+
+-- S14 (27 Oct, Raptor H13): A COUNT ON REQUESTS, LIKE MAIL'S. Stephan: "if I have a new suggestion from the
+-- light bulb, show me how many there are ... not only with the notifications, but on the sidebar".
+-- Kept to what one person can clear, the sidebar's own rule (navCounts.ts): for an Administrator, every
+-- request still waiting for a decision (New -- Submitted or Reviewed); for anybody, their own released
+-- requests still waiting for their test. Approving, declining or testing brings it down. A separate
+-- function, not a fifth column on nav_counts, because changing that one's return type means dropping it.
+create or replace function public.nav_request_count()
+returns integer language sql stable security invoker set search_path to 'public' as $$
+  select (
+    (select count(*) from public.change_requests
+      where status = 'new' and coalesce(public.current_user_role(), '') = 'Administrator')
+    + (select count(*) from public.change_requests
+      where created_by = auth.uid() and status = 'done' and tested_ok is null)
+  )::integer
+$$;
+grant execute on function public.nav_request_count() to authenticated;

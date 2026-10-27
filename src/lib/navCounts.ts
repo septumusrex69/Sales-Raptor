@@ -27,9 +27,11 @@ export interface NavCounts {
   tasks: number
   disputes: number
   diary: number
+  /** S14: requests waiting on me -- to decide (Administrators) or to test (the asker). nav_request_count. */
+  requests: number
 }
 
-const EMPTY: NavCounts = { mail: 0, tasks: 0, disputes: 0, diary: 0 }
+const EMPTY: NavCounts = { mail: 0, tasks: 0, disputes: 0, diary: 0, requests: 0 }
 
 /** Fired by a page that has just changed one of these, so the badge drops without a reload. */
 export const NAV_COUNTS_CHANGED = 'raptor:nav-counts'
@@ -49,16 +51,22 @@ export function useNavCounts(): NavCounts {
   const { pathname } = useLocation()
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.rpc('nav_counts').single<NavCounts>()
+    /* Asked side by side: Requests' count is its own function (nav_request_count) so nav_counts
+       did not have to be dropped to grow a column. */
+    const [{ data, error }, req] = await Promise.all([
+      supabase.rpc('nav_counts').single<NavCounts>(),
+      supabase.rpc('nav_request_count'),
+    ])
     // A count we could not read is not worth an error on the chrome of every page. The badges
     // keep their last value rather than flashing to zero and back.
     if (!error && data) {
-      setCounts({
+      setCounts((prev) => ({
         mail: Number(data.mail ?? 0),
         tasks: Number(data.tasks ?? 0),
         disputes: Number(data.disputes ?? 0),
         diary: Number(data.diary ?? 0),
-      })
+        requests: req.error ? prev.requests : Number(req.data ?? 0),
+      }))
     }
   }, [])
 

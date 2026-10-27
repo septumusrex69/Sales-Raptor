@@ -281,11 +281,15 @@ try {
       bellWrites.push({ url: decodeURIComponent(u), body: req.postDataJSON() }); return { status: 200, body: [] }
     }],
     [(u) => u.includes('/rest/v1/notifications'), () => ({ body: NOTIFS })],
+    [(u) => u.includes('/rpc/nav_request_count'), () => ({ body: 2 })],
     ...handlers(ADMIN, []),
   ], [], { now: '2026-10-27T09:00:00+02:00' })
   await open(bp, '/requests')
   await bp.getByTestId('notifications-count').waitFor({ timeout: 20000 })
   t.check('the bell counts things waiting, not messages: two replies on R-7 are one', await bp.getByTestId('notifications-count').innerText(), '2')
+  /* S14: the sidebar says it too, like Mail's count. Waited for: it arrives with the other counts. */
+  await bp.waitForFunction(() => /\d/.test(document.querySelector('nav a[href="/requests"]')?.textContent ?? ''), null, { timeout: 10000 }).catch(() => {})
+  t.ok('the sidebar\'s Requests carries the count of what waits on me', /^Requests\s*2$/.test((await bp.locator('nav a[href="/requests"]').innerText()).trim()))
   await bp.getByTestId('notifications-bell').click()
   const lines = bp.getByTestId('notification')
   t.check('...one line per request, the newest message on it', JSON.stringify(await lines.evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent))),

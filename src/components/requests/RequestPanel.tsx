@@ -14,6 +14,7 @@ import {
 } from '../../lib/changeRequests'
 import { addEvent, answerQuestion, answerTest, askClaude, editRequest, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
 import type { User } from '../../types'
+import { refreshNavCounts } from '../../lib/navCounts'
 
 /**
  * ONE REQUEST, IN A PANEL BESIDE THE LIST (Raptor H12, the Feedback Centre).
@@ -63,7 +64,8 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
 
   async function act(fn: () => Promise<void>) {
     setBusy(true); setError(null)
-    try { await fn(); setComposing(null); setWords(''); setChoiceWords(''); onChanged(); loadEvents() }
+    /* refreshNavCounts: the sidebar's Requests count drops the moment one is decided or tested. */
+    try { await fn(); setComposing(null); setWords(''); setChoiceWords(''); onChanged(); loadEvents(); refreshNavCounts() }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }

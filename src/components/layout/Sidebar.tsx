@@ -12,9 +12,9 @@ import { canViewClients, canViewLibrary, canViewFinance, canViewBusiness, canSen
 import { useSidebarCollapsed } from '../../lib/sidebarCollapsed'
 
 /**
- * The navigation, and the three items that carry a count.
+ * The navigation, and the items that carry a count.
  *
- * Only three, and the rule is strict: a badge earns its place if it counts something ONE PERSON
+ * Only a few, and the rule is strict: a badge earns its place if it counts something ONE PERSON
  * CAN CLEAR TODAY. Accounts, Leads, Deals and Clients are catalogues rather than inboxes — a
  * number on Accounts would read "100 000" forever and teach everybody to ignore the others.
  * See src/lib/navCounts.ts.
@@ -94,7 +94,8 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // CHANGE REQUESTS (S12): what testers asked Raptor to do differently, and last night's grouped review.
   // Everybody's, at the firm's word: "anyone can see requests".
-  { to: '/requests', label: 'Requests', icon: Lightbulb },
+  /* S14: with a count -- new suggestions for an Administrator, my releases to test for anybody. */
+  { to: '/requests', label: 'Requests', icon: Lightbulb, badge: 'requests' },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 

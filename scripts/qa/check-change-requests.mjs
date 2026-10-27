@@ -128,7 +128,7 @@ ok('the page somebody was on goes with the request', /pagePath: page, pageTitle/
 ok('a picture is shrunk before it leaves', /fitWithin\(img\.naturalWidth, img\.naturalHeight\)/.test(code('src/components/requests/RequestChangeButton.tsx'))
   && /toDataURL\('image\/jpeg', 0\.82\)/.test(code('src/components/requests/RequestChangeButton.tsx')))
 ok('/requests is routed and in the menu for everybody', /path="\/requests" element=\{<RequestsPage \/>\}/.test(code('src/App.tsx'))
-  && /\{ to: '\/requests', label: 'Requests', icon: Lightbulb \}/.test(code('src/components/layout/Sidebar.tsx'))
+  && /\{ to: '\/requests', label: 'Requests', icon: Lightbulb(, badge: 'requests')? \}/.test(code('src/components/layout/Sidebar.tsx'))
   && !/n\.to !== '\/requests'/.test(code('src/components/layout/Sidebar.tsx')))
 const page = code('src/pages/requests/RequestsPage.tsx')
 const panel = code('src/components/requests/RequestPanel.tsx')
@@ -254,6 +254,21 @@ check('only the person who asked answers, and only a question with choices',
     /auth\.uid\(\) is distinct from r\.created_by and coalesce\(public\.current_user_role\(\), ''\) <> 'Administrator'/.test(fn),
     /if r\.status not in \('new', 'accepted'\) then/.test(fn),
     /values \(r\.id, 'edited', r\.description, auth\.uid\(\)\)/.test(fn),
+  ].join(), 'true,true,true')
+}
+
+/* S14: a count on the sidebar's Requests -- new suggestions for an Administrator, my releases to test. */
+{
+  const sch = read('supabase/schema.sql')
+  const fn = sch.slice(sch.lastIndexOf('create or replace function public.nav_request_count('))
+  check('the count: undecided requests for an Administrator, my untested releases for anybody', [
+    /where status = 'new' and coalesce\(public\.current_user_role\(\), ''\) = 'Administrator'/.test(fn),
+    /where created_by = auth\.uid\(\) and status = 'done' and tested_ok is null/.test(fn),
+  ].join(), 'true,true')
+  check('...drawn on the sidebar, and refreshed the moment one is decided or tested', [
+    /\{ to: '\/requests', label: 'Requests', icon: Lightbulb, badge: 'requests' \}/.test(read('src/components/layout/Sidebar.tsx')),
+    /supabase\.rpc\('nav_request_count'\)/.test(read('src/lib/navCounts.ts')),
+    /loadEvents\(\); refreshNavCounts\(\)/.test(read('src/components/requests/RequestPanel.tsx')),
   ].join(), 'true,true,true')
 }
 

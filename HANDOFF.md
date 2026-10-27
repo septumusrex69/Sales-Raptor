@@ -58,6 +58,11 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**REQUESTS: A COUNT ON THE SIDEBAR (27 Oct).** Stephan: show how many new light-bulb suggestions there are, on the
+sidebar like Mail. Migration **`nav_request_count`** (md5 e26459d4...): for an Administrator, requests still New; for
+anybody, their own released requests not yet tested. Fetched beside nav_counts (navCounts.ts), drawn on Requests,
+refreshed when the panel decides or tests one. check-change-requests +2, e2e/change-requests +1.
+
 **REQUESTS: CORRECT THE WORDING (27 Oct).** Stephan: edit a request "just to correct spelling, mistakes". The sender
 or an Administrator may correct a request's words until Claude starts building it (New, Approved, Queued); the old
 words stay on the history (kind `edited`, no notification). Migrations **`change_request_edit`** (md5 a634d514...;
