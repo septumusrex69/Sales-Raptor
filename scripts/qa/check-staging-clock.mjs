@@ -261,6 +261,9 @@ const ALLOWED = new Set([
   /* S10, 23 Oct: a reload GUARD -- "did this tab reload for a missing chunk in the last 30 s" --
      wall time between two page loads, never a date. */
   'src/lib/staleChunk.ts',
+  /* S14, 27 Oct: a REAL-WORLD STAMP. A notification is stamped by the database on the real clock, so
+     "Today 07:39" is told on the real clock too; aged against staging's day every one read "just now". */
+  'src/components/layout/NotificationsMenu.tsx',
 ])
 const walk = (dir) => readdirSync(new URL(dir, root)).flatMap((n) => {
   const p = join(dir, n)
@@ -272,10 +275,10 @@ check('no other file reads the machine\'s clock', offenders, [])
 /* The allowed files' remaining reads are the real-world ones, counted so a new one is looked at.
    51 since 22 Oct: AccountDetail's visit start, compared with a diary entry's created_at -- both
    wall time, so a jumped staging clock must not make every booking look older than the visit.
-   52 since 23 Oct: staleChunk.ts's reload guard. */
+   52 since 23 Oct: staleChunk.ts's reload guard. 53 since 27 Oct (S14): the bell's "Today 07:39". */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 52)
+check('...and the allowed files keep exactly their real-world reads', realReads, 53)
 
 /* ---------- 7. the arithmetic ---------- */
 

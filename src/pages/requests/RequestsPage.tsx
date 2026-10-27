@@ -113,7 +113,7 @@ export function RequestsPage() {
 
   return (
     <div className="max-w-6xl space-y-5">
-      <DashboardHero eyebrow="Feedback centre" title="Build a better Raptor"
+      <DashboardHero eyebrow="Feedback centre" title="Raptor build"
         subtitle="Ideas, feedback and changes asked for by the team. Press the light bulb at the top of any page to add one." />
 
       <div className="flex flex-wrap items-center gap-2">
