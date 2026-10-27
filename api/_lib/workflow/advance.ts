@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { firmClock } from './clock.js'
-import { isStagingDatabase, isTestAccount, daysToNextStep } from '../../../src/lib/testClock.js'
+import { isStagingDatabase, isTestAccount, daysToNextStep, jumpDates } from '../../../src/lib/testClock.js'
 import run from './run.js'
 
 /**
@@ -89,7 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { today } = await firmClock(admin)
   const { data: pending, error: stepsError } = await admin
     .from('workflow_run_steps')
-    .select('due_on, workflow_runs!inner(account_id, state)')
+    .select('due_on, state, workflow_runs!inner(account_id, state)')
     .in('state', ['pending', 'held'])
     .eq('workflow_runs.account_id', accountId)
     .eq('workflow_runs.state', 'running')
@@ -99,7 +99,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const jump = daysToNextStep(today, (pending ?? []).map((s) => s.due_on as string))
+  /* Pending steps only: a held one is waiting on a person, not the date (testClock.jumpDates). */
+  const jump = daysToNextStep(today, jumpDates((pending ?? []) as { due_on: string; state: string }[]))
   let moved = 0
   if (jump > 0) {
     const { data: shifted, error: rpcError } = await admin

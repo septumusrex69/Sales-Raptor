@@ -18,7 +18,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  isTestAccount, isStagingDatabase, daysToNextStep, shiftBack, daysBetween,
+  isTestAccount, isStagingDatabase, daysToNextStep, jumpDates, shiftBack, daysBetween,
   STAGING_PROJECT_REF, TEST_ACCOUNT_PREFIX,
 } from '../../src/lib/testClock.ts'
 
@@ -162,6 +162,14 @@ check('...or overdue', daysToNextStep(TODAY, ['2026-09-01']), 0)
 /* ZERO WHERE THERE IS NOTHING LEFT, which reads as "nothing to move forward to" rather than as an
    error: a sequence that has finished is the ordinary end of a test. */
 check('nothing moves when nothing is left', daysToNextStep(TODAY, []), 0)
+/* S14, BOP00005: a held step dated today pinned the jump at zero, so day 7 never came forward. */
+check('a held step does not set the jump -- only pending ones do',
+  daysToNextStep(TODAY, jumpDates([{ due_on: TODAY, state: 'held' }, { due_on: '2026-10-09', state: 'pending' }, { due_on: '2026-09-01', state: 'sent' }])), 11)
+{
+  const advance = readFileSync(new URL('../../api/_lib/workflow/advance.ts', import.meta.url), 'utf8')
+  check('...and the route asks for the state and jumps on pending only',
+    [/select\('due_on, state, workflow_runs!inner/.test(advance), /daysToNextStep\(today, jumpDates\(/.test(advance)].join(), 'true,true')
+}
 
 /*
  * AND THE SHAPE OF THE REST OF THE SEQUENCE SURVIVES. Every remaining step moves by the SAME

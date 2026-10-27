@@ -133,6 +133,19 @@ export function shiftBack(date: string, days: number): string {
  * ZERO WHERE THERE IS NOTHING LEFT, which reads on the screen as "nothing further to advance to"
  * rather than as an error -- a sequence that has finished is the ordinary end of a test.
  */
+/*
+ * ONLY PENDING STEPS SET THE JUMP (S14, 27 Oct). The firm pressed Next step now on BOP00005 and
+ * nothing moved: the account's old Handover run had a HELD step dated today (its first email failed,
+ * so the second was held), and a held step counted as "already due" pinned the jump at zero for
+ * ever -- the section 129's day 7 could never be pulled forward. A held step is waiting on a PERSON
+ * or a reason, not on the calendar; the daily pass looks at it again whatever the date. So it still
+ * moves with the run (workflow_test_advance shifts pending and held alike, keeping the shape), but
+ * it no longer decides how far the clock jumps.
+ */
+export function jumpDates(steps: { due_on: string; state: string }[]): string[] {
+  return steps.filter((s) => s.state === 'pending').map((s) => s.due_on)
+}
+
 export function daysToNextStep(today: string, dueDates: string[]): number {
   let soonest: string | null = null
   for (const d of dueDates) {

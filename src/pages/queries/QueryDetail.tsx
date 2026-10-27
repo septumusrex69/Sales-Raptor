@@ -756,6 +756,7 @@ export function QueryDetail() {
               debtorName: data.account?.debtorName ?? null,
               accountNumber: data.account?.accountNumber ?? null,
               clientReference: data.account?.clientReference ?? null,
+              ticketNo: q.ticketNo,
             })}
           initialBody={forwarding
             ? forwardBody(
@@ -783,6 +784,7 @@ export function QueryDetail() {
               clientReference: data.account?.clientReference ?? null,
               contact: data.clientContact,
               from: currentUser?.name ?? null,
+              ticketNo: q.ticketNo,
             })}
           contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
             + 'item 1(a). It is filed against this dispute as well as the account.'}

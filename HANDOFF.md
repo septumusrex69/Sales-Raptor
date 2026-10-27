@@ -58,6 +58,19 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**TEST CLOCK: "NEXT STEP NOW" DID NOTHING ON BOP00005 (27 Oct).** No error in the logs: the account's old Handover
+run had a HELD step dated today (its first email failed: "Connect your email account in Settings"), and a held step
+counted as already due pinned the jump at zero, so the section 129's day 7 never came forward. The jump is now set by
+PENDING steps only (`jumpDates`, testClock.ts; advance.ts); held steps still move with the run. check-test-clock +2.
+That Handover run is still "running" with a failed step -- whoever it sends as has no connected mailbox.
+
+**DISPUTE TICKETS, PHASE 1 BUILT (27 Oct): THE NUMBER.** Migration **`ticket_numbers`** (staging; md5 82382f37...
+matched): `account_queries.ticket_no`, sequence from 1001, existing 16 numbered by raised_at (BOP00005's request is
+**T-1016**). `ticketLabel()` (accountQueries.ts, mapper carries `ticketNo`); the client email's subject ends
+"— ticket T-1016" and the body asks for it back (ticketEmail.ts, check-ticket-work +3). STILL TO DO: show T-numbers on
+the ticket, the board and the client page; file a NEW email quoting T-#### onto the ticket (emailSync findAccount,
+after the thread and before the address); file a client email onto a ticket by hand; the conversation; the timer.
+
 **NEXT, AGREED 27 OCT -- DISPUTE TICKETS** (Stephan, on BOP00005 Boitsoko Mose): every dispute, query and request
 gets a ticket number **T-1042** (one series), quoted in the subject beside our account number and the client's
 reference, so a NEW email quoting it is filed on the ticket (replies already thread by Message-ID, emailSync

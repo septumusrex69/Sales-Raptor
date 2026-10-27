@@ -51673,3 +51673,24 @@ alter policy change_request_events_insert on public.change_request_events
     and (answers is null or exists (select 1 from public.change_request_events q
                                      where q.id = change_request_events.answers and q.kind = 'question' and q.choices is not null
                                        and q.request_id = change_request_events.request_id)));
+
+-- S14 (27 Oct, Raptor H13): EVERY TICKET HAS A NUMBER, T-1001 ONWARDS. The firm, on a dispute on
+-- BOP00005: "every single dispute should have a ticket number ... when we email the client it has
+-- the client's reference number and our reference number". One series for every escalation kind
+-- (dispute, query, request, help, import) -- R- is the change requests'. The number goes into the
+-- subject of what is sent to the client, so a NEW email that quotes it (not only a reply, which
+-- already threads by Message-ID) can be filed on the ticket. Existing tickets are numbered in the
+-- order they were raised. The backfill touches no column any account_queries trigger acts on.
+create sequence if not exists public.account_queries_ticket_seq start 1001;
+alter table public.account_queries add column if not exists ticket_no bigint;
+do $$
+declare r record;
+begin
+  for r in select id from public.account_queries where ticket_no is null order by raised_at, created_at, id loop
+    update public.account_queries set ticket_no = nextval('public.account_queries_ticket_seq') where id = r.id;
+  end loop;
+end $$;
+alter table public.account_queries alter column ticket_no set default nextval('public.account_queries_ticket_seq');
+alter table public.account_queries alter column ticket_no set not null;
+alter table public.account_queries add constraint account_queries_ticket_no_key unique (ticket_no);
+grant usage on sequence public.account_queries_ticket_seq to authenticated;

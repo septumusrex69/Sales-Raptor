@@ -110,6 +110,11 @@ const THEIRS = { ...REQUEST, clientReference: 'INV-7731' }
 check('the subject carries the client\'s own reference after the account number',
   ticketSubject(THEIRS), 'Proof of communication — Ofentse Thema — RRC00008 — your ref INV-7731')
 ok('...and so does the body', ticketBody(THEIRS).includes('Ofentse Thema (RRC00008, your reference INV-7731)'))
+/* S14: the ticket's number closes the subject, and the body asks for it back. */
+check('the ticket number closes the subject, after what is asked for',
+  ticketSubject({ ...THEIRS, ticketNo: 1016 }), 'Proof of communication — Ofentse Thema — RRC00008 — your ref INV-7731 — ticket T-1016')
+ok('...and the body asks the client to quote it', ticketBody({ ...THEIRS, ticketNo: 1016 }).includes('Please quote ticket T-1016 in any email about this.'))
+ok('...and neither invents one where there is none', !/T-/.test(ticketSubject(THEIRS)) && !/T-/.test(ticketBody(THEIRS)))
 ok('...a dispute names the account and both references too',
   ticketBody({ ...THEIRS, kind: 'dispute', requestFor: null }).includes('Ofentse Thema (RRC00008, your reference INV-7731) has disputed this account'))
 check('...left out where it only repeats the account number', ticketSubject({ ...REQUEST, clientReference: ' rrc00008 ' }), ticketSubject(REQUEST))
