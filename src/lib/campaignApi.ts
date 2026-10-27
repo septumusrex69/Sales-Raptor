@@ -40,8 +40,6 @@ export interface CampaignPreview {
   /** Who the emails go out as, and how many each (an SMS has none). */
   fromSplit: { name: string; address: string | null; count: number; central: boolean }[]
   central: { name: string; address: string | null } | null
-  /** Written-off accounts are charged nothing by the engine today (see route.ts). */
-  writtenOffUncharged: boolean
   hoursProblem: string | null
   wordingProblem: string | null
 }

@@ -37,7 +37,7 @@ export const PROMISE_DESCRIPTION = 'Payment arrangement'
  */
 export interface ChargeOutcome {
   exclVat: number
-  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'at-ceiling'
+  reason: 'charged' | 'prescribed' | 'item-total-spent' | 'monthly-limit' | 'at-ceiling'
 }
 
 /**

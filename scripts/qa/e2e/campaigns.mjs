@@ -42,7 +42,7 @@ const PREVIEW = {
   },
   estimate: { item: '1c', perMessage: 3.5, total: 3.5, citation: 'GN R.7207, GG 54273, 6 March 2026', monthlyLimit: null },
   estimateWords: 'R 3,50', atMonthlyLimit: 0, mailbox: null, hoursProblem: null, wordingProblem: null,
-  sendFrom: 'me', target: 'live', fromSplit: [], central: null, writtenOffUncharged: false,
+  sendFrom: 'me', target: 'live', fromSplit: [], central: null,
 }
 
 const CAMPAIGN = {
@@ -152,7 +152,7 @@ try {
   /* ------------------- 3b. Raptor H12: an email to written-off accounts, from the central mailbox */
   {
     const { context, page } = await signedInPage(browser, ADMIN, handlers(ADMIN), [])
-    await stubApi(page, { ...PREVIEW, sendFrom: 'central', target: 'written_off', writtenOffUncharged: true,
+    await stubApi(page, { ...PREVIEW, sendFrom: 'central', target: 'written_off',
       sample: { ...PREVIEW.sample, subject: 'Your account', html: '<p>Dear A Mokoena</p>', segments: null, encoding: null },
       estimate: { ...PREVIEW.estimate, item: '1a', perMessage: 25, total: 25 },
       central: { name: 'Bredell Ferreira Legal', address: 'legal@bredellferreira.co.za' },
@@ -177,12 +177,14 @@ try {
     t.check('the preview asks for written-off accounts, by reason, from the central mailbox',
       JSON.stringify([asked?.target, asked?.reasons, asked?.sendFrom]), JSON.stringify(['written_off', ['raptor:uncontactable'], 'central']))
     t.ok('...shows who it goes out from', /1 from Bredell Ferreira Legal <legal@bredellferreira\.co\.za> — the central mailbox/.test(await page.getByTestId('campaign-from-split').innerText()))
-    t.ok('...and says a written-off account is charged nothing today', /No fee today/.test(await page.getByTestId('campaign-fee').innerText()))
+    /* B, the firm (Raptor H13, 27 Oct): a written-off account is charged like any other. */
+    t.ok('...and states the fee as on any campaign, not "no fee"', (await page.getByTestId('campaign-fee').innerText()).includes('excluding VAT, charged to the debtors')
+      && !/No fee today/.test(await page.getByTestId('campaign-fee').innerText()))
     await t.shot(page, 'campaigns-written-off')
     await page.getByTestId('campaign-continue').click()
-    t.ok('the confirm step names the mailbox and says nothing is charged',
+    t.ok('the confirm step names the mailbox and the fee each message raises',
       /from legal@bredellferreira\.co\.za\./.test(await page.getByTestId('campaign-confirm-words').innerText())
-      && /Nothing is charged/.test(await page.getByTestId('campaign-confirm-words').innerText()))
+      && /charged to the debtor’s account under Annexure B item 1\(a\)/.test(await page.getByTestId('campaign-confirm-words').innerText()))
     await context.close()
   }
 

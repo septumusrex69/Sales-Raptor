@@ -5,8 +5,8 @@
  * THE FIRM (26 Oct): a campaign should "ask if it goes out from ... a centralized email, or ... the
  * person who sends it, or ... the person who owns the account" -- the central one legal@; written
  * off and withdrawn are "two different things"; a client may ask us not to work its written-off
- * accounts ("yes, client switch"); and "yes, charge fees" -- which the charge engine does not yet do
- * on a written-off account (held here as what IS true, so the change is a decision, not a drift).
+ * accounts ("yes, client switch"); and "yes, charge fees" -- held back by S12 as a money decision, then
+ * chosen (B, Raptor H13): a written-off account is charged like any other; a prescribed one is not.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-campaign-sender.mjs
  */
@@ -68,15 +68,17 @@ check('...but not out of a trace on the live book: it is about written-off accou
   traceSkip({ ...wo, book: 'active', endedAs: null, status: 'Active', clientNoWriteoff: true }, 'live', [reason]), null)
 check('...and withdrawn stays withdrawn whatever the switch says', recoverySkip({ ...wo, endedAs: 'withdrawn', clientNoWriteoff: true }, [reason]), 'withdrawn')
 
-/* ---------- fees: what is true today ---------- */
-ok('a campaign on written-off accounts says it charges nothing',
-  /Nothing is charged: a written-off account earns no fee until it is re-opened\./.test(campaignConfirmation({
-    name: 'x', channel: 'email', sending: 3, skipped: 0, estimate: { item: '1a', perMessage: 25, total: 0 }, money: (n) => `R${n}`,
+/* ---------- fees: a written-off campaign is charged (the firm chose B, Raptor H13, 27 Oct) ---------- */
+ok('a campaign on written-off accounts states its fee like any other',
+  /charged to the debtor’s account under Annexure B item 1\(a\) as it goes: about R75 excluding VAT/.test(campaignConfirmation({
+    name: 'x', channel: 'email', sending: 3, skipped: 0, estimate: { item: '1a', perMessage: 25, total: 75 }, money: (n) => `R${n}`,
   })))
-ok('...because the charge engine charges a written-off account nothing (the firm asked otherwise: a decision to make with the statement)',
-  /const recoverable = !closed && room > 0/.test(code('src/lib/chargeEngine.ts')))
-ok('...and the server says so on the preview and records no estimate', /const writtenOffUncharged = input\.target === 'written_off'/.test(code('api/_lib/campaign/route.ts'))
-  && /fee_estimate: a\.writtenOffUncharged \? 0 : a\.estimate\.total/.test(code('api/_lib/campaign/route.ts')))
+ok('...because the charge engine no longer refuses a written-off account -- only a prescribed one',
+  !/isWrittenOff/.test(code('src/lib/chargeEngine.ts')) && /const closed = hasPrescribed\(/.test(code('src/lib/chargeEngine.ts'))
+  && /const recoverable = !closed && room > 0/.test(code('src/lib/chargeEngine.ts')))
+ok('...and the server previews and records the real estimate, written off or not',
+  !/writtenOffUncharged/.test(code('api/_lib/campaign/route.ts')) && /fee_estimate: a\.estimate\.total/.test(code('api/_lib/campaign/route.ts'))
+  && !/writtenOffUncharged|No fee today/.test(code('src/pages/accounts/CampaignModal.tsx')))
 
 /* ---------- the database ---------- */
 const schema = read('supabase/schema.sql')

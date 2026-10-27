@@ -244,13 +244,6 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
 
   const estimate = campaignFeeEstimate(input.channel, sendable.length, sample?.segments ?? null, clock.today)
   /*
-   * A WRITTEN-OFF ACCOUNT IS CHARGED NOTHING TODAY -- the charge engine's rule (chargeEngine.ts: "a
-   * written-off account earns nothing more", because the statement drops fees dated after the
-   * write-off). The firm has said it wants these charged; until that rule is changed with the
-   * statement, the preview says what will actually happen rather than promise a fee.
-   */
-  const writtenOffUncharged = input.target === 'written_off'
-  /*
    * ITEM 1(c)'s MONTHLY ALLOWANCE, WHERE IT BINDS. Off since 10 September at the firm's instruction
    * (annexureB.ts ENFORCE_MONTHLY_LIMITS), in which case monthlyLimit is null and nobody is "at the
    * cap". Where it binds, the accounts already at it still get the SMS and pay nothing for it --
@@ -289,7 +282,6 @@ async function assess(admin: SupabaseClient, caller: Caller, input: Input) {
     target: input.target,
     fromSplit,
     central: central ? { name: central.name, address: mailboxes.get(central.id) ?? null } : null,
-    writtenOffUncharged,
     hoursProblem: callHoursProblem(clock.today, johannesburgMinute(clock.now)),
     wordingProblem,
     /* Which accounts, for create -- never sent to the browser (forBrowser). */
@@ -347,7 +339,7 @@ async function create(
     name, channel: input.channel, template_id: input.templateId,
     subject: input.channel === 'email' ? (input.subject ?? '') : null, body: input.body,
     selection, created_by: caller.id, created_by_name: caller.name || null, team_id: caller.teamId,
-    selected: a.selected, to_send: a.sending, skipped: a.skipped, fee_estimate: a.writtenOffUncharged ? 0 : a.estimate.total,
+    selected: a.selected, to_send: a.sending, skipped: a.skipped, fee_estimate: a.estimate.total,
     send_from: input.sendFrom, target: input.target, reasons: input.target === 'written_off' ? input.reasons : [],
   }).select('id').single()
   if (error || !made) return { error: error?.message ?? 'The campaign could not be saved.', status: 500 }

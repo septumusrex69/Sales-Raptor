@@ -29,7 +29,7 @@ import { callerFor, centralSender, factsFor, holdersFor, valuesFor, withMailbox 
  * Outside them nothing is claimed at all, and the campaign waits for the next call inside them.
  *
  * EVERY MESSAGE IS ITS OWN SEND AND ITS OWN FEE. Charged through the engine at the moment it goes,
- * after the provider took it -- never in bulk up front -- so the in duplum ceiling, a written-off
+ * after the provider took it -- never in bulk up front -- so the in duplum ceiling, a prescribed debt
  * account and (where it binds) item 1(c)'s monthly allowance are decided per debtor, by the same
  * code that decides them for a message sent by hand.
  */

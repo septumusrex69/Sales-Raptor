@@ -43,7 +43,6 @@
  * The cost: `node --experimental-strip-types` cannot resolve `.js` to a `.ts` file on disk, so the
  * QA script for this module runs with scripts/qa/tsresolve.mjs, which teaches it to.
  */
-import { isWrittenOff } from './accountStatus.js'
 import { clockNow } from './clock.js'
 /*
  * FROM reminderTime, NOT diaryPriority, though both export this.
@@ -72,7 +71,7 @@ export interface ChargeResult {
    * it is not folded into 'monthly-limit': the two refuse for different reasons and the collector
    * should be told which.
    */
-  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'tracing-limit'
+  reason: 'charged' | 'prescribed' | 'item-total-spent' | 'monthly-limit' | 'tracing-limit'
     | 'daily-limit' | 'at-ceiling'
 }
 
@@ -135,6 +134,19 @@ export interface ChargeDb {
 
 const VAT_RATE = 0.15
 
+/** The two columns that say whether a debt has prescribed, as imported or recorded. */
+export interface PrescriptionFacts { prescribed?: boolean | null; prescription_date?: string | null }
+
+/**
+ * Whether the debt had prescribed on `day` (YYYY-MM-DD): marked so, or its prescription date has
+ * passed. The date rule is open_interest's, so a fee and the interest stop on the same day.
+ */
+export function hasPrescribed(a: PrescriptionFacts | null | undefined, day: string): boolean {
+  if (!a) return false
+  if (a.prescribed) return true
+  return !!a.prescription_date && a.prescription_date < day
+}
+
 /**
  * Charge an Annexure B item to an account, respecting every cap.
  *
@@ -163,16 +175,23 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
   const towardsCeiling = Number(data?.towards_ceiling ?? 0)
 
   /*
-   * A written-off account earns nothing more.
+   * A PRESCRIBED DEBT EARNS NOTHING MORE; A WRITTEN-OFF ONE IS CHARGED LIKE ANY OTHER.
    *
-   * The statement drops fees dated after the write-off, so charging one produced money that was
-   * recorded, announced to the collector, and then invisible everywhere it mattered. The work is
-   * still written down — it happened — it simply cannot be recovered.
+   * This used to refuse every written-off account, because the statement once dropped fees dated
+   * after the write-off. It no longer does: the firm, 12 Oct, "written off accounts ... should
+   * continue to run until prescription ... sometimes we write off accounts and then we revisit
+   * them", so balanceInput stopped passing a write-off date and interest runs on (open_interest
+   * agrees). That left this as the only place a written-off fee came to nothing -- and the firm,
+   * asked about the campaigns it now runs on the written-off book: "yes, charge fees", for every
+   * action, not campaigns only (Raptor H13, 27 Oct). In duplum still caps it, as on any account.
+   *
+   * What stops now is PRESCRIPTION, the same line interest stops at: a prescribed debt may not be
+   * collected at all (NCA s126B), so work on one is written down at nothing, saying why.
    */
   const { data: acct, error: statusError } = await db
-    .from('debtor_accounts').select('status').eq('id', input.accountId).maybeSingle()
+    .from('debtor_accounts').select('prescribed, prescription_date').eq('id', input.accountId).maybeSingle()
   if (statusError) throw new Error(statusError.message)
-  const closed = isWrittenOff((acct as { status?: string | null } | null)?.status)
+  const closed = hasPrescribed(acct as PrescriptionFacts | null, todayIso(at))
 
   const quantity = Math.max(1, Math.floor(input.quantity ?? 1))
   const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule, input.debtAmount)
@@ -285,7 +304,7 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
   const vat = roundToCents(exclVat * VAT_RATE)
   const reason: ChargeResult['reason'] =
     exclVat > 0 ? 'charged'
-      : closed ? 'written-off'
+      : closed ? 'prescribed'
         : room <= 0 ? 'monthly-limit'
           : actionMonthRoom <= 0 ? 'tracing-limit'
             : dayRoom <= 0 ? 'daily-limit'
@@ -360,8 +379,8 @@ export function chargeMessage(r: ChargeResult, itemId: string): string {
   if (r.reason === 'item-total-spent') {
     return `No charge: item ${itemId} is a total for the account and it has already been used.`
   }
-  if (r.reason === 'written-off') {
-    return 'No charge: the account is written off, so nothing further can be recovered. The action is recorded.'
+  if (r.reason === 'prescribed') {
+    return 'No charge: the debt has prescribed, so it may not be collected. The action is recorded.'
   }
   if (r.reason === 'monthly-limit') {
     return `No charge: item ${itemId} has already been charged its maximum for this month. It is recorded, and the allowance resets next month.`

@@ -17,7 +17,7 @@
  * needs them; tsresolve.mjs is what lets Node follow those to the `.ts` sources. See its header.
  */
 import { readFileSync, existsSync } from 'node:fs'
-import { chargeItemWith } from '../../src/lib/chargeEngine.ts'
+import { chargeItemWith, chargeMessage, hasPrescribed } from '../../src/lib/chargeEngine.ts'
 import { ENFORCE_ITEM_TOTALS } from '../../src/lib/annexureB.ts'
 
 let pass = 0
@@ -36,7 +36,7 @@ const check = (name, actual, expected) => {
  * The filter methods return `this` so a chain of .eq().gte().lt() works, and the object is
  * thenable so an un-awaited chain resolves like a real query builder does.
  */
-function fakeDb({ capital = 100000, spentOnItem = 0, towardsCeiling = 0, status = 'active', monthCount = 0 } = {}) {
+function fakeDb({ capital = 100000, spentOnItem = 0, towardsCeiling = 0, status = 'active', prescribed = false, prescriptionDate = null, monthCount = 0 } = {}) {
   const log = { rpc: [], selects: [], inserted: null, updated: null, updateFilters: [] }
   const builder = (table) => {
     const b = {
@@ -56,7 +56,7 @@ function fakeDb({ capital = 100000, spentOnItem = 0, towardsCeiling = 0, status 
       or(expr) { log.updateFilters.push(`or:${expr}`); return b },
       gte(col, val) { log.selects.push({ filter: `gte:${col}` , val }); return b },
       lt(col, val) { log.selects.push({ filter: `lt:${col}`, val }); return b },
-      maybeSingle: async () => ({ data: table === 'debtor_accounts' ? { status } : null, error: null }),
+      maybeSingle: async () => ({ data: table === 'debtor_accounts' ? { status, prescribed, prescription_date: prescriptionDate } : null, error: null }),
       insert(row) { log.inserted = { table, row }; return { error: null } },
       then(resolve) { return resolve({ count: monthCount, error: null }) },
     }
@@ -99,15 +99,34 @@ const base = { accountId: 'acc-1', actionCode: 'consultation', description: 'Con
   check('...and stands for one unit', row.segments, 1)
 }
 
-/* ---- a written-off account ---- */
+/*
+ * ---- a written-off account is charged like any other (the firm, Raptor H13, 27 Oct: "charge fees",
+ * every action); a PRESCRIBED one earns nothing, the line interest already stops at ----
+ */
 {
   const db = fakeDb({ status: 'written off' })
   const r = await chargeItemWith(db, { ...base, itemId: '7' })
-  check('a written-off account earns nothing', r.exclVat, 0)
-  check('...and says why', r.reason, 'written-off')
+  check('a written-off account is charged as usual', r.exclVat, 60)
+  check('...as a charge', r.reason, 'charged')
+  check('...on a billable row', db.log.inserted.row.billed, true)
+  check('...and the engine asks for prescription, not the status', db.log.selects.some((x) => x.table === 'debtor_accounts' && x.cols === 'prescribed, prescription_date'), true)
+}
+{
+  const db = fakeDb({ status: 'written off', prescribed: true })
+  const r = await chargeItemWith(db, { ...base, itemId: '7' })
+  check('a prescribed debt earns nothing', r.exclVat, 0)
+  check('...and says why', r.reason, 'prescribed')
   // The work still has to be visible: an account with no trace of the work cannot be defended.
   check('...but the action is still recorded', db.log.inserted?.table, 'account_fees')
   check('...as an unbilled row', db.log.inserted.row.billed, false)
+  check('...in words the collector can read', chargeMessage(r, '7'), 'No charge: the debt has prescribed, so it may not be collected. The action is recorded.')
+}
+{
+  check('a prescription date already passed is prescribed', hasPrescribed({ prescription_date: '2026-09-11' }, '2026-09-12'), true)
+  check('...the day itself is not yet (open_interest\'s "<")', hasPrescribed({ prescription_date: '2026-09-12' }, '2026-09-12'), false)
+  check('...nor a date still to come, nor no facts at all', [hasPrescribed({ prescription_date: '2027-01-01' }, '2026-09-12'), hasPrescribed(null, '2026-09-12')].join(), 'false,false')
+  const db = fakeDb({ prescriptionDate: '2026-01-01' })
+  check('...and a live account past its date earns nothing either', (await chargeItemWith(db, { ...base, itemId: '7' })).reason, 'prescribed')
 }
 
 /* ---- the items 1-7 ceiling ---- */
@@ -221,14 +240,14 @@ console.log(`\n${pass} passed, ${failures.length} failed`)
 }
 
 /*
- * IT HAPPENS EVEN WHEN NOTHING IS CHARGED. A written-off account earns nothing more, and a
+ * IT HAPPENS EVEN WHEN NOTHING IS CHARGED. A prescribed debt earns nothing more, and a
  * ceiling can leave nothing to bill -- but the work was still done, which is what this column
  * means. An account worked and not billed must not read as never worked.
  */
 {
-  const db = fakeDb({ status: 'Written-off' })
+  const db = fakeDb({ prescribed: true })
   const r = await chargeItemWith(db, { ...base, itemId: '7' })
-  check('a written-off account still charges nothing', r.exclVat, 0)
+  check('a prescribed account still charges nothing', r.exclVat, 0)
   check('...and is still marked worked', db.log.updated?.row?.last_action_at, '2026-09-12')
 }
 

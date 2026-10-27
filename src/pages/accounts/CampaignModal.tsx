@@ -168,7 +168,7 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
           <div className="rounded-lg border border-gold-500 bg-gold-50 p-3.5 text-sm text-navy-950" data-testid="campaign-confirm-words">
             {campaignConfirmation({
               name, channel, sending: preview.sending, skipped: preview.skipped + (preview.selected - preview.found),
-              estimate: preview.writtenOffUncharged ? { ...preview.estimate, total: 0 } : preview.estimate, money: rand,
+              estimate: preview.estimate, money: rand,
               from: fromSplit.length === 1 ? (fromSplit[0].address ?? fromSplit[0].name) : fromSplit.length > 1 ? `${fromSplit.length} mailboxes` : null,
             })}
           </div>
@@ -252,12 +252,6 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
             )}
           </div>
 
-          {preview.writtenOffUncharged ? (
-            <div className="rounded-lg border border-slate-200 p-3 text-[13px] text-slate-700" data-testid="campaign-fee">
-              <p><span className="font-medium">No fee today.</span> These accounts are written off, and Raptor charges a written-off
-                account nothing — its statement stops at the write-off. A debtor who answers and is re-opened is charged as usual from then.</p>
-            </div>
-          ) : (
           <div className="rounded-lg border border-slate-200 p-3 text-[13px] text-slate-700" data-testid="campaign-fee">
             <p>
               <span className="font-medium">About {rand(preview.estimate.total)}</span> excluding VAT, charged to the debtors’
@@ -267,14 +261,13 @@ export function CampaignModal({ selection, selectedCount, onClose, onStarted }: 
             </p>
             <p className="mt-1 text-xs text-slate-500">
               An estimate. Each fee is raised as its message goes, on {preview.estimate.citation}: an account at the
-              in duplum ceiling or written off is charged nothing
+              in duplum ceiling, or whose debt has prescribed, is charged nothing
               {channel === 'sms' && (preview.estimate.monthlyLimit !== null
                 ? `, and past ${preview.estimate.monthlyLimit} SMSs in a month the message still goes but earns nothing (${preview.atMonthlyLimit.toLocaleString('en-ZA')} already there)`
                 : '')}
               {channel === 'sms' && ', and a longer name elsewhere can make a message a segment longer'}.
             </p>
           </div>
-          )}
 
           {channel === 'email' && fromSplit.length > 0 && (
             <div className="rounded-lg border border-slate-200 p-3 text-[13px] text-slate-700" data-testid="campaign-from-split">

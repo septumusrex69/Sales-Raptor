@@ -28,10 +28,23 @@ Everything is committed and pushed, and **the same commit is pushed to
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 
-## RAPTOR · HANDOFF 13 SESSION -- LOOSE ENDS (26 Oct, evening; commits `Raptor H13: ...`)
+## S14 · LOOSE ENDS (26-27 Oct; branch `claude/s14-loose-ends`, pushed to the preview too; commits `Raptor H13: ...`)
 
-Started from Handoff 13 on the preview branch. Its S-number is not settled: Reino's campaigns session is also
-S13 (Stephan to say: a second S13, as the two S11s were, or S14). No migrations, nothing on staging changed.
+Started from Handoff 13. Stephan named it **S14** (S13 is Reino's campaigns). No migrations, nothing on staging changed.
+
+**FEES ON WRITTEN-OFF ACCOUNTS: B, BUILT (27 Oct).** S12 held this back believing the statement dropped fees after
+a write-off. It has not since 12 Oct ("written off accounts ... should continue to run until prescription":
+balanceInput passes no write-off date; open_interest runs on written-off accounts and stops at prescription) --
+the CHARGE ENGINE was the only thing still refusing. Stephan: charge **every action** on a written-off account,
+not campaigns only, and **stop fees at prescription** like interest. So `chargeEngine` reads `prescribed,
+prescription_date` (not the status): prescribed, or a prescription date before the action's day -> R0, reason
+`prescribed` ("No charge: the debt has prescribed ..."); written off -> charged like any live account, in duplum
+still capping. The campaign preview's "No fee today" box and `writtenOffUncharged` are gone; the estimate and
+`fee_estimate` are the real figure. check-charge-engine (41, +prescription cases), check-campaign-sender (34),
+e2e/campaigns (24) -- the old engine fails both checks. Fees recorded at R0 before today stay R0 (immutable).
+
+**Stephan's other answers (27 Oct):** A.1 -- a handover row with no client reference **keeps being refused**
+(Rinda's Bonnitta sheet needs the references). A.2 -- "Client Division" ignored: **already done by S11**.
 
 - **R-numbers on one line** (`692bdfb`). Stephan's iPad showed "R-" over "6" in the Requests table: the browser broke
   the number at its hyphen. Every place a request number shows is `whitespace-nowrap`; check-change-requests +1,
@@ -75,7 +88,7 @@ Advanced settings, which create_trigger cannot do):
 **Waiting on people, not on code:**
 1. **Rinda** -- test R-5 (Released, "Please test it"); tick her two answers on **R-6** (which reference on the
    diary; Diary or Accounts). Then Stephan presses **Ask Claude to build it** on R-6.
-2. **Stephan** -- **fees on written-off campaigns, A or B** (see DEBTOR CAMPAIGNS: A = as now, fees resume if the
+2. ~~**Stephan** -- **fees on written-off campaigns, A or B**~~ **B, built by S14 (see S14 above)** (see DEBTOR CAMPAIGNS: A = as now, fees resume if the
    account is reopened, recommended; B = change the statement/balance for written-off accounts -- a money change).
 3. **Stephan** -- set up **legal@bredellferreira.co.za** as a login with a connected mailbox, then choose it in
    Settings -> Integrations -> Central mailbox. Until then "central" falls back to the sender. (He pasted a
@@ -235,7 +248,7 @@ withdrawn are "two different things"; "yes, charge fees"; "yes, client switch".
   closed-book trace -- skips them (`client_no_writeoff`). Live accounts untouched; withdrawn never worked anyway.
 - **Closed, by how it ended**: `debtor_accounts.closure` (stored, generated from recovery_closure); the Closed
   book has Paid up / Settled / Written off / Withdrawn chips (`?ending=`, applyAccountFilters).
-- **FEES -- NOT DONE, NEEDS STEPHAN'S DECISION.** He said "yes charge fees" on written-off campaigns, but the charge
+- **FEES -- DONE BY S14 (B, see S14 above); the rest of this paragraph is S12's reasoning, superseded.** He said "yes charge fees" on written-off campaigns, but the charge
   engine deliberately charges a written-off account nothing (chargeEngine.ts: the statement drops fees after
   the write-off, so a fee would be recorded and invisible). The box says "No fee today" honestly. Charging them
   means changing the statement/balance for written-off accounts too (and interest stops at the write-off) --

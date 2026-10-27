@@ -34,7 +34,7 @@ function chargeWords(
   source: TraceSource,
 ): string {
   if (result.charge === null) return 'Recorded · no charge (already charged for this person)'
-  if (result.charge.reason === 'written-off') return 'Recorded · no charge (account written off)'
+  if (result.charge.reason === 'prescribed') return 'Recorded · no charge (the debt has prescribed)'
   if (result.charge.reason !== 'charged') return 'Recorded · no charge (fee ceiling)'
   const many = result.count > 1 && source.kind === 'credit_bureau'
     ? `${result.count} searches · ` : ''

@@ -606,7 +606,7 @@ export function campaignConfirmation(input: {
       + (input.channel === 'email' && input.from ? `, from ${input.from}` : '') + '.',
     input.skipped > 0 ? `${plural(input.skipped, 'account is', 'accounts are')} skipped and will not be contacted.` : null,
     input.estimate.total === 0 && input.sending > 0
-      ? 'Nothing is charged: a written-off account earns no fee until it is re-opened.'
+      ? 'Nothing is charged for these messages.'
       : `Each message is charged to the debtor’s account under Annexure B item ${input.estimate.item === '1a' ? '1(a)' : '1(c)'}`
         + ` as it goes: about ${input.money(input.estimate.total)} excluding VAT in all.`,
     'It goes out only during the firm’s calling hours, and can be stopped at any time from Campaigns.',
