@@ -55,6 +55,12 @@ export interface TicketLetterInput {
   contact?: string | null
   /** Who is sending it. */
   from?: string | null
+  /**
+   * The ticket's number (S14): "ticket T-1042" closes the subject and the body asks for it back.
+   * LAST in the subject because the firm wants what is asked for first; a mail client that cuts a
+   * long subject on a phone still carries the whole header, which is what the sync reads.
+   */
+  ticketNo?: number | null
 }
 
 /** A sentence a person would actually say, with no trailing full stop to double up on. */
@@ -82,7 +88,7 @@ export function ticketSubject(input: TicketLetterInput): string {
   /* NEITHER PIECE IS ASSUMED. A ticket on an account with no number, or a debtor whose name never
      arrived, still produces a subject rather than "Information needed —  — ". */
   const theirs = clientRef(input)
-  return [lead, who, ref, theirs ? `your ref ${theirs}` : ''].filter(Boolean).join(' — ')
+  return [lead, who, ref, theirs ? `your ref ${theirs}` : '', input.ticketNo ? `ticket T-${input.ticketNo}` : ''].filter(Boolean).join(' — ')
 }
 
 /**
@@ -128,6 +134,9 @@ export function ticketBody(input: TicketLetterInput): string {
     'Please let us know when we can expect this, so that we can tell the debtor where the account '
       + 'stands.',
     '',
+    /* ASKED FOR BACK (S14). A reply threads by itself; a NEW email only finds the ticket if it quotes
+       the number, so the client is told to. */
+    ...(input.ticketNo ? [`Please quote ticket T-${input.ticketNo} in any email about this.`, ''] : []),
     'Kind regards',
     trim(input.from) || '',
   ]

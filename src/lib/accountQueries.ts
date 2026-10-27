@@ -142,6 +142,17 @@ export interface AccountQuery {
    * refuses it there (account_queries_for_only_on_request).
    */
   requestFor: string | null
+  /** The ticket's number, T-1001 onwards (S14): see ticketLabel. Every kind shares one series. */
+  ticketNo: number
+}
+
+/**
+ * "T-1042": what a ticket is called out loud, on the board, on the ticket and in the subject of
+ * every email sent about it (S14). The client quotes it back, and a new email that does is filed on
+ * this ticket (api/_lib/emailSync.ts, ticketFromSubject).
+ */
+export function ticketLabel(q: Pick<AccountQuery, 'ticketNo'>): string {
+  return `T-${q.ticketNo}`
 }
 
 const toQuery = (r: any): AccountQuery => ({
@@ -152,6 +163,7 @@ const toQuery = (r: any): AccountQuery => ({
   receivedOn: r.received_on ?? null,
   inWriting: !!r.in_writing,
   requestFor: (r.request_for ?? null) as string | null,
+  ticketNo: Number(r.ticket_no),
   accountId: r.account_id ?? null,
   handoverId: r.handover_id ?? null,
   description: r.description,
