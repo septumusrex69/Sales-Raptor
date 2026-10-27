@@ -322,7 +322,9 @@ for (const name of [
    * makes on purpose: every caller in the app is written expecting a silent revert, and a trigger
    * that suddenly throws would surface as a failed save on a screen with no handler for it.
    */
-  ok(`...and reverts rather than raising`, !/raise\s+exception/i.test(body))
+  /* S14: except the finance block of protect_profile_privileged_fields, which raises only on a real
+     change of somebody's finance access -- see check-admin-finance and check-capability-screen. */
+  ok(`...and reverts rather than raising`, !/raise\s+exception/i.test(body.replace(/-- S14: AN ADMINISTRATOR WITHOUT FINANCE[\s\S]*?\n  end if;\n  return new;/, '')))
 }
 
 if (failures.length) {

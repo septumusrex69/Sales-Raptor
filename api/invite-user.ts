@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { adminClient, callerIsAdmin, requireCaller } from './_lib/auth.js'
+import { adminClient, callerIsAdmin, FINANCE_CAPABILITIES, hasFinance, requireCaller } from './_lib/auth.js'
 
 /**
  * Adding a person, in the two ways a firm actually needs.
@@ -110,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'A name is needed. It is the whole point of the record.' })
       return
     }
-    await addFormerUser(admin, res, email, name.trim(), role)
+    await addFormerUser(admin, res, email, name.trim(), role, caller.id)
     return
   }
 
@@ -128,9 +128,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // handle_new_user() has already created the profile row (defaulting to Sales Representative,
   // no team) by the time inviteUserByEmail resolves — apply what the admin actually chose.
+  /* S14: an Administrator without finance invites Administrators without it (auth.ts). */
+  const withoutFinance = role === 'Administrator' && !(await hasFinance(admin, caller.id))
   if (data.user?.id && (role || teamId)) {
-    const patch: Record<string, string> = {}
+    const patch: Record<string, string | string[]> = {}
     if (role) patch.role = role
+    if (withoutFinance) patch.revokes = FINANCE_CAPABILITIES
     if (teamId) patch.team_id = teamId
     const { error: patchError } = await admin.from('profiles').update(patch).eq('id', data.user.id)
     if (patchError) {
@@ -175,6 +178,7 @@ async function addFormerUser(
   email: string,
   name: string,
   role: string | undefined,
+  callerId: string,
 ) {
   // createUser rather than inviteUserByEmail: no email is sent, and with no password argument
   // there is no password to sign in with.
@@ -210,7 +214,8 @@ async function addFormerUser(
   /* status AND role are both protected columns -- see the read-back on the invite path above.
      Reverted here, the record would sit on the list as an ACTIVE colleague who has left. */
   const { error: profileError } = await admin.from('profiles')
-    .update({ name, status: 'Inactive', ...(role ? { role } : {}) })
+    .update({ name, status: 'Inactive', ...(role ? { role } : {}),
+      ...(role === 'Administrator' && !(await hasFinance(admin, callerId)) ? { revokes: FINANCE_CAPABILITIES } : {}) })
     .eq('id', data.user.id)
   if (profileError) {
     await admin.auth.admin.deleteUser(data.user.id)

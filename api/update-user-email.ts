@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { financeRefusal } from './_lib/auth.js'
 
 /**
  * Changes a user's actual login email (auth.users), not just the display
@@ -46,6 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { userId, email } = (req.body ?? {}) as { userId?: string; email?: string }
   if (!userId || !email) {
     res.status(400).json({ error: 'userId and email are required.' })
+    return
+  }
+
+  const refused = await financeRefusal(admin, callerData.user.id, userId, 'change the login email of')
+  if (refused) {
+    res.status(403).json({ error: refused })
     return
   }
 

@@ -495,6 +495,29 @@ export function can(
   return capabilitiesOf(user).has(capability)
 }
 
+/*
+ * TWO KINDS OF ADMINISTRATOR (S14, 27 Oct). Stephan: "administrators that can access finances and ones
+ * that can't". One role; an Administrator WITHOUT finance is one with these revoked. The database holds
+ * it (finance_capabilities, protect_profile_privileged_fields): somebody without finance may not change
+ * anybody's finance access, nor their own permissions at all. These mirror it so the screen greys out
+ * what would be refused rather than letting somebody tick it and fail.
+ */
+export const FINANCE_CAPABILITIES: Capability[] = ['finance.view', 'business.view', 'business.income', 'people.pay',
+  'payment.approve', 'payment.reverse', 'payment.move']
+
+/** Finance access is Trust: the line the database draws (profile_has_finance). */
+export function hasFinanceAccess(user: CapabilityHolder | null | undefined): boolean {
+  return can(user, 'finance.view')
+}
+
+/** May this person change this capability on that one? */
+export function mayChangeCapability(actor: (CapabilityHolder & { id?: string }) | null | undefined,
+  target: { id?: string }, capability: Capability): boolean {
+  if (hasFinanceAccess(actor)) return true
+  if (actor?.id && actor.id === target.id) return false
+  return !FINANCE_CAPABILITIES.includes(capability)
+}
+
 /**
  * IS THIS A DEPARTURE FROM WHAT THE ROLE GIVES? What the settings screen draws a mark against.
  *

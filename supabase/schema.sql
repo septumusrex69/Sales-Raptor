@@ -51908,3 +51908,89 @@ returns integer language sql stable security invoker set search_path to 'public'
   )::integer
 $$;
 grant execute on function public.nav_request_count() to authenticated;
+
+-- S14 (27 Oct, Raptor H13): TWO KINDS OF ADMINISTRATOR -- WITH FINANCE AND WITHOUT. Stephan: "perhaps we should
+-- create two types of administrators, like administrators that can access finances and ones that can't." One
+-- role, not two: 'Administrator' is read by dozens of policies and screens, and a second role would quietly
+-- lose every one of them it was not added to. An Administrator WITHOUT finance is an Administrator whose
+-- finance capabilities are revoked (finance.view at least) -- Ryno, since 27 Oct -- and the database makes
+-- that hold:
+--   * an Administrator without finance may not change ANYBODY's finance access, either way (giving it is the
+--     obvious hole; taking it from Stephan is the other one);
+--   * nor their OWN role, grants, revokes or department at all (a revoke cleared on yourself is a grant).
+-- Loud, not the silent revert the rest of this guard uses: a refused permission change must say so.
+-- The server routes that act for an Administrator (invite, change a login email, delete a user) are held to
+-- the same line in api/ -- a login email changed to an address you control is the account.
+create or replace function public.finance_capabilities() returns text[]
+language sql immutable set search_path to 'public' as $$
+  select array['finance.view', 'business.view', 'business.income', 'people.pay',
+               'payment.approve', 'payment.reverse', 'payment.move']
+$$;
+
+-- What of the finance set a profile holds, by role, grant and department duty, less its revokes. Sorted, so
+-- two can be compared.
+create or replace function public.finance_held(p_role text, p_grants text[], p_revokes text[], p_department uuid)
+returns text[] language sql stable security definer set search_path to 'public' as $$
+  select coalesce(array_agg(c order by c), array[]::text[])
+    from unnest(public.finance_capabilities()) c
+   where (c = any(public.role_capabilities(p_role))
+          or c = any(coalesce(p_grants, array[]::text[]))
+          or exists (select 1 from public.departments d, unnest(d.duties) as u(duty)
+                      where d.id = p_department and c = any(public.duty_capabilities(u.duty))))
+     and not (c = any(coalesce(p_revokes, array[]::text[])))
+$$;
+
+-- Does this person have finance access (Trust)? For the server routes, which act as the service role.
+create or replace function public.profile_has_finance(p_user uuid) returns boolean
+language sql stable security definer set search_path to 'public' as $$
+  select coalesce((select 'finance.view' = any(public.finance_held(p.role, p.grants, p.revokes, p.department_id))
+                     from public.profiles p where p.id = p_user), false)
+$$;
+revoke all on function public.profile_has_finance(uuid) from public;
+grant execute on function public.profile_has_finance(uuid) to service_role, authenticated;
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+    return new;
+  end if;
+
+  -- S14: AN ADMINISTRATOR WITHOUT FINANCE (see the top of this block).
+  if not public.has_capability('finance.view') then
+    if new.id = auth.uid() and (new.role is distinct from old.role or new.grants is distinct from old.grants
+        or new.revokes is distinct from old.revokes or new.department_id is distinct from old.department_id) then
+      raise exception 'An Administrator without finance access cannot change their own permissions.'
+        using errcode = '42501';
+    end if;
+    if public.finance_held(new.role, new.grants, new.revokes, new.department_id)
+       is distinct from public.finance_held(old.role, old.grants, old.revokes, old.department_id) then
+      raise exception 'Only an Administrator with finance access can give or take away finance access (Trust, Business, pay, approving payments).'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;

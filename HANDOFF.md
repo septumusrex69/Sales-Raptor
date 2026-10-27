@@ -60,6 +60,18 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**TWO KINDS OF ADMINISTRATOR (27 Oct).** Stephan: "administrators that can access finances and ones that can't". One
+role; an Administrator WITHOUT finance has the finance set revoked (finance.view, business.view, business.income,
+people.pay, payment.approve/reverse/move). Migration **`administrators_without_finance`** (md5 89660fdd...):
+`finance_capabilities()`, `finance_held()`, `profile_has_finance()`, and the profile guard RAISES (the one exception to
+its silent reverts, only on a real change) when somebody without finance changes anybody's finance access or their
+own permissions. api/: `financeRefusal`/`hasFinance` (auth.ts) -- without finance you cannot change the login email
+of, or remove, somebody with it; an Administrator you invite arrives without finance. Screen: "no finance" beside the
+role in Settings -> Users; the permissions box greys out what would be refused and says why. Probed as Ryno (refused
+self-unrevoke, revoking Stephan, making a full Administrator; allowed an Administrator without finance, and his own
+name). check-admin-finance (8); check-capability-screen and check-silent-triggers narrowed to "no raise outside the
+finance block". Ryno now needs no role change: the CAVEAT below is closed.
+
 **RYNO: EVERYTHING EXCEPT MONEY (27 Oct).** Stephan: "give him access to anything except the financial or anything
 that has to do with finances." Ryno Buitendag (ryno@; "Reino" in the S13 brief) works through his own Claude session,
 which had no access to the repository (no `claude/s13-reino-campaigns` branch ever appeared) -- Stephan must add him
@@ -71,8 +83,7 @@ supabase/, capabilities/permissions, CLAUDE.md, vercel/package, .github and the 
 "Require review from Code Owners" on the preview branch -- NOT verified from here. CLAUDE.md's marketing section and
 the S13 brief say the same. APP: on staging his profile revokes finance.view, business.view, business.income,
 people.pay, payment.record/approve/reverse/move, settlement.approve (done as Stephan -- the profile guard reverts a
-permission change by anyone but an Administrator); has_capability as Ryno confirms. CAVEAT: he is still an
-ADMINISTRATOR, so he could restore them himself in Settings -> Users; production not touched.
+permission change by anyone but an Administrator); has_capability as Ryno confirms. Production not touched.
 
 **REQUESTS: A COUNT ON THE SIDEBAR (27 Oct).** Stephan: show how many new light-bulb suggestions there are, on the
 sidebar like Mail. Migration **`nav_request_count`** (md5 e26459d4...): for an Administrator, requests still New; for
