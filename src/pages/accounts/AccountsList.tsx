@@ -694,7 +694,7 @@ export function AccountsList() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className={`${inputClass} pl-9`}
-              placeholder="Account number, client reference, surname, cell or email"
+              placeholder="Name, case or account number, client reference, ID, surname, cell or email"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />

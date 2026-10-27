@@ -58,6 +58,17 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**SEARCH, EVERYWHERE (27 Oct).** Stephan: "search on a surname, on a telephone number ... on a reference number, on a
+client reference number, all of the data ... first prize, anything anywhere, if it doesn't affect the speed". The top
+bar searched only the sales side, by name, and NEVER the debtor book. Now: migration **`global_search`** (staging;
+md5 3d9df639... matched) -- `pg_trgm`, two GIN trigram indexes on debtor_accounts (`debtor_search_key`: case,
+account, client ref, legacy, Swordfish, ID number, contact_search; `debtor_name_key`: first + surname + first, so
+either order), and `global_search(q, limit)` (security invoker; T-#### tickets, R-# requests; exact refs first).
+The top bar asks it 250 ms after the last key (only the newest answer drawn) and matches the sales side by name,
+email, phone (0.../27... forms), website and client code (`src/lib/globalSearch.ts`). The Accounts page's search also
+takes a full name in either order, the first name, ID number and the old references. check-global-search (13),
+e2e/global-search (7). AT GO-LIVE: the two indexes build on production's whole book -- run it out of hours.
+
 **TEST CLOCK: "NEXT STEP NOW" DID NOTHING ON BOP00005 (27 Oct).** No error in the logs: the account's old Handover
 run had a HELD step dated today (its first email failed: "Connect your email account in Settings"), and a held step
 counted as already due pinned the jump at zero, so the section 129's day 7 never came forward. The jump is now set by

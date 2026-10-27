@@ -448,7 +448,7 @@ const global = read('src/components/layout/GlobalSearch.tsx')
 ok('the global search is readable at all', global.length > 0)
 ok('it searches people too', /for \(const u of users\)/.test(global))
 ok('...by the same rule as the Users screen', /matchesPerson\(u, team, q\)/.test(global))
-ok('...and says so in the box', /companies, deals, people/.test(global))
+ok('...and says so in the box', /placeholder="[^"]*\bpeople\b/.test(global))
 /*
  * IT LANDS ON THE LIST ALREADY NARROWED. There is no page for one person, and sending somebody to
  * a screen of a hundred rows having just picked one of them is worse than no result.

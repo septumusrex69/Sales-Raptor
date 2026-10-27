@@ -576,8 +576,22 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
        address on the account, kept by a trigger on account_contacts. A number is matched on its
        digits, so "082 123 4567" and "+27 82 123 4567" find the same debtor. */
     const digits = contactDigits(s)
-    out = out.or(`case_number.ilike.%${s}%,account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%,`
-      + `contact_search.ilike.%${(digits ?? s).toLowerCase()}%`)
+    /*
+     * A FULL NAME, IN EITHER ORDER (S14). The firm: "you should be able to search on a surname ... all
+     * of the data". "Petunia Mothoa" matched no single column, so it found nobody: two words or more
+     * that are not a number now ask that EVERY word be in the first name or the surname -- one or()
+     * per word, which PostgREST joins with AND.
+     */
+    const words = digits ? [] : s.split(/\s+/).filter(Boolean)
+    if (words.length > 1) {
+      for (const w of words) out = out.or(`debtor_first_name.ilike.%${w}%,debtor_surname.ilike.%${w}%`)
+    } else {
+      /* AND THE REST OF THE ACCOUNT'S NAMES AND NUMBERS (S14): the first name, the ID number, and the
+         legacy and Swordfish references a client or an old letter may still quote. */
+      out = out.or(`case_number.ilike.%${s}%,account_number.ilike.%${s}%,client_reference.ilike.%${s}%,debtor_surname.ilike.%${s}%,`
+        + `debtor_first_name.ilike.%${s}%,debtor_id_number.ilike.%${s}%,legacy_reference.ilike.%${s}%,swordfish_reference.ilike.%${s}%,`
+        + `contact_search.ilike.%${(digits ?? s).toLowerCase()}%`)
+    }
   }
 
   return out as T

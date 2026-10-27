@@ -51729,3 +51729,103 @@ begin
    where id = new.query_id and status <> 'closed' and stage = 'client';
   return new;
 end $f$;
+
+-- S14 (27 Oct, Raptor H13): ONE SEARCH BOX FOR THE WHOLE OF RAPTOR. The firm: "You should be able to
+-- search on a surname, on a telephone number ... on a reference number, on a client reference number,
+-- all of the data ... First prize, we can search anything anywhere ... if it doesn't affect the
+-- speed." The top bar searched only the sales side held in the browser, by name; the debtor book --
+-- the one that matters, and too big for the browser -- was not searched at all.
+--
+-- TWO TRIGRAM INDEXES, NOT ONE PER COLUMN. A "contains" search (ilike '%x%') can only use an index if
+-- it is a trigram one; one per column would be eight indexes for every Swordfish import to maintain.
+-- So every reference and number on an account goes in ONE expression (debtor_search_key: our case
+-- number, the creditor's account number, the client's reference, the legacy and Swordfish references,
+-- the ID number and contact_search -- every phone number in both 0... and 27... forms, and every
+-- email), and the NAME in another (debtor_name_key: first name, surname, first name again, so "john
+-- smith" and "smith john" both match in order). The function's WHERE uses the same two expressions,
+-- which is what lets Postgres use the indexes.
+create extension if not exists pg_trgm with schema extensions;
+
+-- THE COLUMNS, NOT THE ROW: an index on a function of the whole row is rewritten on every update to
+-- the account (a balance, a diary date); one on these columns only when one of them changes.
+create or replace function public.debtor_search_key(
+  p_case text, p_account text, p_client_ref text, p_legacy text, p_swordfish text, p_id text, p_contacts text
+) returns text language sql immutable set search_path to 'public' as $$
+  select lower(concat_ws(' ', p_case, p_account, p_client_ref, p_legacy, p_swordfish, p_id, p_contacts))
+$$;
+create or replace function public.debtor_name_key(p_first text, p_surname text) returns text
+language sql immutable set search_path to 'public' as $$
+  select lower(concat_ws(' ', p_first, p_surname, p_first))
+$$;
+create index if not exists debtor_accounts_search_key_trgm on public.debtor_accounts using gin (
+  public.debtor_search_key(case_number, account_number, client_reference, legacy_reference,
+    swordfish_reference, debtor_id_number, contact_search) extensions.gin_trgm_ops);
+create index if not exists debtor_accounts_name_key_trgm on public.debtor_accounts using gin (
+  public.debtor_name_key(debtor_first_name, debtor_surname) extensions.gin_trgm_ops);
+
+-- THE SEARCH. SECURITY INVOKER: a collector finds what their own policies let them read, nothing more.
+-- Three characters at least for the book (a trigram index cannot help with fewer). A phone number is
+-- matched on its digits, so "082 123 4567" and "+27 82 123 4567" find the same debtor. T-1016 is a
+-- ticket and R-6 a request, when typed that way. Exact matches on a reference come first, then
+-- references that start with what was typed, then names.
+create or replace function public.global_search(p_q text, p_limit integer default 8)
+returns table (kind text, id uuid, label text, sub text, path text)
+language plpgsql stable security invoker set search_path to 'public' as $$
+declare
+  v_q text := lower(btrim(coalesce(p_q, '')));
+  v_esc text;
+  v_like text;
+  v_name text;
+  v_digits text;
+  v_n bigint;
+begin
+  if length(v_q) < 2 then return; end if;
+  p_limit := least(greatest(coalesce(p_limit, 8), 1), 25);
+
+  if v_q ~ '^t-?\d{4,}$' then
+    v_n := regexp_replace(v_q, '\D', '', 'g')::bigint;
+    return query
+      select 'ticket'::text, q.id, 'T-' || q.ticket_no,
+             coalesce(nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), ''), 'A handover sheet')
+               || coalesce(' · ' || a.account_number, ''),
+             '/queries/' || q.id
+        from public.account_queries q left join public.debtor_accounts a on a.id = q.account_id
+       where q.ticket_no = v_n;
+  end if;
+  if v_q ~ '^r-?\d{1,6}$' then
+    v_n := regexp_replace(v_q, '\D', '', 'g')::bigint;
+    return query
+      select 'request'::text, r.id, 'R-' || r.number, coalesce(r.review_title, left(r.description, 80)),
+             '/requests?r=' || r.number
+        from public.change_requests r where r.number = v_n;
+  end if;
+  if length(v_q) < 3 then return; end if;
+
+  v_esc := replace(replace(replace(v_q, '\', '\\'), '%', '\%'), '_', '\_');
+  v_like := '%' || v_esc || '%';
+  v_name := '%' || regexp_replace(v_esc, '\s+', '%', 'g') || '%';
+  v_digits := regexp_replace(v_q, '\D', '', 'g');
+
+  return query
+    select 'account'::text, a.id,
+           coalesce(nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), ''), a.account_number, 'Debtor'),
+           concat_ws(' · ', a.case_number, nullif(a.account_number, a.case_number), c.name),
+           '/accounts/' || a.id
+      from public.debtor_accounts a
+      left join public.companies c on c.id = a.company_id
+     where public.debtor_search_key(a.case_number, a.account_number, a.client_reference, a.legacy_reference,
+             a.swordfish_reference, a.debtor_id_number, a.contact_search) like v_like
+        or (length(v_digits) >= 6 and v_digits <> v_q
+            and public.debtor_search_key(a.case_number, a.account_number, a.client_reference, a.legacy_reference,
+                  a.swordfish_reference, a.debtor_id_number, a.contact_search) like '%' || v_digits || '%')
+        or public.debtor_name_key(a.debtor_first_name, a.debtor_surname) like v_name
+     order by
+       case when v_q in (lower(a.case_number), lower(a.account_number), lower(a.client_reference),
+                         lower(a.legacy_reference), lower(a.debtor_id_number)) then 0
+            when lower(a.case_number) like v_esc || '%' or lower(a.account_number) like v_esc || '%'
+              or lower(a.client_reference) like v_esc || '%' then 1
+            else 2 end,
+       a.debtor_surname nulls last, a.debtor_first_name nulls last
+     limit p_limit;
+end $$;
+grant execute on function public.global_search(text, integer) to authenticated;
