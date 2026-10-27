@@ -51829,3 +51829,65 @@ begin
      limit p_limit;
 end $$;
 grant execute on function public.global_search(text, integer) to authenticated;
+
+-- S14 (27 Oct, Raptor H13): THE PERSON WHO SENT A REQUEST MAY CORRECT IT UNTIL IT IS DECIDED. Stephan:
+-- "you should be able to edit a request after it's already been sent through, just to correct spelling,
+-- mistakes ... before it's been submitted. After it's been submitted, it's been submitted." So: only the
+-- asker, only their own words (description), only while it is New -- Submitted or Reviewed -- and never
+-- once an Administrator has approved, declined or given it to Claude. The words it replaced are kept on
+-- the history (kind 'edited'), so what the night's review read is still on the record. No notification:
+-- a spelling fix is not news. SECURITY DEFINER because change_requests_update is Administrators' only;
+-- this changes one column, under the three conditions above, and nothing else.
+alter table public.change_request_events drop constraint if exists change_request_events_kind_check;
+alter table public.change_request_events add constraint change_request_events_kind_check
+  check (kind = any (array['sent', 'reviewed', 'status', 'tested', 'assigned', 'comment', 'question', 'edited']));
+
+create or replace function public.change_request_edit(p_number integer, p_description text)
+returns void language plpgsql security definer set search_path to 'public' as $$
+declare
+  r public.change_requests;
+  v_new text := btrim(coalesce(p_description, ''));
+begin
+  select * into r from public.change_requests where number = p_number;
+  if not found then raise exception 'There is no request R-%.', p_number using errcode = '22023'; end if;
+  if auth.uid() is distinct from r.created_by then
+    raise exception 'Only the person who sent R-% may correct it.', p_number using errcode = '42501';
+  end if;
+  if r.status <> 'new' then
+    raise exception 'R-% has been decided, so it can no longer be changed. Add a comment instead.', p_number using errcode = '22023';
+  end if;
+  if v_new = '' then raise exception 'A request needs words.' using errcode = '22023'; end if;
+  if v_new = btrim(r.description) then return; end if;
+  update public.change_requests set description = v_new, updated_at = public.raptor_now() where id = r.id;
+  insert into public.change_request_events (request_id, kind, body, by_id)
+  values (r.id, 'edited', r.description, auth.uid());
+end $$;
+revoke all on function public.change_request_edit(integer, text) from public;
+grant execute on function public.change_request_edit(integer, text) to authenticated;
+
+-- S14 (27 Oct): THE WORDS MAY BE CORRECTED UNTIL CLAUDE STARTS BUILDING, BY THE SENDER OR AN
+-- ADMINISTRATOR. R-9 went to Claude's queue as "Whent the clerk ask ..." within the hour, so a rule
+-- that locked at approval would have left the typo on it for good. The builder reads the request when
+-- it takes it, so a correction made while it waits on the queue is the one built; once it is In
+-- development (or released, or declined) the words are the record. Every correction still keeps the
+-- old words on the history.
+create or replace function public.change_request_edit(p_number integer, p_description text)
+returns void language plpgsql security definer set search_path to 'public' as $$
+declare
+  r public.change_requests;
+  v_new text := btrim(coalesce(p_description, ''));
+begin
+  select * into r from public.change_requests where number = p_number;
+  if not found then raise exception 'There is no request R-%.', p_number using errcode = '22023'; end if;
+  if auth.uid() is distinct from r.created_by and coalesce(public.current_user_role(), '') <> 'Administrator' then
+    raise exception 'Only the person who sent R-%, or an Administrator, may correct it.', p_number using errcode = '42501';
+  end if;
+  if r.status not in ('new', 'accepted') then
+    raise exception 'Claude has started on R-% (or it is finished), so its words are the record now. Add a comment instead.', p_number using errcode = '22023';
+  end if;
+  if v_new = '' then raise exception 'A request needs words.' using errcode = '22023'; end if;
+  if v_new = btrim(r.description) then return; end if;
+  update public.change_requests set description = v_new, updated_at = public.raptor_now() where id = r.id;
+  insert into public.change_request_events (request_id, kind, body, by_id)
+  values (r.id, 'edited', r.description, auth.uid());
+end $$;

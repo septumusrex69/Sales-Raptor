@@ -100,6 +100,12 @@ export async function updateRequest(id: string, patch: Partial<{ status: Request
   if (error) throw new Error(error.message)
 }
 
+/** Correct a request's words (the sender or an Administrator, until Claude starts) -- see mayEdit. */
+export async function editRequest(number: number, description: string): Promise<void> {
+  const { error } = await supabase.rpc('change_request_edit', { p_number: number, p_description: description })
+  if (error) throw new Error(error.message)
+}
+
 export async function withdrawRequest(id: string): Promise<void> {
   const { error } = await supabase.from('change_requests').delete().eq('id', id)
   if (error) throw new Error(error.message)

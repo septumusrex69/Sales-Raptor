@@ -71,7 +71,7 @@ export const VERDICT_LABEL: Record<ReviewVerdict, string> = {
 export interface RequestEvent {
   id: string
   request_id: string
-  kind: 'sent' | 'reviewed' | 'status' | 'tested' | 'assigned' | 'comment' | 'question'
+  kind: 'sent' | 'reviewed' | 'status' | 'tested' | 'assigned' | 'comment' | 'question' | 'edited'
   body: string | null
   from_status: RequestStatus | null
   to_status: RequestStatus | null
@@ -299,6 +299,16 @@ export function mayDecide(user: Pick<User, 'role'> | null | undefined): boolean 
 }
 
 /** The person who sent it may take it back while nobody has looked at it. */
+/*
+ * WHO MAY CORRECT THE WORDS, AND UNTIL WHEN (S14, Stephan: "edit a request after it's already been sent
+ * through, just to correct spelling, mistakes"). The sender or an Administrator, until Claude starts
+ * building -- New, Approved or Queued for Claude. The database holds the same rule
+ * (change_request_edit) and keeps the words it replaced on the history.
+ */
+export function mayEdit(user: Pick<User, 'id' | 'role'> | null | undefined, r: Pick<ChangeRequest, 'created_by' | 'status'>): boolean {
+  return !!user && (user.id === r.created_by || user.role === 'Administrator') && (r.status === 'new' || r.status === 'accepted')
+}
+
 export function mayWithdraw(user: Pick<User, 'id'> | null | undefined, r: Pick<ChangeRequest, 'created_by' | 'status'>): boolean {
   return !!user && r.created_by === user.id && r.status === 'new'
 }

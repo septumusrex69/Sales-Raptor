@@ -8,11 +8,11 @@ import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayDecide, mayTest, mayWithdraw,
+  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayDecide, mayEdit, mayTest, mayWithdraw,
   parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
-import { addEvent, answerQuestion, answerTest, askClaude, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
+import { addEvent, answerQuestion, answerTest, askClaude, editRequest, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
 import type { User } from '../../types'
 
 /**
@@ -52,12 +52,14 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   const [words, setWords] = useState('')
   /* A question's options, one per line; empty is a question that wants words. */
   const [choiceWords, setChoiceWords] = useState('')
+  /* Correcting the words (mayEdit): null while not editing, else the draft. */
+  const [draft, setDraft] = useState<string | null>(null)
   const choices = parseChoices(choiceWords)
 
   const loadEvents = useCallback(() => {
     listEvents(r.id).then(setEvents).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [r.id])
-  useEffect(() => { setEvents(null); setComposing(null); setWords(''); setChoiceWords(''); setError(null); loadEvents() }, [loadEvents])
+  useEffect(() => { setEvents(null); setComposing(null); setWords(''); setChoiceWords(''); setDraft(null); setError(null); loadEvents() }, [loadEvents])
 
   async function act(fn: () => Promise<void>) {
     setBusy(true); setError(null)
@@ -135,7 +137,28 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
         </div>
 
         <Section label="What they asked">
-          <p className="whitespace-pre-wrap text-sm text-slate-800" data-testid="request-panel-description">{r.description}</p>
+          {draft === null ? (
+            <>
+              <p className="whitespace-pre-wrap text-sm text-slate-800" data-testid="request-panel-description">{r.description}</p>
+              {mayEdit(me, r) && (
+                <button type="button" disabled={busy} onClick={() => setDraft(r.description)} data-testid="request-edit"
+                  className="mt-1.5 text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700">
+                  Correct the wording
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="space-y-2">
+              <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={5} data-testid="request-edit-words"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              <p className="text-xs text-slate-500">For spelling and slips. The old wording stays on the history. Once Claude starts building it, it can no longer be changed.</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="primary" disabled={busy || !draft.trim() || draft.trim() === r.description.trim()} data-testid="request-edit-save"
+                  onClick={() => void act(async () => { await editRequest(r.number, draft); setDraft(null) })}>Save the correction</Button>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => setDraft(null)}>Cancel</Button>
+              </div>
+            </div>
+          )}
         </Section>
 
         {/* CLAUDE'S READING, kept apart from the status: a request can be Approved and still need an answer. */}
@@ -335,7 +358,8 @@ function EventLine({ e, who, children }: { e: RequestEvent; who: string | null; 
       : e.kind === 'status' ? `moved it to ${e.to_status ? STATUS_LABEL[e.to_status] : '?'}`
         : e.kind === 'tested' ? 'tested it'
           : e.kind === 'assigned' ? (e.body ? `gave it to ${e.body}` : 'took it off everybody')
-            : e.kind === 'question' ? 'asked' : e.answers ? 'answered' : 'wrote'
+            : e.kind === 'edited' ? 'corrected the wording. It used to read:'
+              : e.kind === 'question' ? 'asked' : e.answers ? 'answered' : 'wrote'
   const body = e.kind === 'assigned' ? null : e.body
   return (
     <li className="flex gap-2.5 text-sm" data-kind={e.kind}>

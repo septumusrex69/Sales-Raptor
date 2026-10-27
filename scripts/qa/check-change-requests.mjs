@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
-  STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, onShelf, SHELVES, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
+  STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, mayEdit, onShelf, SHELVES, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
 let pass = 0
@@ -240,6 +240,21 @@ check('only the person who asked answers, and only a question with choices',
   const shown = ['src/pages/requests/RequestsPage.tsx', 'src/components/requests/RequestPanel.tsx']
     .flatMap((p) => code(p).match(/<span className="[^"]*"[^>]*>\{requestLabel\(r\)\}/g) ?? [])
   check('every R-number on screen is kept on one line', [shown.length > 3, shown.every((s) => /\bwhitespace-nowrap\b/.test(s))].join(), 'true,true')
+}
+
+/* S14: the words may be corrected -- by the sender or an Administrator -- until Claude starts building. */
+{
+  const asker = { id: 'u', role: 'Liaison' }, admin = { id: 'a', role: 'Administrator' }, other = { id: 'x', role: 'Liaison' }
+  check('the sender may correct it while New, Approved or Queued, not once Claude has started',
+    ['new', 'accepted', 'building', 'done', 'declined'].map((st) => mayEdit(asker, { created_by: 'u', status: st })).join(), 'true,true,false,false,false')
+  check('...an Administrator may too; nobody else', [mayEdit(admin, { created_by: 'u', status: 'new' }), mayEdit(other, { created_by: 'u', status: 'new' }), mayEdit(null, { created_by: 'u', status: 'new' })].join(), 'true,false,false')
+  const sch = read('supabase/schema.sql')
+  const fn = sch.slice(sch.lastIndexOf('create or replace function public.change_request_edit('))
+  check('the database holds the same rule, and keeps the old words on the history', [
+    /auth\.uid\(\) is distinct from r\.created_by and coalesce\(public\.current_user_role\(\), ''\) <> 'Administrator'/.test(fn),
+    /if r\.status not in \('new', 'accepted'\) then/.test(fn),
+    /values \(r\.id, 'edited', r\.description, auth\.uid\(\)\)/.test(fn),
+  ].join(), 'true,true,true')
 }
 
 if (failures.length) {

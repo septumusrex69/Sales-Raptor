@@ -67,6 +67,10 @@ const handlers = (who, writes) => [
     writes.push({ table: 'patch', url: decodeURIComponent(u), body: req.postDataJSON() })
     return { status: 200, body: [] }
   }],
+  [(u, req) => u.includes('/rpc/change_request_edit'), (u, req) => {
+    writes.push({ table: 'edit', body: req.postDataJSON() })
+    return { status: 200, body: null }
+  }],
   [(u, req) => u.includes('/rpc/change_request_tested'), (u, req) => {
     writes.push({ table: 'tested', body: req.postDataJSON() })
     return { status: 200, body: null }
@@ -211,6 +215,17 @@ try {
   await page.waitForTimeout(500)
   t.check('...and sends them as Other', answers()[1]?.body, 'Other: Purple')
   await t.shot(page, 'change-requests-6-choices')
+
+  /* S14: the person who sent it may correct the wording while it waits -- "just to correct spelling". */
+  t.check('a released request offers no correction', await page.getByTestId('request-edit').count(), 0)
+  await open(page, '/requests?r=7')
+  const panel7 = page.locator('[data-testid="request-panel"][data-number="7"]')
+  await panel7.getByTestId('request-edit').click()
+  await panel7.getByTestId('request-edit-words').fill('Diary: make broken promises red, please')
+  await panel7.getByTestId('request-edit-save').click()
+  await page.waitForTimeout(500)
+  t.check('the sender corrects the wording of a request that is still waiting',
+    JSON.stringify(writes.find((w) => w.table === 'edit')?.body), JSON.stringify({ p_number: 7, p_description: 'Diary: make broken promises red, please' }))
   await page.context().close()
 
   /* 3. An Administrator works a ticket from the panel. */

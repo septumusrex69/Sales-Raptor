@@ -58,6 +58,19 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**REQUESTS: CORRECT THE WORDING (27 Oct).** Stephan: edit a request "just to correct spelling, mistakes". The sender
+or an Administrator may correct a request's words until Claude starts building it (New, Approved, Queued); the old
+words stay on the history (kind `edited`, no notification). Migrations **`change_request_edit`** (md5 a634d514...;
+the kind constraint gains 'edited') and **`change_request_edit_until_built`** (3173ba0c...; widened after R-9 went to
+the queue as "Whent the clerk ask..."). `mayEdit` (changeRequests.ts), `editRequest`, "Correct the wording" in
+RequestPanel. check-change-requests +3, e2e/change-requests +2.
+
+**THE BUILDER LEFT R-8 IN DEVELOPMENT.** Its 09:13 run pushed R-8 (ffe55de, a forward keeps its attachments) at 09:30
+and never released it; later runs only take 'accepted' requests, so R-8 sat in "building" for three hours. S14 merged
+it, ran fast + e2e compose-send/ticket-work/mail (green) and released it (done, how to test, done_in). WATCH FOR THIS:
+a request in 'building' for more than an hour with its commit on the preview needs releasing by hand, or the builder's
+skill should release before it writes its handoff note.
+
 **SEARCH, EVERYWHERE (27 Oct).** Stephan: "search on a surname, on a telephone number ... on a reference number, on a
 client reference number, all of the data ... first prize, anything anywhere, if it doesn't affect the speed". The top
 bar searched only the sales side, by name, and NEVER the debtor book. Now: migration **`global_search`** (staging;
