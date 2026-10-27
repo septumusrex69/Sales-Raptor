@@ -54,6 +54,7 @@ const NOTES = [
   },
 ]
 
+const ticketWrites = []
 const server = await startServer()
 let browser
 try {
@@ -62,6 +63,9 @@ try {
     /* The signed-in row is fetched by id and the rest as a list. Answering both with two rows makes
        AuthContext's `maybeSingle` an error and leaves `currentUser` null — which silently disables
        every button on this page. Learned the hard way in escalate-box.mjs. */
+    [(u, req) => req.method() === 'PATCH' && u.includes('/rest/v1/account_queries'), (u, req) => {
+      ticketWrites.push(req.postDataJSON()); return { status: 200, body: [Q] }
+    }],
     [(u) => u.includes('/rest/v1/profiles') && /id=eq\./.test(u), () => ({ body: [LIAISON] })],
     [(u) => u.includes('/rest/v1/profiles'), () => ({ body: [PROFILE, LIAISON] })],
     [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
@@ -180,6 +184,24 @@ try {
    */
   t.ok('...with no merge field left in it', !/\{\{|\}\}/.test(drafted))
   await t.shot(page, 'ticket-work-email')
+
+  /*
+   * S14: A TICKET ENDS ONLY WHEN SOMEBODY RESOLVES IT, WITH ITS REAL OUTCOME. The two buttons that
+   * closed it on the client's first answer -- one of them as 'valid', which on a dispute is UPHELD --
+   * are gone; Resolve opens the account panel's own outcome form.
+   */
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  const pageText = await page.locator('body').innerText()
+  t.ok('no button closes the ticket on the client\'s first answer', !/The client has answered|Close without an answer/.test(pageText))
+  await page.getByTestId('ticket-resolve').click()
+  await page.getByRole('button', { name: /Close query/ }).waitFor({ timeout: 5000 })
+  t.check('Resolve asks for the outcome before anything closes', ticketWrites.length, 0)
+  await page.locator('select').filter({ has: page.locator('option', { hasText: /not valid/i }) }).first()
+    .selectOption({ label: (await page.locator('option', { hasText: /not valid/i }).first().innerText()).trim() })
+  await page.getByRole('button', { name: /Close query/ }).click()
+  await page.waitForTimeout(600)
+  t.ok('...and closes it with the outcome chosen', ticketWrites.some((w) => w.status === 'closed' && w.outcome === 'not_valid'))
 
   await context.close()
 

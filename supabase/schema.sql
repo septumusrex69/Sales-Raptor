@@ -51694,3 +51694,38 @@ alter table public.account_queries alter column ticket_no set default nextval('p
 alter table public.account_queries alter column ticket_no set not null;
 alter table public.account_queries add constraint account_queries_ticket_no_key unique (ticket_no);
 grant usage on sequence public.account_queries_ticket_seq to authenticated;
+
+-- S14 (27 Oct, Raptor H13): A CLIENT'S REPLY BRINGS THE TICKET BACK; IT DOES NOT CLOSE IT. The firm:
+-- "it says like the client has answered or closed without an answer. That makes no sense because
+-- there could be multiple communications regarding a specific dispute." An email the CLIENT wrote
+-- (correspondent, decided by account_email_correspondent before insert), filed on a ticket that is
+-- waiting on the client, puts the ticket back with the liaison -- our move -- and leaves it open.
+-- A debtor's email on the same ticket changes nothing: it is not the client's answer. Only somebody
+-- resolving the ticket ends it.
+-- SECURITY DEFINER, deliberately and narrowly: the person filing the email by hand (or the sync)
+-- need not be allowed to edit the ticket, and this changes one column of one row, only from
+-- 'client' to 'liaison', only while it is open.
+create or replace function public.ticket_client_replied() returns trigger
+language plpgsql security definer set search_path to 'public' as $f$
+begin
+  if new.query_id is null or new.direction <> 'in' or new.correspondent <> 'client' then return new; end if;
+  update public.account_queries set stage = 'liaison', updated_at = now()
+   where id = new.query_id and status <> 'closed' and stage = 'client';
+  return new;
+end $f$;
+drop trigger if exists ticket_client_replied on public.account_emails;
+create trigger ticket_client_replied after insert on public.account_emails
+  for each row execute function public.ticket_client_replied();
+revoke all on function public.ticket_client_replied() from public;
+
+-- S14 (27 Oct): ticket_client_replied stamped updated_at with now(); every other date decision in
+-- this schema reads the firm's clock (raptor_now -- the staging clock on staging), and
+-- check-staging-clock holds the list of functions allowed the real one. Same function, firm clock.
+create or replace function public.ticket_client_replied() returns trigger
+language plpgsql security definer set search_path to 'public' as $f$
+begin
+  if new.query_id is null or new.direction <> 'in' or new.correspondent <> 'client' then return new; end if;
+  update public.account_queries set stage = 'liaison', updated_at = public.raptor_now()
+   where id = new.query_id and status <> 'closed' and stage = 'client';
+  return new;
+end $f$;

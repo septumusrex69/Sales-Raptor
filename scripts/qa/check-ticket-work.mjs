@@ -128,6 +128,19 @@ check('...though the same one twice is still one', ticketNumberIn('T-1016 (re T-
   ok('the sync files a quoted ticket number on the ticket: after the thread, before the address',
     thread > 0 && ticket > thread && address > ticket && /\.from\('account_queries'\)\.select\('id, account_id'\)\.eq\('ticket_no', ticketNo\)/.test(find))
 }
+
+/* S14: a client's reply brings a ticket back to the liaison; it never closes it. */
+{
+  const schema = read('supabase/schema.sql')
+  const fn = schema.slice(schema.lastIndexOf('create or replace function public.ticket_client_replied('))
+  ok('a client email on a ticket waiting on the client brings it back to the liaison, open',
+    /new\.direction <> 'in' or new\.correspondent <> 'client'/.test(fn)
+    && /set stage = 'liaison'[\s\S]{0,80}where id = new\.query_id and status <> 'closed' and stage = 'client'/.test(fn)
+    && !/status = 'closed'/.test(fn.slice(0, fn.indexOf('end $f$'))))
+  ok('...on every insert into account_emails', /create trigger ticket_client_replied after insert on public\.account_emails/.test(schema))
+  const detail = read('src/pages/queries/QueryDetail.tsx')
+  ok('the ticket page resolves through the outcome form, never on a single press', /<CloseForm busy=\{busy\}/.test(detail) && !/close\('valid'\)/.test(detail))
+}
 ok('...a dispute names the account and both references too',
   ticketBody({ ...THEIRS, kind: 'dispute', requestFor: null }).includes('Ofentse Thema (RRC00008, your reference INV-7731) has disputed this account'))
 check('...left out where it only repeats the account number', ticketSubject({ ...REQUEST, clientReference: ' rrc00008 ' }), ticketSubject(REQUEST))

@@ -74,8 +74,12 @@ address -> reference; exactly one distinct T-number, a sheet ticket with no acco
 check-ticket-work +5, e2e ticket-work +3. **Phase 3:** filing an email onto an
 account in Mail now asks "Is it about one of this account's tickets?" (its open tickets; one the subject quotes is
 chosen already) and files it there (`linkMailToAccount` / `fileOnAccount` take `queryId`; a client's email on a
-ticket stays on the ticket, the sync's rule). check-client-correspondence +3. STILL TO DO: the conversation ("Client
-answered" as one step); the timer and the Communications figures.
+ticket stays on the ticket, the sync's rule). check-client-correspondence +3. **Phase 4 (the conversation):** migrations
+**`ticket_client_replied`** (md5 7d39325b...) and **`ticket_client_replied_firm_clock`** (dc213c80...): a CLIENT's
+email filed on a ticket waiting on the client puts it back with the liaison and leaves it open (a debtor's email does
+nothing); the ticket page's "The client has answered" / "Close without an answer" -- which CLOSED it, the first as
+'valid' = upheld on a dispute -- are replaced by **Resolve…**, the account panel's own CloseForm. check-ticket-work +3,
+e2e ticket-work +3. STILL TO DO: the timer and the Communications figures (time with us AND whole time open).
 
 **NEXT, AGREED 27 OCT -- DISPUTE TICKETS** (Stephan, on BOP00005 Boitsoko Mose): every dispute, query and request
 gets a ticket number **T-1042** (one series), quoted in the subject beside our account number and the client's

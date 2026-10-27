@@ -516,7 +516,7 @@ function ChaseDate({ value, stale, busy, onChange }: {
   )
 }
 
-function CloseForm({ onClose, onCancel, busy }: {
+export function CloseForm({ onClose, onCancel, busy }: {
   onClose: (outcome: QueryOutcome, action: string, amount: number | null, effect: QueryEffect | null) => void
   onCancel: () => void
   busy: boolean

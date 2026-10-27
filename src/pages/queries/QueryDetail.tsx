@@ -8,7 +8,7 @@ import { formatDate } from '../../data/mockData'
 import {
   ageInDays, closeQuery, fetchQuery, isStale, stageLine, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
-  type QueryStage,
+  type QueryStage, type QueryOutcome, type QueryEffect,
   ticketLabel,
 } from '../../lib/accountQueries'
 /* The kind's own words, from the file that OWNS the dispute vocabulary rather than through the
@@ -28,6 +28,7 @@ import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
 import { TicketWork } from '../../components/queries/TicketWork'
+import { CloseForm } from '../accounts/QueryPanel'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import {
@@ -99,6 +100,7 @@ export function QueryDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [resolving, setResolving] = useState(false)
   /**
    * THE MAIL FILED AGAINST THIS TICKET, and the one being passed on.
    *
@@ -229,15 +231,25 @@ export function QueryDetail() {
     } finally { setBusy(false) }
   }
 
-  async function close(outcome: 'valid' | 'not_valid') {
+  /*
+   * RESOLVED, WITH ITS REAL OUTCOME (S14). The two buttons here were "The client has answered" and
+   * "Close without an answer", and both CLOSED the ticket -- the first as 'valid', which on a dispute
+   * means UPHELD and lets the account's sequences resume. The firm: "there could be multiple
+   * communications regarding a specific dispute". A client's reply now brings the ticket back to the
+   * liaison and leaves it open (ticket_client_replied, in the database); it ends only here, through
+   * the account panel's own outcome form, which asks what the outcome was and what happens to the
+   * account.
+   */
+  async function resolve(outcome: QueryOutcome, action: string, amount: number | null, effect: QueryEffect | null) {
     if (!data) return
     setBusy(true); setError(null)
     try {
-      await closeQuery(data.query.id, { outcome }, {
+      await closeQuery(data.query.id, { outcome, action, amount, effect }, {
         accountId: data.query.accountId,
         actorId: currentUser?.id ?? null,
         actorName: currentUser?.name ?? null,
       })
+      setResolving(false)
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -452,15 +464,21 @@ export function QueryDetail() {
         {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
 
         {q.status !== 'closed' && (
-          <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-100">
-            <button type="button" disabled={busy} onClick={() => void close('valid')}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-50">
-              The client has answered
-            </button>
-            <button type="button" disabled={busy} onClick={() => void close('not_valid')}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-50">
-              Close without an answer
-            </button>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            {resolving ? (
+              <CloseForm busy={busy} onCancel={() => setResolving(false)}
+                onClose={(outcome, action, amount, effect) => { void resolve(outcome, action, amount, effect) }} />
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" disabled={busy} onClick={() => setResolving(true)} data-testid="ticket-resolve"
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-50">
+                  Resolve…
+                </button>
+                <span className="text-xs text-slate-500">
+                  Open until it is resolved. Every email in and out stays on this ticket, and a reply from the client brings it back to you.
+                </span>
+              </div>
+            )}
           </div>
         )}
       </Card>
