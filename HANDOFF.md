@@ -71,8 +71,11 @@ matched): `account_queries.ticket_no`, sequence from 1001, existing 16 numbered 
 shows on the ticket's header, the disputes board (card and list), the client's queries and the account's ticket card;
 a NEW email quoting it is filed on that ticket (`ticketNumberIn`, emailSync findAccount: thread -> ticket number ->
 address -> reference; exactly one distinct T-number, a sheet ticket with no account cannot be filed this way).
-check-ticket-work +5, e2e ticket-work +3. STILL TO DO: file a client email onto a ticket by hand; the
-conversation; the timer and the Communications figures.
+check-ticket-work +5, e2e ticket-work +3. **Phase 3:** filing an email onto an
+account in Mail now asks "Is it about one of this account's tickets?" (its open tickets; one the subject quotes is
+chosen already) and files it there (`linkMailToAccount` / `fileOnAccount` take `queryId`; a client's email on a
+ticket stays on the ticket, the sync's rule). check-client-correspondence +3. STILL TO DO: the conversation ("Client
+answered" as one step); the timer and the Communications figures.
 
 **NEXT, AGREED 27 OCT -- DISPUTE TICKETS** (Stephan, on BOP00005 Boitsoko Mose): every dispute, query and request
 gets a ticket number **T-1042** (one series), quoted in the subject beside our account number and the client's

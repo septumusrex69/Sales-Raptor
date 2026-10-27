@@ -157,6 +157,17 @@ ok('...once, where there is a Message-ID to key it on',
 const handCharge = byHand.indexOf('const charge = await chargeItem({')
 ok('...after the item 6 charge, which is not gated on who wrote it', handCharge > 0 && handCharge < handBlock)
 
+/* S14: filed by hand ON A TICKET when the filer chooses one; there it is where it belongs, as on the sync. */
+ok('filing by hand carries the chosen ticket', /query_id: input\.queryId \?\? null/.test(byHand)
+  && /return fileOnAccount\(\{ mail: input\.mail, accountId: input\.accountId, actor: input\.actor, queryId: input\.queryId \?\? null \}\)/.test(userMail))
+ok('...and client mail on a ticket stays on the ticket, the sync\'s own rule', /if \(filed\?\.correspondent === 'client' && input\.actor\.id && !input\.queryId\)/.test(byHand))
+{
+  const mail = code('src/pages/mail/MailPage.tsx')
+  ok('the Mail page offers the account\'s open tickets, choosing one the subject quotes',
+    /const open = qs\.filter\(\(q\) => q\.status !== 'closed'\)/.test(mail) && /open\.find\(\(q\) => q\.ticketNo === quoted\)/.test(mail)
+    && /linkMailToAccount\(\{ mail, accountId, actor, queryId: ticketId \}\)/.test(mail))
+}
+
 /* ---------- 5. the fee is not touched ---------- */
 
 /*

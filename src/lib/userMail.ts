@@ -1219,6 +1219,13 @@ export async function linkMailToAccount(input: {
   mail: MailItem
   accountId: string
   actor: { id: string | null; name: string | null }
+  /**
+   * One of this account's tickets, where the person filing it says the email is about it (S14).
+   * The firm: "if it's just general ... it just stays within the client. But if it's ... relating
+   * to a specific ticket, we can match it to a ticket." The database refuses a ticket of another
+   * account (mail_ticket_same_account), so a wrong pick is an error, not a misfiling.
+   */
+  queryId?: string | null
 }): Promise<ChargeResult> {
   const { data: claimed, error: claimError } = await supabase
     .from('user_emails')
@@ -1246,7 +1253,7 @@ export async function linkMailToAccount(input: {
   if (claimError) throw new Error(claimError.message)
   if (!claimed) throw new Error('That email has already been filed.')
 
-  return fileOnAccount({ mail: input.mail, accountId: input.accountId, actor: input.actor })
+  return fileOnAccount({ mail: input.mail, accountId: input.accountId, actor: input.actor, queryId: input.queryId ?? null })
 }
 
 /**
@@ -1263,6 +1270,7 @@ async function fileOnAccount(input: {
   mail: MailItem
   accountId: string
   actor: { id: string | null; name: string | null }
+  queryId?: string | null
 }): Promise<ChargeResult> {
   /*
    * THE SAME RULE ON THE OTHER DOOR.
@@ -1320,6 +1328,8 @@ async function fileOnAccount(input: {
     read_at: new Date().toISOString(),
     charged_excl_vat: charge.exclVat,
     occurred_at: input.mail.occurredAt,
+    /* On the ticket where the person filing it said so (S14); null keeps it on the account only. */
+    query_id: input.queryId ?? null,
   /* `correspondent` is not written here: the database decides it on insert from the account's
      contacts and the client's (account_email_correspondent), and it is read back for the step
      below -- exactly as the sync does. */
@@ -1327,12 +1337,14 @@ async function fileOnAccount(input: {
   if (fileError) console.error('[userMail] filed and charged, but the account copy failed:', fileError.message)
 
   /*
-   * THE CLIENT WROTE IT, SO IT GOES ON THE CLIENT TOO (HANDOFF section 5). Filed by hand there is
-   * no ticket -- this path never carries one -- so the debtor's Emails tab leaves it out and,
+   * THE CLIENT WROTE IT, SO IT GOES ON THE CLIENT TOO (HANDOFF section 5). Filed by hand with no
+   * ticket (S14 lets the filer choose one), the debtor's Emails tab leaves it out and,
    * without this, nobody's screen shows it but the filer's own mailbox. The same activity the sync
    * writes, built by the same function.
    */
-  if (filed?.correspondent === 'client' && input.actor.id) {
+  /* ON A TICKET IT IS ALREADY WHERE IT BELONGS -- the ticket reads both sides -- which is the sync's
+     own rule (emailSync: `correspondent === 'client' && !message.queryId`). */
+  if (filed?.correspondent === 'client' && input.actor.id && !input.queryId) {
     const { data: acc } = await supabase
       .from('debtor_accounts').select('company_id').eq('id', input.accountId).maybeSingle<{ company_id: string | null }>()
     if (acc?.company_id) {

@@ -49,6 +49,8 @@ import {
   type BlockedSender, type DebtorFile, type InlineImage, type LinkedRecord,
   type MailFilter, type MailItem,
 } from '../../lib/userMail'
+import { fetchQueries, ticketLabel, type AccountQuery } from '../../lib/accountQueries'
+import { ticketNumberIn } from '../../lib/ticketEmail'
 import { useAppStore } from '../../store/AppStore'
 import { LeadForm } from '../../components/layout/QuickAdd'
 import { isLeadIntake, parseLeadIntake } from '../../lib/leadIntake'
@@ -3975,6 +3977,26 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
    * no fee, so it files on the tap, as it always did.
    */
   const [picked, setPicked] = useState<{ id: string; label: string } | null>(null)
+  /*
+   * WHICH TICKET, IF ANY (S14). The firm: general mail stays on the client, mail about a ticket
+   * goes on the ticket. The picked account's open tickets are offered; one the subject quotes
+   * (ticketNumberIn) is chosen already, anything else waits for the person to say.
+   */
+  const [tickets, setTickets] = useState<AccountQuery[]>([])
+  const [ticketId, setTicketId] = useState<string | null>(null)
+  useEffect(() => {
+    setTickets([]); setTicketId(null)
+    if (!picked) return
+    let live = true
+    fetchQueries(picked.id).then((qs) => {
+      if (!live) return
+      const open = qs.filter((q) => q.status !== 'closed')
+      setTickets(open)
+      const quoted = ticketNumberIn(mail.subject)
+      setTicketId(open.find((q) => q.ticketNo === quoted)?.id ?? null)
+    }).catch(() => { /* no tickets offered is the account alone, which is what filing did before */ })
+    return () => { live = false }
+  }, [picked, mail.subject])
   const [keepAddress, setKeepAddress] = useState(true)
   const [keepDetails, setKeepDetails] = useState<Set<string>>(new Set())
 
@@ -4076,7 +4098,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
     setBusy(true)
     setError(null)
     try {
-      const charge = await linkMailToAccount({ mail, accountId, actor })
+      const charge = await linkMailToAccount({ mail, accountId, actor, queryId: ticketId })
 
       /*
        * Saved AFTER the filing, and never allowed to undo it. The message is on the account and
@@ -4108,7 +4130,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
       }
 
       onDone(
-        `Matched to ${label}. ${chargeMessage(charge, '6')}`
+        `Matched to ${label}${ticketId ? `, on ticket ${ticketLabel(tickets.find((q) => q.id === ticketId)!)}` : ''}. ${chargeMessage(charge, '6')}`
         + (saved > 0 ? ` ${saved} contact ${saved === 1 ? 'detail' : 'details'} saved on the account.` : ''),
         accountId,
         { kind: 'account', id: accountId, label, path: `/accounts/${accountId}` },
@@ -4152,6 +4174,23 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
               Change
             </button>
           </div>
+
+          {tickets.length > 0 && (
+            <div className="mt-3" role="radiogroup" aria-label="Which ticket" data-testid="mail-ticket-choice">
+              <p className="text-sm font-medium text-slate-700">Is it about one of this account&rsquo;s tickets?</p>
+              <label className="flex items-center gap-2.5 mt-1.5 cursor-pointer text-sm text-slate-700">
+                <input type="radio" name="ticket" checked={ticketId === null} onChange={() => setTicketId(null)} />
+                No &mdash; just the account
+              </label>
+              {tickets.map((q) => (
+                <label key={q.id} className="flex items-center gap-2.5 mt-1 cursor-pointer text-sm text-slate-700 min-w-0">
+                  <input type="radio" name="ticket" checked={ticketId === q.id} onChange={() => setTicketId(q.id)} data-testid="mail-ticket-option" />
+                  <span className="font-mono text-[12px] font-semibold text-slate-500 shrink-0">{ticketLabel(q)}</span>
+                  <span className="truncate">{q.category || q.requestFor || q.description}</span>
+                </label>
+              ))}
+            </div>
+          )}
 
           {/*
             On by default, because it is the whole point: findAccount matches future mail against
