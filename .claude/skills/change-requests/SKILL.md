@@ -122,6 +122,16 @@ The firm (Raptor H12): "It should only be released ... if you have told me that 
 have to be able to ... click on it and say, okay, well, Claude, please do this." Stephan approves and presses
 **Ask Claude to build it**; this job is the only thing that moves a request to In development and Released.
 
+0. **FIRST, FINISH WHAT AN EARLIER RUN LEFT** (S14, 27 Oct: a run pushed R-8 to the preview at 09:30 and never
+   released it, and every later run looked only at `accepted`, so R-8 sat In development for three hours):
+   ```sql
+   select number, updated_at from public.change_requests where status = 'building' order by updated_at;
+   ```
+   For each: if `git log origin/claude/sales-raptor-review-p1pzx2 --oneline | grep "R-<n> "` shows its commit,
+   the build was pushed -- check it out, run `npm run qa -- --fast`, and if green release it exactly as step 5
+   does (how to test from the commit and its HANDOFF line), then stop: that was this run's request. If no
+   commit is there and it has been building for over an hour, put it back (`status = 'accepted'`, queue kept)
+   with a comment saying the earlier run did not finish, and carry on to step 1.
 1. **ONE request a run**, the oldest on the queue -- a sent-back one counts (it is `accepted` again):
    ```sql
    select r.number, r.department, r.pane, r.description, r.review_summary, r.review_questions,
