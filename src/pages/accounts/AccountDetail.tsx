@@ -95,6 +95,9 @@ import {
   type AccountEmail,
 } from '../../lib/accountEmails'
 import { EmailsPanel } from './EmailsPanel'
+import { SmsPanel } from './SmsPanel'
+import { fetchAccountSms } from '../../lib/smsHistory'
+import type { AccountSms } from '../../lib/smsView'
 import { clockNow, clockToday } from '../../lib/clock.ts'
 /* The same four helpers the mailbox answers its own mail with. Written once, so a reply-all from
    an account and a reply-all from the mailbox cannot disagree about who is on a thread. */
@@ -151,7 +154,7 @@ import { whatsAppOpening } from '../../lib/whatsapp'
 import { recordWhatsApp } from '../../lib/accountWhatsApp'
 import { mayHandOutFor } from '../../lib/handoverUpload'
 
-type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'Documents'
+type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'SMS' | 'Documents'
 
 /**
  * How the Overview arranges its six panels.
@@ -214,6 +217,7 @@ function AccountPage() {
   const [settlement, setSettlement] = useState<Settlement | null>(null)
   const [settlementTick, setSettlementTick] = useState(0)
   const [emails, setEmails] = useState<AccountEmail[]>([])
+  const [smsList, setSmsList] = useState<AccountSms[]>([])
   const [standing, setStanding] = useState<AccountStanding>({ directors: [], judgments: [] })
   const [traces, setTraces] = useState<FiledTrace[]>([])
   /** The same debtor's accounts elsewhere on the book. Derived from the identity number. */
@@ -480,13 +484,13 @@ function AccountPage() {
          * information gained. From Paris that is a round trip of about 200ms, spent to learn
          * something we knew before the page rendered.
          */
-        const [a, l, w, d, q, e, st, tr] = await Promise.all([
+        const [a, l, w, d, q, e, st, tr, sm] = await Promise.all([
           fetchAccount(id), fetchLedgers(id), fetchWorkspace(id), fetchDocuments(id), fetchQueries(id),
-          fetchAccountEmails(id), fetchStanding(id), fetchTraces(id),
+          fetchAccountEmails(id), fetchStanding(id), fetchTraces(id), fetchAccountSms(id),
         ])
         if (cancelled) return
         setAccount(a)
-        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e); setStanding(st); setTraces(tr) }
+        if (a) { setLedgers(l); setWorkspace(w); setDocuments(d); setQueries(q); setEmails(e); setStanding(st); setTraces(tr); setSmsList(sm) }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       } finally {
@@ -625,10 +629,10 @@ function AccountPage() {
    */
   const reload = useCallback(async () => {
     if (!account) return
-    const [a, l, w, d, q, e, st, tr] = await Promise.all([
+    const [a, l, w, d, q, e, st, tr, sm] = await Promise.all([
       fetchAccount(account.id), fetchLedgers(account.id), fetchWorkspace(account.id),
       fetchDocuments(account.id), fetchQueries(account.id), fetchAccountEmails(account.id),
-      fetchStanding(account.id), fetchTraces(account.id),
+      fetchStanding(account.id), fetchTraces(account.id), fetchAccountSms(account.id),
       loadRuns(),
     ])
     if (a) setAccount(a)
@@ -638,6 +642,7 @@ function AccountPage() {
     setDocuments(d)
     setQueries(q)
     setEmails(e)
+    setSmsList(sm)
     setStanding(st)
     setTraces(tr)
     /*
@@ -1985,6 +1990,8 @@ function AccountPage() {
           { id: 'Overview', label: 'Overview' },
           { id: 'Transactions', label: 'Transactions', count: statement?.lines.length ?? 0 },
           { id: 'Emails', label: 'Emails', count: emails.length },
+          /* R-10: the words of every SMS and the time it went, beside the emails they travel with. */
+          { id: 'SMS', label: 'SMS', count: smsList.length },
           { id: 'Documents', label: 'Documents', count: documents.length },
           /*
             THE FIRM: "we should make like a separate little tab there for the workflow. Then we
@@ -2074,6 +2081,8 @@ function AccountPage() {
           />
         </Card>
       )}
+
+      {tab === 'SMS' && <SmsPanel messages={smsList} />}
 
       {tab === 'Emails' && (
         <EmailsPanel
