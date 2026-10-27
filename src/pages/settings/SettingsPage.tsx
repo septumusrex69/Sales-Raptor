@@ -614,9 +614,15 @@ function UsersTab() {
                   ) : (
                     <span className="text-slate-500">{u.role}</span>
                   )}
-                  {/* S14: the second kind of Administrator, said where the role is. */}
-                  {u.role === 'Administrator' && !hasFinanceAccess(u) && (
-                    <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600" data-testid="no-finance">no finance</span>
+                  {/*
+                    S14: THE ADMINISTRATORS WHO SEE THE MONEY ARE THE GENERAL MANAGERS. Stephan: "like a manager
+                    or general manager function ... only me and Camille can basically see the finances" (Rinda
+                    too while testing, removed at go-live). One role; this is its finance access, said by name.
+                    A plain Administrator is one without.
+                  */}
+                  {u.role === 'Administrator' && hasFinanceAccess(u) && (
+                    <span className="ml-1.5 rounded bg-gold-100 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--c-gold-deep)]"
+                      title="Administrator with finance access: Trust, Business, pay and approving payments" data-testid="general-manager">General Manager</span>
                   )}
                 </td>
                 <td className="px-2 py-1.5 text-slate-500 max-w-[16rem] truncate" title={u.email}>{u.email}</td>

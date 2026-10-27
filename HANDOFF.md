@@ -60,6 +60,14 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**GENERAL MANAGERS: ONLY STEPHAN AND CAMILLE SEE THE MONEY (27 Oct).** Stephan: "like a manager or general manager
+function ... only me and Camille can basically see the finances ... for testing it's fine to put Rinda there. But
+when we go live, we should remove Rinda as well." An Administrator WITH finance shows as **General Manager** in
+Settings -> Users. Staging: Stephan, Camille, Rinda have finance; Barry Joubert, Meloney Pergaas and Ryno do not
+(finance revoked 27 Oct, done as Stephan). **AT GO-LIVE (production):** only Stephan and Camille keep finance --
+revoke `finance_capabilities()` from every other Administrator, RINDA INCLUDED, after the
+administrators_without_finance migration is applied there.
+
 **TWO KINDS OF ADMINISTRATOR (27 Oct).** Stephan: "administrators that can access finances and ones that can't". One
 role; an Administrator WITHOUT finance has the finance set revoked (finance.view, business.view, business.income,
 people.pay, payment.approve/reverse/move). Migration **`administrators_without_finance`** (md5 89660fdd...):

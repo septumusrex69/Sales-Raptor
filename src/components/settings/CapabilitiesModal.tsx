@@ -96,7 +96,7 @@ export function CapabilitiesModal({ user, onClose, onSave }: {
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600" data-testid="capability-finance-note">
             {currentUser?.id === user.id
               ? 'You are an Administrator without finance access, so you cannot change your own permissions.'
-              : 'You are an Administrator without finance access: Trust, Business, pay and approving payments can only be given or taken away by an Administrator who has them.'}
+              : 'Trust, Business, pay and approving payments can only be given or taken away by a General Manager (an Administrator with finance access).'}
           </p>
         )}
         {groups.map(([group, caps]) => (
