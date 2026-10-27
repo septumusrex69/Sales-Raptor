@@ -3,8 +3,10 @@ import { Check, Loader2, RotateCcw, ShieldCheck } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import {
   CAPABILITIES, CAPABILITY_ORDER, ROLE_CAPABILITIES, capabilitiesOf, type Capability,
+  hasFinanceAccess, mayChangeCapability,
 } from '../../lib/capabilities.ts'
 import type { User } from '../../types'
+import { useAuth } from '../../store/AuthContext'
 
 /**
  * WHAT ONE PERSON MAY DO, AND WHAT THAT IS A DEPARTURE FROM.
@@ -42,8 +44,11 @@ export function CapabilitiesModal({ user, onClose, onSave }: {
      from the two columns would be a second opinion about what this person may do. */
   const [held, setHeld] = useState<Set<Capability>>(() => capabilitiesOf(user))
   const [busy, setBusy] = useState(false)
+  /* S14: an Administrator without finance cannot change finance access, nor their own permissions. */
+  const { currentUser } = useAuth()
+  const may = (c: Capability) => mayChangeCapability(currentUser, user, c)
 
-  const toggle = (c: Capability) => setHeld((prev) => {
+  const toggle = (c: Capability) => may(c) && setHeld((prev) => {
     const next = new Set(prev)
     if (next.has(c)) next.delete(c); else next.add(c)
     return next
@@ -87,6 +92,13 @@ export function CapabilitiesModal({ user, onClose, onSave }: {
       width={620}
     >
       <div className="space-y-4">
+        {!hasFinanceAccess(currentUser) && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600" data-testid="capability-finance-note">
+            {currentUser?.id === user.id
+              ? 'You are an Administrator without finance access, so you cannot change your own permissions.'
+              : 'You are an Administrator without finance access: Trust, Business, pay and approving payments can only be given or taken away by an Administrator who has them.'}
+          </p>
+        )}
         {groups.map(([group, caps]) => (
           <div key={group}>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{group}</p>
@@ -102,7 +114,10 @@ export function CapabilitiesModal({ user, onClose, onSave }: {
                     key={c}
                     type="button"
                     onClick={() => toggle(c)}
-                    className={`w-full text-left flex items-start gap-2.5 px-2.5 py-2 rounded-lg border transition-colors ${
+                    disabled={!may(c)}
+                    title={may(c) ? undefined : 'Only an Administrator with finance access can change this.'}
+                    data-testid="capability" data-capability={c}
+                    className={`w-full text-left flex items-start gap-2.5 px-2.5 py-2 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       mark ? 'border-[#c9a052] bg-gold-50' : 'border-transparent hover:bg-slate-50'}`}
                   >
                     <span className={`mt-0.5 w-4 h-4 rounded shrink-0 grid place-items-center ${

@@ -18,6 +18,7 @@ import { needsDeviceCode } from '../../lib/loginCode'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
+import { hasFinanceAccess } from '../../lib/capabilities.ts'
 import { useAppStore } from '../../store/AppStore'
 import { byDepartment, departmentOf, matchesPerson, teamKindForRole, teamsForRole } from '../../lib/departments'
 import { groupByStoredDepartment, placeInDepartment, placeInTeam, sortDepartments, teamsIn } from '../../lib/orgStructure'
@@ -612,6 +613,10 @@ function UsersTab() {
                     </select>
                   ) : (
                     <span className="text-slate-500">{u.role}</span>
+                  )}
+                  {/* S14: the second kind of Administrator, said where the role is. */}
+                  {u.role === 'Administrator' && !hasFinanceAccess(u) && (
+                    <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600" data-testid="no-finance">no finance</span>
                   )}
                 </td>
                 <td className="px-2 py-1.5 text-slate-500 max-w-[16rem] truncate" title={u.email}>{u.email}</td>

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { financeRefusal } from './_lib/auth.js'
 
 /**
  * Permanently deletes a user's login (auth.users) -- their profiles row
@@ -48,6 +49,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (userId === callerData.user.id) {
     res.status(400).json({ error: 'You can’t remove your own account.' })
+    return
+  }
+
+  const refused = await financeRefusal(admin, callerData.user.id, userId, 'remove')
+  if (refused) {
+    res.status(403).json({ error: refused })
     return
   }
 

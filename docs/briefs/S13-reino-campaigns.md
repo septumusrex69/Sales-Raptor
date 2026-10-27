@@ -6,6 +6,11 @@ HANDOFF.md, and do what the brief says."*
 
 ---
 
+> **27 Oct, Stephan widened this:** Ryno's sessions may change anything EXCEPT money (trust, business, pay,
+> payments, fees, balances, commission, payovers, settlements, the bank), the database, the permissions,
+> CLAUDE.md and `.github/` -- see "Working for the sales and marketing team" in CLAUDE.md and
+> `.github/CODEOWNERS`. The table below was the first assignment's area; it is no longer a limit.
+
 ## 0. Who you are working for, and where you may build
 
 You are working for **Reino, the marketer**, not for the administrator. Stephan has given this session

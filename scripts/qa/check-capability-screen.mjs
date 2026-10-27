@@ -74,7 +74,12 @@ ok('...and it fails closed on nobody at all',
 ok('...rather than with a bare comparison', !/current_user_role\(\) <> /.test(guard))
 /* REVERTED, NOT RAISED, deliberately: an ordinary self-edit sends the whole row back, grants
    included, and refusing it would break editing your own name for everybody. */
-ok('...silently, so an ordinary self-edit still works', !/raise exception/.test(guard))
+/* S14: THE ONE EXCEPTION, the finance block, raises -- and only when a permission value actually
+   CHANGES (is distinct from), so the ordinary self-edit above, which sends the same values back, still
+   passes. A silent revert there would tell an Administrator without finance it had saved. */
+const outsideFinance = guard.replace(/-- S14: AN ADMINISTRATOR WITHOUT FINANCE[\s\S]*?\n  end if;\n  return new;/, '')
+ok('...silently, so an ordinary self-edit still works', !/raise exception/.test(outsideFinance)
+  && /new\.id = auth\.uid\(\) and \(new\.role is distinct from old\.role/.test(guard))
 /* AND IT IS ACTUALLY ATTACHED. A function nothing fires is a comment. */
 ok('the trigger is on every update of a profile',
   /create trigger protect_profile_privileged_fields\s*\n\s*before update on public\.profiles\s*\n\s*for each row/.test(sql))

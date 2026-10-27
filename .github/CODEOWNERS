@@ -1,35 +1,71 @@
-# WHO MUST APPROVE A CHANGE, BY FOLDER (22 Oct).
+# WHO MUST APPROVE A CHANGE, BY FOLDER (22 Oct; widened 27 Oct, S14).
 #
-# The firm: a marketer may change "things that are relevant for marketing and sales", and must not
-# touch "the finances and the data side, the people owing money, the collection side ... the bank,
-# and the settings". GitHub cannot stop a collaborator editing a file; it can stop the change
-# reaching a protected branch. With the branch rule "Require review from Code Owners":
-#   - a file owned below needs the owner's approval before it can merge;
-#   - a file with NO owner (the sales lines further down) needs nobody's -- a marketer can ship it.
+# 22 Oct the firm: a marketer may change "things that are relevant for marketing and sales". 27 Oct
+# Stephan widened it for Ryno: "give him access to anything except the financial or anything that has
+# to do with finances". So everything is now open EXCEPT money -- trust, business, pay, payments,
+# fees and charges, commission, balances, remittance, the bank -- and the four things a money change
+# could hide behind: the database (every ledger and its policies live there), the rules (CLAUDE.md),
+# the permissions, and this folder. A file with no owner needs nobody's approval; an owned one waits
+# for @septumusrex69.
 #
-# THE LAST MATCHING LINE WINS, which is why the sales area un-owns itself after the catch-all, and
-# the money and consent exceptions inside it are owned again at the very end.
+# GitHub cannot stop a collaborator READING or editing a file; it stops the change reaching a protected
+# branch, and only with the branch rule "Require review from Code Owners" switched on.
+#
+# THE LAST MATCHING LINE WINS: nothing is owned by default, and the money lines below own it back.
 
-# Everything, by default: the book, the diary, collections, trust, business, settings, the database,
-# the serverless functions, the checks, and this file itself.
-*                                   @septumusrex69
+# THE MONEY SCREENS.
+/src/pages/trust/                       @septumusrex69
+/src/pages/business/                    @septumusrex69
+/src/pages/finance/                     @septumusrex69
+/src/pages/people/                      @septumusrex69
+/src/components/finance/                @septumusrex69
+/src/components/business/               @septumusrex69
+/src/components/people/                 @septumusrex69
+/src/components/accounts/SettlementPanel.tsx  @septumusrex69
+/src/components/collections/RepaymentCalculator.tsx  @septumusrex69
 
-# THE SALES AND MARKETING AREA -- no owner, so no approval needed.
-/src/pages/leads/
-/src/components/leads/
-/src/pages/deals/
-/src/pages/contacts/
-/src/components/contacts/
-/src/pages/reps/
-/src/pages/news/
-# The news screens' calls to the server. Safe to un-own: who may be mailed, the opt-in and the
-# unsubscribe are enforced in api/_lib/marketing.ts and src/lib/marketing.ts, both still owned.
-/src/lib/marketingApi.ts
-/src/pages/Dashboard.tsx
+# THE MONEY RULES: what a debtor owes and is charged, what the firm earns, what a client is paid.
+/src/lib/accountBalance.ts              @septumusrex69
+/src/lib/accountCharges.ts              @septumusrex69
+/src/lib/actionTariff.ts                @septumusrex69
+/src/lib/annexureB.ts                   @septumusrex69
+/src/lib/balanceInput.ts                @septumusrex69
+/src/lib/bank*.ts                       @septumusrex69
+/src/lib/business*.ts                   @septumusrex69
+/src/lib/chargeEngine.ts                @septumusrex69
+/src/lib/clerkCommission.ts             @septumusrex69
+/src/lib/client*Payovers.ts             @septumusrex69
+/src/lib/clientBusinessReceipts.ts      @septumusrex69
+/src/lib/clientLedger.ts                @septumusrex69
+/src/lib/clientStatement.ts             @septumusrex69
+/src/lib/commission*.ts                 @septumusrex69
+/src/lib/excessCredit*.ts               @septumusrex69
+/src/lib/feeLabel.ts                    @septumusrex69
+/src/lib/interestAccrual.ts             @septumusrex69
+/src/lib/money.ts                       @septumusrex69
+/src/lib/payment*.ts                    @septumusrex69
+/src/lib/payover*.ts                    @septumusrex69
+/src/lib/quotedCommission.ts            @septumusrex69
+/src/lib/recordPayment.ts               @septumusrex69
+/src/lib/remittance*.ts                 @septumusrex69
+/src/lib/repayment*.ts                  @septumusrex69
+/src/lib/settlement*.ts                 @septumusrex69
+/src/lib/simplePay.ts                   @septumusrex69
+/src/lib/storedBalance.ts               @septumusrex69
+/src/lib/trust*.ts                      @septumusrex69
+/src/lib/firmSettings*.ts               @septumusrex69
 
-# INSIDE IT, STILL OWNED: anything that sets money terms or records consent.
-/src/components/leads/ConvertLeadModal.tsx    @septumusrex69
-/src/components/leads/SendMandateModal.tsx    @septumusrex69
-/src/pages/news/OptInPage.tsx                 @septumusrex69
-/src/pages/news/UnsubscribePage.tsx           @septumusrex69
-/.github/                                     @septumusrex69
+# WHAT A MONEY CHANGE COULD HIDE BEHIND.
+/supabase/                              @septumusrex69
+/src/lib/capabilities.ts                @septumusrex69
+/src/lib/permissions.ts                 @septumusrex69
+/CLAUDE.md                              @septumusrex69
+/vercel.json                            @septumusrex69
+/package.json                           @septumusrex69
+/package-lock.json                      @septumusrex69
+/.github/                               @septumusrex69
+
+# CONSENT (POPIA): who may be mailed at all.
+/src/pages/news/OptInPage.tsx           @septumusrex69
+/src/pages/news/UnsubscribePage.tsx     @septumusrex69
+/src/lib/clientNews.ts                  @septumusrex69

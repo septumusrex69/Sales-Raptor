@@ -509,20 +509,24 @@ fails.** A check that passes on broken code is worse than none. Two traps seen h
 
 ## Working for the sales and marketing team
 
-Some sessions work for a marketer (Reno), not for the firm's administrator. **Ask which at the start
-if it is not said.** A sales-and-marketing session changes only the sales side: `src/pages/leads`,
-`src/components/leads`, `src/pages/deals`, `src/pages/contacts`, `src/components/contacts`,
-`src/pages/reps`, `src/pages/news` and `src/pages/Dashboard.tsx` -- see `.github/CODEOWNERS`. It does
-not touch debtors, collections, the diary, trust, the bank, business, clients' money terms, settings,
-`supabase/`, `api/` or the checks, and it never writes to any database. It works on its own branch
-from `claude/sales-raptor-review-p1pzx2` and opens a pull request into it; a pull request that strays
-outside the sales area waits for the administrator's approval, by design. If the work genuinely
-needs a change outside the area, say so in the pull request rather than working round it.
+Some sessions work for the marketer, **Ryno** (Ryno Buitendag; "Reino" in the S13 brief), not for the
+firm's administrator. **Ask which at the start if it is not said.**
 
-**A brief can widen the area for one assignment, and only the administrator writes one.** S13 · Campaigns
-(`docs/briefs/S13-reino-campaigns.md`, 26 Oct) gives Reino's session the whole News & campaigns section --
-including `src/lib/marketing.ts`, the campaign server in `api/` and the campaign checks -- and nothing else.
-The owned files in it still wait for the administrator's approval on the pull request; that is the design.
+**EVERYTHING EXCEPT MONEY (Stephan, 27 Oct, widening the 22 Oct sales-only rule):** *"give him access to
+anything except the financial or anything that has to do with finances."* A session working for Ryno may
+change anything in the app EXCEPT what `.github/CODEOWNERS` owns: trust, business, pay and the People
+screens, payments, fees and charges (Annexure B, the charge engine), interest and balances, commission,
+payovers and remittance, settlements, the bank -- and the database (`supabase/`), the permissions, this
+file and `.github/`. `check-codeowners` holds that list to the files that exist. It **never writes to any
+database** and never touches Vercel or Supabase settings. It works on its own branch from
+`claude/sales-raptor-review-p1pzx2` and opens a pull request into it; a pull request that touches an owned
+file waits for the administrator's approval, by design. If the work genuinely needs a money change, say so
+in the pull request rather than working round it. In the app, Ryno's own login has the money permissions
+revoked (finance, business, pay, payments, settlements), on staging since 27 Oct.
+
+**A brief can set one assignment**, and only the administrator writes one: S13 · Campaigns
+(`docs/briefs/S13-reino-campaigns.md`, 26 Oct). Where a brief is narrower than the rule above, the rule above
+wins (Stephan widened it after the brief was written).
 
 ## Working in parallel
 
