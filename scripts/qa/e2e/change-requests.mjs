@@ -248,6 +248,39 @@ try {
     && patch.body.status === 'declined' && patch.body.admin_note === 'Covered by R-8.')
   await t.shot(ap, 'change-requests-2-admin')
   await ap.context().close()
+
+  /*
+   * 4. THE BELL (S14, Raptor H13). The firm, 27 Oct: every line said "just now", two replies on one
+   * request were two lines, and a request already opened and approved still showed unread.
+   */
+  const NOTIFS = [
+    { id: 'n1', type: 'change_request.reply', message: 'Alianna replied on R-7: Red', link: '/requests?r=7', read: false, created_at: '2026-10-27T05:43:50Z' },
+    { id: 'n2', type: 'change_request.reply', message: 'Alianna replied on R-7: Orange after all', link: '/requests?r=7', read: false, created_at: '2026-10-27T05:43:51Z' },
+    { id: 'n3', type: 'change_request.new', message: 'Alianna asked for a change (R-8)', link: '/requests?r=8', read: false, created_at: '2026-10-27T05:39:00Z' },
+  ]
+  const bellWrites = []
+  const { page: bp } = await signedInPage(browser, ADMIN, [
+    [(u, req) => req.method() === 'PATCH' && u.includes('/rest/v1/notifications'), (u, req) => {
+      bellWrites.push({ url: decodeURIComponent(u), body: req.postDataJSON() }); return { status: 200, body: [] }
+    }],
+    [(u) => u.includes('/rest/v1/notifications'), () => ({ body: NOTIFS })],
+    ...handlers(ADMIN, []),
+  ], [], { now: '2026-10-27T09:00:00+02:00' })
+  await open(bp, '/requests')
+  await bp.getByTestId('notifications-count').waitFor({ timeout: 20000 })
+  t.check('the bell counts things waiting, not messages: two replies on R-7 are one', await bp.getByTestId('notifications-count').innerText(), '2')
+  await bp.getByTestId('notifications-bell').click()
+  const lines = bp.getByTestId('notification')
+  t.check('...one line per request, the newest message on it', JSON.stringify(await lines.evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent))),
+    JSON.stringify(['Alianna replied on R-7: Orange after all', 'Alianna asked for a change (R-8)']))
+  t.check('...with a real date and time, and how many more', JSON.stringify(await bp.getByTestId('notification-when').allInnerTexts()),
+    JSON.stringify(['Today 07:43 · and 1 more', 'Today 07:39']))
+  await bp.keyboard.press('Escape')
+  await open(bp, '/requests?r=8')
+  await bp.getByTestId('request-panel').waitFor({ timeout: 20000 })
+  await bp.waitForTimeout(500)
+  t.ok('opening R-8 marks its notification read, and nothing else', bellWrites.length === 1 && /id=eq\.n3/.test(bellWrites[0].url) && bellWrites[0].body.read === true)
+  await bp.context().close()
 } catch (e) {
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message.split('\n')[0] : e})`, false)
 } finally {

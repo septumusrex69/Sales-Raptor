@@ -43,6 +43,14 @@ still capping. The campaign preview's "No fee today" box and `writtenOffUncharge
 `fee_estimate` are the real figure. check-charge-engine (41, +prescription cases), check-campaign-sender (34),
 e2e/campaigns (24) -- the old engine fails both checks. Fees recorded at R0 before today stay R0 (immutable).
 
+**THE BELL (27 Oct).** Stephan: every notification said "just now", R-6's two replies were two lines, and R-8 stayed
+unread after he opened and approved it ("the notifications are not linked to the actions"). "Just now" was the staging
+clock: `timeAgo` measures from the app's TODAY (staging, 23 Oct) and a notification is stamped on the real clock, so
+each looked to be in the future. Now (`src/lib/notificationGroups.ts`): a real date and time ("Today 07:39",
+"26 Oct 14:36", Johannesburg, real clock); one line per LINK (newest message, "and N more", unread while any is; the
+badge counts lines); and opening a page a notification links to marks it read (`linkIsOpen`, watched from the bell,
+so every link works without the page knowing). check-notification-groups (18), e2e/change-requests +4 -- both seen failing.
+
 **Stephan's other answers (27 Oct):** A.1 -- a handover row with no client reference **keeps being refused**
 (Rinda's Bonnitta sheet needs the references). A.2 -- "Client Division" ignored: **already done by S11**.
 
