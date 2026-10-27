@@ -45,6 +45,8 @@ e2e/campaigns (24) -- the old engine fails both checks. Fees recorded at R0 befo
 
 **R-9 (builder run): a team leader can send a ticket back to the clerk.** On a ticket awaiting the team leader, a "Send back to <clerk>" box asks for the question, files it on the thread, hands the ticket to whoever raised it at the `agent` stage and rings their bell (`canSendBack`, `SendBack.tsx`, `updateQuery` `bell`). `check-send-back` (12), seen failing. No migration.
 
+**R-10 (builder run, 27 Oct): the account has an SMS tab** beside Emails -- every SMS to or from the debtor in full, with the time it went (Johannesburg, 24-hour), where it got to, and a count on the tab (`SmsPanel`, `smsView.ts`, `smsHistory.ts`; read-only, from `sms_messages`, which any signed-in person could already read). The Activity timeline's "SMS sent to ..." line is unchanged. `check-account-sms` (15) and `e2e/account-sms` (8), both seen failing. No migration.
+
 **R-6 (28 Oct builder run): the Diary row shows Raptor's case number** before the debtor's name (Rinda: Diary, case number). The client and debtor name were already on the row. `check-diary-case-number` (6), seen failing. No migration.
 
 **THE BELL (27 Oct).** Stephan: every notification said "just now", R-6's two replies were two lines, and R-8 stayed
