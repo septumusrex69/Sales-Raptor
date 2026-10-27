@@ -14,7 +14,7 @@ import {
 /* The kind's own words, from the file that OWNS the dispute vocabulary rather than through the
    module that re-exports the queries half of it. */
 import { ESCALATION_KINDS, escalationCard } from '../../lib/disputeCategories'
-import { nextAction, ticketThread } from '../../lib/ticketThread.ts'
+import { canSendBack, nextAction, sendBackNote, ticketThread } from '../../lib/ticketThread.ts'
 import { TicketThread } from '../../components/queries/TicketThread'
 import {
   acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft,
@@ -28,6 +28,7 @@ import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
 import { TicketWork } from '../../components/queries/TicketWork'
+import { SendBack } from '../../components/queries/SendBack'
 import { CloseForm } from '../accounts/QueryPanel'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
@@ -513,6 +514,29 @@ export function QueryDetail() {
         Its record is the ticket itself and the rows below, which is why it has a page of its own.
         Absent rather than disabled: a panel of controls that all refuse reads as a fault.
       */}
+      {canSendBack(q, currentUser?.id) && (
+        <SendBack
+          toName={q.raisedByName}
+          busy={busy}
+          onSend={async (question) => {
+            setError(null)
+            try {
+              await updateQuery(q.id, { ownerId: q.raisedBy, stage: 'agent' }, {
+                accountId: q.accountId,
+                actorId: currentUser?.id ?? null,
+                actorName: currentUser?.name ?? null,
+                note: sendBackNote(q.raisedByName, question),
+                debtorName: data.account?.debtorName ?? null,
+                bell: `${currentUser?.name ?? 'The team leader'} sent back${data.account?.debtorName ? ` ${data.account.debtorName}` : ' a ticket'} with a question for you.`,
+              })
+              await load()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            }
+          }}
+        />
+      )}
+
       {q.accountId && (
         <TicketWork
           canReachClient={mayWriteToClient}

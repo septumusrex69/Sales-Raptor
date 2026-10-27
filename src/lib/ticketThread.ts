@@ -226,3 +226,29 @@ export function nextAction(input: { stage: string; status: string }): string | n
   if (input.status === 'closed') return null
   return NEXT_ACTION[input.stage] ?? null
 }
+
+/**
+ * SENDING A TICKET BACK TO THE CLERK WHO RAISED IT.
+ *
+ * THE FIRM (R-9, Administration · Settings): when a clerk asks a team leader for help and the team
+ * leader has a question or needs clarity, there must be a button that refers it back to the clerk
+ * and takes it off the team leader's desk -- "currently the clerk is not notified once there is a
+ * question from the team leader ... so he will then not be aware and the query will not be
+ * resolved."
+ *
+ * ONLY WHILE IT IS AWAITING THE TEAM LEADER, and only to somebody who is not the clerk themselves.
+ * Back is the `agent` stage with the raiser as owner -- the same two fields a hand-over writes, so
+ * the board, the badge and the bell need nothing new to know about it. A closed ticket is finished.
+ */
+export function canSendBack(
+  q: { stage: string; status: string; raisedBy: string | null },
+  actorId: string | null | undefined,
+): boolean {
+  if (q.status === 'closed' || q.stage !== 'team_leader') return false
+  return !!q.raisedBy && q.raisedBy !== actorId
+}
+
+/** The question, as it is filed on the ticket's thread where the clerk will read it. */
+export function sendBackNote(toName: string | null, question: string): string {
+  return `Sent back to ${toName?.trim() || 'the clerk'}: ${question.trim()}`
+}

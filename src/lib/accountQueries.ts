@@ -734,6 +734,8 @@ async function tellTheOwner(input: {
   requestFor?: string | null
   debtorName?: string | null
   raisedByName?: string | null
+  /** A sentence of its own, where "is waiting for you" would say too little (a ticket sent back). */
+  message?: string
 }): Promise<void> {
   const owner = input.ownerId
   if (!owner || owner === input.actorId) return
@@ -746,7 +748,7 @@ async function tellTheOwner(input: {
     await supabase.rpc('notify_user', {
       p_user_id: owner,
       p_type: 'query.assigned',
-      p_message: `${what}${about}${from} is waiting for you.`,
+      p_message: input.message ?? `${what}${about}${from} is waiting for you.`,
       /* STRAIGHT TO THE TICKET, because that is where every one of these is answered. A link to
          the board would make the reader find it again among everybody else's. */
       p_link: `/queries/${input.queryId}`,
@@ -802,6 +804,8 @@ export async function updateQuery(
     note?: string
     /** Who it is about, for the new owner's notification only. See tellTheOwner. */
     debtorName?: string | null
+    /** Rings the new owner's bell with these words instead of the usual "is waiting for you". */
+    bell?: string
   },
 ): Promise<AccountQuery> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -869,6 +873,7 @@ export async function updateQuery(
       requestFor: q.requestFor,
       debtorName: context.debtorName ?? null,
       raisedByName: context.actorName,
+      message: context.bell,
     })
   }
   return q
