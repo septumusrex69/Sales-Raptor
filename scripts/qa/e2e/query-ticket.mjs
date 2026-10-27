@@ -33,7 +33,7 @@ const QUERY = {
   id: QUERY_ID, account_id: null, handover_id: BATCH_ID,
   description: 'handover.csv — 1 account could not be opened and needs to be sent again.',
   kind: 'import', category: null, status: 'open', stage: 'liaison',
-  owner_id: PROFILE.id, raised_by: PROFILE.id, raised_by_name: 'Handover import',
+  ticket_no: 1002, owner_id: PROFILE.id, raised_by: PROFILE.id, raised_by_name: 'Handover import',
   raised_at: '2026-09-22T06:00:00Z', chase_on: null,
   outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false,
   closed_at: null, closed_by: null, closed_by_name: null,

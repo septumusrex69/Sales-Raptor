@@ -19,7 +19,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-ticket-work.mjs
  */
 import { readFileSync } from 'node:fs'
-import { ticketBody, ticketSubject } from '../../src/lib/ticketEmail.ts'
+import { ticketBody, ticketNumberIn, ticketSubject } from '../../src/lib/ticketEmail.ts'
 import { QUERY_STAGE_LABEL, stageLine } from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
@@ -115,6 +115,19 @@ check('the ticket number closes the subject, after what is asked for',
   ticketSubject({ ...THEIRS, ticketNo: 1016 }), 'Proof of communication — Ofentse Thema — RRC00008 — your ref INV-7731 — ticket T-1016')
 ok('...and the body asks the client to quote it', ticketBody({ ...THEIRS, ticketNo: 1016 }).includes('Please quote ticket T-1016 in any email about this.'))
 ok('...and neither invents one where there is none', !/T-/.test(ticketSubject(THEIRS)) && !/T-/.test(ticketBody(THEIRS)))
+/* ...and a NEW email that quotes it is read back to that ticket (S14). */
+check('a subject that quotes a ticket is read back to it',
+  [ticketNumberIn('RE: Proof of communication — Ofentse Thema — RRC00008 — ticket T-1016'), ticketNumberIn('t-1016 bank statements attached'), ticketNumberIn('About ticket T-1016.')].join(), '1016,1016,1016')
+check('...but not a number that only looks like one', [ticketNumberIn('PAT-10234'), ticketNumberIn('INVT-1042'), ticketNumberIn('T-12'), ticketNumberIn('T-10165x'), ticketNumberIn(null)].join(), ',,,,')
+check('...nor an email about two tickets -- it is about both', ticketNumberIn('T-1016 and T-1020'), null)
+check('...though the same one twice is still one', ticketNumberIn('T-1016 (re T-1016)'), 1016)
+{
+  const sync = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url), 'utf8')
+  const find = sync.slice(sync.indexOf('async function findAccount('))
+  const thread = find.indexOf("via: 'thread'"), ticket = find.indexOf("via: 'ticket'"), address = find.indexOf("via: 'address'")
+  ok('the sync files a quoted ticket number on the ticket: after the thread, before the address',
+    thread > 0 && ticket > thread && address > ticket && /\.from\('account_queries'\)\.select\('id, account_id'\)\.eq\('ticket_no', ticketNo\)/.test(find))
+}
 ok('...a dispute names the account and both references too',
   ticketBody({ ...THEIRS, kind: 'dispute', requestFor: null }).includes('Ofentse Thema (RRC00008, your reference INV-7731) has disputed this account'))
 check('...left out where it only repeats the account number', ticketSubject({ ...REQUEST, clientReference: ' rrc00008 ' }), ticketSubject(REQUEST))

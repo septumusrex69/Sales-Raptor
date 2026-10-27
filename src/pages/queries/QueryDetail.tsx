@@ -9,6 +9,7 @@ import {
   ageInDays, closeQuery, fetchQuery, isStale, stageLine, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type QueryStage,
+  ticketLabel,
 } from '../../lib/accountQueries'
 /* The kind's own words, from the file that OWNS the dispute vocabulary rather than through the
    module that re-exports the queries half of it. */
@@ -360,15 +361,14 @@ export function QueryDetail() {
               {/*
                 WHAT KIND OF TICKET, rather than a number.
                 
-                THE FIRM'S DESIGN SHOWS A REFERENCE -- "DSP-00428" -- AND RAPTOR HAS NONE. A ticket
-                is identified by its row id, which is a UUID: not something anybody reads out on a
-                telephone, and printing eight characters of one here would look like a reference
-                while being unusable as one. A real ticket number is a sequence and a migration, and
-                it is worth having; inventing the look of one is not. So this says what the ticket
-                IS, which is the thing the kind already answers honestly.
+                THE FIRM'S DESIGN SHOWED A REFERENCE -- "DSP-00428" -- AND RAPTOR HAD NONE; a UUID is
+                not something anybody reads out on a telephone. S14 made the real thing: a sequence
+                and a migration (ticket_numbers), T-1001 onwards, one series for every kind. It is
+                printed beside what the ticket IS, and the client is asked to quote it.
               */}
               <p className="text-[11px] uppercase tracking-wide text-white/50">
-                {escalationCard(q.kind).label}
+                <span className="font-mono font-semibold text-white/80" data-testid="ticket-number">{ticketLabel(q)}</span>
+                {' · '}{escalationCard(q.kind).label}
               </p>
               <h1 className="text-lg sm:text-xl font-semibold mt-0.5 wrap-anywhere">
                 {q.category || q.requestFor || ESCALATION_KINDS[q.kind ?? 'dispute'].label}

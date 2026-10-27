@@ -7,6 +7,7 @@ import {
   closeQuery, isStale, markDisputeReceived, markOutcomeDone, openDisputeOn, updateQuery,
   stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, stageLine,
   type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
+  ticketLabel,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
@@ -234,6 +235,7 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
         least useful of them at a glance, and the timeline records it on the "Dispute raised" note.
       */}
       <p className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-1.5">
+        <span className="shrink-0 font-mono text-[10.5px] font-semibold text-slate-500" data-testid="ticket-number">{ticketLabel(q)}</span>
         {/*
           WHERE IT STANDS AND WHEN IT COMES BACK, in one breath.
 

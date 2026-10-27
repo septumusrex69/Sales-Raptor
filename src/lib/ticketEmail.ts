@@ -144,3 +144,16 @@ export function ticketBody(input: TicketLetterInput): string {
      to be edited by a person and an empty last line is where their own name goes. */
   return lines.join('\n').replace(/\n+$/, '\n')
 }
+
+/*
+ * THE TICKET A SUBJECT QUOTES (S14). A reply finds its ticket by Message-ID already; a NEW email only
+ * can if it quotes the number we put in every subject and asked for back. Read as "T-" and four or
+ * more digits standing alone -- the series starts at 1001 -- so "PAT-10234", "T-12" or an invoice
+ * "INVT-1042" are not tickets. Exactly one distinct number, or none: an email quoting two tickets is
+ * about both, and choosing one would file it out of sight of the other.
+ */
+export function ticketNumberIn(subject: string | null | undefined): number | null {
+  const found = new Set<number>()
+  for (const m of (subject ?? '').matchAll(/(?<![A-Za-z0-9-])T-(\d{4,})(?![A-Za-z0-9])/gi)) found.add(Number(m[1]))
+  return found.size === 1 ? [...found][0] : null
+}

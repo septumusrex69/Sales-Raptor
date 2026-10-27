@@ -16,6 +16,7 @@ import {
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
 import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
+import { ticketNumberIn } from '../../src/lib/ticketEmail.js'
 import { bodyToStore, extractPictures, tooBigFor } from '../../src/lib/mailBodyCache.js'
 import { savePictures } from './mailPictures.js'
 import { actsOnItsOwn, bounceSeverity } from '../../src/lib/bounceSeverity.js'
@@ -638,7 +639,7 @@ async function findAccount(
   admin: SupabaseClient,
   fromAddress: string,
   parsed: { inReplyTo?: string; references?: string | string[]; subject?: string },
-): Promise<{ accountId: string; queryId: string | null; via: 'thread' | 'address' | 'reference' } | null> {
+): Promise<{ accountId: string; queryId: string | null; via: 'thread' | 'ticket' | 'address' | 'reference' } | null> {
   for (const id of threadIds(parsed.inReplyTo, parsed.references)) {
     const { data } = await admin
       .from('account_emails')
@@ -653,6 +654,19 @@ async function findAccount(
         via: 'thread',
       }
     }
+  }
+
+  /*
+   * THE TICKET NUMBER IN THE SUBJECT, SECOND (S14). After the thread, which is a fact about the
+   * message; before the sender's address, because a ticket number is an identifier WE wrote and asked
+   * the client to quote, and it says which ticket as well as which account -- the address says only
+   * whose account. A ticket about a whole handover sheet has no account and cannot be filed this way.
+   */
+  const ticketNo = ticketNumberIn(parsed.subject)
+  if (ticketNo !== null) {
+    const { data: ticket } = await admin
+      .from('account_queries').select('id, account_id').eq('ticket_no', ticketNo).maybeSingle()
+    if (ticket?.account_id) return { accountId: ticket.account_id as string, queryId: ticket.id as string, via: 'ticket' }
   }
 
   const address = normaliseAddress(fromAddress)

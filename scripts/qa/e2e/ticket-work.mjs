@@ -32,7 +32,7 @@ const Q = {
   description: 'Debtor stated that they were not communicated with before handover and they feel '
     + 'like they are not responsible for fees.',
   category: null, status: 'open', stage: 'liaison',
-  owner_id: LIAISON.id, raised_by: PROFILE.id, raised_by_name: 'Vusi Maringa',
+  ticket_no: 1016, owner_id: LIAISON.id, raised_by: PROFILE.id, raised_by_name: 'Vusi Maringa',
   raised_at: '2026-10-02T06:39:59Z', chase_on: null,
   alleged_on: null, received_on: null, in_writing: false, sent_to_client_at: null,
   outcome: null, outcome_action: null, outcome_amount: null, outcome_done: false,
@@ -95,6 +95,8 @@ try {
 
   /* ---------- the three things a person does with a ticket ---------- */
 
+  /* S14: every ticket has a number, and it heads the ticket. */
+  t.check('the ticket says its number', (await page.getByTestId('ticket-number').first().innerText()).trim(), 'T-1016')
   t.ok('the ticket offers to email the client', /Email the client/.test(body))
   t.ok('...to log a call', /Log a call/.test(body))
   t.ok('...and to add a note', /Add a note/.test(body))
@@ -163,12 +165,14 @@ try {
   const inputs = await dialog.locator('input').evaluateAll((els) => els.map((e) => e.value))
   t.ok('the subject is already written',
     inputs.some((v) => /Proof of communication .* Mhlongo/.test(v)))
+  t.ok('...ending with the ticket number, so the client can quote it', inputs.some((v) => / — ticket T-1016$/.test(v)))
 
   const drafted = await dialog.locator('textarea').first().inputValue().catch(() => '')
   t.ok('...and so is the body', drafted.length > 100)
   t.ok('...asking for the thing the ticket asks for', /proof of communication/i.test(drafted))
   /* THE CLERK'S OWN WORDS, QUOTED. They wrote them with the debtor on the telephone. */
   t.ok('...quoting what was recorded on the account', /not communicated with before handover/.test(drafted))
+  t.ok('...and asking for the ticket number back', /Please quote ticket T-1016 in any email about this\./.test(drafted))
   /*
    * AND NOT ONE BRACE. Every template in the library is a notice to a DEBTOR; this is a colleague
    * at a credit provider. A merge field reaching a client's inbox would mean the two vocabularies

@@ -9,6 +9,7 @@ import { formatDate } from '../../data/mockData'
 import {
   ageInDays, canSendToClient, fetchAllQueries, isStale, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL, type QueryStage, type QueueRow,
+  ticketLabel,
 } from '../../lib/accountQueries'
 import { escalationCard } from '../../lib/disputeCategories'
 import { clockToday } from '../../lib/clock.ts'
@@ -369,6 +370,7 @@ export function DisputesBoard() {
                     </td>
                     <td className="px-2 py-1.5 text-slate-600 max-w-[26rem] truncate"
                       title={[q.description, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}>
+                      <span className="mr-1.5 font-mono text-[11px] font-semibold text-slate-500" data-testid="ticket-number">{ticketLabel(q)}</span>
                       {/* The same chip as the card, from the same record -- see DisputeCard. */}
                       <span className={`mr-1.5 text-[10px] font-semibold uppercase tracking-wide inline-block px-1.5 py-0.5 rounded align-middle ${escalationCard(q.kind).tint}`}>
                         {escalationCard(q.kind).label}
@@ -450,6 +452,7 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
         quiet. A dispute still shows its classification, which is the line people already read.
       */}
       <div className="flex items-center gap-1.5 whitespace-nowrap min-w-0">
+        <span className="shrink-0 font-mono text-[10.5px] font-semibold text-slate-500" data-testid="ticket-number">{ticketLabel(q)}</span>
         <span className={`shrink-0 text-[9.5px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
           {escalationCard(q.kind).label}
         </span>

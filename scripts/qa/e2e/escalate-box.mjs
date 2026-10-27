@@ -162,6 +162,7 @@ try {
     owner_id: LIAISON.id,
     raised_by: PROFILE.id,
     raised_by_name: PROFILE.name,
+    ticket_no: 1020,
     raised_at: '2026-10-02T06:39:59Z',
     chase_on: null,
     alleged_on: null,

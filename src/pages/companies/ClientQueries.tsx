@@ -7,6 +7,7 @@ import {
   ageInDays, clientSection, fetchQueriesForClient, isStale,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type ClientSection, type QueryStage, type QueueRow,
+  ticketLabel,
 } from '../../lib/accountQueries'
 import { clockToday } from '../../lib/clock.ts'
 
@@ -176,6 +177,7 @@ export function ClientQueries({ companyId, section }: {
                       */}
                       <Link to={`/queries/${q.id}`} title={q.description}
                         className="block max-w-[20rem] truncate text-slate-800 hover:text-brand-600">
+                        <span className="mr-1.5 font-mono text-[11px] font-semibold text-slate-500" data-testid="ticket-number">{ticketLabel(q)}</span>
                         {q.description}
                       </Link>
                     </td>
