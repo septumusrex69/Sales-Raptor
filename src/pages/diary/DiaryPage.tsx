@@ -707,6 +707,13 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
               className="rounded border-slate-300 shrink-0"
               title={`Select ${debtorName(row)}`} />
           )}
+          {/* Raptor's case number first, as on the Accounts list (R-6): the reference every notice quotes. */}
+          {row.account.caseNumber && (
+            <span className="shrink-0 tabular-nums text-[11.5px] text-slate-400" title="Raptor case number"
+              data-testid="diary-case-number">
+              {row.account.caseNumber}
+            </span>
+          )}
           <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
             className="font-medium text-slate-800 hover:text-[var(--c-steel)] truncate max-w-[16rem] shrink-0"
             title={debtorName(row)}>

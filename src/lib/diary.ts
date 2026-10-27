@@ -71,6 +71,8 @@ export interface DiaryRow extends DiaryEntry {
     id: string
     companyId: string | null
     accountNumber: string | null
+    /* Raptor's own number -- unique, and the one every notice quotes. R-6 asked for it on the day list. */
+    caseNumber: string | null
     debtorFirstName: string | null
     debtorSurname: string | null
     capitalOutstanding: number
@@ -153,6 +155,7 @@ const toRow = (r: any): DiaryRow => ({
     // row of a list that pages out of a six-figure table, to fetch something already in memory.
     companyId: r.debtor_accounts?.company_id ?? null,
     accountNumber: r.debtor_accounts?.account_number ?? null,
+    caseNumber: r.debtor_accounts?.case_number ?? null,
     debtorFirstName: r.debtor_accounts?.debtor_first_name ?? null,
     debtorSurname: r.debtor_accounts?.debtor_surname ?? null,
     capitalOutstanding: Number(r.debtor_accounts?.capital_outstanding ?? 0),
@@ -183,7 +186,7 @@ const ROW_SELECT = `
   promises_to_pay!diary_entries_promise_id_fkey ( id, amount, due_on, status ),
   campaigns!diary_entries_campaign_id_fkey ( name, body, ends_on, call_kind, status ),
   debtor_accounts!diary_entries_account_id_fkey (
-    id, company_id, account_number, debtor_first_name, debtor_surname,
+    id, company_id, account_number, case_number, debtor_first_name, debtor_surname,
     capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at, ended_as, book,
     prescription_date, main_comment, main_comment_at
   )

@@ -43,6 +43,8 @@ still capping. The campaign preview's "No fee today" box and `writtenOffUncharge
 `fee_estimate` are the real figure. check-charge-engine (41, +prescription cases), check-campaign-sender (34),
 e2e/campaigns (24) -- the old engine fails both checks. Fees recorded at R0 before today stay R0 (immutable).
 
+**R-6 (28 Oct builder run): the Diary row shows Raptor's case number** before the debtor's name (Rinda: Diary, case number). The client and debtor name were already on the row. `check-diary-case-number` (6), seen failing. No migration.
+
 **THE BELL (27 Oct).** Stephan: every notification said "just now", R-6's two replies were two lines, and R-8 stayed
 unread after he opened and approved it ("the notifications are not linked to the actions"). "Just now" was the staging
 clock: `timeAgo` measures from the app's TODAY (staging, 23 Oct) and a notification is stamped on the real clock, so
