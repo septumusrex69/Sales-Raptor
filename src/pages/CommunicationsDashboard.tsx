@@ -12,6 +12,7 @@ import { CompareSelector, type CompareMode } from '../components/ui/CompareSelec
 import { RingDonut, type RingDonutSlice } from '../components/ui/RingDonut'
 import { DashboardPanes } from '../components/dashboard/DashboardPanes'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
+import { TicketSpeedCard } from '../components/dashboard/TicketSpeedCard'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { formatCurrency, timeAgo, TODAY } from '../data/mockData'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
@@ -543,6 +544,8 @@ export function CommunicationsDashboard({ layoutKey = 'raptor.dashboard.communic
             </div>
           </Card>
         ) },
+        /* S14: how fast each person answers and resolves tickets -- TicketSpeedCard. */
+        { id: 'ticket-speed', kind: 'wide', node: <TicketSpeedCard /> },
         { id: 'team', kind: 'wide', node: (
           <Card padded={false}>
             <div className="p-5 pb-0">

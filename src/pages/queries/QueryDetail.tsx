@@ -6,7 +6,7 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { formatDate } from '../../data/mockData'
 import {
-  ageInDays, closeQuery, fetchQuery, isStale, stageLine, updateQuery,
+  ageInDays, closeQuery, fetchQuery, fetchTicketStages, isStale, stageLine, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type QueryStage, type QueryOutcome, type QueryEffect,
   ticketLabel,
@@ -30,6 +30,8 @@ import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
 import { TicketWork } from '../../components/queries/TicketWork'
 import { SendBack } from '../../components/queries/SendBack'
 import { CloseForm } from '../accounts/QueryPanel'
+import { formatWorkingTime, ticketTimes, type StageMark } from '../../lib/ticketClock'
+import { clockNow } from '../../lib/clock'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import {
@@ -120,6 +122,8 @@ export function QueryDetail() {
    * half, and they share one modal because they produce the same record.
    */
   const [notes, setNotes] = useState<AccountNote[]>([])
+  /* S14: the ticket's stage history, which its clock is read off (ticketClock.ts). */
+  const [stages, setStages] = useState<StageMark[]>([])
   const [writing, setWriting] = useState(false)
   /* Whether the signed-in person has a mailbox at all. Mail goes out through their OWN, so the
      button says why it is disabled rather than failing on Send. Null while we are asking. */
@@ -140,6 +144,8 @@ export function QueryDetail() {
       /* NEVER FATAL, for the same reason as the mail above: a thread that will not load leaves a
          ticket somebody can still work from the row itself. */
       setNotes(await fetchQueryNotes(id).catch(() => []))
+      /* Never fatal: no history reads as one stretch with us, which is what is known. */
+      setStages(await fetchTicketStages(id).catch(() => []))
       /*
        * Only for a batch, and never fatal. A draft that has been tidied away leaves the query
        * readable rather than the page broken -- the query's own words still say what it is about.
@@ -641,6 +647,28 @@ export function QueryDetail() {
           </dl>
         </Card>
       )}
+      {/*
+        THE TICKET'S CLOCK (S14). The firm: "every query has like a timer on to say how long has it been, how
+        long did it take to resolve this" -- and BOTH figures: the time it sat with us, and the whole time it
+        was open. Office hours, so a Friday-afternoon ticket answered first thing Monday reads as an hour.
+      */}
+      {q.accountId && (() => {
+        const t = ticketTimes({
+          raisedAt: q.raisedAt, closedAt: q.status === 'closed' ? q.closedAt : null, stages,
+          firstReplyAt: emails.filter((e) => e.direction === 'out').map((e) => e.occurredAt).sort()[0] ?? null,
+        }, clockNow().toISOString())
+        return (
+          <Card>
+            <CardHeader title={t.resolved ? 'How long it took' : 'Clock'} subtitle="Office hours: 08:00–16:30 on working days" />
+            <dl className="space-y-3 mt-1" data-testid="ticket-clock">
+              <Fact label={t.resolved ? 'Open for' : 'Open'} value={formatWorkingTime(t.open)} />
+              <Fact label="With us" value={formatWorkingTime(t.withUs)} />
+              <Fact label="With the client" value={formatWorkingTime(t.withClient)} />
+              <Fact label="First response" value={t.firstResponse === null ? 'Not yet' : formatWorkingTime(t.firstResponse)} />
+            </dl>
+          </Card>
+        )
+      })()}
       </div>
 
       {data.batch && !draft && (

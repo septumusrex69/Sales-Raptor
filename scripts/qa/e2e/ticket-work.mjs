@@ -101,6 +101,9 @@ try {
 
   /* S14: every ticket has a number, and it heads the ticket. */
   t.check('the ticket says its number', (await page.getByTestId('ticket-number').first().innerText()).trim(), 'T-1016')
+  /* S14: every ticket has a clock -- open, with us, with the client, first response -- in office hours. */
+  const clock = (await page.getByTestId('ticket-clock').innerText()).replace(/\s+/g, ' ')
+  t.ok(`the ticket shows its clock (${clock.slice(0, 120)})`, /Open/i.test(clock) && /With us/i.test(clock) && /With the client/i.test(clock) && /First response/i.test(clock))
   t.ok('the ticket offers to email the client', /Email the client/.test(body))
   t.ok('...to log a call', /Log a call/.test(body))
   t.ok('...and to add a note', /Add a note/.test(body))

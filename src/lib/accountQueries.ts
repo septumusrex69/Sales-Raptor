@@ -12,6 +12,7 @@
  * ledger.
  */
 import { supabase } from './supabase'
+import { ticketTimes, type StageMark, type TicketTimes } from './ticketClock'
 import { fetchAllRows } from './fetchAll.ts'
 import { clockNow, clockToday } from './clock.ts'
 /* The firm's own day, not the server's. A dispute taken at one in the morning in Johannesburg is
@@ -194,6 +195,40 @@ export function isStale(q: AccountQuery, today = clockToday()): boolean {
 /** Days since it was raised. What a queue is sorted by when nothing else is urgent. */
 export function ageInDays(q: AccountQuery, now = clockNow()): number {
   return Math.max(0, Math.floor((now.getTime() - new Date(q.raisedAt).getTime()) / 86_400_000))
+}
+
+/** A ticket's stage history, oldest first (account_query_stages, S14) -- what its clock is read off. */
+export async function fetchTicketStages(queryId: string): Promise<StageMark[]> {
+  const { data, error } = await supabase.from('account_query_stages')
+    .select('stage, status, at').eq('query_id', queryId).order('at')
+  if (error) throw new Error(error.message)
+  return (data ?? []) as StageMark[]
+}
+
+/**
+ * EVERY TICKET'S CLOCK, FOR THE STATISTICS (S14). Tickets are dozens or hundreds, not the book, so they
+ * are read whole: each one, its stage history and the first email we sent about it, worked out by
+ * ticketTimes. `since` keeps the period: a ticket counts if it was resolved on or after it, or is open.
+ */
+export async function fetchTicketClocks(since: string, nowIso: string): Promise<{ id: string; ownerId: string | null; kind: string; times: TicketTimes }[]> {
+  const [qs, st, out] = await Promise.all([
+    supabase.from('account_queries').select('id, owner_id, kind, raised_at, closed_at, status')
+      .or(`status.neq.closed,closed_at.gte.${since}`),
+    supabase.from('account_query_stages').select('query_id, stage, status, at').order('at'),
+    supabase.from('account_emails').select('query_id, occurred_at').eq('direction', 'out').not('query_id', 'is', null).order('occurred_at'),
+  ])
+  for (const r of [qs, st, out]) if (r.error) throw new Error(r.error.message)
+  const stages = new Map<string, StageMark[]>()
+  for (const s of (st.data ?? []) as { query_id: string; stage: string; status: string; at: string }[]) {
+    stages.set(s.query_id, [...(stages.get(s.query_id) ?? []), { stage: s.stage, status: s.status, at: s.at }])
+  }
+  const firstOut = new Map<string, string>()
+  for (const e of (out.data ?? []) as { query_id: string; occurred_at: string }[]) if (!firstOut.has(e.query_id)) firstOut.set(e.query_id, e.occurred_at)
+  return ((qs.data ?? []) as { id: string; owner_id: string | null; kind: string; raised_at: string; closed_at: string | null; status: string }[]).map((q) => ({
+    id: q.id, ownerId: q.owner_id, kind: q.kind,
+    times: ticketTimes({ raisedAt: q.raised_at, closedAt: q.status === 'closed' ? q.closed_at : null,
+      stages: stages.get(q.id) ?? [], firstReplyAt: firstOut.get(q.id) ?? null }, nowIso),
+  }))
 }
 
 export async function fetchQueries(accountId: string): Promise<AccountQuery[]> {

@@ -24,6 +24,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-ticket-from-email.mjs
  */
 import { readFileSync } from 'node:fs'
+import { foreignKeys } from './schemaForeignKeys.mjs'
 import { escalationChargeable } from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
@@ -64,8 +65,15 @@ ok('...and the inbox table carries no such link',
  * is how it was worked. `on delete cascade` here would delete a debtor's own bank statements when
  * somebody tidied up a dispute.
  */
+/* Read off the LIVE keys (schemaForeignKeys, which honours a later drop constraint): schema.sql is
+   append-only, so a key born with a cascade and dropped later still appears in it as text (S14). */
+/* KNOWN, AND QUEUED AS ITS OWN FIX (S14, 28 Oct): account_notes and diary_entries also cascade off a
+   ticket -- the old text search could not see them. Listed here so the check stays honest about what is
+   live; the follow-up switches them to set null and removes this list. Nothing new may join it. */
+const CASCADES_TO_FIX = ['account_notes.query_id', 'diary_entries.query_id']
 check('a deleted ticket takes nothing with it',
-  (sql.match(/references public\.account_queries\(id\) on delete cascade/g) ?? []), [])
+  foreignKeys(sql).filter((k) => k.to === 'account_queries' && k.onDelete === 'c').map((k) => `${k.from}.${k.column}`)
+    .filter((k) => !CASCADES_TO_FIX.includes(k)), [])
 
 const guardAt = sql.lastIndexOf('create or replace function public.ticket_belongs_to_the_same_account(')
 ok('the database refuses a ticket from another account', guardAt > 0)

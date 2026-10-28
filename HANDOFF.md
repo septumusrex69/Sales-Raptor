@@ -62,6 +62,17 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**DISPUTE TICKETS, PHASE 5: THE CLOCK AND THE FIGURES (28 Oct).** Migrations **`ticket_stage_history`** (md5 7d1180ec...:
+`account_query_stages`, one row per raise / stage move / open-close, written by trigger, history backfilled from
+raised_at, sent_to_client_at, closed_at) and **`ticket_stage_history_unlinked`** (b7822949...: its foreign key dropped
+-- the "a deleted ticket takes nothing with it" and Clear-staging rules -- and a delete trigger instead).
+`src/lib/ticketClock.ts`: office minutes (08:00-16:30, working days, holidays), open / with us / with the client /
+first response, `statsByOwner`. The ticket page has a Clock card; the Communications dashboard has "Tickets: how fast"
+(TicketSpeedCard: per owner, resolved, still open, averages over resolved, 30/90/365 days). "Now" is the firm clock.
+check-ticket-clock (15, seen failing), e2e ticket-work +1. FOUND ON THE WAY: account_notes and diary_entries CASCADE off
+account_queries (deleting a ticket deletes its notes and diary entries); check-ticket-from-email now reads live keys
+and lists those two as known; a follow-up task was suggested to switch them to set null.
+
 **GENERAL MANAGERS: ONLY STEPHAN AND CAMILLE SEE THE MONEY (27 Oct).** Stephan: "like a manager or general manager
 function ... only me and Camille can basically see the finances ... for testing it's fine to put Rinda there. But
 when we go live, we should remove Rinda as well." An Administrator WITH finance shows as **General Manager** in

@@ -51994,3 +51994,69 @@ begin
   end if;
   return new;
 end $$;
+
+-- S14 (28 Oct, Raptor H13): EVERY TICKET KEEPS ITS OWN CLOCK. Stephan: "every query has like a timer on to say
+-- how long has it been, how long did it take to resolve this ... it can form part of their statistics", and
+-- of what counts against the clerk or communications agent: BOTH -- the time it sat with us, and the whole
+-- time it was open. A ticket only remembered where it is NOW (stage, status) and the last time it went to the
+-- client, so "how long was it with the client" could not be answered. This writes one row every time a ticket
+-- is raised, moves stage, or opens or closes -- by trigger, so no screen can forget -- and nobody may edit it.
+-- Existing tickets get the history their own columns can vouch for: raised at raised_at, with the client at
+-- sent_to_client_at, closed at closed_at.
+create table if not exists public.account_query_stages (
+  id uuid primary key default gen_random_uuid(),
+  query_id uuid not null references public.account_queries(id) on delete cascade,
+  stage text not null,
+  status text not null,
+  at timestamptz not null default public.raptor_now()
+);
+create index if not exists account_query_stages_query_idx on public.account_query_stages (query_id, at);
+alter table public.account_query_stages enable row level security;
+-- Read as tickets are read (by anybody signed in); written by the trigger alone.
+create policy account_query_stages_select on public.account_query_stages for select to authenticated
+  using (auth.uid() is not null);
+
+create or replace function public.account_query_stage_log() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if tg_op = 'INSERT' or new.stage is distinct from old.stage or new.status is distinct from old.status then
+    insert into public.account_query_stages (query_id, stage, status, at)
+    values (new.id, new.stage, new.status,
+            case when tg_op = 'INSERT' then coalesce(new.raised_at, public.raptor_now()) else public.raptor_now() end);
+  end if;
+  return new;
+end $$;
+create trigger account_query_stage_log after insert or update of stage, status on public.account_queries
+  for each row execute function public.account_query_stage_log();
+
+insert into public.account_query_stages (query_id, stage, status, at)
+select q.id, case when q.sent_to_client_at is not null and q.stage = 'client' then 'liaison' else q.stage end, 'open', q.raised_at
+  from public.account_queries q
+ where not exists (select 1 from public.account_query_stages s where s.query_id = q.id);
+insert into public.account_query_stages (query_id, stage, status, at)
+select q.id, 'client', 'open', q.sent_to_client_at
+  from public.account_queries q
+ where q.sent_to_client_at is not null and q.sent_to_client_at > q.raised_at
+   and not exists (select 1 from public.account_query_stages s where s.query_id = q.id and s.stage = 'client');
+insert into public.account_query_stages (query_id, stage, status, at)
+select q.id, q.stage, 'closed', q.closed_at
+  from public.account_queries q
+ where q.status = 'closed' and q.closed_at is not null
+   and not exists (select 1 from public.account_query_stages s where s.query_id = q.id and s.status = 'closed');
+
+-- S14 (28 Oct): THE STAGE HISTORY HOLDS NO FOREIGN KEY ON ITS TICKET. Two standing rules forbade the one it
+-- was born with: "a deleted ticket takes nothing with it" (check-ticket-from-email -- no `on delete cascade`
+-- off account_queries, so a dispute tidied away can never take a debtor's documents), and "every table
+-- pointing into the truncate is in it" (check-clear-staging). A ticket's own clock is not paperwork, so it
+-- goes with the ticket by a trigger instead -- explicit, and a Clear staging truncate (which fires no delete
+-- trigger) leaves rows nothing reads: every reader starts from account_queries.
+alter table public.account_query_stages drop constraint if exists account_query_stages_query_id_fkey;
+
+create or replace function public.account_query_stages_go_with_ticket() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  delete from public.account_query_stages where query_id = old.id;
+  return old;
+end $$;
+create trigger account_query_stages_go_with_ticket after delete on public.account_queries
+  for each row execute function public.account_query_stages_go_with_ticket();
