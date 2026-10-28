@@ -69,5 +69,24 @@ const panes = read('src/components/dashboard/DashboardPanes.tsx')
 ok('a full pane is drawn outside every arrangement, across the page',
   /\(p\.kind \?\? 'narrow'\) === 'full'\) stretches\.push\(p\)/.test(panes) && /: <div key=\{s\.id\} data-pane=\{s\.id\}>\{s\.node\}<\/div>/.test(panes))
 
+/* ---------- the side panel is everybody's default (Stephan, 28 Oct, Raptor · Handover 14) ---------- */
+/* "Always keep views in this viewing pane ... They can change it if they want, but this is by
+   default." One fallback decides it for every record page and dashboard; a saved choice still wins. */
+const shell = read('src/components/record/RecordShell.tsx')
+ok('useRecordLayout falls back to the side panel (wide)',
+  /export function useRecordLayout\(key: string, fallback: RecordLayoutId = 'wide'\)/.test(shell))
+ok('...and a saved choice is still read before the fallback',
+  /const saved = localStorage\.getItem\(key\)[\s\S]{0,120}return saved as RecordLayoutId[\s\S]{0,120}return fallback/.test(shell))
+const pagesWithLayout = ['src/pages/accounts/AccountDetail.tsx', 'src/pages/companies/CompanyDetail.tsx',
+  'src/pages/contacts/ContactDetail.tsx', 'src/pages/leads/LeadDetail.tsx', 'src/pages/deals/DealDetail.tsx']
+for (const f of pagesWithLayout) {
+  const src = read(f)
+  ok(`${f.split('/').pop()} uses the shared layout memory`, /useRecordLayout\(/.test(src))
+  ok(`...and does not pass a default of its own other than the side panel`,
+    !/useRecordLayout\([^)]*,\s*'(columns|stacked)'\)/.test(src))
+}
+ok('no dashboard opens in anything but the side panel unless chosen',
+  ![sales, comms, company, floor, admin].some((src) => /<DashboardPanes[^>]*initial="(columns|stacked)"/.test(src)))
+
 if (failures.length) { console.error(`check-dashboard-panes: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`); process.exit(1) }
 console.log(`check-dashboard-panes: ${pass} passed, 0 failed`)

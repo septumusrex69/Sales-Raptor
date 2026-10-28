@@ -205,7 +205,7 @@ try {
     const ap = page.getByTestId('dashboard-panes')
     const stored = () => page.evaluate(() => ['admin', 'sales', 'communications'].map((k) => localStorage.getItem(`raptor.dashboard.${k}.layout`)).join(' '))
     t.ok('Administration has the arrangement switcher', await ap.getByRole('button', { name: 'One column' }).isVisible())
-    t.check('...opening in its own default, not the Sales page\'s choice', await ap.getAttribute('data-layout'), 'columns')
+    t.check('...opening in its own default (the side panel, Stephan 28 Oct), not the Sales page\'s choice', await ap.getAttribute('data-layout'), 'wide')
     await ap.getByRole('button', { name: 'One column' }).click(); await page.waitForTimeout(300)
     const box = async (id) => (await ap.locator(`[data-pane="${id}"]`).boundingBox()) ?? { x: -1, y: -1, width: -1 }
     const [m1, d1] = [await box('mandates'), await box('deals')]

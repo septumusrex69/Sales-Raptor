@@ -1,7 +1,7 @@
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBlocker, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Archive, Banknote, Building2, CalendarClock, Check, CheckCircle2, Clock, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, PauseCircle, Phone, PhoneForwarded, PlayCircle, Plus, Printer, RotateCcw, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle, type LucideIcon } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -2962,6 +2962,8 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
   )
 }
 
+type PositionControl = { label: string; hint: string; icon: LucideIcon; onClick: () => void; strong?: boolean }
+
 function Field({ label, value, note, action }: {
   label: string
   value?: string | null
@@ -4768,9 +4770,44 @@ function PositionPanel({
     ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
     : null
 
+  /*
+   * WHAT CAN BE DONE WITH THE ACCOUNT, AS BUTTONS ONE CAN SEE (S15, Raptor · Handover 14). Stephan,
+   * having found the withdrawal: "it's so hidden, it's so small, you can barely see what's going on
+   * there. Make it better." The three were 11px links under the Status, Book and Ending values --
+   * still the right place (the firm: work is stopped beside the status, not in the nine-button
+   * action row), but drawn as the thing they are. So they sit together at the top of this card,
+   * full size, each saying in one line what it does, and the fields below only report.
+   */
+  const frozen = !!account.frozenBy || /^frozen/i.test(account.status)
+  const controls: PositionControl[] = []
+  if (onFreeze) controls.push(frozen
+    ? { label: 'Restart', hint: 'Work on it again', icon: PlayCircle, onClick: onFreeze }
+    : { label: 'Stop work', hint: 'Freeze it; nobody works it', icon: PauseCircle, onClick: onFreeze })
+  if (account.book === 'active' && onHold) controls.push({ label: 'Put on hold', hint: 'Park it with a reason and a date', icon: Clock, onClick: onHold })
+  if (account.book !== 'active' && onRelease) controls.push(account.book === 'closed'
+    ? { label: 'Re-open', hint: 'Bring it back onto the active book', icon: RotateCcw, onClick: onRelease }
+    : { label: 'Back to active', hint: 'Take it off hold', icon: RotateCcw, onClick: onRelease })
+  if (!account.endedAs && onEnd) controls.push({ label: 'Close account', hint: 'Paid up, written off or withdrawn', icon: Archive, onClick: onEnd, strong: true })
+
   return (
     <Card>
       <PanelTitle>Position</PanelTitle>
+      {controls.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-4" data-testid="position-controls">
+          {controls.map((c) => (
+            <button key={c.label} type="button" onClick={c.onClick} aria-label={c.label}
+              className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${c.strong
+                ? 'border-negative/40 bg-negative/5 hover:bg-negative/10 sm:col-span-2'
+                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}>
+              <c.icon size={18} className={`mt-0.5 shrink-0 ${c.strong ? 'text-negative' : 'text-[var(--c-steel)]'}`} />
+              <span className="min-w-0">
+                <span className={`block text-sm font-semibold ${c.strong ? 'text-negative' : 'text-slate-800'}`}>{c.label}</span>
+                <span className="block text-xs text-slate-500">{c.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       {ceiling && (
         <div className="pb-3">
           <div className="flex items-baseline justify-between text-xs mb-1">
@@ -4807,10 +4844,6 @@ function PositionPanel({
           note={account.frozenBy || account.frozenReason
             ? [frozenByLabel(account.frozenBy), account.frozenReason].filter(Boolean).join(' — ')
             : undefined}
-          action={onFreeze
-            ? { label: account.frozenBy || /^frozen/i.test(account.status) ? 'Restart' : 'Stop work',
-                onClick: onFreeze }
-            : undefined}
         />
         {/*
           HOW IT ENDED, OR THE WAY TO END IT. One field rather than a button that appears and
@@ -4831,11 +4864,6 @@ function PositionPanel({
                account.holdReviewOn ? `look again ${formatDate(account.holdReviewOn)}` : null]
               .filter(Boolean).join(' \u2014 ')
             : undefined}
-          action={account.book === 'active'
-            ? (onHold ? { label: 'Put on hold', onClick: onHold } : undefined)
-            : (onRelease
-              ? { label: account.book === 'closed' ? 'Re-open' : 'Back to active', onClick: onRelease }
-              : undefined)}
         />
         <Field
           label="Ending"
@@ -4843,9 +4871,6 @@ function PositionPanel({
           note={account.endedAs
             ? [account.endedReason, account.endedOn ? formatDate(account.endedOn) : null]
               .filter(Boolean).join(' \u2014 ')
-            : undefined}
-          action={!account.endedAs && onEnd
-            ? { label: 'Close it', onClick: onEnd }
             : undefined}
         />
         <Field label="Bucket" value={account.bucket} />
