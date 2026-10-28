@@ -21,16 +21,19 @@ export function DashboardHero({
   subtitle?: ReactNode
 }) {
   // Each skin brings its own mark. The watermark steps aside where a skin supplies its own
-  // atmosphere behind the band, rather than two brand devices competing in one panel.
+  // atmosphere behind the band, rather than two brand devices competing in one panel -- which is
+  // every skin with a photograph, so only the plain Original keeps it. On the Africa band (S15) the
+  // ring was drawn straight through the pre-legal agent's name.
   const { theme, themeId } = useTheme()
   const raptor = themeId === 'raptor' || themeId === 'glass-mountain'
   const glassMountain = themeId === 'glass-mountain'
+  const ring = themeId === 'original'
   return (
     <div
       className="app-hero px-7 py-8"
       style={glassMountain ? { background: 'transparent', backgroundImage: 'none', overflow: 'visible' } : undefined}
     >
-      {!raptor && (
+      {ring && (
       <svg
         viewBox="0 0 200 200"
         className="pointer-events-none absolute -top-10 -right-10 h-52 w-52 opacity-20"
@@ -70,7 +73,7 @@ export function DashboardHero({
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">{eyebrow ?? `Bredell Ferreira · ${theme.productName}`}</p>
           <h2 className="text-2xl font-extrabold tracking-tight text-white">{title}</h2>
-          <p className="text-[13px] text-white/60 mt-0.5">{subtitle}</p>
+          <p className="text-[13px] text-white/80 mt-0.5">{subtitle}</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">{children}</div>

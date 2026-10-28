@@ -127,7 +127,7 @@ html[data-theme='forest'] {
   --skin-scrollbar: #c8d7cf;
 
       --skin-hero-background:
-    linear-gradient(100deg, rgba(6, 19, 12, 0.9) 0%, rgba(9, 27, 17, 0.7) 38%, rgba(12, 32, 21, 0.3) 100%);
+    linear-gradient(100deg, rgba(8, 18, 12, 0.94) 0%, rgba(10, 22, 15, 0.86) 34%, rgba(12, 26, 18, 0.5) 62%, rgba(12, 26, 18, 0.12) 100%);
   --skin-hero-image: url('/brand/forest-band.webp');
   --skin-hero-radius: 18px;
 
@@ -166,10 +166,13 @@ html[data-theme='forest'] {
   --skin-gold-gradient-deep: linear-gradient(135deg, #988547 0%, #d0bc7c 100%);
 }
 
+/* THE SUBJECT ON THE RIGHT, THE WORDS ON THE LEFT (S15, "Make this look better"). Centred, the
+   band showed the wing's feathers behind the debtor's name and cut the trees in half; anchored right,
+   the trees sit beside the agent and the wash darkens the half the name is written on. */
 html[data-theme='forest'] .app-hero {
   background:
     var(--skin-hero-background),
-    var(--skin-hero-image) center / cover no-repeat;
+    var(--skin-hero-image) right 40% / cover no-repeat;
 }
 
 html[data-theme='forest'] .collections-hero {

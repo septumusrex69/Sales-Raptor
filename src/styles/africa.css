@@ -128,7 +128,7 @@ html[data-theme='africa'] {
   --skin-scrollbar: #d5ceca;
 
       --skin-hero-background:
-    linear-gradient(100deg, rgba(17, 12, 8, 0.9) 0%, rgba(25, 17, 11, 0.7) 38%, rgba(30, 20, 14, 0.3) 100%);
+    linear-gradient(100deg, rgba(14, 10, 7, 0.94) 0%, rgba(18, 13, 9, 0.86) 34%, rgba(22, 15, 10, 0.5) 62%, rgba(22, 15, 10, 0.12) 100%);
   --skin-hero-image: url('/brand/africa-band.webp');
   --skin-hero-radius: 18px;
 
@@ -167,10 +167,13 @@ html[data-theme='africa'] {
   --skin-gold-gradient-deep: linear-gradient(135deg, #a5703a 0%, #dda66f 100%);
 }
 
+/* THE SUBJECT ON THE RIGHT, THE WORDS ON THE LEFT (S15, "Make this look better"). Centred, the
+   band showed the wing's feathers behind the debtor's name and cut the trees in half; anchored right,
+   the trees sit beside the agent and the wash darkens the half the name is written on. */
 html[data-theme='africa'] .app-hero {
   background:
     var(--skin-hero-background),
-    var(--skin-hero-image) center / cover no-repeat;
+    var(--skin-hero-image) right 42% / cover no-repeat;
 }
 
 html[data-theme='africa'] .collections-hero {

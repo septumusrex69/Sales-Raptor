@@ -1661,7 +1661,7 @@ function AccountPage() {
         }
         subtitle={
           <span className="inline-flex flex-wrap items-center gap-x-1.5">
-            <span className="text-white/50">Client</span>
+            <span className="text-white/60">Client</span>
             {client
               ? canViewClients(currentUser)
                 ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
@@ -1679,7 +1679,7 @@ function AccountPage() {
                 back down the phone has to know which they are reading. */}
             {account.accountNumber && (
               <>
-                <span className="text-white/30">·</span>
+                <span className="text-white/45">·</span>
                 <span title="The account number on the agreement, as the client gave it">
                   account no. {account.accountNumber}
                 </span>
@@ -1687,13 +1687,13 @@ function AccountPage() {
             )}
             {account.clientReference && (
               <>
-                <span className="text-white/30">·</span>
+                <span className="text-white/45">·</span>
                 <span title="The client's own reference for this account">
                   client ref {account.clientReference}
                 </span>
               </>
             )}
-            {account.handoverDate && <><span className="text-white/30">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
+            {account.handoverDate && <><span className="text-white/45">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
           </span>
         }
       >
@@ -1740,7 +1740,9 @@ function AccountPage() {
           SAME assign-and-refer screen the accounts list and the client screen use, because
           commitHandOut is the only thing that allocates and it always diarises with it.
         */}
-        <div className="mt-2.5 text-right leading-tight ml-2">
+        {/* ON A SMALL PANE OF ITS OWN (S15): over a photograph the name floated on whatever part of the
+            picture happened to be behind it, and on the Africa band that was a tree trunk. */}
+        <div data-testid="hero-agent" className="text-right leading-tight ml-1 rounded-xl bg-black/30 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
           {mayHandOut ? (
             <button type="button" onClick={() => setHandOut(true)}
