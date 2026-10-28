@@ -42,6 +42,36 @@
 - Checks: check-account-ending (+7: one rule, refunds finance, off the desk), check-account-desk (+2),
   check-books (slices widened), e2e settlement (+3: own liaison / other liaison / collector), all seen failing.
 
+- **BIG BOSS: only Stephan decides what gets built** ("I am the only person that can approve a suggestion for
+  building Raptor"; asked what "Big boss" meant: "above admin"). A tick in no role, `raptor.boss`, granted to him
+  (migrations **`big_boss`** md5 `b8708671...` and **`big_boss_queue`** `ac79221c...`, the second renaming `boss` to
+  area.thing). `change_request_boss_decides` refuses approving, declining, reopening a declined request and "Ask
+  Claude to build it" without it; the profile guard RAISES when anybody who is not already Big Boss gives or takes
+  it (finance or not). Probed as Camille: refused both. Screen: the request panel's decide buttons are the Big
+  Boss's (others: "Only the Big Boss approves what gets built."); Settings -> Users shows **Big Boss** above General
+  Manager; the permissions box greys the tick. e2e change-requests +3, checks updated.
+- **THE PAID-UP LETTER** (Stephan: "I don't want to see an SMS go out ... we can send a letter to a guy who's paid
+  up his account, even though if that is a small balance"; asked: automatic, small balances too, no email = noted).
+  Two letters `letter-paid-up-individual/company` (build.mjs, `seed-paid-up.mjs`, md5 `b2b4dff8...`/`5d3ea0fa...`
+  on staging) quote no figure ("Amount still owing: Nothing") and say "Sent by email."; the two covering emails now
+  attach them and are signed `{{signatory_name}}` (a closed account has no collector, and `{{collector_name}}`
+  would hold the send). Migration **`paid_up_letter`** (`9caf435b...`): trigger kind `account_paid_up`;
+  `settle_account` starts the "Paid-up letter" workflow (one email step, day 0, no SMS) AFTER stopping every other
+  sequence -- on paid up, and on settled only where no approved settlement was paid (Ready to close's small
+  balance). `planSend.paidUp`: nothing is charged on an account closed paid up or settled. It goes with the 08:00
+  morning run. No email address: the step holds "No email address on this account" on the account's workflow
+  panel. `check-paid-up-letter` (16, seen failing). A SETTLEMENT the client agreed gets no letter yet (a
+  settlement confirmation is its own question for Stephan; the covering emails exist, the letter does not).
+- **The Position card is Stephan's mockup**: "Account position" title with the book as a pill, Stop work / Put on
+  hold tiles, the fee ceiling in its own box, ACCOUNT DETAILS / KEY DATES / CONTACT & ADMIN, "This month" chip on
+  Handed over, Close account in red at the foot (`position-close`). check-account-standing names the title as the
+  second stated exception to the house text scale.
+- **Mail's "Checked 14 days ago" on staging**: the sync is stamped on the real clock and was measured from the
+  staging date; now on the real clock (`check-mail-checked-clock`; check-staging-clock's count 53 -> 54).
+- **WAITING ON STEPHAN: the Africa theme.** He sent two photographs (a wing over baobabs at sunset, and the
+  baobabs alone) in chat; they did not arrive as files. A skin needs hero, band and sidebar images
+  (`public/brand/*-hero.webp` etc., `src/styles/<theme>.css`, `src/lib/themes.ts`) and its own saying (heroLine).
+
 - **A handover-SHEET ticket sends and receives email, not charged** (S14's question 1; Stephan: "yes, not
   charged"). Staging migration **`sheet_ticket_mail`** (md5 `a95a7767...`): `account_emails.account_id` may be null;
   `ticket_belongs_to_the_same_account` lets mail with no account onto a ticket with none (mail only, not documents);
@@ -66,7 +96,8 @@
 Ask Stephan whether he wants the sheet ticket's T-number shown on its page (see "Noticed" above).
 
 **AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
-`withdrawal_basis_for_closers`, `sheet_ticket_mail` -- after S14's list below. The backfill in the first moves every closed account off
+`withdrawal_basis_for_closers`, `sheet_ticket_mail`, `big_boss`, `big_boss_queue`, then RUN
+`scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter` -- after S14's list below. The backfill in the first moves every closed account off
 its collector; on production that is the whole closed book, run out of hours.
 
 ---

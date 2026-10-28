@@ -52971,3 +52971,155 @@ update public.profiles
        revokes = array_replace(revokes, 'boss', 'raptor.boss')
  where 'boss' = any(coalesce(grants, array[]::text[])) or 'boss' = any(coalesce(revokes, array[]::text[]));
 reset role;
+
+-- ============================================================================================
+-- paid_up_letter (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A PAID-UP ACCOUNT GETS A LETTER, BY EMAIL, AND NOTHING ELSE. Stephan: "I don't want to see an SMS go
+-- out. It's a waste of money. But we can send a letter to a guy who's paid up his account, even though
+-- if that is a small balance." Asked: automatically; a balance under R50 waived by Ready to close gets
+-- the same letter; no email address is noted on the account (the step holds there, "No email address
+-- on this account", which the account's workflow panel shows).
+--
+-- A WORKFLOW, because that is how Raptor sends anything on its own: the morning runner, the letter
+-- drawn to PDF and attached, the send recorded on the account. One step, day 0, email only -- the
+-- covering emails "Paid-up confirmation" (person and company), which post the letters seeded by
+-- scripts/letters/seed-paid-up.mjs. NOT CHARGED: planSend.paidUp quotes nothing on an account closed
+-- paid up or settled, because an R25 item 1(a) would put a balance back on the account the letter says
+-- owes nothing.
+--
+-- STARTED BY settle_account, AFTER stop_workflows_on_close -- so closing stops every other sequence and
+-- then starts this one. Paid up always; SETTLED only where no approved settlement was paid, which is
+-- the Ready-to-close small-balance close: a real settlement is the client accepting less, and a letter
+-- saying "paid up" would misstate it (that confirmation is its own question for the firm). Once per
+-- account and version, ever: re-opened and closed again, the debtor already has the letter.
+--
+-- AT GO-LIVE the letters must be seeded first (seed-paid-up.mjs); the node finds its two emails by
+-- seed_key, and an email without its letter attached would promise an attachment that is not there.
+-- ============================================================================================
+
+alter table public.workflow_versions drop constraint if exists workflow_versions_trigger_kind_check;
+alter table public.workflow_versions add constraint workflow_versions_trigger_kind_check
+  check (trigger_kind = any (array['handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
+    'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned', 'callback', 'by_hand',
+    'account_paid_up']));
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON, for every ending (S15; was finance.view for a write-off
+  -- and payment.record for paid up).
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may close an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held run is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  -- AND THEN THE ONE THAT BELONGS TO A CLOSE (S15): the paid-up letter. See the header for why a
+  -- settlement that was really agreed is left out.
+  if p_as = 'paid_up'
+     or (p_as = 'settled' and not exists (
+           select 1 from public.account_settlements s where s.account_id = p_account and s.status = 'paid')) then
+    insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+    select p_account, v.id, public.raptor_today(), auth.uid()
+      from public.workflow_versions v
+     where v.state = 'active' and v.trigger_kind = 'account_paid_up'
+       and not exists (select 1 from public.workflow_runs r where r.account_id = p_account and r.version_id = v.id);
+  end if;
+
+  if p_as = 'written_off' then
+    -- THE LIAISON IS companies.account_owner_id. This read `companies.liaison`, a name column that is
+    -- empty on every client, so the "tell the client" task was never once created. And not when the
+    -- liaison is the one writing it off: they know.
+    select c.name, c.account_owner_id into v_client, v_liaison
+      from public.companies c
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null and v_liaison is distinct from auth.uid() then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, public.raptor_today() + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+-- THE WORKFLOW ITSELF, once. Found again by its key, so running this twice adds nothing.
+do $$
+declare v_w uuid; v_v uuid; v_p uuid;
+begin
+  if exists (select 1 from public.workflows where key = 'paid-up-letter') then return; end if;
+  insert into public.workflows (key, name, description, domain)
+  values ('paid-up-letter', 'Paid-up letter',
+    'Emails the paid-up confirmation, with the letter attached, the morning after an account is closed as paid up '
+      || '(or settled on a small balance waived). Email only, never an SMS, and never charged.',
+    'collections')
+  returning id into v_w;
+  -- DRAFTED, FILLED, THEN PUBLISHED: refuse_frozen_workflow will not let a phase or a node onto a
+  -- version that is already published, which is the rule every other workflow lives under too.
+  insert into public.workflow_versions (workflow_id, version, state, trigger_kind, trigger_note, day_unit)
+  values (v_w, 1, 'draft', 'account_paid_up',
+    'Starts itself when an account is closed as paid up, or settled on a balance under R50 waived by Ready to close. '
+      || 'Not on a settlement the client approved. Not charged: nothing is quoted on an account closed paid.',
+    'calendar')
+  returning id into v_v;
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v_v, 1, 'Paid up', 'The letter the debtor keeps', 0, 0)
+  returning id into v_p;
+  insert into public.workflow_nodes (version_id, phase_id, key, kind, label, description, day, channel,
+    template_id, template_company_id, statutory, ordinal, needs_release, anchor)
+  values (v_v, v_p, 'paid-up-email', 'communication', 'Paid-up letter',
+    'The covering email with the paid-up confirmation attached. Email only: Stephan, "I don''t want to see an SMS go out".',
+    0, 'email',
+    (select id from public.message_templates where seed_key = 'email-paid-up-individual'),
+    (select id from public.message_templates where seed_key = 'email-paid-up-company'),
+    false, 0, false, 'run');
+  update public.workflow_versions set state = 'active', published_at = now() where id = v_v;
+end $$;

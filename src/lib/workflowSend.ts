@@ -103,6 +103,13 @@ export interface SendPlan {
  */
 export function planSend(input: {
   node: WorkflowNode
+  /**
+   * THE ACCOUNT IS CLOSED AS PAID UP OR SETTLED (S15). Nothing sent to it is charged: the paid-up
+   * letter is the firm confirming the debt is gone, and an R25 item 1(a) on it would put a balance back
+   * on an account the same letter says owes nothing. Stephan: "we can send a letter to a guy who's paid
+   * up his account" -- the letter, not a bill.
+   */
+  paidUp?: boolean
   /** The wording for a person, and the wording for a company. Either may be absent. */
   individual: StepTemplate | null
   company: StepTemplate | null
@@ -198,7 +205,7 @@ export function planSend(input: {
     ...attachmentMerged.missing,
   ])]
 
-  const charge = quote(node, body, dueOn)
+  const charge = input.paidUp ? null : quote(node, body, dueOn)
   const base = {
     template, subject, body,
     attachmentKey: template?.attachment?.key ?? null,

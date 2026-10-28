@@ -2962,7 +2962,7 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
   )
 }
 
-type PositionControl = { label: string; hint: string; icon: LucideIcon; onClick: () => void; strong?: boolean }
+type PositionControl = { label: string; hint: string; icon: LucideIcon; onClick: () => void }
 
 function Field({ label, value, note, action }: {
   label: string
@@ -4766,10 +4766,6 @@ function PositionPanel({
   onHold: (() => void) | null
   onRelease: (() => void) | null
 }) {
-  const handedOver = account.handoverDate
-    ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
-    : null
-
   /*
    * WHAT CAN BE DONE WITH THE ACCOUNT, AS BUTTONS ONE CAN SEE (S15, Raptor · Handover 14). Stephan,
    * having found the withdrawal: "it's so hidden, it's so small, you can barely see what's going on
@@ -4787,21 +4783,44 @@ function PositionPanel({
   if (account.book !== 'active' && onRelease) controls.push(account.book === 'closed'
     ? { label: 'Re-open', hint: 'Bring it back onto the active book', icon: RotateCcw, onClick: onRelease }
     : { label: 'Back to active', hint: 'Take it off hold', icon: RotateCcw, onClick: onRelease })
-  if (!account.endedAs && onEnd) controls.push({ label: 'Close account', hint: 'Paid up, written off or withdrawn', icon: Archive, onClick: onEnd, strong: true })
+  /* CLOSING IS DRAWN APART, at the foot (Stephan's mockup, S15): the two above are reversible; this is
+     the one that ends the account, so it is not a tile beside them. */
+  const closeOn = !account.endedAs && onEnd ? onEnd : null
 
+  /* "25% — set on this account" read as a value and a note under it, which is how the mockup draws it. */
+  const [commissionValue, ...commissionRest] = commission.split(' — ')
+  const commissionNote = commissionRest.join(' — ')
+  const age = account.handoverDate ? timeOnDesk(account.handoverDate) : ''
+  /* THE BOOK, AS A PILL BESIDE THE TITLE: what anybody wants off this card first. */
+  const pill = account.book === 'active'
+    ? { label: 'Active', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' }
+    : account.book === 'on_hold'
+      ? { label: 'On hold', tone: 'bg-amber-50 text-amber-800 border-amber-200', dot: 'bg-amber-500' }
+      : { label: 'Closed', tone: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' }
+
+  /*
+   * THE CARD, AS STEPHAN DREW IT (S15, Raptor · Handover 14): a real title with the book beside it, the
+   * two reversible controls as tiles, the fee ceiling in a box of its own, the facts in three headed
+   * groups -- the account, its dates, and who deals with it -- and Close account last, under a rule.
+   * The fields only REPORT; every control is one of the four buttons.
+   */
   return (
     <Card>
-      <PanelTitle>Position</PanelTitle>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h3 className="text-xl font-bold text-slate-900">Account position</h3>
+        <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${pill.tone}`}
+          data-testid="position-book">
+          <span className={`h-2 w-2 rounded-full ${pill.dot}`} />{pill.label}
+        </span>
+      </div>
       {controls.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-4" data-testid="position-controls">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pb-4" data-testid="position-controls">
           {controls.map((c) => (
             <button key={c.label} type="button" onClick={c.onClick} aria-label={c.label}
-              className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${c.strong
-                ? 'border-negative/40 bg-negative/5 hover:bg-negative/10 sm:col-span-2'
-                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}>
-              <c.icon size={18} className={`mt-0.5 shrink-0 ${c.strong ? 'text-negative' : 'text-[var(--c-steel)]'}`} />
+              className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-left transition-colors hover:border-slate-300 hover:bg-slate-50">
+              <c.icon size={22} className="mt-0.5 shrink-0 text-[var(--c-steel)]" />
               <span className="min-w-0">
-                <span className={`block text-sm font-semibold ${c.strong ? 'text-negative' : 'text-slate-800'}`}>{c.label}</span>
+                <span className="block text-sm font-bold text-slate-900">{c.label}</span>
                 <span className="block text-xs text-slate-500">{c.hint}</span>
               </span>
             </button>
@@ -4809,95 +4828,111 @@ function PositionPanel({
         </div>
       )}
       {ceiling && (
-        <div className="pb-3">
-          <div className="flex items-baseline justify-between text-xs mb-1">
-            <span className="text-slate-500">Annexure B fee ceiling</span>
-            <span className={`tabular-nums ${chargedExclVat > ceiling.limit ? 'text-negative font-medium' : 'text-slate-400'}`}>
-              {formatMoney(chargedExclVat)} of {formatMoney(ceiling.limit)}
+        <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3" data-testid="position-ceiling">
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <span className="text-sm font-bold text-slate-900">Annexure B fee ceiling</span>
+            <span className={`text-sm tabular-nums ${chargedExclVat > ceiling.limit ? 'text-negative font-semibold' : 'text-slate-800'}`}>
+              {formatMoney(chargedExclVat)} / {formatMoney(ceiling.limit)}
             </span>
           </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div className="h-2.5 bg-white/80 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full ${chargedExclVat > ceiling.limit ? 'bg-negative' : chargedExclVat / ceiling.limit > 0.9 ? 'bg-gold-500' : 'bg-brand-500'}`}
               style={{ width: `${Math.min(100, ceiling.limit ? (100 * chargedExclVat) / ceiling.limit : 0)}%` }}
             />
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 mt-2">
             {chargedExclVat >= ceiling.limit - 0.01
               ? 'At the ceiling. Further work on this account cannot be charged to the debtor.'
               : `${formatMoney(ceiling.limit - chargedExclVat)} of chargeable work left.`}
           </p>
         </div>
       )}
-      <div className="space-y-1.5">
-        <Field label="Commission" value={commission} />
-        {/*
-          THE STATUS IS WHERE WORK IS STOPPED, not the action row.
 
-          The row is already nine buttons and the firm has said so. More to the point, a freeze
-          IS the status — changing it anywhere else would be a control that acts on a field
-          somewhere else on the page, which is how people end up unsure whether it worked.
-        */}
-        <Field
-          label="Status"
-          value={[account.status, account.subStatus].filter(Boolean).join(' · ')}
+      <PositionSection title="Account details">
+        <PositionRow label="Commission" value={commissionValue}
+          note={commissionNote ? commissionNote.charAt(0).toUpperCase() + commissionNote.slice(1) : undefined} />
+        {/* THE STATUS IS WHERE WORK IS STOPPED -- the Stop work tile above acts on it, not the action row. */}
+        <PositionRow label="Status" value={[account.status, account.subStatus].filter(Boolean).join(' · ')}
           note={account.frozenBy || account.frozenReason
             ? [frozenByLabel(account.frozenBy), account.frozenReason].filter(Boolean).join(' — ')
-            : undefined}
-        />
-        {/*
-          HOW IT ENDED, OR THE WAY TO END IT. One field rather than a button that appears and
-          disappears: an account that is finished has to SAY so wherever somebody looks at it, and
-          "Closed as written off — Uncontactable" is the answer to the question they came with.
-        */}
-        {/*
-          WHICH BOOK IT IS IN, which is the first thing anybody wants off this panel and the one
-          thing the screen could not say. Read off the database's own generated column, never
-          computed here: a screen that worked it out again would be the second source of truth the
-          firm said not to build.
-        */}
-        <Field
-          label="Book"
-          value={bookLabel(account.book)}
+            : undefined} />
+        {/* WHICH BOOK, off the database's own generated column, never computed here. */}
+        <PositionRow label="Book" value={bookLabel(account.book)}
           note={account.book === 'on_hold'
             ? [holdLabel(account.holdReason), account.holdNote,
                account.holdReviewOn ? `look again ${formatDate(account.holdReviewOn)}` : null]
               .filter(Boolean).join(' \u2014 ')
-            : undefined}
-        />
-        <Field
-          label="Ending"
-          value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
+            : undefined} />
+        {/* HOW IT ENDED: an account that is finished has to SAY so wherever somebody looks at it. */}
+        <PositionRow label="Ending" value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
           note={account.endedAs
             ? [account.endedReason, account.endedOn ? formatDate(account.endedOn) : null]
               .filter(Boolean).join(' \u2014 ')
-            : undefined}
-        />
-        <Field label="Bucket" value={account.bucket} />
-        {/*
-          HANDED OVER, and it belongs above the other dates because it is the one they are all
-          measured from — prescription runs from it, and how long an account has sat on the desk
-          is judged against it.
+            : undefined} />
+        <PositionRow label="Bucket" value={account.bucket} />
+      </PositionSection>
 
-          It was only in the hero band, which is the first thing off the top of the screen: the
-          moment somebody scrolls to the figures they are working from, the date the clock
-          started is gone. Shown with its age because that is the question actually being asked
-          — "how long have we had this one" — and nobody counts months off a date in their head
-          while a debtor is on the phone.
-        */}
-        {/* BOTH DATES, AND NAMED APART (prompt 11): interest runs from the handover, never from the
-            default, which is the client's record of when the debt fell due. */}
-        <Field label="Date of default" value={account.defaultDate ? formatDate(account.defaultDate) : null}
+      {/* BOTH DATES, AND NAMED APART (prompt 11): interest runs from the handover, never from the
+          default. Handed over carries its age, because "how long have we had this one" is the question. */}
+      <PositionSection title="Key dates">
+        <PositionRow label="Date of default" value={account.defaultDate ? formatDate(account.defaultDate) : null}
           note={account.defaultDate ? 'A record — nothing accrues from it' : undefined} />
-        <Field label="Handed over" value={handedOver} />
-        <Field label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
-        <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
-        <Field label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
-        <Field label="Last contact by" value={account.lastContactMethod} />
-        <Field label="Client liaison" value={clientLiaisonName} />
-        <Field label="Written off" value={account.writeOffReason} />
-      </div>
+        <PositionRow label="Handed over" value={account.handoverDate ? formatDate(account.handoverDate) : null}
+          chip={age ? age.charAt(0).toUpperCase() + age.slice(1) : undefined} />
+        <PositionRow label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
+        <PositionRow label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
+        <PositionRow label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
+      </PositionSection>
+
+      <PositionSection title="Contact & admin">
+        <PositionRow label="Last contact by" value={account.lastContactMethod} />
+        <PositionRow label="Client liaison" value={clientLiaisonName} />
+        <PositionRow label="Written off" value={account.writeOffReason} />
+      </PositionSection>
+
+      {closeOn && (
+        <div className="mt-2 border-t border-slate-200 pt-3">
+          <button type="button" onClick={closeOn} aria-label="Close account" data-testid="position-close"
+            className="flex w-full items-start gap-3 rounded-lg px-1 py-1.5 text-left hover:bg-negative/5">
+            <Archive size={22} className="mt-0.5 shrink-0 text-negative" />
+            <span>
+              <span className="block text-sm font-bold text-negative">Close account</span>
+              <span className="block text-xs text-slate-500">Paid up, written off or withdrawn</span>
+            </span>
+          </button>
+        </div>
+      )}
     </Card>
+  )
+}
+
+/** A heading with a hairline running to the edge, as the mockup draws ACCOUNT DETAILS. */
+function PositionSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mb-3">
+      <div className="flex items-center gap-3 mb-1">
+        <h4 className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{title}</h4>
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+      <dl className="divide-y divide-slate-100">{children}</dl>
+    </section>
+  )
+}
+
+/** One fact: label left, value right, a note under it, and an optional chip ("This month"). */
+function PositionRow({ label, value, note, chip }: { label: string; value?: string | null; note?: string; chip?: string }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-3 py-2 text-sm">
+      <dt className="text-slate-500 shrink-0">{label}</dt>
+      <dd className="ml-auto min-w-0 text-right text-slate-900 break-words">
+        <span className="inline-flex items-center gap-2">
+          {value || '\u2014'}
+          {chip && <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">{chip}</span>}
+        </span>
+        {note && <span className="block text-xs text-slate-400">{note}</span>}
+      </dd>
+    </div>
   )
 }
 

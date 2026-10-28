@@ -435,6 +435,18 @@ still means what it always meant (the reference the *debtor* knows); `{{case_num
 The SMSs quote ours only, and that swap was free **because the two are the same width** — a
 longer case number is a price rise on every SMS, paid by the debtor, under item 1(c).
 
+**ONLY THE BIG BOSS DECIDES WHAT GETS BUILT.** Stephan: *"I am the only person that can approve a suggestion for
+building Raptor"* -- and, asked what Big Boss meant, *"above admin"*. It is a tick in no role, `raptor.boss`, held by
+him; the database refuses approving, declining, reopening a declined request or asking Claude to build without it,
+and refuses giving or taking it to anybody who is not already Big Boss. Do not fold it into the Administrator's
+template: six Administrators could then approve their own requests, which is what it exists to stop.
+
+**A PAID-UP ACCOUNT GETS ONE LETTER, BY EMAIL, FREE.** *"I don't want to see an SMS go out. It's a waste of money."*
+Closing as paid up (or Ready to close's small-balance settle) starts the "Paid-up letter" workflow from
+`settle_account`, after every other sequence is stopped. Nothing sent to an account closed paid up or settled is
+charged (`planSend.paidUp`): an item 1(a) fee on it would put a balance back on the account the letter says owes
+nothing.
+
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does
   not raise.

@@ -67,7 +67,9 @@ const inCode = Object.keys(TRIGGERS).sort()
  */
 const shapes = [
   ...schema.matchAll(/check \(trigger_kind in \(([\s\S]*?)\)\)/g),
-]
+  /* S15: the third shape, `= any (array[...])`, which is how paid_up_letter rewrote it. */
+  ...schema.matchAll(/check \(trigger_kind = any \(array\[([\s\S]*?)\]\)\)/g),
+].sort((a, b) => a.index - b.index)
 ok('the trigger column is a closed list in the database', shapes.length > 0)
 /* ASSERTED PRESENT BEFORE IT IS INDEXED, or a schema with no constraint at all reads as an empty
    list -- and an empty list would make the comparison below fail for the wrong reason, or throw. */
@@ -98,7 +100,9 @@ const diary = Object.keys(DIARY_KINDS)
    own word is "dispute chase", which is the WORK that follows one. Neither the debtor saying it nor
    the letter arriving is a diary kind -- they are the events that raise the chasing. */
 const NOT_IN_THE_DIARY = ['handover', 'allocated', 'arrangement_broken', 'payment_received',
-  'dispute_alleged', 'dispute_logged', 'trace_returned', 'by_hand']
+  'dispute_alleged', 'dispute_logged', 'trace_returned', 'by_hand',
+  /* S15: closing an account paid up raises no work, only the letter. */
+  'account_paid_up']
 for (const t of TRIGGER_ORDER) {
   if (NOT_IN_THE_DIARY.includes(t)) continue
   ok(`"${t}" is the diary's own word for it`, diary.includes(t))

@@ -147,7 +147,7 @@ try {
     current = null
     const own = await open(browser, LIAISON)
     t.ok('the client\'s own liaison is offered Close account',
-      await own.page.getByTestId('position-controls').getByRole('button', { name: 'Close account' }).isVisible())
+      await own.page.getByTestId('position-close').isVisible())
     await own.context.close()
     const other = await open(browser, { ...LIAISON, id: '99999999-9999-4999-8999-999999999999', name: 'Other Liaison', email: 'other@example.test' })
     t.check('...a liaison from another client is not', await other.page.getByRole('button', { name: 'Close account' }).count(), 0)
