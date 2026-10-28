@@ -104,7 +104,11 @@ try {
   t.check('signed-nothing-yet is the liaisons\', not on the sales page', await page.getByTestId('sales-awaiting').count(), 0)
   t.ok('mandate to first handover, per closer', /Mandate to first handover/.test(await page.getByTestId('mandate-to-handover').innerText()))
   t.ok('where mandates come from, by source', /Website/.test(await page.getByTestId('lead-sources').innerText()))
-  /* "fit these guys in next to each other": Mandates and Deal outcomes share a row on a wide screen. */
+  /* "fit these guys in next to each other": Mandates and Deal outcomes share a row on a wide screen --
+     IN THREE COLUMNS. Since S15 (Stephan, 28 Oct) every dashboard opens in the side panel, where the
+     two stack down the right third by design, so this asks for three columns first. */
+  t.check('the sales page opens in the side panel, like every dashboard', await page.getByTestId('dashboard-panes').getAttribute('data-layout'), 'wide')
+  await page.getByTestId('dashboard-panes').getByRole('button', { name: 'Three columns' }).click(); await page.waitForTimeout(300)
   const row = await page.evaluate(() => {
     const m = document.querySelector('[data-testid="mandate-outcomes"]')?.getBoundingClientRect()
     const d = [...document.querySelectorAll('h3, h2, p, span')].find((x) => x.textContent?.trim() === 'Deal Outcomes')?.getBoundingClientRect()
