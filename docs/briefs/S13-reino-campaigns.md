@@ -18,33 +18,36 @@ HANDOFF.md, and do what the brief says."*
 
 ## 0. Who you are working for, and where you may build
 
-You are working for **Reino, the marketer**, not for the administrator. Stephan has given this session
-permission to build in the **News & campaigns section only**. That is wider than the usual marketing area in
-CLAUDE.md ("Working for the sales and marketing team"): for this assignment it includes the campaign server
-code and the campaign checks, listed below. Everything else in CLAUDE.md still applies.
+You are working for **Ryno ("Reino"), the marketer**, not for the administrator. **This section was rewritten
+on 28 Oct (Raptor · Handover 14)** because its first version -- "News & campaigns only, never write to any
+database" -- was still being read after Stephan had widened it twice, and a session told Ryno his workflow
+could not go ahead until Stephan added tables that already existed. What holds now:
 
-**You may change:**
+**You may change anything in the app EXCEPT money.** Not yours: trust, business, pay and the People screens,
+payments, fees and charges (Annexure B, the charge engine), interest and balances, commission, payovers and
+remittance, settlements, the bank, the permissions, CLAUDE.md and `.github/` -- `.github/CODEOWNERS` is the list.
+The unsubscribe and opt-in pages and the client-wide unsubscribe are POPIA consent: change them only to keep
+consent working, never to loosen it.
 
-| Area | Files |
-|---|---|
-| The campaign screens | `src/pages/news/NewsPage.tsx`, `src/pages/news/ImportListCard.tsx`, `src/pages/news/UndeliveredCard.tsx`, and new files under `src/pages/news/` or `src/components/news/` |
-| The screens' calls to the server | `src/lib/marketingApi.ts` |
-| The campaign rules (shared by screen and server) | `src/lib/marketing.ts` |
-| The campaign server | `api/_lib/marketing.ts`, `api/_lib/email/marketing.ts` |
-| The campaign checks | `scripts/qa/check-marketing.mjs`, `scripts/qa/check-marketing-prospects.mjs`, `scripts/qa/e2e/news-campaigns.mjs`, `scripts/qa/e2e/news-prospects.mjs`, and new `check-campaign-*.mjs` / `e2e/campaign-*.mjs` |
-| The handoff | your own section at the top of `HANDOFF.md` |
+**You may change the STAGING database** (`kvkajxpremantdkhmjvb`) with the Supabase tool, under CLAUDE.md's
+"Migrations" rules: mirror the SQL into `supabase/schema.sql`, check the md5, try anything destructive in a
+transaction that rolls back first. **Never production** (`qcvesjzoiznrvunjrqpv`), never a money table, function
+or policy, never Clear staging, never Vercel or Supabase settings, and never remove or rewrite the testers' data
+(staging is shared with Camille and others).
 
-**You may NOT change:** anything else. In particular not the unsubscribe or opt-in pages
-(`UnsubscribePage.tsx`, `OptInPage.tsx` — that is POPIA consent), the client-wide unsubscribe
-(`src/lib/clientNews.ts`, `NewsPreferenceCard.tsx`), debtors, collections, the diary, trust, business,
-settings, `supabase/`, `.github/`, `vercel.json`, `package.json`. **Never write to any database** (staging or
-production) and never touch Vercel or Supabase settings — you have no access, by design. If the work truly
-needs something outside the list, stop and write it in the pull request for Stephan; do not work round it.
+**Already built for you on staging (28 Oct), yours to use or change:** `marketing_senders`, `marketing_workflows`,
+`marketing_workflow_steps`, `marketing_results_settings`, the views `marketing_workflow_steps_due` and
+`marketing_results_due`, and the 07:13 morning timer `/api/email/marketing-daily` -> `marketingDailyTick` in
+`api/_lib/marketing.ts`, which reports what is due and SENDS NOTHING until you write the sending. So a workflow
+("step one, wait 20 days, step two") does not wait on Stephan: the tables and the daily timer are there.
+
+If the work genuinely needs a money change, stop and say so in the pull request rather than working round it.
 
 **How your work ships:** your own branch `claude/s13-reino-campaigns`, from `claude/sales-raptor-review-p1pzx2`,
-and a **pull request into `claude/sales-raptor-review-p1pzx2`**. Files under `src/pages/news/` and
-`marketingApi.ts` merge without approval. `src/lib/marketing.ts`, `api/` and `scripts/qa/` are owned by
-Stephan (`.github/CODEOWNERS`), so the pull request waits for his click — that is expected, not a problem.
+and a **pull request into `claude/sales-raptor-review-p1pzx2`**. Only money files and `supabase/` are owned by
+Stephan now (`.github/CODEOWNERS`): a pull request that touches none of them merges without him, and one that
+carries a migration's mirror in `supabase/schema.sql` waits for his click even though staging already has it --
+that is expected, not a problem.
 Never push to `claude/sales-raptor-review-p1pzx2` or `Main` directly.
 
 ---
