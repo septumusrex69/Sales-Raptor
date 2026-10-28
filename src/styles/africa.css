@@ -1,0 +1,268 @@
+/*
+ * AFRICA -- a visual skin (S15, Raptor · Handover 14).
+ *
+ * Stephan: "new africa theme", with two photographs -- a wing over baobabs at sunset, and the baobabs
+ * alone under a storm sky -- and its own saying: "Africa is our roots."
+ *
+ * BUILT ON ocean.css, AND SAID SO: the same tokens, the same rules, the same qualified selectors
+ * (`html[data-theme='africa']`, for the reason ocean.css gives), with every colour moved into the
+ * photographs' family by a hue shift -- the cool structure into baobab bark and storm cloud, the
+ * champagne into the sunset's amber, the sea green into dry-season olive. Lightness is kept colour by
+ * colour, so every contrast the ocean skin was checked at holds here too.
+ *
+ * THE WING IS THE BAND AND THE BAOBABS ARE THE HERO, the desert's and the ocean's division: the wing is
+ * a wide 3:1 frame (enlarged 5% to the 700px the theme check asks of a band); the baobabs under the
+ * storm are the company dashboard's photograph.
+ *
+ * THE REASONING FOR EVERY RULE BELOW IS WRITTEN ONCE, IN ocean.css (where each token is, what the
+ * wash is for, why one plain url()). It is not copied here: comments describing a sea under a
+ * forest's colours would be worse than none.
+ */
+html[data-theme='africa'] {
+      --color-surface: #f7f5f3;
+  --color-card: #fdfcfb;
+    --color-card-solid: #fdfcfb;
+
+    --color-slate-50: #f9f8f7;
+  --color-slate-100: #f2efed;
+  --color-slate-200: #e7e2de;
+  --color-slate-300: #d5ceca;
+  --color-slate-400: #a79c95;
+  --color-slate-500: #867b73;
+  --color-slate-600: #70655d;
+  --color-slate-700: #52463e;
+  --color-slate-800: #3b3029;
+  --color-slate-900: #29201a;
+
+    --color-navy-950: #19110b;
+  --color-navy-900: #211711;
+  --color-navy-800: #2f2219;
+  --color-navy-700: #402f23;
+  --color-navy-600: #523e31;
+
+    --color-gold-600: #a5703a;
+  --color-gold-500: #dda66f;
+  --color-gold-400: #eabb8c;
+  --color-gold-300: #f5d6b7;
+
+  --color-brand-50: #f8f6f4;
+  --color-brand-100: #eee9e5;
+  --color-brand-500: #523e31;
+  --color-brand-600: #2f2219;
+  --color-brand-700: #19110b;
+
+  --color-positive: #657b33;
+  --color-negative: #c4553f;
+
+  --color-red-50: #fbeeeb;
+  --color-red-100: #f5dad5;
+  --color-red-200: #ebc0b7;
+  --color-red-500: #c4553f;
+  --color-red-600: #ae4a36;
+  --color-red-700: #8f3d2c;
+
+      --c-navy-deep: #19110b;
+  --c-navy: #2f2219;
+  --c-navy-mid: #443226;
+  --c-navy-slate: #473b33;
+  --c-navy-ink: #32251d;
+  --c-navy-steel: #58493f;
+    --c-steel: #7e6250;
+  --c-steel-soft: #8e7463;
+  --c-steel-bright: #a38b7b;
+  --c-steel-deep: #664f3f;
+  --c-steel-light: #b9a79b;
+  --c-steel-pale: #dbd1ca;
+  --c-gold: #dda66f;
+  --c-gold-brand: #dda66f;
+  --c-gold-bright: #eabb8c;
+  --c-gold-light: #f2cca7;
+  --c-gold-deep: #a5703a;
+  --c-gold-dark: #85592d;
+  --c-gold-bronze: #a5703a;
+  --c-gold-deep-hover: #85592d;
+  --c-green: #657b33;
+  --c-green-bright: #768e3e;
+  --c-green-muted: #89966c;
+  --c-rust: #c4553f;
+  --c-rust-deep: #a8432f;
+  --c-rust-hover: #a8432f;
+  --c-rust-deep-hover: #8c3827;
+  --c-grey: #867b73;
+  --c-grey-warm: #928a85;
+  --c-grey-light: #a79c95;
+  --c-grey-blue: #a79b93;
+  --c-grey-pale: #dcd5d1;
+  --c-ink: #19110b;
+
+  --tint-steel: #f4f0ed;
+  --tint-steel-soft: #f1ece8;
+  --tint-steel-alt: #f5f1ef;
+  --tint-gold: #fcf0e3;
+  --tint-gold-deep: #f9e8d8;
+  --tint-gold-dark: #f6e0cb;
+  --tint-gold-pale: #f0ceab;
+  --tint-green: #eff2e9;
+  --tint-green-bright: #ebeee2;
+  --tint-rust: #fbeae7;
+  --tint-rust-deep: #f7ded9;
+  --tint-neutral: #f2efed;
+  --tint-neutral-soft: #f9f8f7;
+
+  --stage-new-deal: #7e6250;
+  --stage-quotation-sent: #dda66f;
+  --stage-mandate-sent: #be854d;
+  --stage-won: #657b33;
+  --stage-rejected: #c4553f;
+
+    --outcome-won: #dda66f;
+  --outcome-open: #a38b7b;
+  --outcome-rejected: #615751;
+  --outcome-value: #2f2219;
+
+    --skin-card-radius: 14px;
+  --skin-card-border: #ece7e4;
+    --skin-card-shadow: 0 1px 2px rgba(31, 20, 13, 0.05), 0 6px 18px rgba(31, 20, 13, 0.05);
+  --skin-card-shadow-hover: 0 1px 2px rgba(31, 20, 13, 0.06), 0 12px 30px rgba(31, 20, 13, 0.1);
+  --skin-body-text: #2b211b;
+  --skin-scrollbar: #d5ceca;
+
+      --skin-hero-background:
+    linear-gradient(100deg, rgba(17, 12, 8, 0.9) 0%, rgba(25, 17, 11, 0.7) 38%, rgba(30, 20, 14, 0.3) 100%);
+  --skin-hero-image: url('/brand/africa-band.webp');
+  --skin-hero-radius: 18px;
+
+    --skin-collections-hero-image: url('/brand/africa-hero.webp');
+    --skin-collections-hero-ground: #2a1e16;
+    --skin-collections-scrim:
+    linear-gradient(
+      90deg,
+      rgba(20, 13, 9, 0.5) 0%,
+      rgba(20, 13, 9, 0.24) 38%,
+      rgba(20, 13, 9, 0.06) 62%,
+      rgba(20, 13, 9, 0.42) 100%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(20, 13, 9, 0.12) 0%,
+      rgba(20, 13, 9, 0) 30%,
+      rgba(20, 13, 9, 0) 58%,
+      rgba(20, 13, 9, 0.14) 78%,
+      rgba(20, 13, 9, 0.28) 100%
+    );
+
+    --skin-sidebar-art: url('/brand/africa-sidebar.webp');
+  --skin-sidebar-art-opacity: 0.22;
+
+  --africa-light-metal: linear-gradient(
+    135deg,
+    #85592d 0%,
+    #d49c63 34%,
+    #f5d6b7 54%,
+    #c4894e 78%,
+    #775029 100%
+  );
+
+    --skin-gold-gradient: var(--africa-light-metal);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #a5703a 0%, #dda66f 100%);
+}
+
+html[data-theme='africa'] .app-hero {
+  background:
+    var(--skin-hero-background),
+    var(--skin-hero-image) center / cover no-repeat;
+}
+
+html[data-theme='africa'] .collections-hero {
+  background-position: 50% 55%;
+}
+
+html[data-theme='africa'] .collections-hero {
+  --ch-glass: rgba(23, 16, 11, 0.6);
+  --ch-edge: rgba(255, 255, 255, 0.12);
+  --ch-gold: #dda66f;
+  --ch-champagne: #f5d6b7;
+  --ch-muted: #c9c0ba;
+}
+
+html[data-theme='africa'] .login-photo {
+  background-image: url('/brand/africa-hero.webp');
+  background-position: 72% 50%;
+}
+@media (min-resolution: 2dppx) {
+  html[data-theme='africa'] .login-photo {
+    background-image: url('/brand/africa-hero.webp');
+  }
+}
+
+html[data-theme='africa'] h1,
+html[data-theme='africa'] h2,
+html[data-theme='africa'] h3 {
+  letter-spacing: -0.012em;
+}
+
+html[data-theme='africa'] table,
+html[data-theme='africa'] .app-hero {
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-theme='africa'] .card {
+  transition: box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html[data-theme='africa'] .app-sidebar {
+  position: relative;
+  isolation: isolate;
+}
+
+html[data-theme='africa'] .app-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, #19110b 0%, rgba(25, 17, 11, 0.7) 38%, rgba(25, 17, 11, 0.9) 100%),
+    var(--skin-sidebar-art) center bottom / cover no-repeat;
+  opacity: var(--skin-sidebar-art-opacity);
+  pointer-events: none;
+}
+
+html[data-theme='africa'] .app-sidebar nav a[aria-current='page'] {
+  background: linear-gradient(180deg, #eabb8c 0%, #dda66f 100%);
+  color: #201610;
+}
+
+html[data-theme='africa'] tbody tr:hover {
+  background-color: #f9f8f7;
+}
+
+html[data-theme='africa'] input:not([type='checkbox']):not([type='radio']),
+html[data-theme='africa'] select,
+html[data-theme='africa'] textarea {
+  border-radius: 10px;
+}
+
+html[data-theme='africa'] input:focus-visible,
+html[data-theme='africa'] select:focus-visible,
+html[data-theme='africa'] textarea:focus-visible,
+html[data-theme='africa'] button:focus-visible,
+html[data-theme='africa'] a:focus-visible {
+  outline: 2px solid rgba(126, 98, 80, 0.6);
+  outline-offset: 1px;
+}
+
+html[data-theme='africa'] button,
+html[data-theme='africa'] a {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='africa'] *,
+  html[data-theme='africa'] *::before,
+  html[data-theme='africa'] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

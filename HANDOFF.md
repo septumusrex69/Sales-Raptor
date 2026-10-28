@@ -70,9 +70,12 @@
   second stated exception to the house text scale.
 - **Mail's "Checked 14 days ago" on staging**: the sync is stamped on the real clock and was measured from the
   staging date; now on the real clock (`check-mail-checked-clock`; check-staging-clock's count 53 -> 54).
-- **WAITING ON STEPHAN: the Africa theme.** He sent two photographs (a wing over baobabs at sunset, and the
-  baobabs alone) in chat; they did not arrive as files. A skin needs hero, band and sidebar images
-  (`public/brand/*-hero.webp` etc., `src/styles/<theme>.css`, `src/lib/themes.ts`) and its own saying (heroLine).
+- **Two new skins, Africa and Forest** (Stephan's photographs and sayings: "Africa is our roots." / "The closer
+  you look, the more you see."). `src/styles/africa.css`, `forest.css`: ocean.css's rules with every colour
+  hue-shifted into the photographs' family, lightness kept (so the ocean's contrasts hold); its comments are not
+  copied (they describe a sea) -- ocean.css carries the reasoning. Images `public/brand/{africa,forest}-{band,hero,
+  sidebar}.webp`, made from the originals with an sRGB profile (VP8X, which check-themes reads); the bands were
+  2000x667 and are enlarged 5% to the 700px the check asks.
 
 - **A handover-SHEET ticket sends and receives email, not charged** (S14's question 1; Stephan: "yes, not
   charged"). Staging migration **`sheet_ticket_mail`** (md5 `a95a7767...`): `account_emails.account_id` may be null;
