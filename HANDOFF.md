@@ -60,8 +60,10 @@
   sequence -- on paid up, and on settled only where no approved settlement was paid (Ready to close's small
   balance). `planSend.paidUp`: nothing is charged on an account closed paid up or settled. It goes with the 08:00
   morning run. No email address: the step holds "No email address on this account" on the account's workflow
-  panel. `check-paid-up-letter` (16, seen failing). A SETTLEMENT the client agreed gets no letter yet (a
-  settlement confirmation is its own question for Stephan; the covering emails exist, the letter does not).
+  panel. `check-paid-up-letter` (16, seen failing). A SETTLEMENT the client agreed gets the **settlement letter**
+  instead (Stephan: "yes make settlement letter"): `letter-settlement-*` (seed-paid-up.mjs, md5 `c0fbc9a2...`/
+  `907d4df8...`), quoting `{{settlement_amount}}` (a PAID settlement now answers it, accountMergeValues), migration
+  **`settlement_letter`** (`6581553f...`, trigger `account_settled`; settle_account starts one letter or the other).
 - **The Position card is Stephan's mockup**: "Account position" title with the book as a pill, Stop work / Put on
   hold tiles, the fee ceiling in its own box, ACCOUNT DETAILS / KEY DATES / CONTACT & ADMIN, "This month" chip on
   Handed over, Close account in red at the foot (`position-close`). check-account-standing names the title as the
@@ -97,7 +99,7 @@ Ask Stephan whether he wants the sheet ticket's T-number shown on its page (see 
 
 **AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
 `withdrawal_basis_for_closers`, `sheet_ticket_mail`, `big_boss`, `big_boss_queue`, then RUN
-`scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter` -- after S14's list below. The backfill in the first moves every closed account off
+`scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter`, `settlement_letter` -- after S14's list below. The backfill in the first moves every closed account off
 its collector; on production that is the whole closed book, run out of hours.
 
 ---

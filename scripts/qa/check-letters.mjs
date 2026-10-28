@@ -51,6 +51,9 @@ const WANTED = [
   /* S15: THE PAID-UP CONFIRMATION, attached by the "Paid-up letter" workflow when an account closes paid
      (Stephan, 28 Oct). Not a demand -- but the workflow attaches it, which is what this list means. */
   'letter-paid-up-individual', 'letter-paid-up-company',
+  /* S15: and the settlement confirmation, attached by the "Settlement letter" workflow ("yes make
+     settlement letter"). */
+  'letter-settlement-individual', 'letter-settlement-company',
 ]
 /*
  * AND THE FOUR THAT ARE NOT NOTICES. They live in the same file and are a different animal:
@@ -70,7 +73,7 @@ const BY_HAND = [
   'letter-affordability-individual', 'letter-affordability-company',
 ]
 
-check('the ten letters the workflow attaches are all there',
+check('the twelve letters the workflow attaches are all there',
   Object.keys(letters).filter((k) => !BY_HAND.includes(k)).sort(), [...WANTED].sort())
 /* AND THE FOUR SIGNED DOCUMENTS ARE BUILT. Asserted here as well as in check-aod and
    check-affordability, because this is the file that knows what letters.json should contain. */
@@ -164,9 +167,9 @@ for (const key of WANTED) {
  */
 /* THE NOTICES THAT ASK FOR MONEY. The paid-up confirmation asks for none, so it names no account at all
    -- printing the trust account on a letter saying nothing is owing would invite a payment nobody owes. */
-const DEMANDS = WANTED.filter((key) => !key.startsWith('letter-paid-up-'))
-ok('the paid-up confirmation names no bank account',
-  WANTED.filter((k) => k.startsWith('letter-paid-up-')).every((k) => !/\{\{firm_(business_)?bank/.test(JSON.stringify(letters[k] ?? {}))))
+const DEMANDS = WANTED.filter((key) => !key.startsWith('letter-paid-up-') && !key.startsWith('letter-settlement-'))
+ok('the paid-up and settlement confirmations name no bank account',
+  WANTED.filter((k) => k.startsWith('letter-paid-up-') || k.startsWith('letter-settlement-')).every((k) => !/\{\{firm_(business_)?bank/.test(JSON.stringify(letters[k] ?? {}))))
 const bankFields = DEMANDS.map((key) => {
   const text = spansOf(letters[key]).map((s) => s.text).join(' ')
   return [...new Set([...text.matchAll(/\{\{(firm_bank[a-z_]*)\}\}/g)].map((m) => m[1]))].sort().join(',')

@@ -36,7 +36,7 @@ import { addWorkingDays, subtractWorkingDays, workingDaysBetween } from './worki
 export type TriggerKind =
   | 'handover' | 'allocated' | 'promise_due' | 'promise_broken' | 'arrangement_broken'
   | 'payment_received' | 'dispute_alleged' | 'dispute_logged' | 'no_contact' | 'trace_returned'
-  | 'callback' | 'by_hand' | 'account_paid_up'
+  | 'callback' | 'by_hand' | 'account_paid_up' | 'account_settled'
 
 export interface TriggerMeta {
   /** What the firm would call it, on the button. */
@@ -76,6 +76,9 @@ export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
   /* S15: THE PAID-UP LETTER. Started by settle_account when an account closes paid up, or settled on a
      small balance Ready to close waived -- Stephan: a letter by email, never an SMS. */
   account_paid_up: { label: 'An account is closed as paid up', dayZero: 'the day it was closed' },
+  /* S15: AND THE SETTLEMENT LETTER, where the client agreed a settlement and it was paid ("yes make
+     settlement letter"). settle_account starts one or the other, never both. */
+  account_settled: { label: 'An agreed settlement is paid and closed', dayZero: 'the day it was closed' },
   callback: { label: 'A callback is asked for', dayZero: 'the day it was asked for' },
   by_hand: { label: 'Somebody starts it on a file', dayZero: 'the day somebody started it' },
 }
@@ -84,7 +87,7 @@ export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
 export const TRIGGER_ORDER: TriggerKind[] = [
   'handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
   'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned',
-  'callback', 'account_paid_up', 'by_hand',
+  'callback', 'account_paid_up', 'account_settled', 'by_hand',
 ]
 
 /**

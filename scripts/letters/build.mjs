@@ -228,6 +228,49 @@ const paidUp = (who) => doc([
 out['letter-paid-up-individual'] = paidUp('individual')
 out['letter-paid-up-company'] = paidUp('company')
 
+/* ------------------------------------------------- settlement confirmation (S15) */
+/*
+ * THE LETTER FOR A SETTLEMENT THE CLIENT AGREED. Stephan, told the paid-up letter would not go on one
+ * (it would say "paid up" of a debt settled for less): "yes make settlement letter". It quotes the
+ * amount accepted -- the one figure it exists to record -- and says the debt is extinguished. Its words
+ * follow the covering emails the firm already had for it, so the email and the letter say one thing.
+ * Email only and never charged, for the paid-up letter's reasons.
+ */
+const settled = (who) => doc([
+  headerStrip('By email'), ...addressee(who),
+  h(1, 'CONFIRMATION OF FULL AND FINAL SETTLEMENT'),
+  p((who === 'individual' ? 'Dear {{debtor_name}}' : 'Dear Sirs / Madams')
+    + ' — we act on behalf of {{client_name}}, the creditor. {{client_name}} accepted the amount below '
+    + 'in full and final settlement of this account. That amount has been received in our trust account, '
+    + 'and our file is closed.'),
+  { kind: 'table', borders: 'rows', widths: [40, 60], rows: [
+    row('Creditor', '{{client_name}}'),
+    row('Account number', '{{account_number}}'),
+    row('Our case reference', '{{case_number}}'),
+    row(cell([t('Accepted in full and final settlement', { bold: true })]), cell([t('{{settlement_amount}}', { bold: true })])),
+    row(cell([t('Amount still owing', { bold: true })]), cell([t('Nothing', { bold: true })])),
+  ] },
+  h(2, 'What this means', { numbered: true }),
+  { kind: 'list', ordered: false, items: [
+    [t('The debt is extinguished. ', { bold: true }), t('The difference between the balance that was '
+      + 'owing and the amount accepted is written off. Neither the creditor nor this firm can revive the '
+      + (who === 'individual' ? 'claim against you arising from this account.'
+        : 'claim arising from this account against the company, or against any surety for it.'))],
+    [t('Keep this letter. ', { bold: true }), t(who === 'individual'
+      ? 'It is your proof of the settlement.' : 'It is the company’s proof of the settlement.')],
+    [t('The credit bureaus. ', { bold: true }), t('A settled account does not read on a credit profile '
+      + 'in the same way as a paid-up account. If a default was reported, the record will reflect that the '
+      + 'account was settled for less than the full balance. Allow 20 business days for the bureaus to '
+      + 'reflect the update.')],
+  ] },
+  p('If a credit provider shows this account as still owing after that, send them this letter and contact '
+    + 'us on {{firm_phone}} or at {{firm_email}}, quoting {{case_number}}, and we will take it up with the '
+    + 'bureaus directly.'),
+  ...signOff('Thank you for settling the account.', 'Sent by email.'),
+])
+out['letter-settlement-individual'] = settled('individual')
+out['letter-settlement-company'] = settled('company')
+
 /* ------------------------------------------------- listing notice, day 39 */
 const listing = (who) => doc([
   headerStrip(), ...addressee(who),

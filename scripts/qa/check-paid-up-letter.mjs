@@ -38,19 +38,30 @@ ok('the runner says so for paid up AND settled', /paidUp: account\.ended_as === 
 /* ---------- started on close, after everything else is stopped ---------- */
 const settle = lastFn('settle_account')
 const stopAt = settle.indexOf('perform public.stop_workflows_on_close(')
-const startAt = settle.indexOf("v.trigger_kind = 'account_paid_up'")
+const startAt = settle.indexOf("then 'account_settled' else 'account_paid_up' end")
 ok('closing starts the paid-up letter', startAt >= 0)
 ok('...after it stops every other sequence', stopAt >= 0 && startAt > stopAt)
-ok('...for paid up, and for settled only with no approved settlement paid',
-  /if p_as = 'paid_up'\s+or \(p_as = 'settled' and not exists \(\s+select 1 from public\.account_settlements s where s\.account_id = p_account and s\.status = 'paid'\)\)/.test(settle))
+/* S15, later: "yes make settlement letter" -- an agreed, paid settlement gets the settlement letter
+   instead, and a small-balance settle still gets the paid-up one. One or the other, never both. */
+ok('...for paid up and settled; an agreed, paid settlement gets the settlement letter instead',
+  /if p_as in \('paid_up', 'settled'\) then/.test(settle)
+  && /when p_as = 'settled' and exists \(\s+select 1 from public\.account_settlements s where s\.account_id = p_account and s\.status = 'paid'\)\s+then 'account_settled' else 'account_paid_up' end/.test(settle))
 ok('...once per account and version, ever',
   /not exists \(select 1 from public\.workflow_runs r where r\.account_id = p_account and r\.version_id = v\.id\)/.test(settle))
+const settledSeed = sql.slice(sql.lastIndexOf("if exists (select 1 from public.workflows where key = 'settlement-letter')"))
+ok('the settlement letter is seeded, by email only', /'settlement-email', 'communication', 'Settlement letter'/.test(settledSeed)
+  && !/'sms'/.test(settledSeed.slice(0, settledSeed.indexOf('end $$;'))))
+const attachesS = JSON.parse(read('scripts/letters/attachments.json'))
+ok('...and its emails attach the settlement letters', attachesS['email-settlement-confirmation-individual'] === 'letter-settlement-individual')
+const merge = read('src/lib/accountMergeValues.ts')
+ok('a PAID settlement still answers the amount, so the letter can quote it', /input\.settlement\?\.state === 'paid' && input\.settlement\.expiresOn/.test(merge))
 ok('the database allows the trigger', /'account_paid_up'\]\)\)/.test(sql))
 const builder = read('src/lib/workflowBuilder.ts')
-ok('...and the library names it', /account_paid_up: \{ label: 'An account is closed as paid up'/.test(builder) && /'account_paid_up', 'by_hand'/.test(builder))
+ok('...and the library names it', /account_paid_up: \{ label: 'An account is closed as paid up'/.test(builder) && /'account_paid_up', 'account_settled', 'by_hand'/.test(builder))
 
 /* ---------- email only ---------- */
-const seed = sql.slice(sql.lastIndexOf("if exists (select 1 from public.workflows where key = 'paid-up-letter')"))
+const seedAll = sql.slice(sql.lastIndexOf("if exists (select 1 from public.workflows where key = 'paid-up-letter')"))
+const seed = seedAll.slice(0, seedAll.indexOf('end $$;') + 7)
 ok('the workflow is seeded', seed.length > 0 && /'paid-up-letter', 'Paid-up letter'/.test(seed))
 ok('...with one step, by email', /'paid-up-email', 'communication', 'Paid-up letter'/.test(seed) && /0, 'email',/.test(seed))
 ok('...and no SMS step at all', !/'sms'/.test(seed.slice(0, seed.indexOf('end $$;'))))

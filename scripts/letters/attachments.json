@@ -10,5 +10,7 @@
   "email-summons-individual": "letter-summons-individual",
   "email-summons-company": "letter-summons-company",
   "email-paid-up-individual": "letter-paid-up-individual",
-  "email-paid-up-company": "letter-paid-up-company"
+  "email-paid-up-company": "letter-paid-up-company",
+  "email-settlement-confirmation-individual": "letter-settlement-individual",
+  "email-settlement-confirmation-company": "letter-settlement-company"
 }

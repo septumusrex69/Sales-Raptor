@@ -1,5 +1,5 @@
 /**
- * PUT THE PAID-UP CONFIRMATION INTO A DATABASE (S15, Raptor · Handover 14).
+ * PUT THE PAID-UP AND SETTLEMENT CONFIRMATIONS INTO A DATABASE (S15, Raptor · Handover 14).
  *
  * Two letters (a person, a company) from letters.json, and the two covering emails that already
  * existed pointed at them. Stephan, 28 Oct: a paid-up account gets a letter, by email, never an SMS.
@@ -27,6 +27,10 @@ const q = (s) => `'${String(s).replace(/'/g, "''")}'`
 const LETTERS = [
   { seed_key: 'letter-paid-up-individual', name: 'Paid-up confirmation (individual)', audience: 'individual' },
   { seed_key: 'letter-paid-up-company', name: 'Paid-up confirmation (company)', audience: 'company' },
+  /* S15, the same afternoon: "yes make settlement letter". Its covering emails already existed; they are
+     pointed at it below and signed by the signatory, for the paid-up emails' reason. */
+  { seed_key: 'letter-settlement-individual', name: 'Settlement confirmation (individual)', audience: 'individual' },
+  { seed_key: 'letter-settlement-company', name: 'Settlement confirmation (company)', audience: 'company' },
 ]
 
 const covering = (who) => [
@@ -67,6 +71,13 @@ for (const who of ['individual', 'company']) {
    set body = ${q(covering(who))},
        attachment_id = (select id from public.message_templates where seed_key = ${q(`letter-paid-up-${who}`)})
  where seed_key = ${q(`email-paid-up-${who}`)};`)
+}
+/* The settlement emails keep the firm's own wording; only the signature changes, and the attachment. */
+for (const who of ['individual', 'company']) {
+  out.push(`update public.message_templates
+   set body = replace(body, '{{collector_name}}', '{{signatory_name}}'),
+       attachment_id = (select id from public.message_templates where seed_key = ${q(`letter-settlement-${who}`)})
+ where seed_key = ${q(`email-settlement-confirmation-${who}`)};`)
 }
 out.push('commit;')
 console.log(out.join('\n'))
