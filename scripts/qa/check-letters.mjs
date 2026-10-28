@@ -48,6 +48,9 @@ const WANTED = [
   'letter-final-notice-individual', 'letter-final-notice-company',
   'letter-listing-individual', 'letter-listing-company',
   'letter-summons-individual', 'letter-summons-company',
+  /* S15: THE PAID-UP CONFIRMATION, attached by the "Paid-up letter" workflow when an account closes paid
+     (Stephan, 28 Oct). Not a demand -- but the workflow attaches it, which is what this list means. */
+  'letter-paid-up-individual', 'letter-paid-up-company',
 ]
 /*
  * AND THE FOUR THAT ARE NOT NOTICES. They live in the same file and are a different animal:
@@ -67,7 +70,7 @@ const BY_HAND = [
   'letter-affordability-individual', 'letter-affordability-company',
 ]
 
-check('the eight notices the workflow attaches are all there',
+check('the ten letters the workflow attaches are all there',
   Object.keys(letters).filter((k) => !BY_HAND.includes(k)).sort(), [...WANTED].sort())
 /* AND THE FOUR SIGNED DOCUMENTS ARE BUILT. Asserted here as well as in check-aod and
    check-affordability, because this is the file that knows what letters.json should contain. */
@@ -159,7 +162,12 @@ for (const key of WANTED) {
  * argument for bankLine is that the same account written two ways across two notices reads as two
  * accounts. Here that means every letter asks for the same four fields.
  */
-const bankFields = WANTED.map((key) => {
+/* THE NOTICES THAT ASK FOR MONEY. The paid-up confirmation asks for none, so it names no account at all
+   -- printing the trust account on a letter saying nothing is owing would invite a payment nobody owes. */
+const DEMANDS = WANTED.filter((key) => !key.startsWith('letter-paid-up-'))
+ok('the paid-up confirmation names no bank account',
+  WANTED.filter((k) => k.startsWith('letter-paid-up-')).every((k) => !/\{\{firm_(business_)?bank/.test(JSON.stringify(letters[k] ?? {}))))
+const bankFields = DEMANDS.map((key) => {
   const text = spansOf(letters[key]).map((s) => s.text).join(' ')
   return [...new Set([...text.matchAll(/\{\{(firm_bank[a-z_]*)\}\}/g)].map((m) => m[1]))].sort().join(',')
 })

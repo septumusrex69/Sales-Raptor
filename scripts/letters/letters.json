@@ -2382,6 +2382,580 @@
    }
   ]
  },
+ "letter-paid-up-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "CONFIRMATION THAT THE ACCOUNT IS PAID UP AND CLOSED"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. We confirm that the account set out below has been paid up and that our file on it is closed."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Amount still owing",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Nothing",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What this means"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Nothing further is payable. ",
+       "bold": true
+      },
+      {
+       "text": "No further payment is owed to {{client_name}} or to us on this account, and no further step will be taken on it."
+      }
+     ],
+     [
+      {
+       "text": "Keep this letter. ",
+       "bold": true
+      },
+      {
+       "text": "It is your proof that the account is paid up, now or in years from now."
+      }
+     ],
+     [
+      {
+       "text": "The credit bureaus. ",
+       "bold": true
+      },
+      {
+       "text": "If a default was reported on this account, the record is corrected to show that it was paid up. Payment does not remove a listing; it changes what it says. Allow 20 business days for the bureaus to reflect it."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If a credit provider still shows this account as unpaid after that, send them this letter and contact us on {{firm_phone}} or at {{firm_email}}, quoting {{case_number}}, and we will take it up with the bureaus directly."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Thank you for settling the account."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
+ "letter-paid-up-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "The Directors"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}",
+      "bold": true
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "CONFIRMATION THAT THE ACCOUNT IS PAID UP AND CLOSED"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. We confirm that the account set out below has been paid up and that our file on it is closed."
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "widths": [
+     40,
+     60
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "Creditor"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{client_name}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Account number"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Our case reference"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Amount still owing",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "Nothing",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "What this means"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "list",
+    "ordered": false,
+    "items": [
+     [
+      {
+       "text": "Nothing further is payable. ",
+       "bold": true
+      },
+      {
+       "text": "No further payment is owed to {{client_name}} or to us on this account, and no further step will be taken on it."
+      }
+     ],
+     [
+      {
+       "text": "Keep this letter. ",
+       "bold": true
+      },
+      {
+       "text": "It is the company’s proof that the account is paid up."
+      }
+     ],
+     [
+      {
+       "text": "The credit bureaus. ",
+       "bold": true
+      },
+      {
+       "text": "If a default was reported on this account, the record is corrected to show that it was paid up. Payment does not remove a listing; it changes what it says. Allow 20 business days for the bureaus to reflect it."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "If a credit provider still shows this account as unpaid after that, send them this letter and contact us on {{firm_phone}} or at {{firm_email}}, quoting {{case_number}}, and we will take it up with the bureaus directly."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Thank you for settling the account."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Yours faithfully"
+     }
+    ],
+    "keepWithNext": true
+   },
+   {
+    "kind": "signature",
+    "spans": [
+     {
+      "text": "{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\nduly authorised agent of {{client_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Note on delivery. Sent by email. Proof of sending is retained on our file.",
+      "size": 8.5
+     }
+    ]
+   }
+  ]
+ },
  "letter-listing-individual": {
   "defaults": {
    "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",

@@ -187,6 +187,47 @@ const finalNotice = (who) => doc([
 out['letter-final-notice-individual'] = finalNotice('individual')
 out['letter-final-notice-company'] = finalNotice('company')
 
+/* ------------------------------------------------- paid-up confirmation (S15) */
+/*
+ * THE LETTER A DEBTOR KEEPS. Stephan, 28 Oct (Raptor · Handover 14): a letter goes to "a guy who's paid
+ * up his account, even though if that is a small balance" -- by email, never an SMS, which is "a waste
+ * of money". So it is sent when an account is closed as paid up, AND when Ready to close waives a
+ * balance under R50 (closed as settled): to the debtor both are paid. Which is why it quotes NO
+ * figure -- the few rand waived are never mentioned, and a "paid since handover" line would read R0 on
+ * an account the debtor paid to the client direct. What it must say is the thing it is kept for: the
+ * account is closed and nothing further is owing.
+ */
+const paidUp = (who) => doc([
+  headerStrip('By email'), ...addressee(who),
+  h(1, 'CONFIRMATION THAT THE ACCOUNT IS PAID UP AND CLOSED'),
+  p((who === 'individual' ? 'Dear {{debtor_name}}' : 'Dear Sirs / Madams')
+    + ' — we act on behalf of {{client_name}}, the creditor. We confirm that the account set out '
+    + 'below has been paid up and that our file on it is closed.'),
+  { kind: 'table', borders: 'rows', widths: [40, 60], rows: [
+    row('Creditor', '{{client_name}}'),
+    row('Account number', '{{account_number}}'),
+    row('Our case reference', '{{case_number}}'),
+    row(cell([t('Amount still owing', { bold: true })]), cell([t('Nothing', { bold: true })])),
+  ] },
+  h(2, 'What this means', { numbered: true }),
+  { kind: 'list', ordered: false, items: [
+    [t('Nothing further is payable. ', { bold: true }), t('No further payment is owed to '
+      + '{{client_name}} or to us on this account, and no further step will be taken on it.')],
+    [t('Keep this letter. ', { bold: true }), t(who === 'individual'
+      ? 'It is your proof that the account is paid up, now or in years from now.'
+      : 'It is the company’s proof that the account is paid up.')],
+    [t('The credit bureaus. ', { bold: true }), t('If a default was reported on this account, the '
+      + 'record is corrected to show that it was paid up. Payment does not remove a listing; it '
+      + 'changes what it says. Allow 20 business days for the bureaus to reflect it.')],
+  ] },
+  p('If a credit provider still shows this account as unpaid after that, send them this letter and '
+    + 'contact us on {{firm_phone}} or at {{firm_email}}, quoting {{case_number}}, and we will take it '
+    + 'up with the bureaus directly.'),
+  ...signOff('Thank you for settling the account.', 'Sent by email.'),
+])
+out['letter-paid-up-individual'] = paidUp('individual')
+out['letter-paid-up-company'] = paidUp('company')
+
 /* ------------------------------------------------- listing notice, day 39 */
 const listing = (who) => doc([
   headerStrip(), ...addressee(who),
