@@ -71,6 +71,8 @@ its collector; on production that is the whole closed book, run out of hours.
 
 ---
 
+- **R-9 sent back after testing, built again (Raptor · Handover 15, builder run).** "Send back" was only offered at the team leader's stage; the asker wanted it for the Call Centre Manager and client liaisons too. `canSendBack` (`ticketThread.ts`) now also allows the `liaison` stage and an `agent`-stage ticket handed to the actor by name (a Call Centre Manager is not a team leader, so `stageForAssignee` leaves it at `agent`). Never the raiser, never `client`, never closed. `check-send-back` holds it.
+
 ## S14 -- WHERE IT STANDS, AND WHERE S15 STARTS (Raptor · Handoff 14, 28 Oct)
 
 **S14 · Loose Ends** -- branch `claude/s14-loose-ends`, every commit also fast-forwarded onto the preview
