@@ -8,7 +8,9 @@
 import fs from 'node:fs'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, isPortalToken, normalisePortalEmail, portalCodeCheck, portalLine,
+  PORTAL_MESSAGE_MAX, PORTAL_TICKET_LABEL, portalCallback, portalMessageText, portalTicketNo, portalTicketTurn,
 } from '../../src/lib/clientPortal.ts'
+import { ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection } from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
 const failures = []
@@ -105,6 +107,42 @@ const portalRoute = app.indexOf('path="/portal"')
 const requireAuth = app.indexOf('<RequireAuth>')
 check('/portal is a route', portalRoute > 0, true)
 check('/portal sits outside RequireAuth and the firm\'s navigation', requireAuth > 0 && portalRoute < requireAuth, true)
+
+/* ---------- phase 2a (S15): tickets, questions, callbacks ---------- */
+check('a ticket number reads as T-123, 123 or a number', [portalTicketNo('T-123'), portalTicketNo('123'), portalTicketNo(123), portalTicketNo('t123')], [123, 123, 123, 123])
+check('...and nothing else is a ticket number', [portalTicketNo('1; drop'), portalTicketNo(''), portalTicketNo(null), portalTicketNo(-4)], [null, null, null, null])
+check('an empty message is no message', [portalMessageText('   '), portalMessageText(undefined)], [null, null])
+check('a message is trimmed and capped', portalMessageText(' hi\r\nthere ') === 'hi\nthere' && portalMessageText('x'.repeat(9000)).length === PORTAL_MESSAGE_MAX, true)
+check('a callback needs a real number', portalCallback({ phone: '123' }).ok, false)
+check('...a number and nothing else is fine, any time', portalCallback({ phone: '082 123 4567' }), { ok: true, phone: '082 123 4567', when: 'Any time', about: '' })
+check('waiting on the client is theirs; any other open stage is ours', [portalTicketTurn({ status: 'open', stage: 'client' }), portalTicketTurn({ status: 'open', stage: 'liaison' }), portalTicketTurn({ status: 'closed', stage: 'client' })], ['yours', 'ours', 'closed'])
+check('the client is told about exactly the kinds portal_tickets returns', Object.keys(PORTAL_TICKET_LABEL).sort(), ['client', 'dispute', 'import', 'litigation'])
+check('a client\'s question is on their QUERY list', clientSection('client'), 'query')
+check('...never raises item 3', ESCALATION_KINDS.client.chargeable, false)
+check('...and is not offered on the staff Escalate menu (the client raises it, not an agent)', ESCALATION_KIND_ORDER.includes('client'), false)
+
+const server = strip(fs.readFileSync('api/_lib/portal.ts', 'utf8'))
+for (const route of ['tickets', 'ticket', 'ticketReply', 'ask', 'callback']) {
+  const at = server.indexOf(`const ${route}: Handler`)
+  const end = server.indexOf('\n}\n', at)
+  const body = at >= 0 ? server.slice(at, end) : ''
+  check(`${route} is a route`, at >= 0, true)
+  check(`${route} asks who is signed in before anything else`, body.length > 0 && /requirePortalUser\(req, admin\)/.test(body.slice(0, 200)), true)
+  check(`${route} never takes the client from the request`, /body\.(companyId|client|company)\b/.test(body), false)
+}
+const ownTicket = server.slice(server.indexOf('async function clientTicket'), server.indexOf('const tickets: Handler'))
+check('a ticket is only found inside the client\'s own group', /clientGroup\(admin, who\.companyId\)/.test(ownTicket), true)
+check('...and only of a kind the client may see', /\['dispute', 'import', 'litigation', 'client'\]/.test(ownTicket), true)
+const replyBody = server.slice(server.indexOf('const ticketReply: Handler'), server.indexOf('async function clientAccount'))
+check('a closed ticket takes no reply', /t\.status !== 'open'/.test(replyBody), true)
+check('a reply hands the ticket back to the liaison', /stage: 'liaison'/.test(replyBody), true)
+const ownAccount = server.slice(server.indexOf('async function clientAccount'), server.indexOf('const ask: Handler'))
+check('an account is found by our reference inside the client\'s own group', /eq\('case_number'/.test(ownAccount) && /clientGroup\(admin, who\.companyId\)/.test(ownAccount), true)
+check('a question is a client ticket on the liaison\'s stage', /kind: 'client', stage: 'liaison'/.test(server), true)
+/* NOT CHARGED until the firm says a portal message is the same as an email (asked, S15). If they say
+   yes, this check changes with the code -- deliberately, so the decision cannot happen by accident. */
+check('nothing the client types is charged to the debtor yet', /chargeItemWith|chargeItem\(/.test(server), false)
+check('...and the filed message says so in the row', /charged_excl_vat: 0/.test(server), true)
 
 if (failures.length) {
   console.log(`check-client-portal: ${pass} passed, ${failures.length} failed`)

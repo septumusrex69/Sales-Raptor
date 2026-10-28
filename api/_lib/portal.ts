@@ -8,8 +8,8 @@ import { can } from '../../src/lib/capabilities.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_CODE_MINUTES, PORTAL_SESSION_DAYS, PORTAL_TOKEN_HEADER,
-  isPortalToken, normalisePortalEmail, portalCodeCheck, portalCodeEmail, portalInviteEmail, portalLine,
-  type PortalBookRow,
+  isPortalToken, normalisePortalEmail, portalCallback, portalCodeCheck, portalCodeEmail, portalInviteEmail, portalLine,
+  portalMessageText, portalTicketNo, type PortalBookRow,
 } from '../../src/lib/clientPortal.js'
 
 /**
@@ -21,7 +21,8 @@ import {
  *
  * Two kinds of caller, never mixed:
  *   anonymous    request-code, verify               (the code is the authority)
- *   portal user  me, book, sign-out                 (x-portal-token)
+ *   portal user  me, book, sign-out,                (x-portal-token)
+ *                tickets, ticket, ticket-reply, ask, callback
  *   staff        staff-list, staff-invite, staff-set-active   (a Raptor session + dispute.write_to_client)
  *
  * The staff tick is dispute.write_to_client because a portal login is a way of writing to a client about
@@ -172,6 +173,189 @@ const signOut: Handler = async (req, res, admin) => {
   res.status(200).json({ ok: true })
 }
 
+/* ------------------------------------------------------------------ a signed-in client: tickets (S15) */
+
+/*
+ * PHASE 2a (S15, Raptor · Handover 14). Stephan's order: tickets in the portal (see them and answer),
+ * questions about a debtor, callbacks. Every write below lands on the LIAISON's desk -- the client's
+ * account owner -- and rings their bell, because each one is work that has just become theirs
+ * (emailSync explains why the bell is for exactly that and nothing else).
+ *
+ * NOT CHARGED. What a client types into the portal raises no fee on the debtor's account. The firm's
+ * ruling charges item 6 on the client's EMAIL about an account; whether a portal message is the same
+ * thing is the firm's question, put to Stephan in S15 and not yet answered, and an unraised fee can be
+ * raised by hand where a raised one is a complaint. If the answer is yes, raise it in fileClientMessage
+ * the way emailSync's fileAccountEmail does.
+ */
+
+/** The client and its sub-accounts: every company a portal user's tickets and accounts may belong to. */
+async function clientGroup(admin: SupabaseClient, clientId: string): Promise<Set<string>> {
+  const { data } = await admin.from('companies').select('id').or(`id.eq.${clientId},parent_company_id.eq.${clientId}`)
+  return new Set((data ?? []).map((c) => c.id as string))
+}
+
+/**
+ * WHO HEARS ABOUT IT: the client's liaison, or -- where the client has none -- every active
+ * Administrator, because a question nobody is told about is a question nobody answers.
+ */
+async function liaisonFor(admin: SupabaseClient, clientId: string): Promise<{ owner: string | null; tell: string[] }> {
+  const { data: co } = await admin.from('companies').select('account_owner_id').eq('id', clientId).maybeSingle()
+  const owner = (co?.account_owner_id as string | null) ?? null
+  if (owner) return { owner, tell: [owner] }
+  const { data: admins } = await admin.from('profiles').select('id').eq('role', 'Administrator').eq('status', 'Active')
+  return { owner: null, tell: (admins ?? []).map((p) => p.id as string) }
+}
+
+async function ring(admin: SupabaseClient, to: string[], type: string, message: string, link: string) {
+  if (to.length === 0) return
+  const { error } = await admin.from('notifications').insert(to.map((userId) => ({ user_id: userId, type, message, link })))
+  if (error) console.error(`[portal] notification not made (${type}): ${error.message}`)
+}
+
+/** The ticket behind a number, if -- and only if -- it is this client's and of a kind they may see. */
+async function clientTicket(admin: SupabaseClient, who: PortalCaller, ticketNo: number) {
+  const { data: q } = await admin.from('account_queries')
+    .select('id, kind, status, stage, owner_id, account_id, handover_id, debtor_accounts(company_id, case_number), handovers(company_id)')
+    .eq('ticket_no', ticketNo).maybeSingle()
+  if (!q || !['dispute', 'import', 'litigation', 'client'].includes(q.kind as string)) return null
+  const acc = q.debtor_accounts as unknown as { company_id: string; case_number: string | null } | null
+  const sheet = q.handovers as unknown as { company_id: string } | null
+  const company = acc?.company_id ?? sheet?.company_id
+  if (!company || !(await clientGroup(admin, who.companyId)).has(company)) return null
+  return {
+    id: q.id as string, status: q.status as string, stage: q.stage as string, ownerId: (q.owner_id as string | null) ?? null,
+    accountId: (q.account_id as string | null) ?? null, caseNumber: acc?.case_number ?? null,
+  }
+}
+
+const tickets: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const { data, error } = await admin.rpc('portal_tickets', { p_client: who.companyId })
+  if (error) { res.status(500).json({ error: 'Your tickets could not be read just now.' }); return }
+  res.status(200).json({ tickets: data ?? [] })
+}
+
+const ticket: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const ticketNo = portalTicketNo((req.body ?? {}).ticketNo)
+  if (ticketNo === null) { res.status(400).json({ error: 'Which ticket?' }); return }
+  const { data, error } = await admin.rpc('portal_ticket_thread', { p_client: who.companyId, p_ticket_no: ticketNo })
+  if (error) { res.status(500).json({ error: 'That ticket could not be read just now.' }); return }
+  /* NOT FOUND AND NOT YOURS ARE ONE ANSWER, for the reason the sign-in gives one answer. */
+  if (data === null) { res.status(404).json({ error: 'There is no such ticket on your accounts.' }); return }
+  res.status(200).json({ messages: data })
+}
+
+/**
+ * The client's words, filed on the ticket as a message received -- the same row an emailed reply makes,
+ * so the liaison reads it in the ticket's Emails tab beside everything else the client wrote. The
+ * correspondent is the database's to decide, and a portal user's address reads as the client's
+ * (client_portal_tickets). charged_excl_vat 0, said in the row: see the note at the top of this block.
+ */
+async function fileClientMessage(admin: SupabaseClient, who: PortalCaller, t: { id: string; accountId: string | null; ownerId: string | null },
+  subject: string, body: string): Promise<boolean> {
+  const { error } = await admin.from('account_emails').insert({
+    account_id: t.accountId, query_id: t.id, direction: 'in',
+    debtor_address: who.email, subject, body,
+    message_id: `<portal-${crypto.randomUUID()}@raptor.portal>`,
+    sent_by_name: `${who.name || who.email} (client portal)`,
+    received_by: t.ownerId, occurred_at: new Date().toISOString(), charged_excl_vat: 0,
+  })
+  if (error) console.error(`[portal] message not filed on ticket ${t.id}: ${error.message}`)
+  return !error
+}
+
+const ticketReply: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const ticketNo = portalTicketNo(body.ticketNo)
+  const text = portalMessageText(body.message)
+  if (ticketNo === null || !text) { res.status(400).json({ error: 'Type your reply first.' }); return }
+  const t = await clientTicket(admin, who, ticketNo)
+  if (!t) { res.status(404).json({ error: 'There is no such ticket on your accounts.' }); return }
+  /* A CLOSED TICKET IS ANSWERED. Writing on it would put words on a desk nobody looks at; a new
+     question is a new ticket, and the screen offers exactly that. */
+  if (t.status !== 'open') { res.status(409).json({ error: 'That ticket is closed. Ask a new question from the account instead.' }); return }
+  if (!(await fileClientMessage(admin, who, t, `Re: ticket T-${ticketNo}`, text))) {
+    res.status(500).json({ error: 'Your reply could not be saved just now. Try again.' }); return
+  }
+  /* THE CLIENT HAS ANSWERED, SO IT IS THE LIAISON'S TURN: a ticket left on stage 'client' after the
+     client wrote back reads on the board as still waiting on them. */
+  if (t.stage === 'client') await admin.from('account_queries').update({ stage: 'liaison' }).eq('id', t.id)
+  const { owner, tell } = await liaisonFor(admin, who.companyId)
+  await ring(admin, t.ownerId ? [t.ownerId] : owner ? [owner] : tell, 'portal.reply',
+    `${who.clientName}: ${who.name || who.email} replied on ticket T-${ticketNo}${t.caseNumber ? ` (${t.caseNumber})` : ''} from the client portal.`,
+    `/queries/${t.id}`)
+  res.status(200).json({ ok: true })
+}
+
+/** An account on this client's book, by OUR reference -- the only one the portal shows that is unique. */
+async function clientAccount(admin: SupabaseClient, who: PortalCaller, caseNumber: unknown) {
+  if (typeof caseNumber !== 'string' || !caseNumber.trim()) return null
+  const { data: a } = await admin.from('debtor_accounts')
+    .select('id, company_id, case_number, debtor_first_name, debtor_surname').eq('case_number', caseNumber.trim()).maybeSingle()
+  if (!a || !(await clientGroup(admin, who.companyId)).has(a.company_id as string)) return null
+  return { id: a.id as string, caseNumber: a.case_number as string,
+    debtor: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'the debtor' }
+}
+
+const ask: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const text = portalMessageText(body.question)
+  if (!text) { res.status(400).json({ error: 'Type your question first.' }); return }
+  const a = await clientAccount(admin, who, body.caseNumber)
+  if (!a) { res.status(404).json({ error: 'That account is not on your book.' }); return }
+  const { owner, tell } = await liaisonFor(admin, who.companyId)
+  const { data: q, error } = await admin.from('account_queries').insert({
+    account_id: a.id, kind: 'client', stage: 'liaison', status: 'open', description: text,
+    owner_id: owner, raised_by: null, raised_by_name: `${who.name || who.email} (client portal)`,
+  }).select('id, ticket_no').single()
+  if (error || !q) {
+    console.error(`[portal] question not raised on ${a.caseNumber}: ${error?.message}`)
+    res.status(500).json({ error: 'Your question could not be sent just now. Try again.' }); return
+  }
+  await ring(admin, tell, 'portal.question',
+    `${who.clientName} asked about ${a.debtor} (${a.caseNumber}) from the client portal: ${text.slice(0, 140)}`,
+    `/queries/${q.id}`)
+  res.status(200).json({ ticketNo: q.ticket_no })
+}
+
+const callback: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const c = portalCallback(body)
+  if (!c.ok) { res.status(400).json({ error: c.error }); return }
+  /* ABOUT ONE ACCOUNT, OR THE CLIENT IN GENERAL. Named where it is one, so the liaison opens the right file. */
+  const a = body.caseNumber ? await clientAccount(admin, who, body.caseNumber) : null
+  if (body.caseNumber && !a) { res.status(404).json({ error: 'That account is not on your book.' }); return }
+  const { owner, tell } = await liaisonFor(admin, who.companyId)
+  const today = new Date().toISOString().slice(0, 10)
+  const title = `Call ${who.name || who.email} at ${who.clientName} on ${c.phone} (${c.when})`
+    + (a ? ` about ${a.debtor}, ${a.caseNumber}` : '') + (c.about ? ` -- "${c.about}"` : '')
+  /* A task must have an owner. With no liaison it goes to the first Administrator told, so it is on a
+     list rather than nowhere; every one of them still hears about it. */
+  const taskOwner = owner ?? tell[0]
+  if (!taskOwner) { res.status(500).json({ error: 'Nobody at the firm could be given your request. Please phone the firm.' }); return }
+  /* A TASK, because a callback is a thing to do by a time -- and it sits on the liaison's own list with
+     every other call they owe, not in a separate portal inbox somebody has to remember to open. */
+  const { error } = await admin.from('tasks').insert({
+    title: title.slice(0, 500), type: 'Call', status: 'Not Started', priority: 'High', owner_id: taskOwner,
+    due_date: today, company_id: who.companyId, related_to_label: a?.caseNumber ?? who.clientName,
+  })
+  if (error) {
+    console.error(`[portal] callback task not made for ${who.companyId}: ${error.message}`)
+    res.status(500).json({ error: 'Your request could not be sent just now. Please phone the firm.' }); return
+  }
+  await ring(admin, tell, 'portal.callback', `${who.clientName} asked to be called back: ${title.slice(0, 200)}`, `/companies/${who.companyId}`)
+  res.status(200).json({ ok: true })
+}
+
 /* ------------------------------------------------------------------ staff: who may sign in */
 
 async function requireStaff(req: VercelRequest, res: VercelResponse, admin: SupabaseClient) {
@@ -245,6 +429,11 @@ export const PORTAL_ROUTES: Record<string, Handler> = {
   me,
   book,
   'sign-out': signOut,
+  tickets,
+  ticket,
+  'ticket-reply': ticketReply,
+  ask,
+  callback,
   'staff-list': staffList,
   'staff-invite': staffInvite,
   'staff-set-active': staffSetActive,

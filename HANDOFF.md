@@ -92,9 +92,32 @@
   **Noticed, not changed:** a sheet ticket's page does not show its T-number in the header (only account tickets
   have `ticket-number` there); the subject carries it, which is what a client quotes.
 
-**S16 starts here (Stephan's order from 28 Oct, S14's list, item 1 now done):**
-1. **Client portal, phase 2:** tickets in the portal (view + reply), client handovers (upload a sheet or one account,
-   with the firm's approval), callbacks, questions about a debtor. See "THE CLIENT PORTAL, PHASE 1".
+- **The account band reads over the photographs** (Stephan: "Make this look better", Africa screenshot). The BF ring
+  watermark shows only on the plain Original skin (it crossed the agent's name); Africa and Forest anchor their band
+  photograph right and wash the left darker; the line under the name is brighter; the pre-legal agent sits on a small
+  pane (`hero-agent`). No check: it is a look, seen in screenshots of all three photographed skins.
+- **CLIENT PORTAL, PHASE 2a: TICKETS, QUESTIONS, CALLBACKS** (Stephan: "go ahead with the client portal"). Staging
+  migration **`client_portal_tickets`** (md5 `9dddf856...`): kind `client` on `account_queries`; a portal user's
+  address reads as the CLIENT in `account_email_correspondent`; `portal_tickets(client)` and
+  `portal_ticket_thread(client, ticket_no)` (service_role only) return dispute/import/litigation/client tickets and,
+  of each, only the mail whose correspondent is the client -- never notes, never the debtor's mail. Server
+  (`api/_lib/portal.ts`): `tickets`, `ticket`, `ticket-reply` (open tickets only; filed as an inbound
+  `account_emails` row on the ticket; a ticket waiting on the client goes back to `liaison`), `ask` (by OUR
+  reference, inside the client's group: a `client` ticket on the liaison's stage), `callback` (a High "Call" task
+  due today on the liaison's list, about one account or the client). Every one rings the liaison's bell -- or every
+  active Administrator's where the client has no liaison. Portal page: tabs **Your accounts | Tickets**, an **Ask**
+  button on every line (question or "Call me"), **Ask us to call you** in the header. Staff side: `client` is an
+  `ESCALATION_KINDS` entry ("Client asked"), on the client's QUERY list, never item 3, not on the Escalate menu.
+  `check-client-portal` (+34) and e2e `client-portal` (+12), both seen failing.
+  **NOT CHARGED, AND ASKED:** nothing typed in the portal raises item 6 yet (`charged_excl_vat: 0`). CLAUDE.md charges
+  R13 on a client's EMAIL about an account; whether a portal message is the same thing is put to Stephan. If yes,
+  raise it in `fileClientMessage` the way `emailSync.fileAccountEmail` does, and change the check that holds it.
+  Staging migration **`account_queries_stage_on_record`** (md5 `27ca0bef...`) is a no-op: `stage` was live but never
+  in `schema.sql`, and check-select-columns refused the portal's select.
+
+**S16 starts here (Stephan's order from 28 Oct, S14's list, items 1 and most of 2 now done):**
+1. **Client portal, phase 2b:** client handovers (upload a sheet or one account, with the firm's approval). 2a
+   (tickets, questions, callbacks) is built -- see above. Answer on the portal-message charge first.
 2. **Monthly progress report** (see S14's item 3 below for the shape).
 3. **Debtor pay page** (EFT first) and self-service promise to pay; PayShap/DebiCheck wait on FNB's answers.
 4. **Early collections.**
@@ -102,7 +125,8 @@ Ask Stephan whether he wants the sheet ticket's T-number shown on its page (see 
 
 **AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
 `withdrawal_basis_for_closers`, `sheet_ticket_mail`, `big_boss`, `big_boss_queue`, then RUN
-`scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter`, `settlement_letter` -- after S14's list below. The backfill in the first moves every closed account off
+`scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter`, `settlement_letter`, `client_portal_tickets`, `change_request_edit_notify`,
+`account_queries_stage_on_record` -- after S14's list below. The backfill in the first moves every closed account off
 its collector; on production that is the whole closed book, run out of hours.
 
 ---

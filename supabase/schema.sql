@@ -53439,3 +53439,13 @@ begin
             '/requests?r=' || r.number);
   end if;
 end $$;
+
+-- ============================================================================================
+-- account_queries_stage_on_record (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A NO-OP ON THE DATABASE, AND THE RECORD CATCHING UP. account_queries.stage has been live (with its
+-- check constraint and the stage log trigger) since tickets moved between desks, but the column itself
+-- never reached supabase/schema.sql -- so check-select-columns refused the portal's first select that
+-- named it. Written idempotently so it changes nothing where it already exists.
+-- ============================================================================================
+alter table public.account_queries add column if not exists stage text not null default 'agent';

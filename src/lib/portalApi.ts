@@ -5,7 +5,7 @@
  * The session token lives in localStorage, read defensively: a private window or an iPad with site data
  * blocked throws on access, and the answer then is "sign in", not a blank page.
  */
-import { PORTAL_TOKEN_HEADER, type PortalLine } from './clientPortal'
+import { PORTAL_TOKEN_HEADER, type PortalLine, type PortalMessage, type PortalTicket } from './clientPortal'
 
 const KEY = 'raptor.portal.token'
 
@@ -45,3 +45,13 @@ export const fetchPortalBook = (token: string, q: { search: string; includeClose
   call<PortalBook>('book', q, token)
 
 export const portalSignOut = (token: string) => call<{ ok: boolean }>('sign-out', {}, token)
+
+/* Phase 2a (S15): tickets, questions and callbacks. */
+export const fetchPortalTickets = (token: string) => call<{ tickets: PortalTicket[] }>('tickets', {}, token)
+export const fetchPortalTicket = (token: string, ticketNo: number) => call<{ messages: PortalMessage[] }>('ticket', { ticketNo }, token)
+export const replyPortalTicket = (token: string, ticketNo: number, message: string) =>
+  call<{ ok: boolean }>('ticket-reply', { ticketNo, message }, token)
+export const askPortalQuestion = (token: string, caseNumber: string, question: string) =>
+  call<{ ticketNo: number }>('ask', { caseNumber, question }, token)
+export const requestPortalCallback = (token: string, req: { caseNumber?: string; phone: string; when: string; about: string }) =>
+  call<{ ok: boolean }>('callback', req, token)

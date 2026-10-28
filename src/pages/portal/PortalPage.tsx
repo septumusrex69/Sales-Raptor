@@ -5,13 +5,15 @@ import {
   PortalSignedOut, fetchPortalBook, fetchPortalMe, portalSignOut, portalToken, requestPortalCode, savePortalToken,
   verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
+import { PortalTickets } from './PortalTickets'
+import { PortalAsk, type AskAbout } from './PortalAsk'
 
 /**
  * THE CLIENT PORTAL (S14, Raptor H13) -- outside the firm, like /sign/:token: no staff login, no staff
  * navigation. A client types their email, is emailed a code, and sees their book. See clientPortal.ts.
  *
- * Phase 1 is the book. Tickets, handing over accounts, callbacks and questions about a debtor are the
- * firm's next asks and will sit beside it.
+ * Phase 1 is the book. Phase 2a (S15) puts the client's tickets beside it, and an Ask on every account --
+ * a written question or a call back. Handing accounts over (with the firm's approval) is phase 2b.
  */
 const FONT = { fontFamily: 'Charter, "Bitstream Charter", Georgia, "Times New Roman", serif' }
 
@@ -51,7 +53,7 @@ export default function PortalPage() {
       <main className="max-w-6xl mx-auto px-4 py-6">
         {!token ? <SignIn onSignedIn={(t) => { savePortalToken(t); setToken(t) }} />
           : !me ? <p className="text-slate-400 text-sm">Opening your accounts…</p>
-            : <Book token={token} onSignedOut={signedOut} />}
+            : <Signed token={token} onSignedOut={signedOut} />}
       </main>
     </div>
   )
@@ -102,9 +104,53 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
   )
 }
 
+/**
+ * THE TWO HALVES OF A SIGNED-IN PORTAL, AND THE ONE WAY IN TO ASKING. Tabs rather than one long page:
+ * a client with four hundred debtors would scroll past all of them to reach a ticket waiting on them.
+ */
+function Signed({ token, onSignedOut }: { token: string; onSignedOut: () => void }) {
+  const [tab, setTab] = useState<'book' | 'tickets'>('book')
+  const [asking, setAsking] = useState<AskAbout | null | false>(false)
+  const [done, setDone] = useState<string | null>(null)
+  const [refresh, setRefresh] = useState(0)
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl bg-white border border-slate-200 p-1 shadow-sm" role="tablist">
+          {(['book', 'tickets'] as const).map((t) => (
+            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
+              data-testid={`portal-tab-${t}`}
+              className={`px-4 py-1.5 rounded-lg text-sm ${tab === t ? 'bg-navy-900 text-white' : 'text-slate-600'}`}>
+              {t === 'book' ? 'Your accounts' : 'Tickets'}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={() => { setDone(null); setAsking(null) }} data-testid="portal-call-me"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm">
+          Ask us to call you
+        </button>
+      </div>
+      {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
+      {tab === 'book'
+        ? <Book token={token} onSignedOut={onSignedOut} onAsk={(a) => { setDone(null); setAsking(a) }} />
+        : <PortalTickets token={token} onSignedOut={onSignedOut} refreshKey={refresh} />}
+      {asking !== false && (
+        <PortalAsk token={token} about={asking} onClose={() => setAsking(false)} onSignedOut={onSignedOut}
+          onAsked={(what, ticketNo) => {
+            setAsking(false); setRefresh((n) => n + 1)
+            setDone(what === 'question'
+              ? `Your question is ticket T-${ticketNo}. Your liaison has it now, and the answer will be under Tickets.`
+              : 'Your liaison has been asked to call you.')
+          }} />
+      )}
+    </div>
+  )
+}
+
 const PAGE = 100
 
-function Book({ token, onSignedOut }: { token: string; onSignedOut: () => void }) {
+function Book({ token, onSignedOut, onAsk }: { token: string; onSignedOut: () => void; onAsk: (about: AskAbout) => void }) {
   const [search, setSearch] = useState('')
   const [asked, setAsked] = useState('')
   const [includeClosed, setIncludeClosed] = useState(false)
@@ -162,6 +208,7 @@ function Book({ token, onSignedOut }: { token: string; onSignedOut: () => void }
                         <th className="font-medium px-2 py-2 text-right">Paid to date</th>
                         <th className="font-medium px-2 py-2 text-right">Capital outstanding</th>
                         <th className="font-medium px-4 py-2">Where it stands</th>
+                        <th className="px-4 py-2"><span className="sr-only">Ask</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -176,6 +223,14 @@ function Book({ token, onSignedOut }: { token: string; onSignedOut: () => void }
                           <td className="px-2 py-2 text-right tabular-nums">{rand(l.capitalOutstanding)}</td>
                           <td className="px-4 py-2" title={CLIENT_POSITIONS[l.position].meaning}>
                             <span className="mr-1.5">{CLIENT_FLAGS[clientFlag(l.position)].dot}</span>{l.positionLabel}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {/* By OUR reference: the client's own is not unique on 21% of the book (CLAUDE.md). */}
+                            {l.ourReference && (
+                              <button type="button" onClick={() => onAsk({ caseNumber: l.ourReference, debtor: l.debtor })}
+                                data-testid="portal-ask-open"
+                                className="rounded-lg border border-slate-300 px-2.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50">Ask</button>
+                            )}
                           </td>
                         </tr>
                       ))}

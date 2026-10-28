@@ -158,3 +158,85 @@ export function portalLine(r: PortalBookRow): PortalLine {
     positionLabel: CLIENT_POSITIONS[position].label,
   }
 }
+
+/* ------------------------------------------------------------------ phase 2a: tickets, questions, callbacks */
+
+/**
+ * WHAT A CLIENT'S TICKET IS CALLED ON THE PORTAL (S15, Raptor · Handover 14). The client's words, not the
+ * board's: the board says "Client data" to a liaison; the client is told what the firm is asking them.
+ * Only the kinds portal_tickets returns are here -- 'help' and 'request' never reach a client.
+ */
+export type PortalTicketKind = 'dispute' | 'import' | 'litigation' | 'client'
+
+export const PORTAL_TICKET_LABEL: Record<PortalTicketKind, string> = {
+  dispute: 'The debtor disputes the account',
+  import: 'Your handover needs correcting',
+  litigation: 'We recommend legal action',
+  client: 'Your question',
+}
+
+/** One ticket as portal_tickets returns it. */
+export interface PortalTicket {
+  ticketNo: number
+  kind: PortalTicketKind
+  status: 'open' | 'closed'
+  stage: string
+  description: string
+  raisedAt: string
+  closedAt: string | null
+  caseNumber: string | null
+  accountNumber: string | null
+  clientReference: string | null
+  debtor: string | null
+  sheetReference: string | null
+  lastMessageAt: string | null
+  messages: number
+}
+
+export interface PortalMessage {
+  direction: 'in' | 'out'
+  subject: string | null
+  body: string
+  at: string
+  from: string | null
+  attachments: string[]
+}
+
+/**
+ * WHOSE TURN IT IS, in a word the client can act on. Stage 'client' is the firm waiting on them; every
+ * other open stage is the firm's side of the desk, which is all the client needs to know of it.
+ */
+export function portalTicketTurn(t: Pick<PortalTicket, 'status' | 'stage'>): 'yours' | 'ours' | 'closed' {
+  if (t.status === 'closed') return 'closed'
+  return t.stage === 'client' ? 'yours' : 'ours'
+}
+
+/** The longest message a client may send in one go. A page of text; a novel is a phone call. */
+export const PORTAL_MESSAGE_MAX = 4000
+
+/** A typed message as it is stored, or null when there is nothing in it. */
+export function portalMessageText(typed: unknown): string | null {
+  if (typeof typed !== 'string') return null
+  const t = typed.replace(/\r\n/g, '\n').trim()
+  return t ? t.slice(0, PORTAL_MESSAGE_MAX) : null
+}
+
+/** A ticket number typed or sent as "T-123", "123" or 123. */
+export function portalTicketNo(value: unknown): number | null {
+  const s = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim().replace(/^T-?/i, '') : ''
+  return /^\d{1,12}$/.test(s) ? Number(s) : null
+}
+
+/**
+ * WHEN A CLIENT ASKS TO BE CALLED. Free text for the time on purpose ("after two", "tomorrow morning"):
+ * a liaison reads it, and a time picker would make the client pick a slot nobody promised to keep.
+ * The number is checked only for being a number -- the liaison will ring it, not a machine.
+ */
+export function portalCallback(input: { phone?: unknown; when?: unknown; about?: unknown }):
+  { ok: true; phone: string; when: string; about: string } | { ok: false; error: string } {
+  const phone = typeof input.phone === 'string' ? input.phone.trim().slice(0, 40) : ''
+  if (phone.replace(/\D/g, '').length < 9) return { ok: false, error: 'Type the number we should call.' }
+  const when = typeof input.when === 'string' ? input.when.trim().slice(0, 120) : ''
+  const about = portalMessageText(input.about) ?? ''
+  return { ok: true, phone, when: when || 'Any time', about }
+}
