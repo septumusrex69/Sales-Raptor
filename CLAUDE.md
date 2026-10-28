@@ -517,8 +517,20 @@ anything except the financial or anything that has to do with finances."* A sess
 change anything in the app EXCEPT what `.github/CODEOWNERS` owns: trust, business, pay and the People
 screens, payments, fees and charges (Annexure B, the charge engine), interest and balances, commission,
 payovers and remittance, settlements, the bank -- and the database (`supabase/`), the permissions, this
-file and `.github/`. `check-codeowners` holds that list to the files that exist. It **never writes to any
-database** and never touches Vercel or Supabase settings. It works on its own branch from
+file and `.github/`. `check-codeowners` holds that list to the files that exist.
+
+**HE BUILDS HIS OWN, DATABASE INCLUDED -- ON STAGING ONLY (Stephan, 28 Oct):** *"he should be able to learn and
+build his own stuff. So everything that he needs to do, he needs to do"*, with staging access for his sessions.
+So a session working for Ryno MAY apply migrations to **staging** (`kvkajxpremantdkhmjvb`) by the Supabase tool,
+under every rule in "Migrations" below (mirror into `schema.sql`, verify the md5, probe destructive SQL in a
+rolled-back transaction) -- and it **NEVER writes to production** (`qcvesjzoiznrvunjrqpv`), never creates, alters
+or drops a money table, function or policy (the ledgers, trust, payments, fees, commission, payovers, profiles'
+permissions), never runs Clear staging, and never touches Vercel or Supabase settings. Staging is shared with the
+firm's testers (Camille and others), so nothing it does may remove or rewrite their data. `supabase/` stays owned in
+CODEOWNERS: the mirror in his pull request waits for the administrator's review even though staging already has it.
+The campaign tables built for him on 28 Oct (`marketing_senders`, `marketing_workflows`, `marketing_workflow_steps`,
+`marketing_results_settings`, `marketing_workflow_steps_due`, `marketing_results_due`, the 07:13 timer
+`/api/email/marketing-daily` and `marketingDailyTick`) are his to use or change. It works on its own branch from
 `claude/sales-raptor-review-p1pzx2` and opens a pull request into it; a pull request that touches an owned
 file waits for the administrator's approval, by design. If the work genuinely needs a money change, say so
 in the pull request rather than working round it. In the app, Ryno's own login has the money permissions

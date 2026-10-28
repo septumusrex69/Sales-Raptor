@@ -52180,3 +52180,69 @@ language sql stable security invoker set search_path to 'public' as $$
      and c.finished_at + make_interval(hours => st.after_hours) <= p_now
    order by c.finished_at
 $$;
+
+-- S14 (28 Oct): CLEAR STAGING EMPTIES THE CAMPAIGN WORKFLOWS TOO, WHEN SOMEBODY PRESSES IT. marketing_workflows and
+-- marketing_workflow_steps (migration marketing_workflows) point at marketing_campaigns, which the button truncates,
+-- and a truncate refuses a table another one points at unless both are in the same statement (check-clear-staging
+-- holds the lists to the schema's foreign keys). The latest body, with the two tables added beside the campaigns;
+-- nothing else changed. Replacing the function clears nothing.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_workflow_steps, public.marketing_workflows, public.marketing_send_events, public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns, ' || 'public.clerk_commission_carried, ' || 'public.leave_records';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.marketing_lists';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;

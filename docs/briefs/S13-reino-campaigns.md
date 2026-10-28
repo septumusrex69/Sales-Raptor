@@ -10,6 +10,11 @@ HANDOFF.md, and do what the brief says."*
 > payments, fees, balances, commission, payovers, settlements, the bank), the database, the permissions,
 > CLAUDE.md and `.github/` -- see "Working for the sales and marketing team" in CLAUDE.md and
 > `.github/CODEOWNERS`. The table below was the first assignment's area; it is no longer a limit.
+>
+> **28 Oct, again:** Ryno builds his own work, the database included -- his sessions may apply migrations to
+> STAGING (never production, never money tables or permissions, never Clear staging); see CLAUDE.md. The tables and
+> the morning timer listed there were built for him as a starting point; the sending (`marketingDailyTick` in
+> `api/_lib/marketing.ts`) is his to write. Tracking on bredellferreira.co.za: OPENS on, CLICKS off (Stephan).
 
 ## 0. Who you are working for, and where you may build
 

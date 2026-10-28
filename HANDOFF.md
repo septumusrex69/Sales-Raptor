@@ -62,6 +62,17 @@ so every link works without the page knowing). check-notification-groups (18), e
 (released, not tested) · **Done** (tested ✓) · Declined · All; the list opens on Needs a decision. Stored statuses
 unchanged (`onShelf`, `SHELVES`, changeRequests.ts). The Feedback Centre's title is **"Raptor build"** (Stephan).
 
+**RYNO BUILDS HIS OWN (28 Oct).** Stephan: "he should be able to learn and build his own stuff". Built for him before
+that, KEPT as his starting point: migration **`marketing_workflows`** (md5 e605b3a5...; extra senders, workflows, steps,
+results settings, `marketing_workflow_steps_due`, `marketing_results_due`), **`clear_staging_workflows`** (9931de22...;
+the two tables added to Clear staging's truncate -- replacing the function cleared nothing, 74 accounts before and
+after), the 07:13 cron `/api/email/marketing-daily` -> `marketingDailyTick` (reports what is due, SENDS NOTHING until
+Ryno writes the sending). His sessions may now apply STAGING migrations (CLAUDE.md, the brief). CAVEAT for Stephan:
+Supabase membership is per ORGANISATION unless the plan has project-scoped roles -- check before inviting him, or he
+reaches production too. Decisions: tracking on bredellferreira.co.za opens ON, clicks OFF. Ozow chosen for online
+payments (1.5% per pay-by-bank payment, R1 minimum, R3 per refund/payout -- reported Oct 2026). Early collections is
+the first money idea after the client portal; the portal is included for clients (not charged).
+
 **DISPUTE TICKETS, PHASE 5: THE CLOCK AND THE FIGURES (28 Oct).** Migrations **`ticket_stage_history`** (md5 7d1180ec...:
 `account_query_stages`, one row per raise / stage move / open-close, written by trigger, history backfilled from
 raised_at, sent_to_client_at, closed_at) and **`ticket_stage_history_unlinked`** (b7822949...: its foreign key dropped
