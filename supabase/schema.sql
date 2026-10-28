@@ -53535,3 +53535,73 @@ end $$;
 
 revoke all on function public.portal_record_ptc(uuid, uuid, numeric, date, text, text, text) from public, anon, authenticated;
 grant execute on function public.portal_record_ptc(uuid, uuid, numeric, date, text, text, text) to service_role;
+
+-- ============================================================================================
+-- portal_summary (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- THE CLIENT'S DASHBOARD IN ONE READ. Stephan: "it's also very slow" -- the dashboard paged the whole book
+-- through portal_book 500 lines at a time to count positions in the server. This answers the same question
+-- in the database: every account of the client (and its sub-accounts), open AND closed, grouped by exactly
+-- the columns a client's position is read off (book, ended_as, status, sub_status, bucket, money this month,
+-- an open dispute), with the count and the capital of each group. The POSITION itself is still decided in
+-- one place, clientPosition (portalLine's rules), from the group's columns -- so the dashboard, the Accounts
+-- list and the firm's own client page cannot disagree about a debtor.
+--
+-- "How many accounts have been paid up?" is ended_as, which is why closed accounts are in it: a client
+-- reading their book wants the finished ones counted by how they finished.
+--
+-- The same money rules as portal_book: receipts not reversed, not rejected, not demo; this month on the
+-- firm's day. Capital, never balance. SERVICE ROLE ONLY, like portal_book.
+-- ============================================================================================
+
+create or replace function public.portal_summary(p_client uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with acct as (
+    select a.id, a.book, a.ended_as, a.status, a.sub_status, a.bucket,
+           coalesce(a.capital_handed_over, 0) as handed_over,
+           coalesce(a.capital_outstanding, 0) as outstanding
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+     where coalesce(c.parent_company_id, c.id) = p_client
+  ), paid as (
+    select p.account_id,
+           sum(p.amount) as to_date,
+           sum(p.amount) filter (where (p.received_at at time zone 'Africa/Johannesburg')::date
+                                       >= date_trunc('month', public.raptor_today())::date) as this_month
+      from public.account_payments p
+     where p.account_id in (select id from acct)
+       and p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+     group by p.account_id
+  ), disputed as (
+    select distinct q.account_id from public.account_queries q
+     where q.account_id in (select id from acct) and q.kind = 'dispute' and q.status <> 'closed'
+  ), lines as (
+    select a.*, coalesce(p.to_date, 0) as paid_to_date, coalesce(p.this_month, 0) as paid_this_month,
+           d.account_id is not null as is_disputed
+      from acct a left join paid p on p.account_id = a.id left join disputed d on d.account_id = a.id
+  )
+  select jsonb_build_object(
+    'totals', (select jsonb_build_object(
+                 'accounts', count(*),
+                 'open', count(*) filter (where book in ('active', 'on_hold') and ended_as is null),
+                 'capital_handed_over', coalesce(sum(handed_over), 0),
+                 'capital_outstanding', coalesce(sum(outstanding) filter (where book in ('active', 'on_hold') and ended_as is null), 0),
+                 'paid_to_date', coalesce(sum(paid_to_date), 0),
+                 'paid_this_month', coalesce(sum(paid_this_month), 0)) from lines),
+    'groups', coalesce((select jsonb_agg(to_jsonb(g)) from (
+                 select book, ended_as, status, sub_status, bucket,
+                        paid_this_month > 0 as paid_now, is_disputed as disputed,
+                        count(*) as accounts, sum(handed_over) as handed_over, sum(outstanding) as outstanding,
+                        sum(paid_to_date) as paid_to_date
+                   from lines
+                  group by book, ended_as, status, sub_status, bucket, paid_this_month > 0, is_disputed) g), '[]'::jsonb)
+  );
+$$;
+
+revoke all on function public.portal_summary(uuid) from public, anon, authenticated;
+grant execute on function public.portal_summary(uuid) to service_role;

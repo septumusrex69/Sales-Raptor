@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, isPortalToken, normalisePortalEmail, portalCodeCheck, portalLine,
   PORTAL_MESSAGE_MAX, PORTAL_TICKET_LABEL, portalCallback, portalMessageText, portalTicketNo, portalTicketTurn,
-  PORTAL_TOPICS, portalTopic, portalQuestion, portalPaymentReport, portalPaymentText,
+  PORTAL_TOPICS, portalTopic, portalQuestion, portalPaymentReport, portalPaymentText, portalOutcomes,
 } from '../../src/lib/clientPortal.ts'
 import { ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection } from '../../src/lib/disputeCategories.ts'
 
@@ -189,8 +189,39 @@ check('...as a short-lived link to the kept copy (never rebuilt)', /createSigned
 const rp = server.slice(server.indexOf('const reports: Handler'), server.indexOf('const reportFile: Handler'))
 check('the report list never hands the browser a storage path', /pdf_path:|xlsx_path:/.test(rp.slice(rp.indexOf('res.status(200)'))), false)
 const dash = server.slice(server.indexOf('const dashboard: Handler'), server.indexOf('const reports: Handler'))
-check('the dashboard works positions out with portalLine, as the Accounts list does', /portalLine/.test(dash), true)
+check('the dashboard is ONE read of the book (portal_summary), not a page-by-page walk', /rpc\('portal_summary'/.test(dash) && !/portal_book/.test(dash), true)
+check('...turned into outcomes by portalOutcomes', /portalOutcomes\(d\.groups\)/.test(dash), true)
 check('...and carries no fee, commission or interest', /commission|annexure|fee|interest/i.test(dash.replace(/\/\*[\s\S]*?\*\//g, '')), false)
+
+/* ---------- outcomes: finished by how they finished, open by where they stand ---------- */
+const G = (o) => ({ book: 'active', ended_as: null, status: 'Active: Activated', sub_status: null, bucket: null,
+  paid_now: false, disputed: false, accounts: 1, handed_over: 100, outstanding: 80, paid_to_date: 20, ...o })
+const out = portalOutcomes([
+  G({ ended_as: 'paid_up', book: 'closed', accounts: 3, outstanding: 0 }),
+  G({ ended_as: 'withdrawn', book: 'withdrawn', accounts: 1 }),
+  G({ paid_now: true, accounts: 2 }),
+  G({ disputed: true, accounts: 1 }),
+  G({ accounts: 4 }),
+  G({ book: 'closed', accounts: 1 }),
+])
+const of = (k) => out.find((o) => o.outcome === k)
+check('paid up is counted by how it ended', of('paid_up')?.accounts, 3)
+check('...withdrawn too', of('withdrawn')?.accounts, 1)
+check('money this month on an open account is Paying', of('paying')?.accounts, 2)
+check('an open dispute is Disputed', of('disputed')?.accounts, 1)
+check('the rest sit where clientPosition puts them (In progress)', of('in_progress')?.accounts, 4)
+check('a closed account with no ending is Closed', of('closed')?.accounts, 1)
+check('open outcomes come first, finished after', out.findIndex((o) => o.finished) > out.findIndex((o) => !o.finished)
+  && out.slice(out.findIndex((o) => o.finished)).every((o) => o.finished), true)
+check('a finished account carries no outstanding', of('withdrawn')?.outstanding, 0)
+const sch = fs.readFileSync('supabase/schema.sql', 'utf8')
+const sumAt = sch.lastIndexOf('create or replace function public.portal_summary(')
+const sumFn = sumAt > 0 ? sch.slice(sumAt, sch.indexOf('$$;', sch.indexOf('$$', sumAt) + 2)) : ''
+check('portal_summary reads the client AND its sub-accounts, open and closed', /coalesce\(c\.parent_company_id, c\.id\) = p_client/.test(sumFn) && !/book in \('active', 'on_hold'\)\)\s*\n\s*\), paid/.test(sumFn), true)
+check('...groups by exactly what a position is read off', /group by book, ended_as, status, sub_status, bucket, paid_this_month > 0, is_disputed/.test(sumFn), true)
+check('...with portal_book\'s money rules', /reversed_at is null and p\.rejected_at is null and not coalesce\(p\.is_demo, false\)/.test(sumFn), true)
+check('...service role only', /revoke all on function public\.portal_summary\(uuid\) from public, anon, authenticated/.test(sch)
+  && /grant execute on function public\.portal_summary\(uuid\) to service_role/.test(sch), true)
 
 if (failures.length) {
   console.log(`check-client-portal: ${pass} passed, ${failures.length} failed`)

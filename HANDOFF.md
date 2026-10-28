@@ -115,6 +115,34 @@
   Staging migration **`account_queries_stage_on_record`** (md5 `27ca0bef...`) is a no-op: `stage` was live but never
   in `schema.sql`, and check-select-columns refused the portal's select.
 
+- **THE PORTAL, REBUILT TO STEPHAN'S DIRECTION (later on 28 Oct).** In the remittance advice's style (its navy
+  #111E2D, gold #C69F54, coastline cover photo, tracked labels; `portalStyle.tsx`): a split sign-in on the cover
+  photo; a navy sidebar like Raptor's -- **Dashboard, Reports, Tickets, Accounts** in his order, gold for where you
+  are, folds to icons (remembered per browser), a row across the top on a phone; a photo band per section.
+  **Dashboard** by OUTCOME ("how many paid up, in progress, in dispute, negotiating"): money tiles (collected to
+  date on the inverted navy tile), open accounts by position with a ring, finished accounts by how they ended
+  (paid up / settled / written off / withdrawn). One read: staging migration **`portal_summary`** (md5
+  `903c80d0...`) groups the book in the database; `portalOutcomes` (clientPortal.ts) turns groups into outcomes
+  with clientPosition's rules, so it cannot disagree with the Accounts list. **Reports**: every remittance advice
+  sent to the client, the PDF and spreadsheet AS SENT (`payover_run_sends`, signed 2-minute links through
+  `report-file`; FileActions for the iPad). **Ask** has three choices: a question (with a short "what is it about"
+  list), **Paid to you**, and Call me.
+- **PAID TO YOU: A CLIENT RECORDS A PTC.** Stephan: "it shows up in the trust thing for approval ... and it also
+  notifies the liaison". Staging migration **`portal_record_ptc`** (md5 `bdaac3cd...`), service role only: an
+  UNAPPROVED account_payments row, paid_to_client, source `portal`, on an open account of the client's own book;
+  not in the future, not before the handover, a reference required, a same-day duplicate refused. Unapproved it
+  allocates nothing (probed: no allocation, balance unchanged). Trust's approval list marks it "From the client
+  portal". A ticket records what was said; the liaison's bell rings. The client's confirmation rule for a PTC is
+  met by the client's own login (details names who and when).
+- **THE TICKET PAGE.** One **Reply on this ticket** (to whoever at the client last wrote, threaded; the email ends
+  with the portal link when somebody at the client can sign in); **Forward to the client** only on the debtor's own
+  messages; a portal message reads CLIENT (`correspondent` from the database); the conversation card to Stephan's
+  design with a filter. The header's case number links to the account. **Refer it**, with a reason, to the agent
+  on the account or their team leader (`referTargets`); they **give feedback** back to the liaison. A portal
+  question is also filed as the client's first message, so Reply works; every portal message, payment and callback
+  is a line on the account's activity. The **disputes board** names each ticket's client and filters by client.
+  Checks: `check-ticket-refer` (26, new), `check-client-portal` (142), e2e `client-portal` (50), all seen failing.
+
 **S16 starts here (Stephan's order from 28 Oct, S14's list, items 1 and most of 2 now done):**
 1. **Client portal, phase 2b:** client handovers (upload a sheet or one account, with the firm's approval). 2a
    (tickets, questions, callbacks) is built -- see above. Answer on the portal-message charge first.
@@ -126,7 +154,7 @@ Ask Stephan whether he wants the sheet ticket's T-number shown on its page (see 
 **AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
 `withdrawal_basis_for_closers`, `sheet_ticket_mail`, `big_boss`, `big_boss_queue`, then RUN
 `scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter`, `settlement_letter`, `client_portal_tickets`, `change_request_edit_notify`,
-`account_queries_stage_on_record` -- after S14's list below. The backfill in the first moves every closed account off
+`account_queries_stage_on_record`, `portal_record_ptc`, `portal_summary` -- after S14's list below. The backfill in the first moves every closed account off
 its collector; on production that is the whole closed book, run out of hours.
 
 ---

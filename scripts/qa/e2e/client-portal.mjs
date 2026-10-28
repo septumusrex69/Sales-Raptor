@@ -27,9 +27,13 @@ const TICKETS = [
     debtor: 'Annelie Fourie', sheetReference: null, lastMessageAt: null, messages: 0 },
 ]
 const DASH = {
-  open: 2, closed: 1,
+  accounts: 3, open: 2,
   figures: { capitalHandedOver: 2500, collectedToDate: 500, collectedThisMonth: 100, capitalOutstanding: 1550.9 },
-  positions: [{ position: 'paying', label: 'Paying', count: 1, outstanding: 600.4 }, { position: 'in_progress', label: 'In progress', count: 1, outstanding: 950.5 }],
+  outcomes: [
+    { outcome: 'paying', label: 'Paying', finished: false, accounts: 1, handedOver: 800.4, outstanding: 600.4, paidToDate: 200 },
+    { outcome: 'in_progress', label: 'In progress', finished: false, accounts: 1, handedOver: 950.5, outstanding: 950.5, paidToDate: 0 },
+    { outcome: 'paid_up', label: 'Paid up', finished: true, accounts: 1, handedOver: 749.1, outstanding: 0, paidToDate: 300 },
+  ],
   tickets: { waitingOnYou: 1, open: 1 },
 }
 const REPORTS = [{ id: 'r1', kind: 'remittance', version: 1, sentAt: '2026-10-12T08:00:00Z', title: 'Remittance', client: 'Alianna Pharmacy',
@@ -95,7 +99,16 @@ try {
   t.ok('the sidebar reads Dashboard, Reports, Tickets, Accounts, in that order', /Dashboard.*Reports.*Tickets.*Accounts/.test(nav))
   const figs = (await page.getByTestId('portal-figures').innerText()).replace(/\u00a0/g, ' ')
   t.ok('the dashboard shows handed over, collected and outstanding', /Capital handed over/i.test(figs) && /Collected to date/i.test(figs) && /R\s?2\s?500/.test(figs) && /20% of capital/.test(figs))
-  t.check('...and one line per position under the ring', await page.getByTestId('portal-positions').locator('li').count(), 2)
+  t.check('...one line per open outcome beside the ring', await page.getByTestId('portal-positions').locator('li').count(), 2)
+  t.ok('...and the finished accounts by how they ended, paid up counted', await page.getByTestId('portal-finished').locator('li').count() === 1
+    && (await page.getByTestId('portal-paid-up').innerText()).trim() === '1')
+  /* The sidebar folds to a rail and remembers it (S15: "the sidebar should be able to minimize"). */
+  await page.getByTestId('portal-fold').click()
+  await page.waitForTimeout(400)
+  t.ok('the sidebar folds to icons', !(await page.getByTestId('portal-sidebar').innerText()).includes('Reports'))
+  await t.shot(page, 'client-portal-folded')
+  await page.getByTestId('portal-fold').click()
+  await page.waitForTimeout(400)
   t.ok('...and says a ticket is waiting on the client', /1 ticket is waiting on you/.test(await page.getByTestId('portal-waiting').innerText()))
   t.ok('...with no fee, commission or interest anywhere on it', !/fee|commission|interest/i.test(await page.getByTestId('portal-dashboard').innerText()))
   await t.shot(page, 'client-portal-dashboard')
@@ -116,11 +129,11 @@ try {
   const verify = calls.filter((c) => c.action === 'verify').pop()
   t.ok('the code is sent with the address it was asked for', verify?.body?.email === 'jan@alianna.co.za' && verify?.body?.code === '123 456')
   t.ok('the book is asked for with the session, and names no client', calls.some((c) => c.action === 'book' && c.token === TOKEN && !('companyId' in c.body) && !('client' in c.body)))
-  t.ok('the client is named at the top', /Alianna Pharmacy/.test(await page.locator('header').innerText()))
+  t.ok('the client is named at the top', /Alianna Pharmacy/i.test(await page.locator('header').innerText()))
 
-  const head = (await page.locator('[data-testid="portal-book"] thead').innerText()).replace(/\s+/g, ' ')
+  const head = (await page.locator('[data-testid="portal-book"] thead').innerText()).replace(/\s+/g, ' ').toLowerCase()
   for (const col of ['Debtor', 'Your reference', 'Our reference', 'Capital handed over', 'Paid this month', 'Paid to date', 'Capital outstanding', 'Where it stands']) {
-    t.ok(`the column "${col}" is there`, head.includes(col))
+    t.ok(`the column "${col}" is there`, head.includes(col.toLowerCase()))
   }
   t.ok('...and no balance, fee or commission column', !/balance|fee|commission|interest/i.test(head))
   t.check('one line per debtor', await page.getByTestId('portal-line').count(), 2)
@@ -132,6 +145,12 @@ try {
   await page.waitForTimeout(800)
   t.check('searching narrows the book', await page.getByTestId('portal-line').count(), 1)
   t.ok('...the search goes to the server', calls.some((c) => c.action === 'book' && c.body.search === 'annelie'))
+  /* A WIDE TABLE SCROLLS INSIDE ITS CARD, never the page: the band and the sidebar stay put on an iPad. */
+  /* Measured as what a person can actually do -- push the page sideways -- because Chromium's scrollWidth on
+     <html> counts content already clipped inside the card. */
+  const sideways = await page.evaluate(() => { window.scrollTo(400, 0); const x = window.scrollX; window.scrollTo(0, 0); return x })
+  const card = await page.evaluate(() => { const w = document.querySelector('[data-testid="portal-book"]')?.parentElement; return w ? getComputedStyle(w).overflowX : 'none' })
+  t.ok(`the page does not scroll sideways (scrolled ${sideways}px; the table's card scrolls: ${card})`, sideways === 0 && card === 'auto')
   await t.shot(page, 'client-portal-book')
 
   /* ---- Phase 2a (S15): ask about a debtor, ask for a call, see and answer tickets. */

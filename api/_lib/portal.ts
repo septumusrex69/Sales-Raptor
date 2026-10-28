@@ -10,8 +10,8 @@ import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_CODE_MINUTES, PORTAL_SESSION_DAYS, PORTAL_TOKEN_HEADER,
   isPortalToken, normalisePortalEmail, portalCallback, portalCodeCheck, portalCodeEmail, portalInviteEmail, portalLine,
-  portalMessageText, portalPaymentReport, portalPaymentText, portalQuestion, portalRands, portalTicketNo, portalTopic,
-  type PortalBookRow,
+  portalMessageText, portalOutcomes, portalPaymentReport, portalPaymentText, portalQuestion, portalRands, portalTicketNo, portalTopic,
+  type PortalBookRow, type PortalSummaryGroup,
 } from '../../src/lib/clientPortal.js'
 
 /**
@@ -438,49 +438,31 @@ const callback: Handler = async (req, res, admin) => {
 /* ------------------------------------------------------------------ a signed-in client: dashboard and reports (S15) */
 
 /*
- * THE DASHBOARD (S15). Stephan: "something like a dashboard on there, like we have, handed over accounts,
- * collected, then by status, circles". The figures are portal_book's totals; the circles are the positions
- * of every open account, worked out by portalLine -- the one place a client's position is decided for the
- * portal, so the dashboard and the Accounts list cannot disagree about a debtor. Paged at portal_book's
- * own 500: a client's book is hundreds of lines, and the largest a few thousand.
+ * THE DASHBOARD (S15). Stephan: "something like a dashboard on there ... handed over accounts, collected, then
+ * by status, circles" -- then "it's also very slow" and "how many accounts have been paid up ... in progress
+ * ... in dispute ... in negotiation". One read (portal_summary: the book grouped in the database), turned into
+ * outcomes by portalOutcomes -- clientPosition's rules, the same the Accounts list uses -- and the tickets.
  */
 const dashboard: Handler = async (req, res, admin) => {
   const who = await requirePortalUser(req, admin)
   if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
-  const positions: Record<string, { label: string; count: number; outstanding: number }> = {}
-  let totals: Record<string, number> | null = null
-  let total = 0
-  for (let offset = 0; offset < 20000; offset += 500) {
-    const { data, error } = await admin.rpc('portal_book', {
-      p_client: who.companyId, p_search: null, p_open_only: true, p_limit: 500, p_offset: offset,
-    })
-    if (error) { res.status(500).json({ error: 'Your dashboard could not be read just now.' }); return }
-    const d = data as { total: number; totals: Record<string, number>; rows: PortalBookRow[] }
-    if (!totals) { totals = d.totals; total = d.total }
-    for (const line of d.rows.map(portalLine)) {
-      const p = positions[line.position] ??= { label: line.positionLabel, count: 0, outstanding: 0 }
-      p.count += 1
-      p.outstanding += line.capitalOutstanding
-    }
-    if (offset + 500 >= d.total) break
-  }
-  /* Closed accounts are counted, not listed: how many the firm has finished is part of "how is my book doing". */
-  const { data: everything } = await admin.rpc('portal_book', {
-    p_client: who.companyId, p_search: null, p_open_only: false, p_limit: 1, p_offset: 0,
-  })
-  const all = everything as { total: number; totals: Record<string, number> } | null
-  const { data: t } = await admin.rpc('portal_tickets', { p_client: who.companyId })
+  const [{ data, error }, { data: t }] = await Promise.all([
+    admin.rpc('portal_summary', { p_client: who.companyId }),
+    admin.rpc('portal_tickets', { p_client: who.companyId }),
+  ])
+  if (error) { res.status(500).json({ error: 'Your dashboard could not be read just now.' }); return }
+  const d = data as { totals: Record<string, number>; groups: PortalSummaryGroup[] }
   const tickets = (t ?? []) as { status: string; stage: string }[]
   res.status(200).json({
-    open: total,
-    closed: Math.max(0, (all?.total ?? total) - total),
+    accounts: Number(d.totals.accounts) || 0,
+    open: Number(d.totals.open) || 0,
     figures: {
-      capitalHandedOver: Number(all?.totals.capital_handed_over ?? totals?.capital_handed_over) || 0,
-      collectedToDate: Number(all?.totals.paid_to_date ?? totals?.paid_to_date) || 0,
-      collectedThisMonth: Number(all?.totals.paid_this_month ?? totals?.paid_this_month) || 0,
-      capitalOutstanding: Number(totals?.capital_outstanding) || 0,
+      capitalHandedOver: Number(d.totals.capital_handed_over) || 0,
+      collectedToDate: Number(d.totals.paid_to_date) || 0,
+      collectedThisMonth: Number(d.totals.paid_this_month) || 0,
+      capitalOutstanding: Number(d.totals.capital_outstanding) || 0,
     },
-    positions: Object.entries(positions).map(([position, p]) => ({ position, ...p })).sort((a, b) => b.count - a.count),
+    outcomes: portalOutcomes(d.groups),
     tickets: {
       waitingOnYou: tickets.filter((x) => x.status === 'open' && x.stage === 'client').length,
       open: tickets.filter((x) => x.status === 'open').length,

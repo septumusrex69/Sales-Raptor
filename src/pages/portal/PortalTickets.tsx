@@ -41,7 +41,7 @@ export function PortalTickets({ token, onSignedOut, refreshKey }: { token: strin
   if (!tickets) return <p className="text-sm text-slate-400">Reading your tickets…</p>
   if (tickets.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center" data-testid="portal-no-tickets">
+      <div className="bg-white rounded-2xl border border-[#D5DBE3] p-8 text-center" data-testid="portal-no-tickets">
         <p className="text-slate-700">No tickets yet.</p>
         <p className="text-sm text-slate-500 mt-1">To ask about a debtor, press <b>Ask</b> beside the account under Your accounts.</p>
       </div>
@@ -54,7 +54,7 @@ export function PortalTickets({ token, onSignedOut, refreshKey }: { token: strin
         const turn = TURN[portalTicketTurn(t)]
         const isOpen = open === t.ticketNo
         return (
-          <section key={t.ticketNo} className="bg-white rounded-2xl border border-slate-200 shadow-sm" data-testid="portal-ticket">
+          <section key={t.ticketNo} className="bg-white rounded-2xl border border-[#D5DBE3]" data-testid="portal-ticket">
             <button type="button" onClick={() => setOpen(isOpen ? null : t.ticketNo)} aria-expanded={isOpen}
               className="w-full text-left p-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">

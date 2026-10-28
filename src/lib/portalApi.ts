@@ -59,10 +59,10 @@ export const recordPortalPayment = (token: string, req: { caseNumber: string; am
   call<{ ticketNo: number | null }>('payment-report', req, token)
 
 export interface PortalDashboard {
+  accounts: number
   open: number
-  closed: number
   figures: { capitalHandedOver: number; collectedToDate: number; collectedThisMonth: number; capitalOutstanding: number }
-  positions: { position: import('./clientPosition').ClientPosition; label: string; count: number; outstanding: number }[]
+  outcomes: import('./clientPortal').PortalOutcomeLine[]
   tickets: { waitingOnYou: number; open: number }
 }
 export const fetchPortalDashboard = (token: string) => call<PortalDashboard>('dashboard', {}, token)

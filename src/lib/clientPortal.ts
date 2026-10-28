@@ -304,3 +304,73 @@ export function portalPaymentText(r: PortalPaymentReport): string {
     + (r.note ? `\n\n${r.note}` : '')
     + '\n\nRecorded on the account. It counts once Bredell Ferreira has approved it.'
 }
+
+/* ------------------------------------------------------------------ the dashboard by outcome (S15) */
+
+/**
+ * ONE GROUP OF ACCOUNTS AS portal_summary RETURNS IT: every account sharing the columns a position is
+ * read off, counted, with its capital.
+ */
+export interface PortalSummaryGroup {
+  book: string | null
+  ended_as: string | null
+  status: string | null
+  sub_status: string | null
+  bucket: string | null
+  paid_now: boolean
+  disputed: boolean
+  accounts: number
+  handed_over: number
+  outstanding: number
+  paid_to_date: number
+}
+
+/**
+ * WHERE THE CLIENT'S ACCOUNTS ARE, BY OUTCOME (S15). Stephan: "how many accounts have been paid up? How many
+ * accounts are kind of in progress, how many accounts are in dispute, how many accounts are in negotiation"
+ * -- "not open or closed". So a finished account is counted by HOW it finished (ended_as: paid up, settled,
+ * written off, withdrawn), and an open one by its position, decided by clientPosition exactly as portalLine
+ * decides it for the Accounts list. One rule, two screens.
+ */
+export type PortalOutcome = ClientPosition | 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
+
+export const PORTAL_ENDING_LABEL: Record<'paid_up' | 'settled' | 'written_off' | 'withdrawn', string> = {
+  paid_up: 'Paid up', settled: 'Settled', written_off: 'Written off', withdrawn: 'Withdrawn',
+}
+/** The finished outcomes' colours, beside CLIENT_POSITION_COLOUR for the open ones. */
+export const PORTAL_ENDING_COLOUR: Record<'paid_up' | 'settled' | 'written_off' | 'withdrawn', string> = {
+  paid_up: '#065f46', settled: '#0f766e', written_off: '#9f1239', withdrawn: '#94a3b8',
+}
+
+export interface PortalOutcomeLine {
+  outcome: PortalOutcome
+  label: string
+  finished: boolean
+  accounts: number
+  handedOver: number
+  outstanding: number
+  paidToDate: number
+}
+
+export function portalOutcomes(groups: readonly PortalSummaryGroup[]): PortalOutcomeLine[] {
+  const by = new Map<PortalOutcome, PortalOutcomeLine>()
+  for (const g of groups) {
+    const ending = g.ended_as && g.ended_as in PORTAL_ENDING_LABEL ? g.ended_as as keyof typeof PORTAL_ENDING_LABEL : null
+    const open = !ending && (g.book === 'active' || g.book === 'on_hold')
+    const outcome: PortalOutcome = ending ?? (open
+      ? clientPosition({ closed: false, status: g.status, subStatus: g.sub_status, bucket: g.bucket,
+        paidInPeriod: g.paid_now, disputed: g.disputed })
+      : 'closed')
+    const line = by.get(outcome) ?? {
+      outcome, label: ending ? PORTAL_ENDING_LABEL[ending] : CLIENT_POSITIONS[outcome as ClientPosition].label,
+      finished: !open, accounts: 0, handedOver: 0, outstanding: 0, paidToDate: 0,
+    }
+    line.accounts += Number(g.accounts) || 0
+    line.handedOver += Number(g.handed_over) || 0
+    /* A finished account owes the client nothing more from us: its outstanding is not "outstanding". */
+    if (open) line.outstanding += Number(g.outstanding) || 0
+    line.paidToDate += Number(g.paid_to_date) || 0
+    by.set(outcome, line)
+  }
+  return [...by.values()].sort((a, b) => Number(a.finished) - Number(b.finished) || b.accounts - a.accounts)
+}

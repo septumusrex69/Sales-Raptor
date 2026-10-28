@@ -39,9 +39,9 @@ export function PortalReports({ token, onSignedOut }: { token: string; onSignedO
   if (!reports) return <p className="text-sm text-slate-400">Reading your reports…</p>
 
   return (
-    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm" data-testid="portal-reports">
+    <section className="bg-white rounded-2xl border border-[#D5DBE3]" data-testid="portal-reports">
       <div className="p-4">
-        <h2 className="text-lg text-slate-900">Your reports</h2>
+        <h2 className="text-xl font-bold text-[#111E2D]">Your reports</h2>
         <p className="text-sm text-slate-500">Every remittance advice we have sent you, exactly as it was sent.</p>
       </div>
       {reports.length === 0 ? (
