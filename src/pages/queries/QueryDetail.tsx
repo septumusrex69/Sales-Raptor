@@ -35,14 +35,14 @@ import { clockNow } from '../../lib/clock'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import {
-  fetchQueryEmails, markRepliesRead, markRepliesUnread, recordSentEmail, type AccountEmail,
+  fetchQueryEmails, markRepliesRead, markRepliesUnread, recordSentEmail, recordSheetTicketEmail, type AccountEmail,
 } from '../../lib/accountEmails'
 import {
   EMAIL_IN_KIND, EMAIL_OUT_KIND, forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject,
 } from '../../lib/emailRules.ts'
 import { RecordTabs } from '../../components/record/RecordShell'
 import { EmailsPanel } from '../accounts/EmailsPanel'
-import { ticketBody, ticketSubject } from '../../lib/ticketEmail.ts'
+import { sheetTicketBody, sheetTicketSubject, ticketBody, ticketSubject } from '../../lib/ticketEmail.ts'
 import { canSendToClient } from '../../lib/disputeCategories.ts'
 import { canViewClients } from '../../lib/permissions.ts'
 import { fetchAccounts } from '../../lib/accountBook'
@@ -542,20 +542,23 @@ export function QueryDetail() {
         running to hundreds, and two thirds of the width is where a reference and seven columns
         stop fitting. A batch keeps the full measure it has always had.
       */}
-      {q.accountId && (
-        <RecordTabs<TicketTab>
-          tabs={[
-            { id: 'Overview', label: 'Overview' },
-            /* The dot: a message in from the client or the debtor that nobody has opened yet. */
-            { id: 'Emails', label: 'Emails', count: emails.length, alert: emails.some((e) => e.direction === 'in' && !e.readAt) },
-            { id: 'Notes', label: 'Notes', count: personNotes.length },
-          ]}
-          active={tab}
-          onChange={setTab}
-        />
-      )}
+      {/*
+        A SHEET TICKET HAS EMAILS TOO (S15). Stephan: a handover-sheet ticket sends and receives email,
+        not charged. So the strip is on every ticket; a sheet ticket has no Notes tab because a note is
+        filed on an account's timeline and a sheet has none.
+      */}
+      <RecordTabs<TicketTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          /* The dot: a message in from the client or the debtor that nobody has opened yet. */
+          { id: 'Emails', label: 'Emails', count: emails.length, alert: emails.some((e) => e.direction === 'in' && !e.readAt) },
+          ...(q.accountId ? [{ id: 'Notes' as TicketTab, label: 'Notes', count: personNotes.length }] : []),
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
-      {(!q.accountId || tab === 'Overview') && (
+      {tab === 'Overview' && (
       <div className={q.accountId ? 'grid gap-4 items-start lg:grid-cols-3' : 'contents'}>
       <div className={q.accountId ? 'space-y-4 lg:col-span-2' : 'contents'}>
 
@@ -724,7 +727,7 @@ export function QueryDetail() {
       </div>
       )}
 
-      {q.accountId && tab === 'Emails' && (
+      {tab === 'Emails' && (
         <div data-testid="ticket-emails">
           <EmailsPanel
             emails={[...emails].reverse()}
@@ -918,7 +921,7 @@ export function QueryDetail() {
         Two modals would be two `onSent` handlers, and the one nobody was watching would be the one
         that forgot to file it against the ticket.
       */}
-      {(forwarding || writing || replyTo) && q.accountId && (
+      {(forwarding || writing || replyTo) && (
         <ComposeEmailModal
           /* A REPLY GOES BACK TO WHOEVER WROTE IT (S14) -- the client's person, or the debtor whose words
              were filed here -- and is threaded under their message. Everything else starts with the client. */
@@ -947,6 +950,8 @@ export function QueryDetail() {
             ? replySubject(replyTo.subject)
             : forwarding
             ? forwardSubject(forwarding.subject)
+            : !q.accountId
+            ? sheetTicketSubject({ sheetReference: data.batch?.reference ?? null, ticketNo: q.ticketNo })
             : ticketSubject({
               kind: q.kind,
               requestFor: q.requestFor,
@@ -976,6 +981,14 @@ export function QueryDetail() {
                  a forward that silently ends mid-sentence reads to the client as all there was. */
               false,
             )
+            : !q.accountId
+            ? sheetTicketBody({
+              sheetReference: data.batch?.reference ?? null,
+              description: q.description,
+              contact: data.clientContact,
+              from: currentUser?.name ?? null,
+              ticketNo: q.ticketNo,
+            })
             : ticketBody({
               kind: q.kind,
               requestFor: q.requestFor,
@@ -987,8 +1000,12 @@ export function QueryDetail() {
               from: currentUser?.name ?? null,
               ticketNo: q.ticketNo,
             })}
-          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
-            + 'item 1(a). It is filed against this dispute as well as the account.'}
+          contextNote={q.accountId
+            ? `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
+              + 'item 1(a). It is filed against this dispute as well as the account.'
+            /* NOT CHARGED (Stephan, S15): a sheet has no debtor to charge. Said, so nobody wonders. */
+            : `Goes out from ${mailbox ?? 'your mailbox'} and is filed on this ticket. `
+              + 'Not charged: it is about the client\'s handover sheet, not a debtor\'s account.'}
           onClose={() => { setForwarding(null); setWriting(false); setReplyTo(null) }}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const answering = replyTo
@@ -1008,8 +1025,20 @@ export function QueryDetail() {
              * activity convention and means nothing on an account. Stripped so what is filed is
              * the subject that actually went out.
              */
-            void recordSentEmail({
-              accountId: q.accountId as string,
+            const recorded = !q.accountId
+              /* A SHEET TICKET (S15): filed on the ticket alone, no fee, no account timeline. */
+              ? recordSheetTicketEmail({
+                queryId: q.id,
+                to: sentTo,
+                from: from ?? null,
+                subject: rawSubject.replace(/^Email sent:\s*/i, ''),
+                body: bodyText,
+                messageId: messageId ?? null,
+                inReplyTo: answering?.messageId ?? null,
+                actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+              })
+              : recordSentEmail({
+              accountId: q.accountId,
               to: sentTo,
               /* The modal leaves both undefined where it could not learn them; the ledger wants
                  a null. Passing undefined through PostgREST omits the column instead of clearing
@@ -1022,6 +1051,7 @@ export function QueryDetail() {
               queryId: q.id,
               actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
             })
+            void recorded
               /* The card has to show it went. Re-read rather than pushed, so what is drawn is what
                  was actually filed -- including the charge, which is computed server-side. */
               .then(() => fetchQueryEmails(q.id))

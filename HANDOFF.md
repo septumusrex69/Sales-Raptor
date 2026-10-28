@@ -42,13 +42,31 @@
 - Checks: check-account-ending (+7: one rule, refunds finance, off the desk), check-account-desk (+2),
   check-books (slices widened), e2e settlement (+3: own liaison / other liaison / collector), all seen failing.
 
-**Stephan's answer to S14's question 1:** a handover-SHEET ticket **should send and receive email, NOT charged**
-(mail about a sheet is between the firm and the client). Not built yet -- see S16 starts here.
+- **A handover-SHEET ticket sends and receives email, not charged** (S14's question 1; Stephan: "yes, not
+  charged"). Staging migration **`sheet_ticket_mail`** (md5 `a95a7767...`): `account_emails.account_id` may be null;
+  `ticket_belongs_to_the_same_account` lets mail with no account onto a ticket with none (mail only, not documents);
+  `account_email_set_correspondent` calls such mail the client's (so a reply moves a ticket waiting on the client
+  back to the liaison). No check that one of the two is set: `query_id` is ON DELETE SET NULL and a check would
+  make deleting a sheet ticket fail. Sending: `recordSheetTicketEmail` (no chargeItem, no account note, R0).
+  Receiving (`emailSync`): a reply threading to a sheet ticket's mail, or a subject quoting its T-number, is filed
+  by `fileSheetTicketEmail` (no item 6, no note; idempotent on message_id); a bounce on one stays in the mailbox,
+  and the mailbox copy is not marked linked (there is no account to link it to). Page: the tab strip on every
+  ticket (a sheet ticket has Overview | Emails, no Notes); Write/Reply/Forward open the same box with "Your
+  handover sheet -- <ref> -- ticket T-n" and say "Not charged". `check-sheet-ticket-mail` (24), e2e
+  `sheet-ticket-emails` (9), both seen failing; `check-ticket-work` updated.
+  **Noticed, not changed:** a sheet ticket's page does not show its T-number in the header (only account tickets
+  have `ticket-number` there); the subject carries it, which is what a client quotes.
 
-**S16 starts here:** see the list at the end of this section (kept current as S15 works).
+**S16 starts here (Stephan's order from 28 Oct, S14's list, item 1 now done):**
+1. **Client portal, phase 2:** tickets in the portal (view + reply), client handovers (upload a sheet or one account,
+   with the firm's approval), callbacks, questions about a debtor. See "THE CLIENT PORTAL, PHASE 1".
+2. **Monthly progress report** (see S14's item 3 below for the shape).
+3. **Debtor pay page** (EFT first) and self-service promise to pay; PayShap/DebiCheck wait on FNB's answers.
+4. **Early collections.**
+Ask Stephan whether he wants the sheet ticket's T-number shown on its page (see "Noticed" above).
 
 **AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
-`withdrawal_basis_for_closers` -- after S14's list below. The backfill in the first moves every closed account off
+`withdrawal_basis_for_closers`, `sheet_ticket_mail` -- after S14's list below. The backfill in the first moves every closed account off
 its collector; on production that is the whole closed book, run out of hours.
 
 ---

@@ -146,6 +146,40 @@ export function ticketBody(input: TicketLetterInput): string {
 }
 
 /*
+ * A TICKET ABOUT A WHOLE HANDOVER SHEET (S15). Stephan: a sheet ticket sends and receives email, not
+ * charged. There is no debtor to name, so the subject says which SHEET -- the client's own reference
+ * for the batch where it has one -- and always the ticket number, because a client starting a fresh
+ * email about their spreadsheet is the very case the number exists for (`ticketNumberIn`).
+ */
+export function sheetTicketSubject(input: { sheetReference: string | null; ticketNo: number | null }): string {
+  const sheet = trim(input.sheetReference)
+  return ['Your handover sheet', sheet, input.ticketNo ? `ticket T-${input.ticketNo}` : ''].filter(Boolean).join(' — ')
+}
+
+export function sheetTicketBody(input: {
+  sheetReference: string | null
+  description: string | null
+  contact: string | null
+  from: string | null
+  ticketNo: number | null
+}): string {
+  const greeting = trim(input.contact) ? `Dear ${trim(input.contact)}` : 'Good day'
+  const sheet = trim(input.sheetReference)
+  const lines = [
+    greeting,
+    '',
+    sheet ? `We have a question about your handover sheet ${sheet}.` : 'We have a question about your handover sheet.',
+    '',
+    trim(input.description),
+    '',
+    ...(input.ticketNo ? [`Please quote ticket T-${input.ticketNo} in any email about this.`, ''] : []),
+    'Kind regards',
+    trim(input.from) || '',
+  ]
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/, '\n')
+}
+
+/*
  * THE TICKET A SUBJECT QUOTES (S14). A reply finds its ticket by Message-ID already; a NEW email only
  * can if it quotes the number we put in every subject and asked for back. Read as "T-" and four or
  * more digits standing alone -- the series starts at 1001 -- so "PAT-10234", "T-12" or an invoice

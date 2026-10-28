@@ -213,7 +213,8 @@ ok('...and the panel says so where the decision is made',
  * handlers, and the one nobody was watching would be the one that forgot the ticket.
  */
 ok('a fresh message, a forward and a reply share one compose box',
-  /\(forwarding \|\| writing \|\| replyTo\) && q\.accountId/.test(page))
+  /* S15: on every ticket now -- a sheet ticket sends mail too, through the same box. */
+  /\{\(forwarding \|\| writing \|\| replyTo\) && \(/.test(page))
 /* S14: A REPLY IS THREADED -- in the header the client's mail reads, and on the record that files it. */
 ok('a reply is threaded under the message it answers', /inReplyTo=\{replyTo\?\.messageId \?\? null\}/.test(page))
 ok('...and filed as the answer to it', /recordSentEmail\(\{[\s\S]{0,400}inReplyTo: answering\?\.messageId \?\? null/.test(page))

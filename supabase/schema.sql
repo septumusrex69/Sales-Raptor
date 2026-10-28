@@ -52679,3 +52679,77 @@ begin
   commission := round(capital * v_rate, 2);
   return next;
 end $$;
+
+-- ============================================================================================
+-- sheet_ticket_mail (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A HANDOVER-SHEET TICKET SENDS AND RECEIVES EMAIL, AND IT IS NOT CHARGED. Asked (S14's question 1),
+-- Stephan: yes, not charged. A ticket about a whole sheet is about the CLIENT's spreadsheet -- fifty
+-- rows with no reference, a column in the wrong place -- and the conversation is between the firm and
+-- the client. There is no debtor on it to bill under item 1(a) or item 6, so nothing raises a fee.
+--
+-- THE MAIL STAYS IN account_emails, with account_id null and query_id set. A second table would be a
+-- second reader for the Emails panel, the reply threading, the ticket-number filing and the read
+-- mirror, each written again and each able to drift. Every reader that lists an ACCOUNT's mail
+-- filters on account_id = X, so a row with none appears on no account; the ticket's own list reads
+-- by query_id and was already the shape a sheet ticket needs.
+--
+-- NO CHECK THAT ONE OF THE TWO IS SET. query_id is ON DELETE SET NULL, by the rule that a deleted
+-- ticket takes nothing with it; a check would make deleting a sheet ticket fail on its own mail.
+-- A row with neither is invisible and harmless, which is the lesser problem.
+-- ============================================================================================
+
+alter table public.account_emails alter column account_id drop not null;
+
+create or replace function public.ticket_belongs_to_the_same_account()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_ticket uuid;
+  v_ticket_account uuid;
+begin
+  /* ONE FUNCTION, TWO TABLES, because it is one rule: a ticket link may only point at a ticket on
+     the row's own account. Both tables call their account column `account_id`; only the name of
+     the link differs, and plpgsql resolves the field when the branch runs. */
+  if tg_table_name = 'account_documents' then
+    v_ticket := new.query_id;
+  else
+    v_ticket := new.query_id;
+  end if;
+  if v_ticket is null then return new; end if;
+
+  select account_id into v_ticket_account from public.account_queries where id = v_ticket;
+
+  /* A SHEET TICKET'S OWN MAIL (S15): no account on the ticket and none on the email -- both sides
+     agree there is no debtor, which is the one case the rule can answer for a sheet. Mail only:
+     a document still needs an account to be filed on. */
+  if tg_table_name = 'account_emails' and v_ticket_account is null and new.account_id is null
+     and exists (select 1 from public.account_queries where id = v_ticket) then
+    return new;
+  end if;
+
+  /* A SHEET-LEVEL TICKET HAS NO ACCOUNT. It may not be linked to an account's row: "belongs to the
+     same account" is unanswerable when one side has none, and unanswerable is not the same as yes. */
+  if v_ticket_account is null or new.account_id is null or v_ticket_account <> new.account_id then
+    raise exception 'That ticket belongs to a different account.' using errcode = '23503';
+  end if;
+  return new;
+end $$;
+
+create or replace function public.account_email_set_correspondent()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  /* MAIL ON A SHEET TICKET IS THE CLIENT'S, always: a sheet has no debtor to write to or hear from. */
+  if new.account_id is null then
+    new.correspondent := 'client';
+    return new;
+  end if;
+  new.correspondent := public.account_email_correspondent(new.account_id, new.debtor_address, new.in_reply_to);
+  return new;
+end $$;
