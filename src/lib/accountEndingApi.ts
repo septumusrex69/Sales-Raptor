@@ -112,6 +112,12 @@ export interface ReceiptOnFile {
   swordfish: boolean
   runInvoice: string | null
   runStatus: string | null
+  /**
+   * Whether it is on a payover run at all. Only an Administrator may read the run itself
+   * (payover_runs), and since S15 the client's liaison may withdraw too -- without this, a receipt
+   * paid over last month would read "Not on a run yet" to them.
+   */
+  onRun: boolean
   /** What the client was paid from it: owed back if refunded after its run went out. */
   toClient: number
 }
@@ -137,6 +143,7 @@ export async function fetchReceiptsOnFile(accountId: string): Promise<ReceiptOnF
     return {
       id: r.id, receivedOn: firmDay(r.received_at), amount: Number(r.amount), paidToClient: !!r.paid_to_client,
       swordfish: !!r.paid_over_in_swordfish, runInvoice: ru?.invoice_number ?? null, runStatus: ru?.status ?? null,
+      onRun: !!a?.payover_run_id,
       toClient: Number(a?.to_client ?? 0),
     }
   })

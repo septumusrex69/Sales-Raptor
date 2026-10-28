@@ -52368,3 +52368,314 @@ as $$
 $$;
 revoke all on function public.portal_book(uuid, text, boolean, integer, integer) from public, anon, authenticated;
 grant execute on function public.portal_book(uuid, text, boolean, integer, integer) to service_role;
+
+-- ============================================================================================
+-- close_account_admin_or_liaison (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- WHO MAY CLOSE AN ACCOUNT. Stephan: "only administrators or client liaison can close an account" --
+-- and, asked which: any Administrator, and the liaison of THAT account's client; refunding the
+-- debtor's payments out of trust stays with the people who see finances. It used to be the other way
+-- round: writing off and withdrawing needed finance.view (three people on staging) and paid up needed
+-- payment.record (anybody who captures payments), and no liaison could close their own client's file.
+--
+-- A CLOSED ACCOUNT IS ON NOBODY'S DESK. Stephan: "if an account is written off or withdrawn or
+-- anything, it doesn't stay on a person's name ... it goes to the company's name." The screen calls
+-- that Bredell Ferreira; the column says null. Done in the closing UPDATE itself rather than by a
+-- BEFORE trigger, because a column changed inside a trigger does not fire the `UPDATE OF assigned_to`
+-- triggers -- and those are what write the desk history and cancel a campaign call left open on it.
+-- ============================================================================================
+
+create or replace function public.may_close_account(p_account uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  -- SECURITY DEFINER for the same reason current_user_role is: it reads the caller's own profile
+  -- and the client's liaison, and must answer the same whatever the caller may read. The liaison
+  -- of a sub-account's main client counts too: the portal and the client page treat a client and
+  -- its sub-accounts as one relationship, looked after by one liaison.
+  select coalesce(public.current_user_role() = 'Administrator', false)
+      or exists (
+        select 1
+          from public.debtor_accounts a
+          join public.companies c on c.id = a.company_id
+          left join public.companies parent on parent.id = c.parent_company_id
+         where a.id = p_account
+           and auth.uid() is not null
+           and (c.account_owner_id = auth.uid() or parent.account_owner_id = auth.uid()))
+$$;
+revoke all on function public.may_close_account(uuid) from public, anon;
+grant execute on function public.may_close_account(uuid) to authenticated;
+comment on function public.may_close_account(uuid) is
+  'Whether the caller may close this account: any Administrator, or the liaison of its client (or of the main client of a sub-account). Stephan, 28 Oct (S15).';
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON, for every ending (S15; was finance.view for a write-off
+  -- and payment.record for paid up).
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may close an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held run is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  if p_as = 'written_off' then
+    -- THE LIAISON IS companies.account_owner_id. This read `companies.liaison`, a name column that is
+    -- empty on every client, so the "tell the client" task was never once created. And not when the
+    -- liaison is the one writing it off: they know.
+    select c.name, c.account_owner_id into v_client, v_liaison
+      from public.companies c
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null and v_liaison is distinct from auth.uid() then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, public.raptor_today() + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+create or replace function public.withdraw_account(
+  p_account uuid, p_reason text, p_fees boolean default true, p_interest boolean default false,
+  p_commission boolean default false, p_amount numeric default null, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_b record;
+  v_excl numeric := 0;
+  v_vatable numeric := 0;
+  v_vat numeric := 0;
+  v_charge uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+begin
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON (S15; was finance.view). The withdrawal charge it raises
+  -- goes to the client set off against their payover, exactly as before; who may press it changed,
+  -- not what it costs. Refunding the debtor's payments is withdraw_account_refunding, still finance.
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may withdraw an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why the client is withdrawing it.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  select * into v_b from public.withdrawal_basis(p_account);
+
+  if p_amount is not null then
+    if p_amount < 0 then
+      raise exception 'A withdrawal charge cannot be negative.' using errcode = '22023';
+    end if;
+    v_excl := round(p_amount, 2);
+    v_vatable := v_excl;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account') || ' - agreed amount';
+  else
+    if p_fees then v_excl := v_excl + v_b.fees; v_vatable := v_vatable + v_b.fees; end if;
+    if p_interest then v_excl := v_excl + v_b.interest; end if;
+    if p_commission then v_excl := v_excl + v_b.commission; v_vatable := v_vatable + v_b.commission; end if;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account')
+      || case when p_fees and p_interest and p_commission then ' - fees, interest and commission'
+              when p_fees and p_interest then ' - fees and interest'
+              when p_fees and p_commission then ' - fees and commission'
+              when p_fees then ' - fees'
+              when p_interest then ' - interest'
+              when p_commission then ' - commission'
+              else ' - no charge' end;
+  end if;
+
+  v_vat := round(v_vatable * coalesce(v_b.vat_rate, 0.15), 2);
+
+  /*
+   * THE CHARGE GOES TO THE CLIENT, NEVER ONTO THE ACCOUNT'S OWN LEDGER. A withdrawal fee that found
+   * its way into account_fees would be a charge the DEBTOR never incurred, on a file the client has
+   * taken back -- and it would ride in duplum and the Annexure B cap with it. The firm invoices its
+   * client; the tariff is between the firm and the debtor, and the two are not the same book.
+   */
+  if v_excl > 0 then
+    v_charge := public.raise_client_charge(
+      p_company => v_a.company_id, p_kind => 'withdrawal', p_description => v_desc,
+      p_amount => v_excl, p_vat => v_vat, p_settlement => 'set_off', p_account => p_account);
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = 'withdrawn', ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE, and a withdrawal above all: the client has taken the file back,
+  -- so a notice going out on it afterwards is the firm writing to a debtor on nobody's mandate.
+  perform public.stop_workflows_on_close(p_account, 'Withdrawn by the client - ' || v_why);
+  -- AND THE LISTING COMES OFF. The firm has no claim left on an account it has handed back, so an
+  -- adverse record still standing in its name is one nobody is entitled to keep there.
+  perform public.bureau_removal_task(p_account, 'withdrawn', v_why);
+
+  return v_charge;
+end $$;
+
+create or replace function public.withdraw_account_refunding(
+  p_account uuid, p_reason text, p_fees boolean, p_interest boolean, p_commission boolean,
+  p_amount numeric, p_note text, p_refund uuid[], p_payable_to text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_charge uuid;
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+  v_alloc uuid;
+  v_to text := nullif(btrim(coalesce(p_payable_to, '')), '');
+  v_why text := 'Withdrawn -- refunded to the debtor: ' || btrim(coalesce(p_reason, ''));
+  p uuid;
+begin
+  -- REFUNDING OUT OF TRUST IS FINANCE'S, whoever may withdraw (S15). reverse_payment below would
+  -- refuse a liaison anyway, but only after the account had been half closed -- say it first.
+  if coalesce(array_length(p_refund, 1), 0) > 0 and not public.has_capability('finance.view') then
+    raise exception 'Refunding a debtor''s payments is for somebody who sees finances. Withdraw it keeping the payments, or ask them.'
+      using errcode = '42501';
+  end if;
+  if coalesce(array_length(p_refund, 1), 0) > 0 and v_to is null then
+    raise exception 'Say who the refund is paid to.' using errcode = '22023';
+  end if;
+  foreach p in array coalesce(p_refund, '{}') loop
+    select * into v_pay from public.account_payments where id = p;
+    if not found or v_pay.account_id <> p_account then
+      raise exception 'That payment is not on this account.' using errcode = '22023';
+    end if;
+    if v_pay.reversed_at is not null or v_pay.rejected_at is not null or v_pay.approved_at is null then
+      raise exception 'Only a processed payment that stands can be refunded.' using errcode = '22023';
+    end if;
+    if v_pay.paid_to_client then
+      raise exception 'A payment made to the client directly never reached the trust account; the client refunds it.'
+        using errcode = '22023';
+    end if;
+  end loop;
+
+  v_charge := public.withdraw_account(p_account, p_reason, p_fees, p_interest, p_commission, p_amount, p_note);
+
+  foreach p in array coalesce(p_refund, '{}') loop
+    v_copy := public.reverse_payment(p, v_why);
+    if v_copy is null then
+      raise exception 'A payment could not be reversed for the refund.' using errcode = '22023';
+    end if;
+    /* Received before the close, so the closed-account rule would split it again: say it is held. */
+    update public.account_payments set hold_as_credit = true where id = v_copy;
+    perform public.approve_payment(v_copy);
+    select id into v_alloc from public.payment_allocations
+     where payment_id = v_copy and status <> 'reversed' and excess_credit > 0;
+    if v_alloc is null then
+      raise exception 'The refunded payment was not held as the debtor''s credit.' using errcode = '22023';
+    end if;
+    perform public.dispose_excess_credit(v_alloc, 'refund', v_why, v_to, null);
+  end loop;
+
+  return v_charge;
+end $$;
+
+-- THE ACCOUNTS ALREADY CLOSED come off their collectors too (Stephan chose it, S15). Through the
+-- table, so the desk history records each move to nobody like any other.
+update public.debtor_accounts set assigned_to = null
+ where ended_as is not null and assigned_to is not null;
+
+-- ============================================================================================
+-- withdrawal_basis_for_closers (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- THE FIGURES A WITHDRAWAL IS PRICED ON, for whoever may withdraw. close_account_admin_or_liaison
+-- let the client's liaison withdraw an account; this is what the box shows them first -- this
+-- account's own fees, interest and the commission it would have earned -- and it still asked for
+-- finance.view, so the liaison would have opened the box onto a refusal. One account's figures to
+-- the person closing it, not the firm's books.
+-- ============================================================================================
+create or replace function public.withdrawal_basis(p_account uuid)
+returns table(fees numeric, interest numeric, commission numeric, vat_rate numeric, capital numeric, commission_rate numeric)
+language plpgsql
+stable security definer
+set search_path to 'public'
+as $$
+declare
+  v_bal record;
+  v_rate numeric;
+  v_vat numeric;
+begin
+  if not (public.has_capability('finance.view') or public.may_close_account(p_account)) then
+    raise exception 'Withdrawal figures are not yours to see.' using errcode = '42501';
+  end if;
+
+  select * into v_bal from public.engine_balances(p_account, null);
+  select coalesce(a.commission_rate, a.commission_rate_expected, 0) into v_rate
+    from public.debtor_accounts a where a.id = p_account;
+  select coalesce(f.vat_rate, 0.15) into v_vat from public.firm_settings f limit 1;
+
+  fees := round(coalesce(v_bal.costs, 0), 2);
+  interest := round(coalesce(v_bal.interest, 0), 2);
+  capital := round(coalesce(v_bal.capital, 0), 2);
+  commission_rate := v_rate;
+  vat_rate := v_vat;
+  -- WHAT THE COMMISSION WOULD HAVE BEEN. The firm: "the commission should have come to us because
+  -- they made an arrangement due to the result of our work." The arrangement is for the balance
+  -- still outstanding, so that is what the commission is reckoned on.
+  commission := round(capital * v_rate, 2);
+  return next;
+end $$;

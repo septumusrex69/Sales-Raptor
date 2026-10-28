@@ -153,19 +153,29 @@ no('it asks no client permission', /client_action_ask|consent_status|awaiting_cl
 /* THE OPENING PAREN IS PART OF THE PATTERN. Without it `public.tasks` matches `public.tasks_x`
  * as a prefix, and a break test that renamed the table away passed. */
 ok('a write-off raises the liaison a task', /insert into public\.tasks \(/.test(settle ?? ''))
-ok('...owned by the client liaison', /p\.name = c\.liaison/.test(settle ?? ''))
+/* THE LIAISON IS companies.account_owner_id (S15). This asserted a join on `companies.liaison`, a
+   name column empty on every client, so the check held a task in place that was never created. */
+ok('...owned by the client liaison', /select c\.name, c\.account_owner_id into v_client, v_liaison/.test(settle ?? ''))
+no('...not read off the empty liaison name', /p\.name = c\.liaison/.test(settle ?? ''))
 /* AND A PAID-UP ACCOUNT RAISES NOTHING: nobody needs telling a debt was paid, and a task for every
    settled account would bury the write-offs among them. */
 ok('...and only for a write-off', /if p_as = 'written_off' then[\s\S]{0,600}insert into public\.tasks \(/.test(settle ?? ''))
 
 /*
- * TWO DIFFERENT TICKS. Writing off cancels a debt under the firm's own mandate and is the trust
- * side's; marking one paid up or SETTLED is the money side -- somebody took a payment and agreed
- * it was the end of it -- so both ask the same tick as recording one.
+ * ONE RULE FOR EVERY ENDING (Stephan, S15: "only administrators or client liaison can close an
+ * account"). It was two ticks -- finance for a write-off, payment.record for paid up -- and is now
+ * may_close_account: any Administrator, or the liaison of the account's client.
  */
-ok('writing off asks the trust capability', /written_off' and not public\.has_capability\('finance\.view'\)/.test(settle ?? ''))
-ok('paid up and settled ask who may record a payment',
-  /p_as in \('paid_up', 'settled'\) and not public\.may_record_payment\(\)/.test(settle ?? ''))
+const mayClose = liveBody('may_close_account')
+ok('every ending asks who may close it', /if not public\.may_close_account\(p_account\) then/.test(settle ?? ''))
+no('...and no longer the finance tick or the payment tick', /has_capability\('finance\.view'\)|may_record_payment\(\)/.test(settle ?? ''))
+ok('who may close: any Administrator', /public\.current_user_role\(\) = 'Administrator'/.test(mayClose ?? ''))
+ok('...or the liaison of the client, or of its main client',
+  /c\.account_owner_id = auth\.uid\(\) or parent\.account_owner_id = auth\.uid\(\)/.test(mayClose ?? ''))
+ok('withdrawing asks the same', /if not public\.may_close_account\(p_account\) then/.test(liveBody('withdraw_account') ?? ''))
+ok('...but refunding out of trust still asks finance',
+  /array_length\(p_refund, 1\), 0\) > 0 and not public\.has_capability\('finance\.view'\)/.test(liveBody('withdraw_account_refunding') ?? ''))
+ok('closing takes it off the collector', /assigned_to = null/.test(settle ?? '') && /assigned_to = null/.test(liveBody('withdraw_account') ?? ''))
 /* SETTLED IS A REAL ENDING AND NOT A KIND OF WRITE-OFF: one of the twenty test accounts is
    "Settled by way of compromise", and folded into written_off it would read on every report as a
    debt nobody recovered. */

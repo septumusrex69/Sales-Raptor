@@ -36,6 +36,7 @@ import { mayHandOutFor } from '../../lib/handoverUpload'
 import { CampaignModal } from './CampaignModal'
 import { useColumnWidths } from '../../lib/columnWidths'
 import { ResizableTh } from '../../components/ui/ResizableTh'
+import { deskLabel } from '../../lib/firmDesk'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
 /*
@@ -959,7 +960,7 @@ export function AccountsList() {
               <tbody>
                 {accounts.map((a) => {
                   const drift = hasCommissionDrift(a)
-                  const desk = a.assignedTo ? users.find((u) => u.id === a.assignedTo)?.name : null
+                  const desk = deskLabel(a, (id) => users.find((u) => u.id === id)?.name)
                   return (
                     <tr key={a.id} className={`border-b border-slate-50 last:border-0 ${
                       allMatching || ticked.has(a.id) ? 'bg-brand-50/50' : 'hover:bg-slate-50'}`}>

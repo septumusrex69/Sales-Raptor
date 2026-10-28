@@ -54,6 +54,9 @@ function handlers(me) {
     })],
     [(u) => /\/rest\/v1\/firm_settings/.test(u), () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rest\/v1\/debtor_accounts/.test(u), () => ({ body: [ACCOUNT] })],
+    /* THE CLIENT IS THE LIAISON'S OWN: since S15 only an Administrator or the account's client's
+       liaison may close it (may_close_account), so the liaison here has to be that liaison. */
+    [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [{ id: 'c1', name: 'Kisi Holdings', account_owner_id: LIAISON.id }] })],
     [(u) => /\/rpc\/account_settlement\b/.test(u), () => ({ body: current ? [current] : [] })],
     /* The account's emails a liaison may pin as the client's acceptance (12 Oct). */
     [(u) => /\/rest\/v1\/account_emails\?/.test(u), () => ({ body: [
@@ -134,6 +137,24 @@ try {
     t.check('...and the figure', a?.body?.p_amount, 18000)
     await t.shot(page, 'settlement-proposed-liaison')
     await context.close()
+  }
+
+  /* ---------------- 2b. WHO MAY CLOSE (Stephan, S15) ---------------- */
+  /* "Only administrators or client liaison can close an account": the client's own liaison sees
+     Close account, another liaison and a collector do not. The database is the guard
+     (may_close_account); this is the button not being offered to somebody it would refuse. */
+  {
+    current = null
+    const own = await open(browser, LIAISON)
+    t.ok('the client\'s own liaison is offered Close account',
+      await own.page.getByTestId('position-controls').getByRole('button', { name: 'Close account' }).isVisible())
+    await own.context.close()
+    const other = await open(browser, { ...LIAISON, id: '99999999-9999-4999-8999-999999999999', name: 'Other Liaison', email: 'other@example.test' })
+    t.check('...a liaison from another client is not', await other.page.getByRole('button', { name: 'Close account' }).count(), 0)
+    await other.context.close()
+    const agent = await open(browser, AGENT)
+    t.check('...nor is a collector', await agent.page.getByRole('button', { name: 'Close account' }).count(), 0)
+    await agent.context.close()
   }
 
   /* ---------------- 3. a proposal, the agent ---------------- */

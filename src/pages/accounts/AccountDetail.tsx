@@ -153,6 +153,7 @@ import { AccountWhatsApp } from './AccountWhatsApp'
 import { whatsAppOpening } from '../../lib/whatsapp'
 import { recordWhatsApp } from '../../lib/accountWhatsApp'
 import { mayHandOutFor } from '../../lib/handoverUpload'
+import { canCloseAccount, deskLabel } from '../../lib/firmDesk'
 
 type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'SMS' | 'Documents'
 
@@ -1113,9 +1114,7 @@ function AccountPage() {
    * the diary, the workflow and every desk list already turn on. `users` is the profiles AppStore
    * already holds, so this costs no query.
    */
-  const assignedName = account.assignedTo
-    ? (users.find((u) => u.id === account.assignedTo)?.name ?? 'Someone no longer here')
-    : null
+  const assignedName = deskLabel(account, (id) => users.find((u) => u.id === id)?.name)
   /* The same authority as handing out from the accounts list, and now literally the same test --
      the book-wide tick, or (S11) may load this account's client, which is a liaison's own batch. */
   const mayHandOut = mayHandOutFor(currentUser, client, users)
@@ -1536,7 +1535,7 @@ function AccountPage() {
       balance={b?.balance}
       open={!account.endedAs}
       canApprove={canApproveSettlement(currentUser)}
-      canClose={canRecordPayment(currentUser)}
+      canClose={canCloseAccount(currentUser, client, companies.find((c) => c.id === client?.parentCompanyId))}
       userId={currentUser?.id ?? null}
       nameOf={(uid) => users.find((u) => u.id === uid)?.name ?? null}
       onChange={reload}
@@ -1615,7 +1614,8 @@ function AccountPage() {
       onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null}
       /* Closing an account is not freezing it: a freeze is reversible and an ending is not. Both
          live beside the status because that is where work is stopped, not in the action row. */
-      onEnd={canRecordPayment(currentUser) ? () => setEnding(true) : null}
+      /* ADMINISTRATORS AND THE CLIENT'S LIAISON (Stephan, S15) -- may_close_account's copy. */
+      onEnd={canCloseAccount(currentUser, client, companies.find((c) => c.id === client?.parentCompanyId)) ? () => setEnding(true) : null}
       /* THE SAME TICK THE DATABASE ASKS FOR -- `book.freeze` -- so the button is not offered to
          somebody the function would refuse. The function is still the guard; this is the courtesy. */
       onHold={canFreezeAccounts(currentUser) ? () => setHolding(true) : null}
@@ -2207,7 +2207,7 @@ function AccountPage() {
              balance ... inclusive of fees, interest, capital" (the firm, 12 Oct). The capital
              alone read nil on accounts that still owed their fees. */
           balance={statement?.breakdown.balance ?? account.capitalOutstanding ?? 0}
-          canWriteOff={canViewFinance(currentUser)}
+          canRefund={canViewFinance(currentUser)}
           onClose={() => setEnding(false)}
           onDone={() => { setEnding(false); reload() }}
         />

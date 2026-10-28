@@ -27,15 +27,19 @@ import { formatDate } from '../../data/mockData'
  * WITHDRAWN IS THE CLIENT'S DOING AND COSTS THEM MONEY; the other two are the firm's. The box
  * changes shape completely between them, which is the honest reflection of that.
  */
-export function EndAccountModal({ accountId, caseNumber, debtorName, balance, canWriteOff, onClose, onDone }: {
+export function EndAccountModal({ accountId, caseNumber, debtorName, balance, canRefund, onClose, onDone }: {
   accountId: string
   caseNumber: string | null
   /** Who a refund is paid to, unless somebody types otherwise. */
   debtorName?: string | null
   /** What is still outstanding, which decides whether paid up is even truthful. */
   balance: number
-  /** finance.view. Writing off and withdrawing are the Administrator's; paid up is not. */
-  canWriteOff: boolean
+  /**
+   * finance.view: refunding the debtor's payments out of trust on a withdrawal. Everything else in
+   * this box is for whoever may open it -- an Administrator or the client's liaison (Stephan, S15;
+   * may_close_account) -- so every ending is offered to them alike.
+   */
+  canRefund: boolean
   onClose: () => void
   onDone: (ending: AccountEnding) => void
 }) {
@@ -63,7 +67,7 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
   const [refundIds, setRefundIds] = useState<Set<string>>(new Set())
   const [payableTo, setPayableTo] = useState(debtorName ?? '')
   useEffect(() => {
-    if (ending !== 'withdrawn' || receipts || !canWriteOff) return
+    if (ending !== 'withdrawn' || receipts) return
     let live = true
     fetchReceiptsOnFile(accountId)
       .then((r) => {
@@ -73,20 +77,20 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
       })
       .catch(() => { if (live) setReceipts([]) })
     return () => { live = false }
-  }, [ending, receipts, accountId, canWriteOff])
+  }, [ending, receipts, accountId])
   const chosen = (receipts ?? []).filter((r) => payments === 'refund' && refundIds.has(r.id))
   const refundTotal = chosen.reduce((t, r) => t + r.amount, 0)
   const owedBack = chosen.filter((r) => r.runStatus && ['approved', 'sent', 'paid'].includes(r.runStatus))
     .reduce((t, r) => t + r.toClient, 0)
 
   useEffect(() => {
-    if (ending !== 'withdrawn' || basis || !canWriteOff) return
+    if (ending !== 'withdrawn' || basis) return
     let live = true
     fetchWithdrawalBasis(accountId)
       .then((b) => { if (live) setBasis(b) })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
     return () => { live = false }
-  }, [ending, basis, accountId, canWriteOff])
+  }, [ending, basis, accountId])
 
   /* A TYPED FIGURE REPLACES THE BOXES ENTIRELY, which is what the database does too -- the two
      cannot be mixed without the number meaning something different depending on what is ticked. */
@@ -115,14 +119,11 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
   }
 
   /*
-   * SETTLED SITS WITH PAID UP, not with written off, and the tick says so. Both are the money
-   * side of the firm -- somebody took a payment and agreed it was the end of it -- and the
-   * database asks `may_record_payment` for either. A write-off cancels a debt under the firm's own
-   * mandate and asks for the finance tick instead.
+   * EVERY ENDING, FOR EVERYBODY WHO MAY OPEN THIS (S15). It used to split -- paid up and settled on
+   * payment.record, written off and withdrawn on finance -- and Stephan replaced both with one rule:
+   * an Administrator or the client's liaison closes the account, whichever ending it is.
    */
-  const choices: AccountEnding[] = canWriteOff
-    ? ['paid_up', 'settled', 'written_off', 'withdrawn']
-    : ['paid_up', 'settled']
+  const choices: AccountEnding[] = ['paid_up', 'settled', 'written_off', 'withdrawn']
 
   return (
     <Modal
@@ -221,7 +222,8 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
                       {r.swordfish ? 'Swordfish history — stays as it is'
                         : r.paidToClient ? 'Paid to the client directly — the client refunds it'
                           : r.runStatus === 'paid' ? `Paid over on ${r.runInvoice}`
-                            : r.runStatus ? `On ${r.runInvoice} (${r.runStatus})` : 'Not on a run yet'}
+                            : r.runStatus ? `On ${r.runInvoice} (${r.runStatus})`
+                              : r.onRun ? 'On a payover run' : 'Not on a run yet'}
                     </td>
                   </tr>
                 ))}
@@ -235,9 +237,14 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
               </label>
               <label className="flex items-start gap-2">
                 <input type="radio" className="mt-1" checked={payments === 'refund'} onChange={() => setPayments('refund')}
-                  disabled={!receipts.some(refundable)} data-testid="withdraw-refund" />
+                  disabled={!canRefund || !receipts.some(refundable)} data-testid="withdraw-refund" />
                 <span><span className="font-medium">Refund them to the debtor</span>
-                  <span className="block text-xs text-slate-500">A wrongful handover: the debt was never owed. Each is reversed, its fees taken back, and refunded from trust.</span></span>
+                  <span className="block text-xs text-slate-500">
+                    {canRefund
+                      ? 'A wrongful handover: the debt was never owed. Each is reversed, its fees taken back, and refunded from trust.'
+                      /* Said rather than hidden: a liaison needs to know the choice exists, and whom to ask. */
+                      : 'Money out of trust is for somebody who sees finances. Ask them to withdraw it if the debtor is owed a refund.'}
+                  </span></span>
               </label>
             </div>
             {payments === 'refund' && (
