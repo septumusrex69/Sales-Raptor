@@ -240,3 +240,67 @@ export function portalCallback(input: { phone?: unknown; when?: unknown; about?:
   const about = portalMessageText(input.about) ?? ''
   return { ok: true, phone, when: when || 'Any time', about }
 }
+
+/**
+ * WHAT THE CLIENT WANTS, IN ONE PICK (S15). Stephan, on the first portal question ("Update"): "what does the
+ * client want? ... we shouldn't make it too complicated." So a short closed list above the box -- enough for
+ * the liaison to know what kind of answer is wanted before reading a word -- and the box for the rest.
+ * Carried as the first line of the ticket's description: no column, because nothing sorts on it yet.
+ */
+export const PORTAL_TOPICS = [
+  'An update on this account',
+  'New details for the debtor',
+  'Stop or withdraw this account',
+  'Something else',
+] as const
+export type PortalTopic = typeof PORTAL_TOPICS[number]
+
+export function portalTopic(value: unknown): PortalTopic {
+  return (PORTAL_TOPICS as readonly string[]).includes(value as string) ? value as PortalTopic : 'Something else'
+}
+
+/** The ticket's description: the topic on its own line, then the client's words. */
+export function portalQuestion(topic: PortalTopic, text: string): string {
+  return `${topic}\n\n${text}`
+}
+
+/**
+ * A PAYMENT THE DEBTOR MADE TO THE CLIENT, RECORDED BY THE CLIENT (S15). Stephan: "record a payment ...
+ * like a PTC, a payment made to you, on a specific account" -- then, of where it goes: "straight to the
+ * account ... it shows up in the trust thing for approval ... and it also notifies the liaison."
+ *
+ * So it is a real payment row, UNAPPROVED (portal_record_ptc): nothing is allocated, no fee raised and no
+ * payover touched until somebody approves it in Trust, exactly like every other receipt. The rules are the
+ * database's; this is the browser's and the server's first reading of what was typed.
+ */
+export interface PortalPaymentReport { amount: number; paidOn: string; reference: string; note: string }
+
+export function portalPaymentReport(input: { amount?: unknown; paidOn?: unknown; reference?: unknown; note?: unknown }, today: string):
+  { ok: true; report: PortalPaymentReport } | { ok: false; error: string } {
+  const amount = typeof input.amount === 'number' ? input.amount
+    : typeof input.amount === 'string' ? Number(input.amount.replace(/[\sR\u00a0]/g, '').replace(/,(?=\d{1,2}$)/, '.').replace(/,/g, '')) : NaN
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: 'Type the amount the debtor paid you.' }
+  if (amount > 100_000_000) return { ok: false, error: 'That amount looks wrong. Check it.' }
+  const paidOn = typeof input.paidOn === 'string' ? input.paidOn.trim() : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || Number.isNaN(Date.parse(paidOn))) return { ok: false, error: 'Say which day it was paid.' }
+  if (paidOn > today) return { ok: false, error: 'A payment cannot be in the future.' }
+  const reference = typeof input.reference === 'string' ? input.reference.trim().slice(0, 120) : ''
+  if (!reference) return { ok: false, error: 'Put your reference on it -- your receipt or bank reference.' }
+  const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''
+  return { ok: true, report: { amount: Math.round(amount * 100) / 100, paidOn, reference, note } }
+}
+
+/** A rand amount as the client typed it back to them: spaces for thousands, never a non-breaking one. */
+export function portalRands(v: number): string {
+  /* By hand, not toLocaleString: en-ZA's decimal mark is a comma in one runtime and a point in another,
+     and this text is stored on a ticket -- it has to read the same whoever wrote it. */
+  const [whole, cents] = Math.abs(v).toFixed(2).split('.')
+  return `${v < 0 ? '-' : ''}R ${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}.${cents}`
+}
+
+/** The ticket's words for it: what the client sees they said, and what the liaison reads. */
+export function portalPaymentText(r: PortalPaymentReport): string {
+  return `Payment made to us directly\n\nThe debtor paid us ${portalRands(r.amount)} on ${r.paidOn}. Our reference: ${r.reference}.`
+    + (r.note ? `\n\n${r.note}` : '')
+    + '\n\nRecorded on the account. It counts once Bredell Ferreira has approved it.'
+}

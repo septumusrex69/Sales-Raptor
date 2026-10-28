@@ -26,6 +26,14 @@ const TICKETS = [
     raisedAt: '2026-09-02T08:00:00Z', closedAt: '2026-09-05T08:00:00Z', caseNumber: 'RAP-125327', accountNumber: null, clientReference: null,
     debtor: 'Annelie Fourie', sheetReference: null, lastMessageAt: null, messages: 0 },
 ]
+const DASH = {
+  open: 2, closed: 1,
+  figures: { capitalHandedOver: 2500, collectedToDate: 500, collectedThisMonth: 100, capitalOutstanding: 1550.9 },
+  positions: [{ position: 'paying', label: 'Paying', count: 1, outstanding: 600.4 }, { position: 'in_progress', label: 'In progress', count: 1, outstanding: 950.5 }],
+  tickets: { waitingOnYou: 1, open: 1 },
+}
+const REPORTS = [{ id: 'r1', kind: 'remittance', version: 1, sentAt: '2026-10-12T08:00:00Z', title: 'Remittance', client: 'Alianna Pharmacy',
+  amount: 420.5, periodStart: '2026-09-11', periodEnd: '2026-10-10', hasPdf: true, hasSheet: true }]
 const THREAD = [{ direction: 'out', subject: 'Dispute', body: 'Please send the statement for March.', at: '2026-10-21T08:00:00Z', from: 'Liesl Liaison', attachments: [] }]
 
 const server = await startServer()
@@ -55,6 +63,10 @@ try {
     if (action === 'ticket') return json(200, { messages: body.ticketNo === 41 ? THREAD : [] })
     if (action === 'ticket-reply') return json(200, { ok: true })
     if (action === 'ask') return json(200, { ticketNo: 77 })
+    if (action === 'payment-report') return String(body.reference ?? '').trim() ? json(200, { ticketNo: 78 }) : json(400, { error: 'Put your reference on it.' })
+    if (action === 'dashboard') return json(200, DASH)
+    if (action === 'reports') return json(200, { reports: REPORTS })
+    if (action === 'report-file') return json(200, { url: 'about:blank' })
     if (action === 'callback') return String(body.phone ?? '').replace(/\D/g, '').length >= 9 ? json(200, { ok: true }) : json(400, { error: 'Type the number we should call.' })
     return json(404, { error: 'unknown' })
   })
@@ -77,6 +89,29 @@ try {
 
   await page.getByTestId('portal-code').fill('123 456')
   await page.getByRole('button', { name: 'Sign in' }).click()
+  /* S15: the DASHBOARD opens first, with the sidebar in Stephan's order. */
+  await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
+  const nav = (await page.getByTestId('portal-sidebar').innerText()).replace(/\s+/g, ' ')
+  t.ok('the sidebar reads Dashboard, Reports, Tickets, Accounts, in that order', /Dashboard.*Reports.*Tickets.*Accounts/.test(nav))
+  const figs = (await page.getByTestId('portal-figures').innerText()).replace(/\u00a0/g, ' ')
+  t.ok('the dashboard shows handed over, collected and outstanding', /Capital handed over/i.test(figs) && /Collected to date/i.test(figs) && /R\s?2\s?500/.test(figs) && /20% of capital/.test(figs))
+  t.check('...and one line per position under the ring', await page.getByTestId('portal-positions').locator('li').count(), 2)
+  t.ok('...and says a ticket is waiting on the client', /1 ticket is waiting on you/.test(await page.getByTestId('portal-waiting').innerText()))
+  t.ok('...with no fee, commission or interest anywhere on it', !/fee|commission|interest/i.test(await page.getByTestId('portal-dashboard').innerText()))
+  await t.shot(page, 'client-portal-dashboard')
+
+  await page.getByTestId('portal-nav-reports').click()
+  await page.getByTestId('portal-reports').waitFor({ timeout: 5000 })
+  t.check('Reports lists what was sent', await page.getByTestId('portal-report').count(), 1)
+  t.ok('...by period, with the PDF and the spreadsheet', /Remittance advice, 11 Sept 2026 – 10 Oct 2026/.test(await page.getByTestId('portal-report').innerText().then((x) => x.replace(/\u00a0/g, ' ')))
+    && await page.getByTestId('portal-report-pdf').count() === 1 && await page.getByTestId('portal-report-xlsx').count() === 1)
+  const popup = page.waitForEvent('popup', { timeout: 5000 }).catch(() => null)
+  await page.getByTestId('portal-report-xlsx').locator('[data-action="open"]').click()
+  await (await popup)?.close()
+  await page.waitForTimeout(300)
+  t.ok('a file is asked for by the report id and kind, never a path', calls.some((c) => c.action === 'report-file' && c.body.id === 'r1' && c.body.file === 'xlsx' && !('path' in c.body)))
+
+  await page.getByTestId('portal-nav-accounts').click()
   await page.getByTestId('portal-book').waitFor({ timeout: 5000 })
   const verify = calls.filter((c) => c.action === 'verify').pop()
   t.ok('the code is sent with the address it was asked for', verify?.body?.email === 'jan@alianna.co.za' && verify?.body?.code === '123 456')
@@ -104,11 +139,26 @@ try {
   await page.getByTestId('portal-ask').waitFor({ timeout: 5000 })
   t.ok('Ask names the debtor and our reference', /Annelie Fourie/.test(await page.getByTestId('portal-ask').innerText()) && /RAP-125327/.test(await page.getByTestId('portal-ask').innerText()))
   await page.getByTestId('portal-ask-text').fill('Has she made an arrangement?')
+  t.ok('a question cannot go without saying what it is about', await page.getByTestId('portal-ask-send').isDisabled())
+  await page.getByTestId('portal-ask-topics').getByRole('button', { name: 'An update on this account' }).click()
   await page.getByTestId('portal-ask-send').click()
   await page.getByTestId('portal-asked').waitFor({ timeout: 5000 })
   const asked = calls.filter((c) => c.action === 'ask').pop()
-  t.ok('the question goes by OUR reference, with the session', asked?.body?.caseNumber === 'RAP-125327' && asked?.token === TOKEN && /arrangement/.test(asked?.body?.question))
+  t.ok('the question goes by OUR reference, with the session and the topic', asked?.body?.caseNumber === 'RAP-125327' && asked?.token === TOKEN && /arrangement/.test(asked?.body?.question) && asked?.body?.topic === 'An update on this account')
   t.ok('...and the client is told the ticket number', /T-77/.test(await page.getByTestId('portal-asked').innerText()))
+
+  /* A payment made to the client: recorded, waiting for approval, said so before and after. */
+  await page.getByTestId('portal-paid-open').first().click()
+  await page.getByTestId('portal-ask').waitFor({ timeout: 5000 })
+  t.ok('Paid to you opens on the payment, and says it counts once approved', /counts once Bredell Ferreira has approved it/.test(await page.getByTestId('portal-ask').innerText()))
+  await page.getByTestId('portal-pay-amount').fill('1 500.00')
+  t.ok('...and cannot go without a reference', await page.getByTestId('portal-ask-send').isDisabled())
+  await page.getByTestId('portal-pay-reference').fill('RCPT-9')
+  await page.getByTestId('portal-ask-send').click()
+  await page.getByTestId('portal-asked').waitFor({ timeout: 5000 })
+  const paid = calls.filter((c) => c.action === 'payment-report').pop()
+  t.ok('the payment goes by our reference with amount, day and their reference', paid?.body?.caseNumber === 'RAP-125327' && paid?.body?.amount === '1 500.00' && /^\d{4}-\d{2}-\d{2}$/.test(paid?.body?.paidOn) && paid?.body?.reference === 'RCPT-9')
+  t.ok('...and the client is told it waits for approval', /counts once we have approved it/.test(await page.getByTestId('portal-asked').innerText()))
 
   await page.getByTestId('portal-call-me').click()
   await page.getByTestId('portal-ask').waitFor({ timeout: 5000 })
@@ -121,7 +171,7 @@ try {
   const cb = calls.filter((c) => c.action === 'callback').pop()
   t.ok('the callback carries the number and the time, and no account', cb?.body?.phone === '082 123 4567' && cb?.body?.when === 'After two' && !cb?.body?.caseNumber)
 
-  await page.getByTestId('portal-tab-tickets').click()
+  await page.getByTestId('portal-nav-tickets').click()
   await page.getByTestId('portal-tickets').waitFor({ timeout: 5000 })
   t.check('both tickets are listed', await page.getByTestId('portal-ticket').count(), 2)
   const firstTicket = await page.getByTestId('portal-ticket').first().innerText()
@@ -141,7 +191,7 @@ try {
   await t.shot(page, 'client-portal-tickets')
 
   await page.reload()
-  await page.getByTestId('portal-book').waitFor({ timeout: 10000 })
+  await page.getByTestId('portal-dashboard').waitFor({ timeout: 10000 })
   t.ok('a reload stays signed in', true)
   await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByTestId('portal-sign-in').waitFor({ timeout: 5000 })

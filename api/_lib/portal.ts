@@ -9,7 +9,8 @@ import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_CODE_MINUTES, PORTAL_SESSION_DAYS, PORTAL_TOKEN_HEADER,
   isPortalToken, normalisePortalEmail, portalCallback, portalCodeCheck, portalCodeEmail, portalInviteEmail, portalLine,
-  portalMessageText, portalTicketNo, type PortalBookRow,
+  portalMessageText, portalPaymentReport, portalPaymentText, portalQuestion, portalRands, portalTicketNo, portalTopic,
+  type PortalBookRow,
 } from '../../src/lib/clientPortal.js'
 
 /**
@@ -22,7 +23,8 @@ import {
  * Two kinds of caller, never mixed:
  *   anonymous    request-code, verify               (the code is the authority)
  *   portal user  me, book, sign-out,                (x-portal-token)
- *                tickets, ticket, ticket-reply, ask, callback
+ *                tickets, ticket, ticket-reply, ask, callback, payment-report,
+ *                dashboard, reports, report-file
  *   staff        staff-list, staff-invite, staff-set-active   (a Raptor session + dispute.write_to_client)
  *
  * The staff tick is dispute.write_to_client because a portal login is a way of writing to a client about
@@ -316,18 +318,71 @@ const ask: Handler = async (req, res, admin) => {
   const a = await clientAccount(admin, who, body.caseNumber)
   if (!a) { res.status(404).json({ error: 'That account is not on your book.' }); return }
   const { owner, tell } = await liaisonFor(admin, who.companyId)
+  const topic = portalTopic(body.topic)
+  const question = portalQuestion(topic, text)
   const { data: q, error } = await admin.from('account_queries').insert({
-    account_id: a.id, kind: 'client', stage: 'liaison', status: 'open', description: text,
+    account_id: a.id, kind: 'client', stage: 'liaison', status: 'open', description: question,
     owner_id: owner, raised_by: null, raised_by_name: `${who.name || who.email} (client portal)`,
   }).select('id, ticket_no').single()
   if (error || !q) {
     console.error(`[portal] question not raised on ${a.caseNumber}: ${error?.message}`)
     res.status(500).json({ error: 'Your question could not be sent just now. Try again.' }); return
   }
+  /*
+   * THE QUESTION IS ALSO THE FIRST MESSAGE ON THE TICKET (S15). Stephan opened the first one in Raptor and
+   * could not answer it: a ticket with no mail on it has nothing to press Reply on, and "Email the client"
+   * goes to the company's address rather than the person who asked. Filed as what the client wrote, from
+   * their own address, Reply goes back to them, threaded -- and what the liaison sends is on the portal,
+   * because a portal user's address reads as the client's.
+   */
+  await fileClientMessage(admin, who, { id: q.id as string, accountId: a.id, ownerId: owner },
+    `${topic}: ${a.debtor} (${a.caseNumber})`, text)
   await ring(admin, tell, 'portal.question',
-    `${who.clientName} asked about ${a.debtor} (${a.caseNumber}) from the client portal: ${text.slice(0, 140)}`,
+    `${who.clientName} asked about ${a.debtor} (${a.caseNumber}) from the client portal -- ${topic}: ${text.slice(0, 120)}`,
     `/queries/${q.id}`)
   res.status(200).json({ ticketNo: q.ticket_no })
+}
+
+/*
+ * A PAYMENT MADE TO THE CLIENT (S15). Recorded on the account as an UNAPPROVED payment, paid to client
+ * (portal_record_ptc, which holds every rule and the client's book), so it waits in Trust's approval queue
+ * with every other receipt; then a ticket says what the client told us, and the liaison's bell rings.
+ * The payment first: a ticket about a payment the database refused would be a ticket about nothing.
+ */
+const paymentReport: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  /* Today in South Africa: a payment made this evening is not "in the future" because UTC has not caught up. */
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  const r = portalPaymentReport(body, today)
+  if (!r.ok) { res.status(400).json({ error: r.error }); return }
+  const a = await clientAccount(admin, who, body.caseNumber)
+  if (!a) { res.status(404).json({ error: 'That account is not on your book.' }); return }
+  const { error: payErr } = await admin.rpc('portal_record_ptc', {
+    p_client: who.companyId, p_account: a.id, p_amount: r.report.amount.toFixed(2), p_received_on: r.report.paidOn,
+    p_reference: r.report.reference, p_reported_by: `${who.name || who.email} (${who.email})`, p_note: r.report.note || null,
+  })
+  /* The database's refusals are written for the client (a duplicate, a closed account, before the handover). */
+  if (payErr) {
+    const readable = ['22023', '23502', '23505', 'P0002'].includes(payErr.code ?? '')
+    if (!readable) console.error(`[portal] payment not recorded on ${a.caseNumber}: ${payErr.message}`)
+    res.status(readable ? 400 : 500).json({ error: readable ? payErr.message : 'Your payment could not be recorded just now. Try again.' }); return
+  }
+  const text = portalPaymentText(r.report)
+  const { owner, tell } = await liaisonFor(admin, who.companyId)
+  const { data: q } = await admin.from('account_queries').insert({
+    account_id: a.id, kind: 'client', stage: 'liaison', status: 'open', description: text,
+    owner_id: owner, raised_by: null, raised_by_name: `${who.name || who.email} (client portal)`,
+  }).select('id, ticket_no').single()
+  if (q) {
+    await fileClientMessage(admin, who, { id: q.id as string, accountId: a.id, ownerId: owner },
+      `Payment made to us directly: ${a.debtor} (${a.caseNumber})`, text)
+  }
+  await ring(admin, tell, 'portal.payment',
+    `${who.clientName} recorded a payment made to them directly: ${a.debtor} (${a.caseNumber}) paid ${portalRands(r.report.amount)} on ${r.report.paidOn}. It is waiting for approval in Trust.`,
+    q ? `/queries/${q.id}` : `/accounts/${a.id}`)
+  res.status(200).json({ ticketNo: q?.ticket_no ?? null })
 }
 
 const callback: Handler = async (req, res, admin) => {
@@ -359,6 +414,108 @@ const callback: Handler = async (req, res, admin) => {
   }
   await ring(admin, tell, 'portal.callback', `${who.clientName} asked to be called back: ${title.slice(0, 200)}`, `/companies/${who.companyId}`)
   res.status(200).json({ ok: true })
+}
+
+/* ------------------------------------------------------------------ a signed-in client: dashboard and reports (S15) */
+
+/*
+ * THE DASHBOARD (S15). Stephan: "something like a dashboard on there, like we have, handed over accounts,
+ * collected, then by status, circles". The figures are portal_book's totals; the circles are the positions
+ * of every open account, worked out by portalLine -- the one place a client's position is decided for the
+ * portal, so the dashboard and the Accounts list cannot disagree about a debtor. Paged at portal_book's
+ * own 500: a client's book is hundreds of lines, and the largest a few thousand.
+ */
+const dashboard: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const positions: Record<string, { label: string; count: number; outstanding: number }> = {}
+  let totals: Record<string, number> | null = null
+  let total = 0
+  for (let offset = 0; offset < 20000; offset += 500) {
+    const { data, error } = await admin.rpc('portal_book', {
+      p_client: who.companyId, p_search: null, p_open_only: true, p_limit: 500, p_offset: offset,
+    })
+    if (error) { res.status(500).json({ error: 'Your dashboard could not be read just now.' }); return }
+    const d = data as { total: number; totals: Record<string, number>; rows: PortalBookRow[] }
+    if (!totals) { totals = d.totals; total = d.total }
+    for (const line of d.rows.map(portalLine)) {
+      const p = positions[line.position] ??= { label: line.positionLabel, count: 0, outstanding: 0 }
+      p.count += 1
+      p.outstanding += line.capitalOutstanding
+    }
+    if (offset + 500 >= d.total) break
+  }
+  /* Closed accounts are counted, not listed: how many the firm has finished is part of "how is my book doing". */
+  const { data: everything } = await admin.rpc('portal_book', {
+    p_client: who.companyId, p_search: null, p_open_only: false, p_limit: 1, p_offset: 0,
+  })
+  const all = everything as { total: number; totals: Record<string, number> } | null
+  const { data: t } = await admin.rpc('portal_tickets', { p_client: who.companyId })
+  const tickets = (t ?? []) as { status: string; stage: string }[]
+  res.status(200).json({
+    open: total,
+    closed: Math.max(0, (all?.total ?? total) - total),
+    figures: {
+      capitalHandedOver: Number(all?.totals.capital_handed_over ?? totals?.capital_handed_over) || 0,
+      collectedToDate: Number(all?.totals.paid_to_date ?? totals?.paid_to_date) || 0,
+      collectedThisMonth: Number(all?.totals.paid_this_month ?? totals?.paid_this_month) || 0,
+      capitalOutstanding: Number(totals?.capital_outstanding) || 0,
+    },
+    positions: Object.entries(positions).map(([position, p]) => ({ position, ...p })).sort((a, b) => b.count - a.count),
+    tickets: {
+      waitingOnYou: tickets.filter((x) => x.status === 'open' && x.stage === 'client').length,
+      open: tickets.filter((x) => x.status === 'open').length,
+    },
+  })
+}
+
+/*
+ * REPORTS (S15). Stephan: "a section where you would see your previous reports". The reports the firm already
+ * sends a client are its remittance advices, and every one is kept exactly as it was sent -- the PDF and the
+ * spreadsheet as attached (payover_run_sends, which nothing may edit). So this lists THOSE copies, never a
+ * statement rebuilt today: a client comparing the portal with the email in their inbox must find the same
+ * document. The monthly progress report joins this list when it is built.
+ */
+const reports: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const group = [...(await clientGroup(admin, who.companyId))]
+  const { data, error } = await admin.from('payover_run_sends')
+    .select('id, version, sent_at, subject, net_payover, pdf_path, xlsx_path, companies(name), payover_runs(period_start, period_end)')
+    .in('company_id', group).order('sent_at', { ascending: false }).limit(500)
+  if (error) { res.status(500).json({ error: 'Your reports could not be read just now.' }); return }
+  res.status(200).json({
+    reports: (data ?? []).map((r) => {
+      const run = r.payover_runs as unknown as { period_start: string; period_end: string } | null
+      const co = r.companies as unknown as { name: string } | null
+      return {
+        id: r.id as string, kind: 'remittance', version: Number(r.version), sentAt: r.sent_at as string,
+        title: r.subject as string, client: co?.name ?? '', amount: Number(r.net_payover),
+        periodStart: run?.period_start ?? null, periodEnd: run?.period_end ?? null,
+        /* The paths stay on the server; the browser asks for a file by the report's id. */
+        hasPdf: !!r.pdf_path, hasSheet: !!r.xlsx_path,
+      }
+    }),
+  })
+}
+
+const reportFile: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  if (typeof body.id !== 'string' || (body.file !== 'pdf' && body.file !== 'xlsx')) { res.status(400).json({ error: 'Which file?' }); return }
+  const { data: r } = await admin.from('payover_run_sends').select('company_id, pdf_path, xlsx_path').eq('id', body.id).maybeSingle()
+  /* NOT FOUND AND NOT YOURS ARE ONE ANSWER. */
+  if (!r || !(await clientGroup(admin, who.companyId)).has(r.company_id as string)) {
+    res.status(404).json({ error: 'There is no such report on your accounts.' }); return
+  }
+  const path = (body.file === 'pdf' ? r.pdf_path : r.xlsx_path) as string
+  /* Two minutes: long enough to open, short enough that a forwarded link is a dead one. The bucket stays private. */
+  const { data: link, error } = await admin.storage.from('payover-advice').createSignedUrl(path, 120, {
+    download: decodeURIComponent(path.split('/').pop() || 'report'),
+  })
+  if (error || !link) { res.status(500).json({ error: 'That file could not be opened just now.' }); return }
+  res.status(200).json({ url: link.signedUrl })
 }
 
 /* ------------------------------------------------------------------ staff: who may sign in */
@@ -439,6 +596,10 @@ export const PORTAL_ROUTES: Record<string, Handler> = {
   'ticket-reply': ticketReply,
   ask,
   callback,
+  'payment-report': paymentReport,
+  dashboard,
+  reports,
+  'report-file': reportFile,
   'staff-list': staffList,
   'staff-invite': staffInvite,
   'staff-set-active': staffSetActive,

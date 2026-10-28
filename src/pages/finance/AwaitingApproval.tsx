@@ -438,6 +438,14 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                       ? 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]' : 'bg-slate-100 text-slate-600'}`}>
                       {f.route === 'ptc' ? 'Paid client (PTC)' : 'Paid into trust'}
                     </span>
+                    {/* RECORDED BY THE CLIENT, IN THE PORTAL (S15): nobody at the firm captured it, and the
+                        person approving should know whose word it rests on -- the client's own login. */}
+                    {r.source === 'portal' && (
+                      <span className="ml-1 text-[10.5px] px-1.5 py-0.5 rounded bg-gold-100 text-[var(--c-gold-deep)]"
+                        title={r.details ?? 'Recorded by the client in the client portal'} data-testid="awaiting-from-portal">
+                        From the client portal
+                      </span>
+                    )}
                   </Td>
                   <Td first right>{rand(f.interestPaid)}</Td>
                   <Td right>{rand(f.receiptFeePaid)}</Td>

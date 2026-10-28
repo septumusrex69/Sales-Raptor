@@ -5,13 +5,10 @@ import { RingDonut } from '../ui/RingDonut'
 import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../store/AppStore'
 import { outcomeRing, positionRing, type OutcomeRow } from '../../lib/clientOutcomes'
-import { CLIENT_POSITION_ORDER, type ClientPosition } from '../../lib/clientPosition'
+import { CLIENT_POSITION_COLOUR } from '../../lib/clientPosition'
 
-/* One colour a rung, in the order the firm reports them, so a rung is the same colour on every client. */
-const POSITION_COLOUR: Record<ClientPosition, string> = Object.fromEntries(CLIENT_POSITION_ORDER.map((p, i) => [p, [
-  '#047857', '#10b981', '#f59e0b', '#b91c1c', '#9ca3af', '#0ea5e9', '#1e3a5f',
-  '#8b5cf6', '#e11d48', '#334155', '#a16207', '#64748b', '#cbd5e1',
-][i]])) as Record<ClientPosition, string>
+/* One colour a rung -- shared with the client portal's dashboard (clientPosition.ts). */
+const POSITION_COLOUR = CLIENT_POSITION_COLOUR
 const rand = (v: number) => `R ${Math.round(v).toLocaleString('en-ZA')}`
 const OUTCOME_COLOUR = { recovered: '#047857', active: '#c9a24a', closed: '#94a3b8' } as const
 

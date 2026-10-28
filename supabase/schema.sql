@@ -53449,3 +53449,89 @@ end $$;
 -- named it. Written idempotently so it changes nothing where it already exists.
 -- ============================================================================================
 alter table public.account_queries add column if not exists stage text not null default 'agent';
+
+-- ============================================================================================
+-- portal_record_ptc (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A CLIENT RECORDS A PAYMENT MADE TO THEM, FROM THE PORTAL. Stephan: "record a payment ... like a PTC, a
+-- payment made to you, on a specific account" -- and, asked whether it should only be reported: "the record
+-- payment can go straight to the account ... it shows up in the trust thing for approval ... and then it
+-- also notifies the liaison that there's been a payment."
+--
+-- SO IT IS A PAYMENT, UNAPPROVED. The same row record_manual_payment writes, paid_to_client, source
+-- 'portal', created_by null (no Raptor user pressed anything). Unapproved, it allocates nothing, raises no
+-- fee and is in no payover run: approve_payment is still the single moment a payment is processed, and the
+-- approval queue lists it beside every other receipt waiting -- with the client's name on it.
+--
+-- THE SAME RULES AS CAPTURE BY HAND, ONE EXCEPTION. Amount above nothing; not in the future; not before
+-- the handover; a reference (the client's own, which is how a commission query is checked against their
+-- books later). A duplicate on the same day is REFUSED rather than asked about: there is nobody at the
+-- firm in the room to confirm it is a second payment, so the client is told to ask their liaison.
+-- THE EXCEPTION IS THE PROOF. record_manual_payment insists on the client's confirmation attached to a PTC
+-- because a PTC captured by the firm is a CLAIM about money it never saw. Here the client is the one
+-- saying it, signed in as themselves: the confirmation is the record itself, and `details` says who made
+-- it and when.
+--
+-- AN OPEN ACCOUNT ON THE CLIENT'S OWN BOOK ONLY, decided here and not trusted from the caller.
+-- SERVICE ROLE ONLY: the portal's server calls it; no browser role may.
+-- ============================================================================================
+
+create or replace function public.portal_record_ptc(
+  p_client uuid, p_account uuid, p_amount numeric, p_received_on date, p_reference text,
+  p_reported_by text, p_note text default null)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_owner uuid;
+  v_reference text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_payment uuid;
+begin
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account is not on your book.' using errcode = 'P0002'; end if;
+  select coalesce(c.parent_company_id, c.id) into v_owner from public.companies c where c.id = v_a.company_id;
+  if v_owner is distinct from p_client then
+    raise exception 'That account is not on your book.' using errcode = 'P0002';
+  end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is closed. Tell your liaison about the payment instead.' using errcode = '22023';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Type the amount the debtor paid you.' using errcode = '22023';
+  end if;
+  if p_received_on is null or p_received_on > public.raptor_today() then
+    raise exception 'Say which day it was paid. It cannot be in the future.' using errcode = '22023';
+  end if;
+  if v_a.handover_date is not null and p_received_on < v_a.handover_date then
+    raise exception 'That day is before you handed the account to us on %. Tell your liaison about it instead.',
+      to_char(v_a.handover_date, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+  if v_reference is null then
+    raise exception 'Put your reference on it -- your receipt or bank reference.' using errcode = '23502';
+  end if;
+  if exists (
+    select 1 from public.account_payments
+     where account_id = p_account and amount = p_amount and reversed_at is null and rejected_at is null
+       and (received_at at time zone 'Africa/Johannesburg')::date = p_received_on) then
+    raise exception 'A payment of % on that day is already recorded on this account. If this is a second one, tell your liaison.',
+      to_char(p_amount, 'FM999999990.00') using errcode = '23505';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+  ) values (
+    p_account, (p_received_on::timestamp at time zone 'Africa/Johannesburg'), round(p_amount, 2), 'Paid to client',
+    v_reference,
+    'Recorded by the client in the client portal: ' || coalesce(nullif(btrim(p_reported_by), ''), 'the client')
+      || ', ' || to_char(public.raptor_now() at time zone 'Africa/Johannesburg', 'DD Mon YYYY HH24:MI')
+      || coalesce(' -- ' || nullif(btrim(p_note), ''), ''),
+    'portal', true, null
+  ) returning id into v_payment;
+  return v_payment;
+end $$;
+
+revoke all on function public.portal_record_ptc(uuid, uuid, numeric, date, text, text, text) from public, anon, authenticated;
+grant execute on function public.portal_record_ptc(uuid, uuid, numeric, date, text, text, text) to service_role;

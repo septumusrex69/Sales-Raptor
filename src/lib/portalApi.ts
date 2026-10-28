@@ -51,7 +51,26 @@ export const fetchPortalTickets = (token: string) => call<{ tickets: PortalTicke
 export const fetchPortalTicket = (token: string, ticketNo: number) => call<{ messages: PortalMessage[] }>('ticket', { ticketNo }, token)
 export const replyPortalTicket = (token: string, ticketNo: number, message: string) =>
   call<{ ok: boolean }>('ticket-reply', { ticketNo, message }, token)
-export const askPortalQuestion = (token: string, caseNumber: string, question: string) =>
-  call<{ ticketNo: number }>('ask', { caseNumber, question }, token)
+export const askPortalQuestion = (token: string, caseNumber: string, topic: string, question: string) =>
+  call<{ ticketNo: number }>('ask', { caseNumber, topic, question }, token)
 export const requestPortalCallback = (token: string, req: { caseNumber?: string; phone: string; when: string; about: string }) =>
   call<{ ok: boolean }>('callback', req, token)
+export const recordPortalPayment = (token: string, req: { caseNumber: string; amount: string; paidOn: string; reference: string; note: string }) =>
+  call<{ ticketNo: number | null }>('payment-report', req, token)
+
+export interface PortalDashboard {
+  open: number
+  closed: number
+  figures: { capitalHandedOver: number; collectedToDate: number; collectedThisMonth: number; capitalOutstanding: number }
+  positions: { position: import('./clientPosition').ClientPosition; label: string; count: number; outstanding: number }[]
+  tickets: { waitingOnYou: number; open: number }
+}
+export const fetchPortalDashboard = (token: string) => call<PortalDashboard>('dashboard', {}, token)
+
+export interface PortalReport {
+  id: string; kind: 'remittance'; version: number; sentAt: string; title: string; client: string; amount: number
+  periodStart: string | null; periodEnd: string | null; hasPdf: boolean; hasSheet: boolean
+}
+export const fetchPortalReports = (token: string) => call<{ reports: PortalReport[] }>('reports', {}, token)
+export const portalReportFile = (token: string, id: string, file: 'pdf' | 'xlsx') =>
+  call<{ url: string }>('report-file', { id, file }, token)

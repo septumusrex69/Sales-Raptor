@@ -113,8 +113,11 @@ function Thread({ token, ticket, onSignedOut, onReplied }: {
 
   return (
     <div className="border-t border-slate-100 p-4 space-y-3" data-testid="portal-thread">
-      {/* WHAT WAS ASKED, first: the ticket's own words, which no message repeats. */}
-      <div className="text-sm text-slate-700 whitespace-pre-line bg-slate-50 rounded-xl p-3">{ticket.description}</div>
+      {/* WHAT WAS ASKED, first: the ticket's own words, which no message repeats -- except on the client's own
+          question, which is filed as their first message (S15) and would otherwise be shown twice. */}
+      {ticket.kind !== 'client' && (
+        <div className="text-sm text-slate-700 whitespace-pre-line bg-slate-50 rounded-xl p-3">{ticket.description}</div>
+      )}
       {!messages ? <p className="text-sm text-slate-400">Reading…</p>
         : messages.length === 0 ? <p className="text-sm text-slate-500">Nothing has been written on this ticket yet.</p>
           : messages.map((m, i) => (

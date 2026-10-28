@@ -6,14 +6,17 @@ import {
   verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
 import { PortalTickets } from './PortalTickets'
-import { PortalAsk, type AskAbout } from './PortalAsk'
+import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
+import { PortalDashboard } from './PortalDashboard'
+import { PortalReports } from './PortalReports'
 
 /**
  * THE CLIENT PORTAL (S14, Raptor H13) -- outside the firm, like /sign/:token: no staff login, no staff
  * navigation. A client types their email, is emailed a code, and sees their book. See clientPortal.ts.
  *
- * Phase 1 is the book. Phase 2a (S15) puts the client's tickets beside it, and an Ask on every account --
- * a written question or a call back. Handing accounts over (with the firm's approval) is phase 2b.
+ * Phase 1 is the book. Phase 2a (S15) gave it a sidebar -- Dashboard, Reports, Tickets, Accounts, in the
+ * order Stephan gave -- and an Ask on every account: a written question, a payment made to the client, or
+ * a call back. Handing accounts over (with the firm's approval) is phase 2b.
  */
 const FONT = { fontFamily: 'Charter, "Bitstream Charter", Georgia, "Times New Roman", serif' }
 
@@ -33,7 +36,7 @@ export default function PortalPage() {
   return (
     <div className="min-h-screen bg-slate-50" style={FONT} data-testid="portal-page">
       <header className="bg-navy-900 text-white">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <img src="/favicon.svg" alt="" className="w-8 h-8" />
             <div>
@@ -50,7 +53,7 @@ export default function PortalPage() {
           )}
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-4 py-6">
+      <main className="max-w-7xl mx-auto px-4 py-6">
         {!token ? <SignIn onSignedIn={(t) => { savePortalToken(t); setToken(t) }} />
           : !me ? <p className="text-slate-400 text-sm">Opening your accounts…</p>
             : <Signed token={token} onSignedOut={signedOut} />}
@@ -105,43 +108,70 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
 }
 
 /**
- * THE TWO HALVES OF A SIGNED-IN PORTAL, AND THE ONE WAY IN TO ASKING. Tabs rather than one long page:
- * a client with four hundred debtors would scroll past all of them to reach a ticket waiting on them.
+ * THE SIGNED-IN PORTAL: A SIDEBAR AND ONE SECTION AT A TIME (S15). Stephan: "on the left, like a sidebar
+ * where there's a dashboard ... dashboard, reports, tickets, accounts". On a phone the sidebar becomes a
+ * row of pills across the top -- the same four, in the same order -- because a column beside a phone's
+ * content is a column that leaves no room for the content.
+ *
+ * The Dashboard opens first: the question a client logs in with is "how is my book doing", and one debtor
+ * is a search away from there.
  */
+type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts'
+const SECTIONS: { id: Section; label: string; icon: string }[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
+  { id: 'reports', label: 'Reports', icon: 'M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6' },
+  { id: 'tickets', label: 'Tickets', icon: 'M4 7h16v4a2 2 0 000 4v4H4v-4a2 2 0 000-4z' },
+  { id: 'accounts', label: 'Accounts', icon: 'M4 6h16M4 12h16M4 18h16' },
+]
+
 function Signed({ token, onSignedOut }: { token: string; onSignedOut: () => void }) {
-  const [tab, setTab] = useState<'book' | 'tickets'>('book')
-  const [asking, setAsking] = useState<AskAbout | null | false>(false)
+  const [section, setSection] = useState<Section>('dashboard')
+  const [asking, setAsking] = useState<{ about: AskAbout | null; mode?: AskMode } | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
+  const go = (s: Section) => { setSection(s); setDone(null) }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-xl bg-white border border-slate-200 p-1 shadow-sm" role="tablist">
-          {(['book', 'tickets'] as const).map((t) => (
-            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-              data-testid={`portal-tab-${t}`}
-              className={`px-4 py-1.5 rounded-lg text-sm ${tab === t ? 'bg-navy-900 text-white' : 'text-slate-600'}`}>
-              {t === 'book' ? 'Your accounts' : 'Tickets'}
-            </button>
-          ))}
-        </div>
-        <button type="button" onClick={() => { setDone(null); setAsking(null) }} data-testid="portal-call-me"
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm">
+    <div className="lg:grid lg:grid-cols-[13rem_1fr] lg:gap-6">
+      <nav aria-label="Portal" data-testid="portal-sidebar"
+        className="mb-4 lg:mb-0 flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible lg:sticky lg:top-6 lg:self-start">
+        {SECTIONS.map((s) => (
+          <button key={s.id} type="button" onClick={() => go(s.id)} aria-current={section === s.id ? 'page' : undefined}
+            data-testid={`portal-nav-${s.id}`}
+            className={`shrink-0 flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-left ${section === s.id
+              ? 'bg-navy-900 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>
+            <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={s.icon} /></svg>
+            {s.label}
+          </button>
+        ))}
+        <div className="hidden lg:block border-t border-slate-200 my-3" />
+        <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-call-me"
+          className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 text-left">
           Ask us to call you
         </button>
+      </nav>
+
+      <div className="min-w-0 space-y-5">
+        {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
+        {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onSignedOut} onOpen={go} />}
+        {section === 'reports' && <PortalReports token={token} onSignedOut={onSignedOut} />}
+        {section === 'tickets' && <PortalTickets token={token} onSignedOut={onSignedOut} refreshKey={refresh} />}
+        {section === 'accounts' && (
+          <Book token={token} onSignedOut={onSignedOut}
+            onAsk={(about, mode) => { setDone(null); setAsking({ about, mode }) }} />
+        )}
       </div>
-      {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
-      {tab === 'book'
-        ? <Book token={token} onSignedOut={onSignedOut} onAsk={(a) => { setDone(null); setAsking(a) }} />
-        : <PortalTickets token={token} onSignedOut={onSignedOut} refreshKey={refresh} />}
-      {asking !== false && (
-        <PortalAsk token={token} about={asking} onClose={() => setAsking(false)} onSignedOut={onSignedOut}
+
+      {asking && (
+        <PortalAsk token={token} about={asking.about} initialMode={asking.mode} onClose={() => setAsking(null)} onSignedOut={onSignedOut}
           onAsked={(what, ticketNo) => {
-            setAsking(false); setRefresh((n) => n + 1)
+            setAsking(null); setRefresh((n) => n + 1)
             setDone(what === 'question'
               ? `Your question is ticket T-${ticketNo}. Your liaison has it now, and the answer will be under Tickets.`
-              : 'Your liaison has been asked to call you.')
+              : what === 'payment'
+                ? `The payment is recorded on the account${ticketNo ? ` (ticket T-${ticketNo})` : ''}. It counts once we have approved it, and your liaison has been told.`
+                : 'Your liaison has been asked to call you.')
           }} />
       )}
     </div>
@@ -150,7 +180,7 @@ function Signed({ token, onSignedOut }: { token: string; onSignedOut: () => void
 
 const PAGE = 100
 
-function Book({ token, onSignedOut, onAsk }: { token: string; onSignedOut: () => void; onAsk: (about: AskAbout) => void }) {
+function Book({ token, onSignedOut, onAsk }: { token: string; onSignedOut: () => void; onAsk: (about: AskAbout, mode?: AskMode) => void }) {
   const [search, setSearch] = useState('')
   const [asked, setAsked] = useState('')
   const [includeClosed, setIncludeClosed] = useState(false)
@@ -227,9 +257,14 @@ function Book({ token, onSignedOut, onAsk }: { token: string; onSignedOut: () =>
                           <td className="px-4 py-2 text-right">
                             {/* By OUR reference: the client's own is not unique on 21% of the book (CLAUDE.md). */}
                             {l.ourReference && (
-                              <button type="button" onClick={() => onAsk({ caseNumber: l.ourReference, debtor: l.debtor })}
-                                data-testid="portal-ask-open"
-                                className="rounded-lg border border-slate-300 px-2.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50">Ask</button>
+                              <span className="inline-flex gap-1.5">
+                                <button type="button" onClick={() => onAsk({ caseNumber: l.ourReference, debtor: l.debtor }, 'question')}
+                                  data-testid="portal-ask-open"
+                                  className="rounded-lg border border-slate-300 px-2.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50">Ask</button>
+                                <button type="button" onClick={() => onAsk({ caseNumber: l.ourReference, debtor: l.debtor }, 'payment')}
+                                  data-testid="portal-paid-open" title="The debtor paid you directly"
+                                  className="rounded-lg border border-slate-300 px-2.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50">Paid to you</button>
+                              </span>
                             )}
                           </td>
                         </tr>

@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, isPortalToken, normalisePortalEmail, portalCodeCheck, portalLine,
   PORTAL_MESSAGE_MAX, PORTAL_TICKET_LABEL, portalCallback, portalMessageText, portalTicketNo, portalTicketTurn,
+  PORTAL_TOPICS, portalTopic, portalQuestion, portalPaymentReport, portalPaymentText,
 } from '../../src/lib/clientPortal.ts'
 import { ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection } from '../../src/lib/disputeCategories.ts'
 
@@ -125,7 +126,7 @@ check('...never raises item 3', ESCALATION_KINDS.client.chargeable, false)
 check('...and is not offered on the staff Escalate menu (the client raises it, not an agent)', ESCALATION_KIND_ORDER.includes('client'), false)
 
 const server = strip(fs.readFileSync('api/_lib/portal.ts', 'utf8'))
-for (const route of ['tickets', 'ticket', 'ticketReply', 'ask', 'callback']) {
+for (const route of ['tickets', 'ticket', 'ticketReply', 'ask', 'callback', 'paymentReport', 'dashboard', 'reports', 'reportFile']) {
   const at = server.indexOf(`const ${route}: Handler`)
   const end = server.indexOf('\n}\n', at)
   const body = at >= 0 ? server.slice(at, end) : ''
@@ -146,6 +147,50 @@ check('a question is a client ticket on the liaison\'s stage', /kind: 'client', 
    yes, this check changes with the code -- deliberately, so the decision cannot happen by accident. */
 check('nothing the client types is charged to the debtor yet', /chargeItemWith|chargeItem\(/.test(server), false)
 check('...and the filed message says so in the row', /charged_excl_vat: 0/.test(server), true)
+
+/* ---------- S15: what the client wants, a payment made to them, reports ---------- */
+check('a topic off the list is kept', portalTopic('New details for the debtor'), 'New details for the debtor')
+check('...anything else is Something else', portalTopic('<script>'), 'Something else')
+check('the topic leads the ticket, on its own line', portalQuestion('An update on this account', 'Any news?'), 'An update on this account\n\nAny news?')
+check('the list is short (Stephan: "we shouldn\'t make it too complicated")', PORTAL_TOPICS.length <= 6, true)
+const T = '2026-10-28'
+check('a payment needs an amount', portalPaymentReport({ amount: '0', paidOn: T, reference: 'x' }, T).ok, false)
+check('...a day not in the future', portalPaymentReport({ amount: '10', paidOn: '2026-10-29', reference: 'x' }, T).ok, false)
+check('...and a reference', portalPaymentReport({ amount: '10', paidOn: T, reference: ' ' }, T).ok, false)
+check('R 1 500,50 reads as 1500.50', portalPaymentReport({ amount: 'R 1 500,50', paidOn: T, reference: 'x' }, T), { ok: true, report: { amount: 1500.5, paidOn: T, reference: 'x', note: '' } })
+check('1,500.50 reads as 1500.50', portalPaymentReport({ amount: '1,500.50', paidOn: T, reference: 'x' }, T).report?.amount, 1500.5)
+const ptcText = portalPaymentText({ amount: 1500.5, paidOn: T, reference: 'RCPT-9', note: '' })
+check('the ticket says the amount, the day, the reference -- and that it waits for approval',
+  /R 1 500\.50/.test(ptcText) && /2026-10-28/.test(ptcText) && /RCPT-9/.test(ptcText) && /approved/.test(ptcText) && !/\u00a0/.test(ptcText), true)
+
+const pay = server.slice(server.indexOf('const paymentReport: Handler'), server.indexOf('const callback: Handler'))
+check('a payment is recorded by portal_record_ptc, with the client from the SESSION', /rpc\('portal_record_ptc'/.test(pay) && /p_client: who\.companyId/.test(pay), true)
+check('...BEFORE the ticket is made (a ticket about a refused payment is about nothing)', pay.indexOf("rpc('portal_record_ptc'") > 0 && pay.indexOf("rpc('portal_record_ptc'") < pay.indexOf("from('account_queries')"), true)
+check('...and never written to the ledger from the server directly', /from\('account_payments'\)/.test(server), false)
+const schemaSql = fs.readFileSync('supabase/schema.sql', 'utf8')
+const ptcAt = schemaSql.lastIndexOf('create or replace function public.portal_record_ptc(')
+const ptcFn = ptcAt >= 0 ? schemaSql.slice(ptcAt, schemaSql.indexOf('end $$;', ptcAt)) : ''
+check('portal_record_ptc is in the schema', ptcAt > 0, true)
+check('...checks the account is on the client\'s own book', /v_owner is distinct from p_client/.test(ptcFn), true)
+check('...refuses a closed account, the future, before the handover, no reference, a same-day duplicate',
+  /ended_as is not null/.test(ptcFn) && /> public\.raptor_today\(\)/.test(ptcFn) && /< v_a\.handover_date/.test(ptcFn)
+  && /v_reference is null/.test(ptcFn) && /errcode = '23505'/.test(ptcFn), true)
+check('...writes a PTC, from the portal, UNAPPROVED (approval stays in Trust)',
+  /'portal', true, null/.test(ptcFn) && !/approved_at/.test(ptcFn.slice(ptcFn.indexOf('insert into'))), true)
+const ptcGrants = schemaSql.slice(schemaSql.indexOf('end $$;', ptcAt), schemaSql.indexOf('end $$;', ptcAt) + 400)
+check('...and only the service role may call it', /revoke all on function public\.portal_record_ptc[^;]*from public, anon, authenticated/.test(ptcGrants)
+  && /grant execute on function public\.portal_record_ptc[^;]*to service_role/.test(ptcGrants), true)
+const approve = fs.readFileSync('src/pages/finance/AwaitingApproval.tsx', 'utf8')
+check('Trust\'s approval list marks a payment the client recorded', /source === 'portal'/.test(approve) && /From the client portal/.test(approve), true)
+
+const rf = server.slice(server.indexOf('const reportFile: Handler'), server.indexOf('/* ------------------------------------------------------------------ staff'))
+check('a report file is only given for the client\'s own group', /clientGroup\(admin, who\.companyId\)/.test(rf), true)
+check('...as a short-lived link to the kept copy (never rebuilt)', /createSignedUrl\(path, 120/.test(rf) && /payover_run_sends/.test(rf), true)
+const rp = server.slice(server.indexOf('const reports: Handler'), server.indexOf('const reportFile: Handler'))
+check('the report list never hands the browser a storage path', /pdf_path:|xlsx_path:/.test(rp.slice(rp.indexOf('res.status(200)'))), false)
+const dash = server.slice(server.indexOf('const dashboard: Handler'), server.indexOf('const reports: Handler'))
+check('the dashboard works positions out with portalLine, as the Accounts list does', /portalLine/.test(dash), true)
+check('...and carries no fee, commission or interest', /commission|annexure|fee|interest/i.test(dash.replace(/\/\*[\s\S]*?\*\//g, '')), false)
 
 if (failures.length) {
   console.log(`check-client-portal: ${pass} passed, ${failures.length} failed`)
