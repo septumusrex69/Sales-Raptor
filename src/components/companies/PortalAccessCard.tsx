@@ -51,6 +51,16 @@ export function PortalAccessCard({ company }: { company: Company }) {
     } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
   }
 
+  async function resend(c: PortalContact) {
+    setBusy(true); setError(null); setNote(null)
+    try {
+      const r = await invitePortalContact(company.id, c.email, c.name)
+      setNote(r.emailed
+        ? `Sent again. ${c.email} has been emailed the link (${r.url}).`
+        : `The invitation could not be emailed (${r.emailError}). Send them ${r.url} yourself.`)
+    } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+  }
+
   async function toggle(c: PortalContact) {
     setError(null)
     try { await setPortalContactActive(c.id, !c.active); await load() } catch (x) { setError(x instanceof Error ? x.message : String(x)) }
@@ -74,9 +84,17 @@ export function PortalAccessCard({ company }: { company: Company }) {
                       <p className="text-slate-800">{c.name || c.email}</p>
                       <p className="text-xs text-slate-500">{c.name ? `${c.email} · ` : ''}last signed in: {when(c.last_login_at)}{c.active ? '' : ' · switched off'}</p>
                     </div>
-                    <button type="button" onClick={() => toggle(c)} className="text-xs underline text-slate-600">
-                      {c.active ? 'Switch off' : 'Switch back on'}
-                    </button>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {/* SEND THE LINK AGAIN (S15): Stephan, on a test login given without an email, wanted the
+                          invitation itself. The same Invite, so it comes from the same mailbox and says the same. */}
+                      {c.active && (
+                        <button type="button" onClick={() => resend(c)} disabled={busy} data-testid="portal-resend"
+                          className="text-xs underline text-slate-600 disabled:opacity-50">Send the link again</button>
+                      )}
+                      <button type="button" onClick={() => toggle(c)} className="text-xs underline text-slate-600">
+                        {c.active ? 'Switch off' : 'Switch back on'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

@@ -41,7 +41,12 @@ const requestCode: Handler = async (req, res, admin) => {
   const { data: user } = await admin.from('client_portal_users')
     .select('id, name, email, active, invited_by, company_id').ilike('email', email).maybeSingle()
   /* THE SAME ANSWER FOR AN ADDRESS THAT MAY NOT SIGN IN -- see CODE_SENT_MESSAGE. */
-  if (!user || !user.active) { res.status(200).json({ message: CODE_SENT_MESSAGE }); return }
+  /* THE SAME ANSWER TO THE BROWSER, BUT NOT TO THE LOG (S15): a code that "never arrived" was otherwise
+     undiagnosable -- not found, switched off and sent all read alike. The log is the firm's, not the client's. */
+  if (!user || !user.active) {
+    console.log(`[portal] code asked for ${email}: ${user ? 'switched off' : 'no portal login with that address'}`)
+    res.status(200).json({ message: CODE_SENT_MESSAGE }); return
+  }
 
   const t = now()
   const { data: last } = await admin.from('client_portal_codes')
@@ -50,7 +55,7 @@ const requestCode: Handler = async (req, res, admin) => {
     sentAt: last.sent_at as string, windowStartedAt: last.window_started_at as string,
     sendsInWindow: Number(last.sends_in_window ?? 0),
   } : null, t)
-  if (!decision.ok) { res.status(429).json({ error: decision.reason, waitSeconds: decision.waitSeconds }); return }
+  if (!decision.ok) { console.log(`[portal] code for portal user ${user.id} held: ${decision.reason}`); res.status(429).json({ error: decision.reason, waitSeconds: decision.waitSeconds }); return }
 
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0')
   const { error: saveErr } = await admin.from('client_portal_codes').upsert({
@@ -58,7 +63,7 @@ const requestCode: Handler = async (req, res, admin) => {
     expires_at: new Date(t + PORTAL_CODE_MINUTES * 60_000).toISOString(), attempts: 0,
     sent_at: new Date(t).toISOString(), window_started_at: decision.windowStartedAt, sends_in_window: decision.sendsInWindow,
   }, { onConflict: 'user_id' })
-  if (saveErr) { res.status(500).json({ error: 'The code could not be made just now. Try again in a minute.' }); return }
+  if (saveErr) { console.error(`[portal] code not saved for portal user ${user.id}: ${saveErr.message}`); res.status(500).json({ error: 'The code could not be made just now. Try again in a minute.' }); return }
 
   /*
    * WHO SENDS IT. Raptor has no system mailbox (loginCode.ts says why), so a person's connected one: the
@@ -77,7 +82,7 @@ const requestCode: Handler = async (req, res, admin) => {
   let lastError = 'Nobody at the firm has a mailbox connected to send it from.'
   for (const senderId of order) {
     const r = await sendAsUser(admin, senderId, { to: user.email as string, subject: mail.subject, bodyHtml: mail.html })
-    if (r.ok) { sent = true; break }
+    if (r.ok) { sent = true; console.log(`[portal] code for portal user ${user.id} sent from ${senderId}`); break }
     lastError = r.error
   }
   if (!sent) {

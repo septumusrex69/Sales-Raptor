@@ -69,7 +69,10 @@ for (const r of ['staffList', 'staffInvite', 'staffSetActive']) check(`${r} asks
 check('the staff tick is dispute.write_to_client', /'dispute\.write_to_client'/.test(code), true)
 const req = body('requestCode')
 check('an address that may not sign in gets the same answer as one that may',
-  /if \(!user \|\| !user\.active\) \{ res\.status\(200\)\.json\(\{ message: CODE_SENT_MESSAGE \}\)/.test(req), true)
+  /if \(!user \|\| !user\.active\) \{\s*(console\.log\([^\n]*\)\s*)?res\.status\(200\)\.json\(\{ message: CODE_SENT_MESSAGE \}\); return\s*\}/.test(req), true)
+/* S15 logs which it was, for the firm -- on the server only. The browser must still get one answer. */
+check('...the log may say which, the response may not', /console\.log\([^\n]*\)\s*res\.status\(200\)\.json\(\{ message: CODE_SENT_MESSAGE \}\)/.test(req)
+  && !/res\.status\(\d+\)\.json\(\{ message: (?!CODE_SENT_MESSAGE)/.test(req.slice(0, req.indexOf('resendDecision'))), true)
 check('...and that answer does not say whether the address is known', /not|unknown|no such/i.test(CODE_SENT_MESSAGE.replace('If that address may sign in', '')), false)
 check('a wrong code and no code read the same', /PORTAL_CODE_MESSAGE\.none/.test(body('verify')) && /not right/.test(PORTAL_CODE_MESSAGE.none), true)
 check('a code is spent the moment it matches', /client_portal_codes'\)\.delete\(\)/.test(body('verify')), true)
