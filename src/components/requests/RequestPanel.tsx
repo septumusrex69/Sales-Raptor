@@ -4,6 +4,7 @@ import {
   Check, ChevronLeft, ChevronRight, FileText, HelpCircle, Loader2, MessageSquare, Moon, Paperclip, X,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { DictateButton } from '../ui/Dictate'
 import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
@@ -154,9 +155,15 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
             </>
           ) : (
             <div className="space-y-2">
+              {/* SAY IT AS WELL AS TYPE IT (Stephan, S15, of R-13: "if you want to edit or make a correction, then you
+                  should be able to dictate as well"). The same microphone the request was sent with. */}
+              <div className="flex justify-end"><DictateButton size="small" value={draft} onChange={setDraft} /></div>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={5} data-testid="request-edit-words"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              <p className="text-xs text-slate-500">For spelling and slips. The old wording stays on the history. Once Claude starts building it, it can no longer be changed.</p>
+              <p className="text-xs text-slate-500">
+                The old wording stays on the history. Once Claude starts building it, it can no longer be changed.
+                {!isAsker && ` ${asker?.name ?? 'Whoever asked'} is told it was reworded, with the new words, and tests it against them when it is released.`}
+              </p>
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" disabled={busy || !draft.trim() || draft.trim() === r.description.trim()} data-testid="request-edit-save"
                   onClick={() => void act(async () => { await editRequest(r.number, draft); setDraft(null) })}>Save the correction</Button>

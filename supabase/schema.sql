@@ -53262,3 +53262,180 @@ begin
     false, 0, false, 'run');
   update public.workflow_versions set state = 'active', published_at = now() where id = v_v;
 end $$;
+
+-- ============================================================================================
+-- client_portal_tickets (S15, Raptor · Handover 14, 28 Oct 2026) -- THE CLIENT PORTAL, PHASE 2a.
+--
+-- Stephan's order (28 Oct): tickets in the portal (view and reply), questions about a debtor, callbacks,
+-- then client handovers with the firm's approval (phase 2b). "Then go ahead with the client portal."
+--
+-- WHAT A CLIENT SEES IS WHAT THE FIRM ALREADY SAID THEY SEE: clientSection() (disputeCategories.ts) puts a
+-- debtor's DISPUTE on the client's dispute list and an import correction or a litigation recommendation
+-- on their QUERY list; an agent asking a team leader for help is the firm supervising its own staff and
+-- is on neither. A question the client asks from the portal is a new kind, `client`, and a query.
+--
+-- AND OF A TICKET, ONLY THE CORRESPONDENCE WITH THE CLIENT: account_emails on the ticket whose
+-- correspondent is the client. Never the internal notes, never the debtor's own mail -- what the firm
+-- puts in front of the client it already does by writing to them, and that is what they see.
+--
+-- READ BY THE SERVICE ROLE ONLY, filtered by the session's client, as portal_book is. No browser role
+-- may call either function.
+-- ============================================================================================
+
+alter table public.account_queries drop constraint if exists account_queries_kind_check;
+alter table public.account_queries add constraint account_queries_kind_check
+  check (kind = any (array['dispute', 'request', 'help', 'litigation', 'import', 'client']));
+
+/*
+ * A PORTAL USER IS THE CLIENT. Their reply is filed with their own address, which is on no contact or
+ * company row, and the correspondent rule read it as the DEBTOR -- the client's words on the debtor's
+ * Emails tab, and a reply that never moved the ticket back to the liaison. Anyone allowed to sign in for
+ * the client (or its main client) now reads as the client, by address, like a contact does.
+ */
+create or replace function public.account_email_correspondent(p_account uuid, p_address text, p_in_reply_to text)
+returns text
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with a as (select lower(trim(coalesce(p_address, ''))) as addr),
+  co as (
+    select da.company_id, c.parent_company_id
+    from debtor_accounts da left join companies c on c.id = da.company_id
+    where da.id = p_account
+  )
+  select case
+    when exists (
+      select 1 from account_contacts ac, a
+      where ac.account_id = p_account and ac.kind = 'email' and lower(trim(ac.value)) = a.addr
+    ) then 'debtor'
+    when exists (
+      select 1 from companies k, co, a
+      where a.addr <> '' and k.id in (co.company_id, co.parent_company_id) and lower(trim(k.email)) = a.addr
+    ) or exists (
+      select 1 from contacts p, co, a
+      where a.addr <> '' and p.company_id in (co.company_id, co.parent_company_id) and lower(trim(p.email)) = a.addr
+    ) or exists (
+      select 1 from client_portal_users u, co, a
+      where a.addr <> '' and u.company_id in (co.company_id, co.parent_company_id) and lower(trim(u.email)) = a.addr
+    ) or exists (
+      select 1 from account_emails r
+      where p_in_reply_to is not null and r.message_id = p_in_reply_to
+        and r.account_id = p_account and r.correspondent = 'client'
+    ) then 'client'
+    else 'debtor'
+  end
+$$;
+
+/* The client's tickets: on their accounts (client or sub-account) or their handover batches. */
+create or replace function public.portal_tickets(p_client uuid)
+returns jsonb
+language sql
+stable
+set search_path to 'public'
+as $$
+  with mine as (
+    select q.id, q.ticket_no, q.kind, q.status, q.stage, q.description, q.request_for, q.category,
+           q.raised_at, q.closed_at, q.outcome, q.account_id, q.handover_id,
+           a.case_number, a.account_number, a.client_reference,
+           trim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)) as debtor,
+           h.reference as sheet_reference
+      from public.account_queries q
+      left join public.debtor_accounts a on a.id = q.account_id
+      left join public.companies ca on ca.id = a.company_id
+      left join public.handovers h on h.id = q.handover_id
+      left join public.companies ch on ch.id = h.company_id
+     where coalesce(ca.parent_company_id, ca.id, ch.parent_company_id, ch.id) = p_client
+       and q.kind in ('dispute', 'import', 'litigation', 'client')
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'ticketNo', m.ticket_no, 'kind', m.kind, 'status', m.status, 'stage', m.stage,
+           'description', m.description, 'requestFor', m.request_for, 'category', m.category,
+           'raisedAt', m.raised_at, 'closedAt', m.closed_at, 'outcome', m.outcome,
+           'caseNumber', m.case_number, 'accountNumber', m.account_number, 'clientReference', m.client_reference,
+           'debtor', nullif(m.debtor, ''), 'sheetReference', m.sheet_reference,
+           'lastMessageAt', (select max(e.occurred_at) from public.account_emails e where e.query_id = m.id and e.correspondent = 'client'),
+           'messages', (select count(*) from public.account_emails e where e.query_id = m.id and e.correspondent = 'client'))
+         order by (m.status = 'open') desc, m.raised_at desc), '[]'::jsonb)
+    from mine m
+$$;
+
+/* One ticket's correspondence with the client, if -- and only if -- the ticket is this client's. */
+create or replace function public.portal_ticket_thread(p_client uuid, p_ticket_no bigint)
+returns jsonb
+language sql
+stable
+set search_path to 'public'
+as $$
+  with t as (
+    select q.id
+      from public.account_queries q
+      left join public.debtor_accounts a on a.id = q.account_id
+      left join public.companies ca on ca.id = a.company_id
+      left join public.handovers h on h.id = q.handover_id
+      left join public.companies ch on ch.id = h.company_id
+     where q.ticket_no = p_ticket_no
+       and coalesce(ca.parent_company_id, ca.id, ch.parent_company_id, ch.id) = p_client
+       and q.kind in ('dispute', 'import', 'litigation', 'client')
+  )
+  select case when not exists (select 1 from t) then null else
+    coalesce((select jsonb_agg(jsonb_build_object(
+              'direction', e.direction, 'subject', e.subject, 'body', e.body, 'at', e.occurred_at,
+              'from', case when e.direction = 'out' then coalesce(e.sent_by_name, 'Bredell Ferreira') else e.sent_by_name end,
+              'attachments', coalesce(to_jsonb(e.attachment_names), '[]'::jsonb))
+            order by e.occurred_at)
+       from public.account_emails e where e.query_id = (select id from t) and e.correspondent = 'client'), '[]'::jsonb)
+  end
+$$;
+
+revoke all on function public.portal_tickets(uuid) from public, anon, authenticated;
+revoke all on function public.portal_ticket_thread(uuid, bigint) from public, anon, authenticated;
+grant execute on function public.portal_tickets(uuid) to service_role;
+grant execute on function public.portal_ticket_thread(uuid, bigint) to service_role;
+-- ============================================================================================
+-- change_request_edit_notify (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- THE PERSON WHO ASKED IS TOLD WHEN SOMEBODY ELSE CHANGES THEIR WORDS. Stephan, of R-13: "if you want to
+-- edit or make a correction ... edit it before you approve it. [Rinda] is notified that it's been edited.
+-- Shows the new prompt. And sends for testing." The correction already existed and kept the OLD words on
+-- the history; nothing told the sender, so a request could be approved and built as somebody else's
+-- reading of it without the person who asked ever seeing that reading. They are now notified, with the
+-- new words in the message, and the bell links to the request -- where it is they who test it when it is
+-- released, against the words as they now stand.
+-- ============================================================================================
+create or replace function public.change_request_edit(p_number integer, p_description text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r public.change_requests;
+  v_new text := btrim(coalesce(p_description, ''));
+  v_who text;
+begin
+  select * into r from public.change_requests where number = p_number;
+  if not found then raise exception 'There is no request R-%.', p_number using errcode = '22023'; end if;
+  if auth.uid() is distinct from r.created_by and coalesce(public.current_user_role(), '') <> 'Administrator' then
+    raise exception 'Only the person who sent R-%, or an Administrator, may correct it.', p_number using errcode = '42501';
+  end if;
+  if r.status not in ('new', 'accepted') then
+    raise exception 'Claude has started on R-% (or it is finished), so its words are the record now. Add a comment instead.', p_number using errcode = '22023';
+  end if;
+  if v_new = '' then raise exception 'A request needs words.' using errcode = '22023'; end if;
+  if v_new = btrim(r.description) then return; end if;
+  update public.change_requests set description = v_new, updated_at = public.raptor_now() where id = r.id;
+  insert into public.change_request_events (request_id, kind, body, by_id)
+  values (r.id, 'edited', r.description, auth.uid());
+
+  -- S15: AND THE SENDER HEARS OF IT, with the new words, when it was not they who changed them.
+  if r.created_by is not null and r.created_by is distinct from auth.uid() then
+    select coalesce(name, 'Somebody') into v_who from public.profiles where id = auth.uid();
+    insert into public.notifications (user_id, type, message, link)
+    values (r.created_by, 'change_request.edited',
+            coalesce(v_who, 'Somebody') || ' reworded your request R-' || r.number || '. It now reads: '
+              || left(v_new, 160) || case when length(v_new) > 160 then '…' else '' end,
+            '/requests?r=' || r.number);
+  end if;
+end $$;

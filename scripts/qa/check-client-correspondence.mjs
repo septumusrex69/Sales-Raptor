@@ -64,11 +64,14 @@ ok("...the debtor branch reads the account's email contacts",
   /from account_contacts ac[\s\S]*?ac\.account_id = p_account and ac\.kind = 'email'[\s\S]*?then 'debtor'/.test(rule))
 ok("the client is the company record's address", /from companies k[\s\S]*?lower\(trim\(k\.email\)\) = a\.addr/.test(rule))
 ok("...or a contact's at the company", /from contacts p[\s\S]*?lower\(trim\(p\.email\)\) = a\.addr/.test(rule))
-ok('...the company or its parent', (rule.match(/in \(co\.company_id, co\.parent_company_id\)/g) ?? []).length === 2)
+ok('...the company or its parent', (rule.match(/in \(co\.company_id, co\.parent_company_id\)/g) ?? []).length === 3)
+/* S15: and anybody who may sign in to the client's portal is the client too -- their portal replies are filed
+   with their own address, on no contact row. */
+ok("...or a portal login for the client", /from client_portal_users u[\s\S]*?lower\(trim\(u\.email\)\) = a\.addr/.test(rule))
 ok('...or a reply to a client message on the same account',
   /r\.message_id = p_in_reply_to[\s\S]*?r\.account_id = p_account and r\.correspondent = 'client'/.test(rule))
 /* An empty address would match a client whose email is blank. */
-ok('an empty address matches no client', (rule.match(/a\.addr <> ''/g) ?? []).length === 2)
+ok('an empty address matches no client', (rule.match(/a\.addr <> ''/g) ?? []).length === 3)
 ok('anything else stays the debtor', /else 'debtor'\s*end/.test(rule))
 ok('...answered the same whoever asks (security definer)', /security definer/.test(rule.slice(0, 300)))
 
