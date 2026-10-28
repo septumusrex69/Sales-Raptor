@@ -52246,3 +52246,125 @@ begin
 
   return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
+
+-- S14 (Raptor H13): THE CLIENT PORTAL, PHASE 1 -- who may sign in, their codes and sessions, and their book.
+--
+-- THE FIRM, 28 Oct: clients see their own book, reports and tickets; included for them, not charged.
+--
+-- A CLIENT IS NEVER A SUPABASE USER. Dozens of policies in this file read "anyone signed in" -- the
+-- book, the diary, the mail -- because everybody signed in has been staff. A client given an ordinary
+-- login would read every other client's debtors through PostgREST without opening the portal at all.
+-- So these three tables have RLS ON AND NO POLICIES: the anon and authenticated roles can neither read
+-- nor write them, and the portal's server (api/portal, the service role) is the only door. Everything it
+-- returns is filtered by the client the session belongs to, in portal_book below.
+create table if not exists public.client_portal_users (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  email text not null,
+  name text not null default '',
+  invited_by uuid references public.profiles (id) on delete set null,
+  invited_at timestamptz not null default now(),
+  active boolean not null default true,
+  last_login_at timestamptz
+);
+-- ONE ADDRESS, ONE CLIENT. A sign-in is "type your email", so an address on two clients would have to
+-- ask which -- and the answer would be the person choosing whose book to read. A contact who really
+-- does act for two clients is the firm's call, made by inviting the second address.
+create unique index if not exists client_portal_users_email_key on public.client_portal_users (lower(email));
+create index if not exists client_portal_users_company_idx on public.client_portal_users (company_id);
+alter table public.client_portal_users enable row level security;
+comment on table public.client_portal_users is
+  'Client contacts who may sign in to the portal (S14). No policies: only api/portal (service role) reads or writes it.';
+
+create table if not exists public.client_portal_codes (
+  user_id uuid primary key references public.client_portal_users (id) on delete cascade,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  sent_at timestamptz not null default now(),
+  window_started_at timestamptz not null default now(),
+  sends_in_window integer not null default 1
+);
+alter table public.client_portal_codes enable row level security;
+comment on table public.client_portal_codes is
+  'The six digits a portal sign-in emails, as keyedHash only (S14). Same send limits as login_codes.';
+
+create table if not exists public.client_portal_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.client_portal_users (id) on delete cascade,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  last_seen_at timestamptz not null default now(),
+  device text not null default ''
+);
+create index if not exists client_portal_sessions_user_idx on public.client_portal_sessions (user_id);
+alter table public.client_portal_sessions enable row level security;
+comment on table public.client_portal_sessions is
+  'A signed-in portal browser (S14). The browser holds the token; only its keyedHash is kept.';
+
+-- THE CLIENT'S BOOK, ONE LINE PER DEBTOR -- the firm's own columns, 28 Oct: their reference and ours,
+-- capital handed over, paid this month, paid to date, capital outstanding, and where it stands.
+--
+-- CAPITAL, NOT BALANCE. The client is shown what is outstanding of what THEY handed over; interest and
+-- Annexure B fees are owed by the debtor to the firm's side of the ledger and are not the client's to
+-- see (the same line the company dashboard holds). No notes, no activity -- the firm: limited
+-- transparency.
+--
+-- The client and its sub-accounts, as client_money_by_day reads them. Paid is live money only: not
+-- reversed, not rejected, not demo -- the same filter. "This month" is the firm clock's calendar month.
+-- The position is derived in the server from status, sub-status and bucket (clientPosition.ts), with the
+-- month's payment and an open dispute passed in.
+--
+-- service_role only: the portal server calls it with the session's client, never the browser.
+create or replace function public.portal_book(p_client uuid, p_search text default null, p_open_only boolean default true,
+                                              p_limit integer default 100, p_offset integer default 0)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with acct as (
+    select a.id, a.case_number, a.account_number, a.client_reference,
+           trim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)) as debtor,
+           coalesce(a.capital_handed_over, 0) as capital_handed_over,
+           coalesce(a.capital_outstanding, 0) as capital_outstanding,
+           a.status, a.sub_status, a.bucket, a.book, a.ended_as,
+           c.name as client_name
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+     where coalesce(c.parent_company_id, c.id) = p_client
+       and (not p_open_only or a.book in ('active', 'on_hold'))
+       and (nullif(trim(p_search), '') is null
+            or concat_ws(' ', a.case_number, a.account_number, a.client_reference, a.debtor_first_name, a.debtor_surname)
+               ilike '%' || trim(p_search) || '%')
+  ), paid as (
+    select p.account_id,
+           sum(p.amount) as to_date,
+           sum(p.amount) filter (where (p.received_at at time zone 'Africa/Johannesburg')::date
+                                       >= date_trunc('month', public.raptor_today())::date) as this_month
+      from public.account_payments p
+     where p.account_id in (select id from acct)
+       and p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+     group by p.account_id
+  ), lines as (
+    select a.*, coalesce(p.to_date, 0) as paid_to_date, coalesce(p.this_month, 0) as paid_this_month,
+           exists (select 1 from public.account_queries q
+                    where q.account_id = a.id and q.kind = 'dispute' and q.status <> 'closed') as disputed
+      from acct a left join paid p on p.account_id = a.id
+  )
+  select jsonb_build_object(
+    'total', (select count(*) from lines),
+    'totals', (select jsonb_build_object(
+                 'capital_handed_over', coalesce(sum(capital_handed_over), 0),
+                 'paid_this_month', coalesce(sum(paid_this_month), 0),
+                 'paid_to_date', coalesce(sum(paid_to_date), 0),
+                 'capital_outstanding', coalesce(sum(capital_outstanding), 0)) from lines),
+    'rows', coalesce((select jsonb_agg(to_jsonb(l) - 'id' order by l.debtor, l.case_number)
+                        from (select * from lines order by debtor, case_number
+                               limit greatest(least(p_limit, 500), 1) offset greatest(p_offset, 0)) l), '[]'::jsonb)
+  );
+$$;
+revoke all on function public.portal_book(uuid, text, boolean, integer, integer) from public, anon, authenticated;
+grant execute on function public.portal_book(uuid, text, boolean, integer, integer) to service_role;

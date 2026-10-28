@@ -12,6 +12,7 @@ import { LoginPage } from './pages/auth/LoginPage'
 const SignPage = lazy(() => import('./pages/sign/SignPage'))
 const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
 const OptInPage = lazy(() => import('./pages/news/OptInPage'))
+const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -150,6 +151,9 @@ function App() {
             {/* THE THIRD (S10, 22 Oct): "Yes, keep me informed" in an introduction email. No login;
                 the signed token names the send that asked, and the page records the yes. */}
             <Route path="/opt-in/:token" element={<OptInPage />} />
+            {/* THE FOURTH (S14, 28 Oct): the CLIENT PORTAL. A client signs in with an emailed code and is
+                never a Supabase user, so it sits outside RequireAuth like the rest -- see clientPortal.ts. */}
+            <Route path="/portal" element={<PortalPage />} />
             <Route
               element={
                 <RequireAuth>

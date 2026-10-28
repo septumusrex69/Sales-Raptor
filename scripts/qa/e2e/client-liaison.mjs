@@ -120,7 +120,8 @@ try {
        an ordinary choice. */
     t.ok('...marked as not a liaison', /not a liaison/i.test(sel.shown))
     t.ok('...and the box explains what to do about it',
-      /should be a Liaison/i.test(await page.locator('form').innerText()))
+      /* The edit form, not the page's other forms (the client portal card has one, S14). */
+      await page.locator('form', { has: page.locator('select') }).filter({ hasText: /should be a Liaison/i }).count() === 1)
 
     /* ---------- and everybody else offered is a liaison ---------- */
     const others = sel.options.filter((o) => o.value !== 'u-samuel')

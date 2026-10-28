@@ -28,6 +28,36 @@ Everything is committed and pushed, and **the same commit is pushed to
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 
+## S14 · THE CLIENT PORTAL, PHASE 1 (28 Oct, Raptor H13) -- clients sign in and see their book
+
+Stephan: clients see their own book, reports and tickets, hand accounts over, ask for callbacks and ask about a
+debtor -- **included, not charged**. Agreed order: portal -> monthly progress report -> debtor pay page (EFT first;
+PayShap/DebiCheck once FNB answers) -> early collections. **Phase 1 is shipped: sign-in and the book.**
+
+- **A client is never a Supabase user.** Dozens of policies read "anyone signed in"; a client login would read
+  every client's book through PostgREST. So: email + six-digit code (same limits as the staff device code:
+  10 min, 5 tries, 1 a minute, 5 an hour), a 30-day session token in the browser (`x-portal-token`; only its
+  keyedHash stored). Migration **`client_portal`** (md5 verified): `client_portal_users` (one address, one client,
+  unique `lower(email)`), `client_portal_codes`, `client_portal_sessions` -- **RLS on, NO policies** -- and
+  `portal_book(client, search, open_only, limit, offset)`, **service_role only**. Probed: Stephan's own login sees
+  0 rows and neither browser role may call the function.
+- **`api/portal/[action].ts`** -> `api/_lib/portal.ts` (8th function; Pro plan). `request-code`/`verify` (anonymous,
+  the SAME answer whether or not the address may sign in), `me`/`book`/`sign-out` (portal session; the client comes
+  off the session, never the request), `staff-list`/`staff-invite`/`staff-set-active` (Raptor session +
+  `dispute.write_to_client`). Codes are sent from the inviting liaison's mailbox, else an Administrator's
+  (`codeSenderOrder`) -- no system mailbox yet, same as staff codes. Switching a contact off deletes their sessions.
+- **The book** (`/portal`, outside RequireAuth): one line per debtor -- debtor, their reference (client_reference,
+  else account_number), our case number, capital handed over, paid this month (firm clock's calendar month), paid
+  to date, **capital** outstanding (never the balance with interest/fees), position in the firm's words
+  (`clientPosition`, with paid-this-month and an open dispute). `portalLine` drops status/sub-status/bucket so they
+  never reach the browser. Search, closed accounts on a tick, 100 a page, totals over the whole (filtered) book.
+- **Staff**: "Client portal" card on the client page (main clients only -- the portal shows a client and its
+  sub-accounts together): who may sign in, last sign-in, Switch off, Invite (emails the link from the liaison's box).
+- Checks: `check-client-portal` (58), e2e `client-portal` (22); `client-liaison` e2e narrowed to its own form.
+- **Next (phase 2)**: tickets in the portal (view + reply), client handovers (sheet or single, with approval),
+  callbacks, questions about a debtor; then the monthly progress report linking here. **Production** needs the
+  `client_portal` migration at go-live.
+
 ## S14 · LOOSE ENDS (26-27 Oct; branch `claude/s14-loose-ends`, pushed to the preview too; commits `Raptor H13: ...`)
 
 Started from Handoff 13. Stephan named it **S14** (S13 is Reino's campaigns). No migrations, nothing on staging changed.

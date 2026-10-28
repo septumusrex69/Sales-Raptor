@@ -54,6 +54,7 @@ import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newD
 import { HandoverBook } from '../../components/companies/HandoverBook'
 import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
 import { WelcomeCard } from '../../components/companies/WelcomeCard'
+import { PortalAccessCard } from '../../components/companies/PortalAccessCard'
 import { ClientBookRings } from '../../components/companies/ClientBookRings'
 import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
 import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
@@ -1036,6 +1037,8 @@ export function CompanyDetail() {
             <div className="space-y-5">
               {/* The new client's welcome (S8): assign a liaison, then the four steps ticked. */}
               <WelcomeCard company={company} />
+              {/* Who at the client may sign in to the client portal (S14). */}
+              <PortalAccessCard company={company} />
               <HandoverBook company={company}
                 onUpload={mayLoad ? () => navigate(uploadPathFor(company.id)) : undefined} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
