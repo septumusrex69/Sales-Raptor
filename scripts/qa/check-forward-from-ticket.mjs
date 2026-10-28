@@ -189,7 +189,8 @@ ok('the ticket knows the client’s address', /clientEmail: string \| null/.test
 ok('...read on the same round trip as the name',
   /\.select\('name, email, contact_person'\)/.test(queries))
 ok('the forward opens addressed to them',
-  /to=\{data\.clientEmail \?\? data\.clientPeople\[0\]\?\.email \?\? ''\}/.test(page))
+  /* A REPLY (S14) goes back to whoever wrote; everything else, the forward included, to the client. */
+  /to=\{replyTo \? replyTo\.debtorAddress : \(data\.clientEmail \?\? data\.clientPeople\[0\]\?\.email \?\? ''\)\}/.test(page))
 /*
  * AND EVERY PERSON AT THE CLIENT IS OFFERED. THE FIRM: "if I say email, it already says Rinda at
  * novacall.co.za. But there's another person on the client's records as well -- there should be an

@@ -28,6 +28,22 @@ Everything is committed and pushed, and **the same commit is pushed to
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 
+## S14 · A TICKET LOOKS LIKE THE CLIENT PAGE, AND A CLIENT'S EMAIL CAN BE ANSWERED (28 Oct, Raptor H13)
+
+Stephan, with the client page beside a ticket: "make the dispute ticket look a little bit more like this ... you
+should be able to send an email or respond to a specific email from a client." Account tickets (disputes,
+requests) now have **Overview | Emails n | Notes n** tabs (`RecordTabs`, the client page's own strip; a dot on
+Emails when something came in unread). Overview is unchanged (the work and the conversation). **Emails** is the
+account page's `EmailsPanel` over the ticket's mail -- Reply, Reply all, Forward, Write, read/unread; classify and
+Unmatch are optional props now and absent here. **Reply** is also on every inbound message in the conversation.
+A reply goes to whoever wrote, threaded (`inReplyTo` to the send and to `recordSentEmail`), R25 item 1(a), filed on
+the ticket; the ticket moves to "with the client" only when the reply went to a client address. **Notes** lists
+what people wrote and rang (not Raptor's lines, not an email's record) with an Add note box.
+**A handover-sheet ticket still has no mail**: `account_emails.account_id` is NOT NULL and a sheet has no account
+-- asked Stephan whether he wants it. Checks: `check-ticket-work` (+4), `check-ticket-thread`, `check-forward-from-
+ticket` updated; new e2e `ticket-emails` (17). Also fixed `check-marketing-prospects`, which went red on 28 Oct with
+no code changed: its week-2 sender date was fixed to 22 Oct while the drain reads real time.
+
 ## S14 · THE CLIENT PORTAL, PHASE 1 (28 Oct, Raptor H13) -- clients sign in and see their book
 
 Stephan: clients see their own book, reports and tickets, hand accounts over, ask for callbacks and ask about a

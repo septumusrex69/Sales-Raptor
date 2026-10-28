@@ -184,8 +184,8 @@ const page = read('src/pages/queries/QueryDetail.tsx')
 ok('the ticket page draws one thread', /<TicketThread/.test(page))
 /* THE CLIENT'S OWN PEOPLE GO IN, because only this page knows them -- and without them every
    client email on the ticket would read as the debtor's. */
-ok('...and hands it the client’s addresses', /clientAddresses: \[/.test(page)
-  && /data\.clientPeople\.map\(\(person\) => person\.email\)/.test(page))
+ok('...and hands it the client’s addresses', /const clientAddresses = \[data\.clientEmail, \.\.\.data\.clientPeople\.map\(\(person\) => person\.email\)\]/.test(page)
+  && /ticketThread\(\{[\s\S]{0,80}clientAddresses,/.test(page))
 /* THE TWO CARDS IT REPLACES ARE GONE, not left drawing the same entries a second time. */
 ok('...and the old correspondence card is not drawn as well', !/<TicketEmails/.test(page))
 const work = read('src/components/queries/TicketWork.tsx')

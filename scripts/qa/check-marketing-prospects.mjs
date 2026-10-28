@@ -311,8 +311,11 @@ const sendRow = (i, extra = {}) => ({ id: `3f1c2a9e-1111-4222-8333-${String(i).p
 }
 {
   /* Already at today's allowance: nothing is claimed at all, and nothing is lost. */
+  /* EIGHT REAL DAYS AGO, not eight days before NOW: the drain reads the warm-up week off the real clock (see
+     warmupDailyCap), so a date fixed to 22 Oct aged into week 3 on 28 Oct and this went red with no code
+     changed (S14). Week 2 is days 7-13 of real time, whenever the check runs. */
   const db = { campaign: intro, marketer: { id: 'm1', name: 'Reino', email: 'reino@bredellferreira.co.za' }, queue: [sendRow(1)], used: 60,
-    firstSentAt: day(-8), leads: [{ id: 'l1', marketing_consent_at: null }] }
+    firstSentAt: new Date(Date.now() - 8 * 86_400_000).toISOString(), leads: [{ id: 'l1', marketing_consent_at: null }] }
   const admin = fakeAdmin(db)
   let called = false
   const report = await S.drainMarketing(admin, { budgetMs: 3000, host: 'raptor.test', fetchImpl: async () => { called = true; return { ok: true, status: 200, json: async () => ({}) } } })

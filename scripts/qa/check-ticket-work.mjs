@@ -212,8 +212,12 @@ ok('...and the panel says so where the decision is made',
  * charged item 1(a), filed on the ticket and on the account. Two modals would be two `onSent`
  * handlers, and the one nobody was watching would be the one that forgot the ticket.
  */
-ok('a fresh message and a forward share one compose box',
-  /\(forwarding \|\| writing\) && q\.accountId/.test(page))
+ok('a fresh message, a forward and a reply share one compose box',
+  /\(forwarding \|\| writing \|\| replyTo\) && q\.accountId/.test(page))
+/* S14: A REPLY IS THREADED -- in the header the client's mail reads, and on the record that files it. */
+ok('a reply is threaded under the message it answers', /inReplyTo=\{replyTo\?\.messageId \?\? null\}/.test(page))
+ok('...and filed as the answer to it', /recordSentEmail\(\{[\s\S]{0,400}inReplyTo: answering\?\.messageId \?\? null/.test(page))
+ok('...addressed to whoever wrote it', /const sentTo = answering \? answering\.debtorAddress/.test(page))
 ok('...and one handler files both against the ticket',
   /recordSentEmail\(\{[\s\S]{0,400}queryId: q\.id/.test(page))
 /* AND THE THREAD REFRESHES, or a liaison presses Send and the ticket looks untouched. */
@@ -283,7 +287,9 @@ ok('the screen formats the date', /follow up \$\{formatDate\(line\.followOn\)\}/
  * separately remembered to press "Send to client".
  */
 ok('sending to the client moves the ticket to them',
-  /if \(q\.stage !== 'client'\) \{[\s\S]{0,200}updateQuery\(q\.id, \{ stage: 'client' \}/.test(page))
+  /if \(q\.stage !== 'client' && toClient\) \{[\s\S]{0,200}updateQuery\(q\.id, \{ stage: 'client' \}/.test(page))
+/* S14: and only when it went TO the client -- answering the debtor's own email is no escalation. */
+ok('...and only when it went to the client', /const toClient = !answering\s*\|\| clientAddresses\.some/.test(page))
 /* ONLY ON THE WAY UP: a second email is a chase, not a fresh escalation, and nothing here moves a
    ticket back -- that is the liaison's decision when the client answers. */
 ok('...and only on the way up', !/stage: 'liaison'/.test(page))

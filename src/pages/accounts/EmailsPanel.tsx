@@ -28,7 +28,7 @@ import { AttachmentLabel } from '../../components/AttachmentKindTag'
  * subject lines makes a person open ten things to find the one that matters.
  */
 export function EmailsPanel({
-  emails, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread, onClassify, onUnmatch,
+  emails, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread, onClassify, onUnmatch, emptyText,
 }: {
   emails: AccountEmail[]
   /** False when the agent has no mailbox connected — the buttons say so rather than failing. */
@@ -57,12 +57,19 @@ export function EmailsPanel({
    * which button was pressed; what gets raised, who it goes to, and whether it is instead ADDED
    * to the dispute already open on the account are the box's to ask.
    */
-  onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
+  /*
+   * BOTH OPTIONAL SINCE S14, when the panel became a ticket's Emails tab as well. On a ticket every
+   * message is already filed on that ticket (so there is nothing to classify), and taking mail off the
+   * account is the account page's act, not something to do from inside one of its disputes.
+   */
+  onClassify?: (email: AccountEmail, kind: 'dispute' | 'request') => void
   /**
    * TAKE IT OFF THIS ACCOUNT (S10, prompt 13 item 12): anybody may, from here as well as from the
    * mailbox. Rejects with the database's words when it cannot.
    */
-  onUnmatch: (email: AccountEmail, reason: string) => Promise<void>
+  onUnmatch?: (email: AccountEmail, reason: string) => Promise<void>
+  /** A ticket says it is the ticket's mail, not the debtor's. */
+  emptyText?: string
 }) {
   /*
    * Nothing opens on its own.
@@ -106,7 +113,7 @@ export function EmailsPanel({
       <Card>
         <div className="py-10 text-center">
           <Mail size={22} className="mx-auto text-slate-300" />
-          <p className="text-sm text-slate-500 mt-3">No email with this debtor yet.</p>
+          <p className="text-sm text-slate-500 mt-3">{emptyText ?? 'No email with this debtor yet.'}</p>
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
             Anything sent from here is charged R25 under item 1(a). Their reply comes back to this
             list on its own and is charged R13 under item 6.
@@ -289,9 +296,9 @@ export function othersOn(email: AccountEmail): boolean {
 function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, onClassify, onUnmatch }: {
   email: AccountEmail
   canSend: boolean
-  onUnmatch: (email: AccountEmail, reason: string) => Promise<void>
+  onUnmatch?: (email: AccountEmail, reason: string) => Promise<void>
   /** Open the Escalate box on this message — see EmailsPanel. */
-  onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
+  onClassify?: (email: AccountEmail, kind: 'dispute' | 'request') => void
   onReply: () => void
   onReplyAll: () => void
   onForward: () => void
@@ -315,6 +322,7 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
   const [unmatchError, setUnmatchError] = useState<string | null>(null)
   async function unmatch() {
     setUnmatchBusy(true); setUnmatchError(null)
+    if (!onUnmatch) return
     try { await onUnmatch(email, unmatchReason); setUnmatching(false) }
     catch (e) { setUnmatchError(e instanceof Error ? e.message : String(e)) }
     finally { setUnmatchBusy(false) }
@@ -371,9 +379,10 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
         */
         extra={inbound ? (
           <>
+            {/* "Already on a ticket" is the account page's note; on the ticket itself it says nothing. */}
             {email.queryId
-              ? <span className="text-[11px] text-slate-400 self-center">Already on a ticket</span>
-              : !email.unmatchedAt && (
+              ? onClassify && <span className="text-[11px] text-slate-400 self-center">Already on a ticket</span>
+              : !email.unmatchedAt && onClassify && (
                 <>
                   <ClassifyButton icon={<ShieldAlert size={13} />} tone="dispute"
                     onClick={() => onClassify(email, 'dispute')}>
@@ -388,7 +397,7 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
             {/* UNMATCH, FOR EVERYBODY (S10, prompt 13 item 12): a message matched to the wrong
                 debtor comes off here as well as from the mailbox. Inbound only -- what the firm
                 SENT from this account was never matched to it. */}
-            {!email.unmatchedAt && (
+            {!email.unmatchedAt && onUnmatch && (
               <button type="button" onClick={() => setUnmatching(true)} data-testid="account-email-unmatch"
                 className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
                 <Undo2 size={13} /> Unmatch
@@ -487,8 +496,8 @@ function EmailRow({
   expanded: boolean
   onToggle: () => void
   canSend: boolean
-  onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
-  onUnmatch: (email: AccountEmail, reason: string) => Promise<void>
+  onClassify?: (email: AccountEmail, kind: 'dispute' | 'request') => void
+  onUnmatch?: (email: AccountEmail, reason: string) => Promise<void>
   onReply: () => void
   onReplyAll: () => void
   onForward: () => void

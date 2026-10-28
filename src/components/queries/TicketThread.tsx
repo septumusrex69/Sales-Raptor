@@ -1,4 +1,4 @@
-import { Forward, Mail, MessageSquare, Paperclip, Phone, Settings2, User } from 'lucide-react'
+import { Forward, Mail, MessageSquare, Paperclip, Phone, Reply, Settings2, User } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { formatDate } from '../../data/mockData'
 import { VOICE_LABEL, type ThreadEntry, type ThreadVoice } from '../../lib/ticketThread.ts'
@@ -43,7 +43,7 @@ const VOICE_ICON: Record<ThreadVoice, typeof Mail> = {
   system: Settings2,
 }
 
-export function TicketThread({ entries, canForward, why, onForward }: {
+export function TicketThread({ entries, canForward, why, onForward, onReply }: {
   entries: ThreadEntry[]
   /** Whether this person may put a message in front of the client. */
   canForward: boolean
@@ -51,6 +51,13 @@ export function TicketThread({ entries, canForward, why, onForward }: {
       and there is no hover to reveal one. */
   why: string | null
   onForward: (emailId: string) => void
+  /**
+   * ANSWER THIS MESSAGE (S14). The firm: "you should be able to send an email or respond to a specific
+   * email from a client." Threaded (In-Reply-To), so the answer sits under the client's own message in
+   * their mail -- the forward above starts a fresh conversation, which is the wrong thing for a reply.
+   * The same gate as Forward: it is a message leaving the building.
+   */
+  onReply?: (emailId: string) => void
 }) {
   if (entries.length === 0) {
     return (
@@ -105,6 +112,14 @@ export function TicketThread({ entries, canForward, why, onForward }: {
                   the next collector, which is exactly what the firm's own objection to putting
                   notes in client reporting was about.
                 */}
+                {e.emailId && e.inbound && onReply && (
+                  <button type="button" onClick={() => onReply(e.emailId!)} disabled={!canForward}
+                    title={why ?? undefined} data-testid="thread-reply"
+                    className="mt-1 mr-3 inline-flex items-center gap-1 text-[11px] font-medium
+                      text-[var(--c-steel)] hover:underline disabled:opacity-40 disabled:no-underline">
+                    <Reply size={11} /> Reply
+                  </button>
+                )}
                 {e.emailId && (
                   <button type="button" onClick={() => onForward(e.emailId!)} disabled={!canForward}
                     title={why ?? undefined}
@@ -133,7 +148,7 @@ export function TicketThread({ entries, canForward, why, onForward }: {
       */}
       {canForward && (
         <p className="mt-3 text-[11px] text-slate-400">
-          Forwarding a message to the client is charged to the debtor at R25 under Annexure B
+          Replying to or forwarding a message is charged to the debtor at R25 under Annexure B
           item 1(a), the same as any other email that leaves.
         </p>
       )}

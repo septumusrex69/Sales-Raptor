@@ -35,9 +35,13 @@ import { clockNow } from '../../lib/clock'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import {
-  fetchQueryEmails, recordSentEmail, type AccountEmail,
+  fetchQueryEmails, markRepliesRead, markRepliesUnread, recordSentEmail, type AccountEmail,
 } from '../../lib/accountEmails'
-import { forwardBody, forwardSubject } from '../../lib/emailRules.ts'
+import {
+  EMAIL_IN_KIND, EMAIL_OUT_KIND, forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject,
+} from '../../lib/emailRules.ts'
+import { RecordTabs } from '../../components/record/RecordShell'
+import { EmailsPanel } from '../accounts/EmailsPanel'
 import { ticketBody, ticketSubject } from '../../lib/ticketEmail.ts'
 import { canSendToClient } from '../../lib/disputeCategories.ts'
 import { canViewClients } from '../../lib/permissions.ts'
@@ -48,6 +52,18 @@ import { buildXlsx, downloadBytes, XLSX_MIME } from '../../lib/xlsxWrite.ts'
 
 /* SAST, not UTC: a follow-up import approved here dates its accounts' handover today (prompt 11). */
 const TODAY = () => firmToday()
+
+/*
+ * TABS ON A TICKET, LIKE THE CLIENT'S OWN PAGE (S14). The firm, holding the two side by side: "make the
+ * dispute ticket look a little bit more like this" -- Overview, then Emails and Notes with their counts.
+ * Overview keeps the work and the whole conversation, which the firm likes; Emails is every message on
+ * the ticket with Reply, Reply all and Forward on each ("respond to a specific email from a client");
+ * Notes is what people wrote and rang about it. Account tickets only: a handover-sheet ticket has no
+ * account, and so no mail of its own to list.
+ */
+type TicketTab = 'Overview' | 'Emails' | 'Notes'
+/* Notes that are an email's own record are the Emails tab's; Raptor's stage lines are the conversation's. */
+const isPersonNote = (n: AccountNote) => n.source !== 'system' && n.kind !== EMAIL_OUT_KIND && n.kind !== EMAIL_IN_KIND
 
 const STAGE_CHIP: Record<QueryStage, string> = {
   agent: 'bg-slate-100 text-slate-600',
@@ -125,6 +141,11 @@ export function QueryDetail() {
   /* S14: the ticket's stage history, which its clock is read off (ticketClock.ts). */
   const [stages, setStages] = useState<StageMark[]>([])
   const [writing, setWriting] = useState(false)
+  /* The message being ANSWERED (S14), and who else is copied on a reply-all. Threaded, unlike a forward. */
+  const [replyTo, setReplyTo] = useState<AccountEmail | null>(null)
+  const [replyCc, setReplyCc] = useState('')
+  const [tab, setTab] = useState<TicketTab>('Overview')
+  const [noteDraft, setNoteDraft] = useState('')
   /* Whether the signed-in person has a mailbox at all. Mail goes out through their OWN, so the
      button says why it is disabled rather than failing on Send. Null while we are asking. */
   const [mailbox, setMailbox] = useState<string | null>(null)
@@ -319,6 +340,22 @@ export function QueryDetail() {
     : 'Only a liaison or a manager deals with the client on a ticket.'
   const forwardWhy = clientWhy
     ?? (!mailbox ? 'Connect your mailbox in Settings before you can send anything.' : null)
+  const clientAddresses = [data.clientEmail, ...data.clientPeople.map((person) => person.email)]
+    .filter((a): a is string => !!a)
+  const personNotes = notes.filter(isPersonNote)
+  function startReply(email: AccountEmail, all: boolean) {
+    setForwarding(null); setWriting(false)
+    setReplyTo(email)
+    if (all) {
+      const { cc } = replyAllTo({
+        from: { name: email.sentByName, address: email.debtorAddress },
+        to: email.toRecipients, cc: email.ccRecipients,
+        /* Never copied back to ourselves -- see replyAllTo. */
+        mine: [email.ourAddress, mailbox, currentUser?.email].filter((a): a is string => !!a),
+      })
+      setReplyCc(recipientLine(cc))
+    } else setReplyCc('')
+  }
 
   return (
     <div className="space-y-4">
@@ -505,6 +542,20 @@ export function QueryDetail() {
         running to hundreds, and two thirds of the width is where a reference and seven columns
         stop fitting. A batch keeps the full measure it has always had.
       */}
+      {q.accountId && (
+        <RecordTabs<TicketTab>
+          tabs={[
+            { id: 'Overview', label: 'Overview' },
+            /* The dot: a message in from the client or the debtor that nobody has opened yet. */
+            { id: 'Emails', label: 'Emails', count: emails.length, alert: emails.some((e) => e.direction === 'in' && !e.readAt) },
+            { id: 'Notes', label: 'Notes', count: personNotes.length },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+      )}
+
+      {(!q.accountId || tab === 'Overview') && (
       <div className={q.accountId ? 'grid gap-4 items-start lg:grid-cols-3' : 'contents'}>
       <div className={q.accountId ? 'space-y-4 lg:col-span-2' : 'contents'}>
 
@@ -601,16 +652,17 @@ export function QueryDetail() {
         entries={ticketThread({
           notes,
           emails,
-          clientAddresses: [
-            data.clientEmail,
-            ...data.clientPeople.map((person) => person.email),
-          ].filter((a): a is string => !!a),
+          clientAddresses,
         })}
         canForward={forwardWhy === null}
         why={forwardWhy}
         onForward={(emailId) => {
           const found = emails.find((e) => e.id === emailId)
-          if (found) setForwarding(found)
+          if (found) { setReplyTo(null); setForwarding(found) }
+        }}
+        onReply={(emailId) => {
+          const found = emails.find((e) => e.id === emailId)
+          if (found) startReply(found, false)
         }}
       />
       </div>
@@ -670,6 +722,71 @@ export function QueryDetail() {
         )
       })()}
       </div>
+      )}
+
+      {q.accountId && tab === 'Emails' && (
+        <div data-testid="ticket-emails">
+          <EmailsPanel
+            emails={[...emails].reverse()}
+            canSend={forwardWhy === null}
+            emptyText="No email on this ticket yet."
+            onCompose={() => { setReplyTo(null); setForwarding(null); setWriting(true) }}
+            onReply={(e) => startReply(e, false)}
+            onReplyAll={(e) => startReply(e, true)}
+            onForward={(e) => { setReplyTo(null); setForwarding(e) }}
+            /* Read FOR EVERYBODY, as on the account: on a ticket unread means nobody has looked. */
+            onRead={(e) => {
+              setEmails((list) => list.map((x) => (x.id === e.id ? { ...x, readAt: clockNow().toISOString() } : x)))
+              void markRepliesRead([e.id])
+            }}
+            onUnread={(e) => {
+              setEmails((list) => list.map((x) => (x.id === e.id ? { ...x, readAt: null } : x)))
+              void markRepliesUnread([e.id])
+            }}
+          />
+          {forwardWhy && <p className="mt-2 text-xs text-slate-500">{forwardWhy}</p>}
+        </div>
+      )}
+
+      {q.accountId && tab === 'Notes' && (
+        <Card>
+          <CardHeader title="Notes" subtitle="What people wrote and rang about on this ticket, newest first. Each is on the account too." />
+          <form className="mt-3 space-y-2" data-testid="ticket-note-form" onSubmit={(e) => {
+            e.preventDefault()
+            const body = noteDraft.trim()
+            if (!body) return
+            setBusy(true)
+            void addNote({
+              accountId: q.accountId as string, body, authorName: currentUser?.name ?? null,
+              createdBy: currentUser?.id ?? null, queryId: q.id, kind: 'note',
+            })
+              .then(() => fetchQueryNotes(q.id)).then((n) => { setNotes(n); setNoteDraft('') })
+              .catch((x: unknown) => setError(x instanceof Error ? x.message : String(x)))
+              .finally(() => setBusy(false))
+          }}>
+            <textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} rows={3}
+              placeholder="Write a note on this ticket…" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <button type="submit" disabled={busy || !noteDraft.trim()}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-50">
+              Add note
+            </button>
+          </form>
+          {personNotes.length === 0
+            ? <p className="text-sm text-slate-400 mt-4">No notes on this ticket yet.</p>
+            : (
+              <ul className="mt-4 divide-y divide-slate-100" data-testid="ticket-notes">
+                {[...personNotes].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((n) => (
+                  <li key={n.id} className="py-2.5">
+                    <p className="text-[11px] text-slate-400">
+                      {n.kind === 'call' ? 'Call · ' : ''}{n.authorName ?? 'Somebody at the firm'} · {formatDate(n.createdAt)}
+                    </p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap wrap-anywhere mt-0.5">{n.body}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </Card>
+      )}
 
       {data.batch && !draft && (
         <Card><p className="text-sm text-slate-400">
@@ -801,9 +918,15 @@ export function QueryDetail() {
         Two modals would be two `onSent` handlers, and the one nobody was watching would be the one
         that forgot to file it against the ticket.
       */}
-      {(forwarding || writing) && q.accountId && (
+      {(forwarding || writing || replyTo) && q.accountId && (
         <ComposeEmailModal
-          to={data.clientEmail ?? data.clientPeople[0]?.email ?? ''}
+          /* A REPLY GOES BACK TO WHOEVER WROTE IT (S14) -- the client's person, or the debtor whose words
+             were filed here -- and is threaded under their message. Everything else starts with the client. */
+          to={replyTo ? replyTo.debtorAddress : (data.clientEmail ?? data.clientPeople[0]?.email ?? '')}
+          inReplyTo={replyTo?.messageId ?? null}
+          initialCc={replyTo ? replyCc : undefined}
+          /* The message being answered sits UNDER the box, never inside it -- see ComposeEmailModal.quoted. */
+          quoted={replyTo?.body ?? undefined}
           /*
             EVERYBODY AT THE CLIENT, NOT JUST THE ADDRESS ON THE COMPANY RECORD.
 
@@ -820,7 +943,9 @@ export function QueryDetail() {
           forwardAttachments={forwarding
             ? { accountEmailId: forwarding.id, names: forwarding.attachmentNames }
             : undefined}
-          initialSubject={forwarding
+          initialSubject={replyTo
+            ? replySubject(replyTo.subject)
+            : forwarding
             ? forwardSubject(forwarding.subject)
             : ticketSubject({
               kind: q.kind,
@@ -831,7 +956,10 @@ export function QueryDetail() {
               clientReference: data.account?.clientReference ?? null,
               ticketNo: q.ticketNo,
             })}
-          initialBody={forwarding
+          /* A reply starts empty, as on the account: the original is quoted below the box. */
+          initialBody={replyTo
+            ? ''
+            : forwarding
             ? forwardBody(
               {
                 fromName: forwarding.direction === 'in'
@@ -861,9 +989,14 @@ export function QueryDetail() {
             })}
           contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
             + 'item 1(a). It is filed against this dispute as well as the account.'}
-          onClose={() => { setForwarding(null); setWriting(false) }}
+          onClose={() => { setForwarding(null); setWriting(false); setReplyTo(null) }}
           onSent={(rawSubject, bodyText, messageId, from) => {
-            setForwarding(null); setWriting(false)
+            const answering = replyTo
+            /* Who it went to, for the record: the person answered, else the client. */
+            const sentTo = answering ? answering.debtorAddress : (data.clientEmail ?? '')
+            const toClient = !answering
+              || clientAddresses.some((a) => a.trim().toLowerCase() === answering.debtorAddress.trim().toLowerCase())
+            setForwarding(null); setWriting(false); setReplyTo(null)
             /*
              * CHARGED, RECORDED AND FILED ON THE TICKET. The firm's ruling: "raising the dispute
              * charges a charge. I think it should charge the debtor for it. And also
@@ -877,7 +1010,7 @@ export function QueryDetail() {
              */
             void recordSentEmail({
               accountId: q.accountId as string,
-              to: data.clientEmail ?? '',
+              to: sentTo,
               /* The modal leaves both undefined where it could not learn them; the ledger wants
                  a null. Passing undefined through PostgREST omits the column instead of clearing
                  it, which is a different thing on an update and a habit not worth having. */
@@ -885,6 +1018,7 @@ export function QueryDetail() {
               subject: rawSubject.replace(/^Email sent:\s*/i, ''),
               body: bodyText,
               messageId: messageId ?? null,
+              inReplyTo: answering?.messageId ?? null,
               queryId: q.id,
               actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
             })
@@ -914,7 +1048,9 @@ export function QueryDetail() {
              * is a chase, not a fresh escalation -- and nothing here moves a ticket BACK, which is
              * the liaison's own decision when the client answers.
              */
-            if (q.stage !== 'client') {
+            /* AND ONLY WHEN IT WENT TO THE CLIENT (S14): answering the debtor's own email from here is not
+               an escalation to anybody. */
+            if (q.stage !== 'client' && toClient) {
               void updateQuery(q.id, { stage: 'client' }, {
                 accountId: q.accountId,
                 actorId: currentUser?.id ?? null,

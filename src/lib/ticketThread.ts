@@ -71,6 +71,8 @@ export interface ThreadEntry {
   attachmentNames?: string[]
   /** Set on an email, so the row can offer to forward the real thing. */
   emailId?: string
+  /** On an email: it came IN, so it can be answered (S14) -- a message we sent is forwarded, not replied to. */
+  inbound?: boolean
 }
 
 /** What the thread needs of a note. An AccountNote satisfies it. */
@@ -191,6 +193,7 @@ export function ticketThread(input: {
         subject: e.subject,
         attachmentNames: e.attachmentNames,
         emailId: e.id,
+        inbound: e.direction === 'in',
       }
     }),
   ]
