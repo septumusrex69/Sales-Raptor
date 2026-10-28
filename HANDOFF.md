@@ -1,7 +1,57 @@
-# Raptor · Handoff 14 — where Raptor stands
+# Raptor · Handover 15 — where Raptor stands
 
-> **Every session, commit, handoff, brief and reply says "Raptor · Handoff N"** (CLAUDE.md, top). This file is
-> **Raptor Handoff 14**, written by S14, which started from Raptor Handoff 13. The next session is S15 and writes Handoff 15.
+> **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
+> **Raptor Handover 15**, written by S15, which started from Raptor Handover 14. The next session is S16 and writes
+> Handover 16. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
+> and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
+
+## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
+
+**S15 · Side Panel** -- branch `claude/s15-side-panel`, from the preview `claude/sales-raptor-review-p1pzx2` at
+`ba34728`; every commit fast-forwarded onto the preview once the suite was green. Commits `Raptor H14: S15 -- ...`.
+
+**Shipped in S15:**
+- **The side panel is everybody's default** (Stephan, given in a Remus session by mistake: "Always keep views in
+  this viewing pane ... They can change it if they want, but this is by default."). `useRecordLayout` falls back to
+  `wide` on every record page (account, client, contact, lead, deal) and every dashboard; a saved choice still wins.
+  Mail already opened in the reading pane. `check-dashboard-panes` (+8, seen failing); the sales dashboard e2e asks
+  for three columns before measuring its side-by-side pair.
+- **Closing an account is a button you can see.** Stephan found the withdrawal ("Close it", 11px under Ending) and
+  said "it's so hidden, it's so small". Stop work / Restart, Put on hold / Back to active / Re-open, and **Close
+  account** (paid up, written off or withdrawn; in red) are full-size buttons at the top of the Position card
+  (`data-testid="position-controls"`), each with a line saying what it does. The fields below only report.
+- **Only an Administrator or the client's liaison closes an account** (Stephan; asked, chose: any Administrator, the
+  liaison of THAT account's client or of its main client, refunds out of trust still finance's). Staging migrations
+  **`close_account_admin_or_liaison`** (md5 `bd207426...`) and **`withdrawal_basis_for_closers`** (`1b71c7dc...`):
+  `may_close_account()`; `settle_account` (so `close_as_settled` too) and `withdraw_account` ask it for every ending
+  (was finance.view for write-off/withdraw, payment.record for paid up); `withdraw_account_refunding` asks finance
+  before any refund; `withdrawal_basis` answers the closer too. Probed as four people: own liaison yes, another
+  liaison no, collector no, Administrator yes. Screens follow: the button, Ready to close (per row), the settlement
+  panel; the withdraw box offers every ending and says a refund is for finance. A liaison cannot read payover runs,
+  so a receipt on one now says "On a payover run" rather than "Not on a run yet".
+- **A closed account is the firm's: "Bredell Ferreira".** Stephan: closed accounts must not stay on a person's name;
+  asked, the firm's own name (not "company account" -- company means a client here). Closing clears `assigned_to`
+  in the closing UPDATE (so the desk history records it and an open campaign call is cancelled); the 2 closed
+  accounts on staging were moved off. `deskLabel`/`FIRM_DESK` (`src/lib/firmDesk.ts`); a LIVE account with nobody
+  on it still reads Unallocated. Re-opening leaves it unallocated, for handing out.
+- **Found on the way:** the write-off's "tell the client" task joined on `companies.liaison`, a name column empty
+  on every client, so it was never created; now `account_owner_id`, and not when the liaison wrote it off.
+- **Ryno's brief, section 0, rewritten** (on the preview): his session told him a campaign workflow had to wait for
+  Stephan to add tables and a timer -- both were built on staging on 28 Oct and his sessions may change staging.
+  The brief still said "never write to any database" under the two notes that widened it.
+- Checks: check-account-ending (+7: one rule, refunds finance, off the desk), check-account-desk (+2),
+  check-books (slices widened), e2e settlement (+3: own liaison / other liaison / collector), all seen failing.
+
+**Stephan's answer to S14's question 1:** a handover-SHEET ticket **should send and receive email, NOT charged**
+(mail about a sheet is between the firm and the client). Not built yet -- see S16 starts here.
+
+**S16 starts here:** see the list at the end of this section (kept current as S15 works).
+
+**AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
+`withdrawal_basis_for_closers` -- after S14's list below. The backfill in the first moves every closed account off
+its collector; on production that is the whole closed book, run out of hours.
+
+---
 
 ## S14 -- WHERE IT STANDS, AND WHERE S15 STARTS (Raptor · Handoff 14, 28 Oct)
 
@@ -60,7 +110,7 @@ also reach production -- Stephan was told.
 > **Previous: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`) · S13 Campaigns (Reino, `claude/s13-reino-campaigns`, see docs/briefs).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`) · S13 Campaigns (Reino, `claude/s13-reino-campaigns`, see docs/briefs) · S14 Loose Ends (`claude/s14-loose-ends`) · S15 Side Panel (`claude/s15-side-panel`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
