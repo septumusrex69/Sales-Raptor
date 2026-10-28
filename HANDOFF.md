@@ -1,7 +1,53 @@
-# Raptor · Handoff 13 — where Raptor stands
+# Raptor · Handoff 14 — where Raptor stands
 
 > **Every session, commit, handoff, brief and reply says "Raptor · Handoff N"** (CLAUDE.md, top). This file is
-> **Raptor Handoff 13**, written by S12, which started from Raptor Handoff 12. The next session is S13 and writes Handoff 14.
+> **Raptor Handoff 14**, written by S14, which started from Raptor Handoff 13. The next session is S15 and writes Handoff 15.
+
+## S14 -- WHERE IT STANDS, AND WHERE S15 STARTS (Raptor · Handoff 14, 28 Oct)
+
+**S14 · Loose Ends** -- branch `claude/s14-loose-ends`, every commit also fast-forwarded onto the preview
+`claude/sales-raptor-review-p1pzx2` (last: `11cc251`). Fast suite green (21 794 checks). The detail is in the S14
+sections just below, newest first.
+
+**Shipped in S14 (all on staging):** fees on written-off accounts until prescription; the bell grouped and on the
+real clock; requests shelves ("Raptor build"), editing a request before it is built, and a sidebar count; ticket
+numbers (T-1001...), a client's reply keeps the ticket open, Resolve with a real outcome, every ticket's clock and
+the Communications "Tickets: how fast" card; search everything from anywhere; Administrators with and without
+finance ("General Manager" = with); CODEOWNERS = money only, so Ryno may change everything else and build on
+staging; Ryno's campaign tables and the 07:13 timer kept for him; **the client portal, phase 1** (clients sign in
+with an emailed code and see one line per debtor); **tickets with Overview | Emails | Notes tabs and Reply** on a
+client's email.
+
+**S15 starts here, in this order (Stephan's, 28 Oct):**
+1. **Ask Stephan first:** should a handover-SHEET ticket send and receive email? It cannot today
+   (`account_emails.account_id` is NOT NULL; a sheet has no account; such mail would not be charged).
+2. **Client portal, phase 2:** tickets in the portal (view + reply), client handovers (upload a sheet or one account,
+   with the firm's approval), callbacks, questions about a debtor. See "THE CLIENT PORTAL, PHASE 1" for how it works
+   (clients are never Supabase users; tables have RLS and no policies; everything through `api/portal`).
+3. **Monthly progress report:** monthly, even with no remittance; an email with totals and a secure link into the
+   portal, downloadable there as PDF or spreadsheet; one line per debtor (both references, capital handed over,
+   paid this month and to date, capital outstanding, position). No notes, no activity. Remittance advice stays a
+   separate document, in the same email when there is one.
+4. **Debtor pay page** (EFT first, our case number as the reference, matched by the bank-statement import) and
+   self-service promise to pay. Ozow was rejected (1.5%). PayShap and DebiCheck wait on FNB's answers -- Stephan to
+   ask the FNB business banker (PayShap receive free? PayShap Request cost? DebiCheck on the trust account and its
+   fees? volume pricing?) and quote Linkserv, Netcash and Direct Debit.
+5. **Early collections** -- the first money-making feature.
+
+**Still open from S14:** the suggested task to fix the cascades on `account_notes.query_id` and
+`diary_entries.query_id` (check-ticket-from-email's `CASCADES_TO_FIX`); `RESEND_FIRM_API_KEY` for sending from
+bredellferreira.co.za (the current key sends only from bfnews.co.za); a portal code is sent from a person's
+connected mailbox (the inviting liaison, else an Administrator) because Raptor has no system mailbox yet.
+
+**AT GO-LIVE (production `qcvesjzoiznrvunjrqpv`, never written by a session):** S14's staging migrations, in order:
+`ticket_numbers`, `ticket_client_replied`, `ticket_client_replied_firm_clock`, `global_search` (its two indexes build
+on the whole book -- run out of hours), `change_request_edit`, `change_request_edit_until_built`, `nav_request_count`,
+`administrators_without_finance`, `ticket_stage_history`, `ticket_stage_history_unlinked`, `marketing_workflows`,
+`clear_staging_workflows`, `client_portal`. Finance stays only with Stephan and Camille (Rinda's removed); set Ryno
+up as an Administrator without finance. Supabase membership is per organisation, so inviting Ryno to staging can
+also reach production -- Stephan was told.
+
+---
 
 > **S12 · No News, then Requests** (`claude/s12-no-news`, then `claude/s12-requests`, from `claude/sales-raptor-review-p1pzx2`
 > at `4afb3f3`, 26 Oct; last commit pushed to both the session branch and the preview). Start at "S12 -- WHERE IT
@@ -21,7 +67,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **26 October 2026, 19:00, S12 (Raptor · Handoff 12 -> 13).** Read "S12 -- WHERE IT STANDS" first, then "S11 -- WHERE IT STANDS", then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
+Last updated: **28 October 2026, S14 (Raptor · Handoff 13 -> 14).** Read "S14 -- WHERE IT STANDS" at the top first. Before S14: **26 October 2026, 19:00, S12 (Raptor · Handoff 12 -> 13).** Read "S12 -- WHERE IT STANDS" next, then "S11 -- WHERE IT STANDS", then S10's list under it (what S11 answered is marked there); the dated entries under Start here are the detail.
 (branched from `claude/sales-raptor-review-p1pzx2` at `925b6fc`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
