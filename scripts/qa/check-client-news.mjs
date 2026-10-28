@@ -87,7 +87,7 @@ ok('...only on the client\'s own page and only for those the policy allows', /co
 ok('...a sub-account covered by its parent is changed on the parent', /may && !inherited && !asking/.test(card))
 ok('the clients list marks the row Unsubscribed', /c\.newsStoppedAt && \(/.test(code('src/pages/companies/CompaniesList.tsx'))
   && /data-testid="client-row-unsubscribed"/.test(read('src/pages/companies/CompaniesList.tsx')))
-ok('the campaign screen counts the new reason', /'client unsubscribed'/.test(code('src/pages/news/NewsPage.tsx')))
+ok('the campaign screen counts the new reason', /'client unsubscribed'/.test(code('src/pages/news/CampaignEditor.tsx')))
 
 if (failures.length) {
   console.log(`check-client-news: ${pass} passed, ${failures.length} failed`)

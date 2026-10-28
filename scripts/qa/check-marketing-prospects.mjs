@@ -140,7 +140,7 @@ const server = code('api/_lib/marketing.ts')
 ok('the SERVER decides the first approach from the kind alone -- the introduction is the only one',
   /const firstApproach = kind === 'introduction'/.test(server) && !/campaign\.first_approach\)/.test(server))
 ok('...and a prospect kind refuses a list that is not leads', /isProspectKind\(kind\) && !LEAD_AUDIENCES\.includes\(audience\.kind\)/.test(server))
-ok('...the queue resolves with the campaign\'s kind', /resolveOnServer\(admin, campaign\.audience, campaign\.kind\)/.test(server))
+ok('...the queue resolves with the campaign\'s kind', /resolveOnServer\(admin, campaign\.audience, campaign\.kind[,)]/.test(server))
 
 /* At the moment of sending, the rule again. */
 check('send-time: a lead row that is not the introduction needs consent on record',
@@ -405,10 +405,11 @@ ok('news is not held to the warm-up: only prospect kinds claim against an allowa
   check('opens, clicks, unsubscribes, spam and opt-ins are out of what was delivered', [r.opened, r.clicked, r.unsubscribed, r.complained, r.optedIn], [50, 10, 1.1, 0.5, 20])
   check('nothing to divide by is no rate, not 0%', M.resultRates({ accepted: 0, delivered: 0, bounced: 0, opened: 0, clicked: 0, unsubscribed: 0, complained: 0, opted_in: 0 }).opened, null)
   ok('the screen says opens are approximate, and why', /Apple Mail/.test(M.OPENS_ARE_APPROXIMATE) && /pictures/.test(M.OPENS_ARE_APPROXIMATE))
-  const page = code('src/pages/news/NewsPage.tsx')
+  /* S13: the one page became files -- the results in ResultsPanel, the preview in CampaignEditor. */
+  const page = code('src/pages/news/ResultsPanel.tsx')
   ok('...beside the figures', /data-testid="news-opens-note">\{OPENS_ARE_APPROXIMATE\}/.test(page))
-  ok('an introduction\'s results include who opted in', /kind === 'introduction' \? \[\{ label: 'Opted in'/.test(page))
-  ok('the introduction\'s preview says the rest will never be sent marketing again', /never be sent another marketing email/.test(page))
+  ok('an introduction\'s results include who opted in', /kind === 'introduction' && <Figure label="Opted in"/.test(page))
+  ok('the introduction\'s preview says the rest will never be sent marketing again', /never be sent another marketing email/.test(code('src/pages/news/CampaignEditor.tsx')))
   const webhookStep = M.SENDER_SETUP_STEPS.find((s) => /webhook/.test(s)) ?? ''
   ok('the webhook step lists delivered, opened and clicked as well',
     ['email.delivered', 'email.opened', 'email.clicked', 'email.bounced', 'email.complained'].every((e) => webhookStep.includes(e)))

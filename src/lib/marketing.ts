@@ -637,6 +637,13 @@ export const PROSPECT_SENDER_ENV = ['RESEND_API_KEY', 'MARKETING_PROSPECT_DOMAIN
  * domain (MARKETING_FROM) and the prospect domain (MARKETING_PROSPECT_DOMAIN), each verified in
  * Resend with its own SPF and DKIM. Neither of the last two may be this domain or a subdomain of it:
  * the mailbox providers weigh a subdomain partly on its parent.
+ *
+ * ONE DELIBERATE DOOR, 26 OCT. The firm then chose to send News from each client's own liaison
+ * ("the client is for Nicole, it goes out from Nicole") or from reports@ -- both on THIS domain --
+ * knowing the reputation risk above, because a newsletter from the person who looks after a client
+ * reads as a letter, not a list. That door is `firmSender` below and nothing else: MARKETING_FROM and
+ * the prospect domain are still refused here, because COLD mail must never reach this domain, and a
+ * client newsletter from a person is a different thing from a stranger's inbox being asked.
  */
 export const FIRM_MAIN_MAIL_DOMAIN = 'bredellferreira.co.za'
 
@@ -714,6 +721,270 @@ export function prospectSender(
   /* The second lock, on the address actually built rather than on the setting. */
   if (isFirmMainDomain(address)) return { error: 'A prospect email may never go from the firm’s own mail domain.' }
   return { from: name ? `"${name}" <${address}>` : address, replyTo: real }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Send from: who a NEWS campaign comes from (S13, the firm's words 26 Oct)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * FOUR CHOICES, ON NEWS ONLY. The firm: "an option to send bulk communication from
+ * reports@bredellferreira.co.za, or ... from each liaison individually ... if the client is assigned
+ * to nobody, it just goes out from" reports@ -- "the only one at BF News is news at BF News", and
+ * "forget about team@". `address` is one of the extra addresses Ryno adds himself
+ * (marketing_senders, 28 Oct): marketing@, info@ and the like. The introduction and prospect
+ * campaigns keep their marketer (`prospectSender`) and are never offered this.
+ */
+export type SendFrom = 'news' | 'liaison' | 'reports' | 'address'
+
+export const SEND_FROM_LABELS: Record<SendFrom, string> = {
+  news: 'BF News',
+  liaison: 'Each client’s liaison',
+  reports: 'Reports',
+  address: 'Another address',
+}
+
+export function parseSendFrom(raw: unknown): SendFrom {
+  return raw === 'liaison' || raw === 'reports' || raw === 'address' ? raw : 'news'
+}
+
+export const FIRM_REPORTS_ADDRESS = `reports@${FIRM_MAIN_MAIL_DOMAIN}`
+/** The name reports@ signs with: the firm, not a department. */
+export const FIRM_SENDER_NAME = 'Bredell Ferreira'
+/**
+ * THE SECOND RESEND KEY. The first (RESEND_API_KEY) is restricted to the news domain, so Resend
+ * refuses anything from bredellferreira.co.za sent with it. The administrator adds this one, allowed
+ * to send from the firm's own domain; rows from a liaison or reports@ go with it, news rows with
+ * the first. Never asked for in chat.
+ */
+export const FIRM_SENDER_ENV = 'RESEND_FIRM_API_KEY'
+/** The two domains Resend can send from -- the same list marketing_senders' check holds. */
+export const NEWS_MAIL_DOMAIN = 'bfnews.co.za'
+export const SENDER_ADDRESS_DOMAINS = [FIRM_MAIN_MAIL_DOMAIN, NEWS_MAIL_DOMAIN] as const
+
+/** Which key a From address needs: the firm's own domain the second key, everything else the first. */
+export function resendKeyEnvFor(address: string): 'RESEND_API_KEY' | typeof FIRM_SENDER_ENV {
+  return isFirmMainDomain(address) ? FIRM_SENDER_ENV : 'RESEND_API_KEY'
+}
+
+/**
+ * WHY AN EXTRA ADDRESS CANNOT BE A SENDER, or null if it can. No mailbox and no password: Resend sends
+ * from ANY address on a domain verified with it, so the only question is the domain -- and only the
+ * two above are. An address elsewhere would be accepted here and refused by Resend on the morning it
+ * mattered.
+ */
+export function senderAddressProblem(raw: string | null | undefined): string | null {
+  const address = normaliseEmail(raw)
+  if (!address) return 'Type the address.'
+  if (!isSendableEmail(address)) return `${address} is not an email address.`
+  const domain = mailDomainOf(address)
+  if (!(SENDER_ADDRESS_DOMAINS as readonly string[]).includes(domain)) {
+    return `Only addresses on ${SENDER_ADDRESS_DOMAINS.join(' or ')} can send: those are the domains set up for sending. ${domain} is not one of them.`
+  }
+  return null
+}
+
+/** "Name <a@b>" or a bare address, taken apart. */
+export function splitFrom(from: string | null | undefined): { name: string | null; address: string } {
+  const raw = (from ?? '').trim()
+  const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(raw)
+  return m ? { name: m[1].trim() || null, address: normaliseEmail(m[2]) } : { name: null, address: normaliseEmail(raw) }
+}
+
+/** A From header, with nothing in the name that could break it. */
+export function fromHeader(name: string | null | undefined, address: string): string {
+  const clean = (name ?? '').replace(/["<>\\\r\n]/g, '').trim()
+  return clean ? `"${clean}" <${address}>` : address
+}
+
+/**
+ * THE DELIBERATE DOOR ONTO THE FIRM'S OWN DOMAIN (see FIRM_MAIN_MAIL_DOMAIN): a liaison, reports@ or
+ * an extra address. Replies go to the same address -- a client answering Nicole's newsletter is
+ * answering Nicole.
+ */
+export function firmSender(name: string | null | undefined, rawAddress: string | null | undefined): SenderChoice {
+  const address = normaliseEmail(rawAddress)
+  const problem = senderAddressProblem(address)
+  if (problem) return { error: problem }
+  return { from: fromHeader(name, address), replyTo: address }
+}
+
+/** A person who might be a client's liaison, as the profiles table has them. */
+export interface LiaisonPerson { id: string; name: string | null; email: string | null; role: string; status: string }
+/** The client columns the liaison rule reads. */
+export interface SenderCompany { id: string; parentCompanyId?: string | null; accountOwnerId?: string | null; liaisonNeeded?: boolean | null }
+
+/** Liaison or Liaison Manager -- `canBeClientLiaison` in permissions.ts, which this must agree with. */
+export const LIAISON_ROLES = ['Liaison', 'Liaison Manager'] as const
+
+/**
+ * WHO LOOKS AFTER THIS CLIENT, for the From line -- or nobody. The client's `account_owner_id`, ONLY
+ * if that person is Active and may be a liaison: the rule the welcome email and assign-liaison use.
+ * A sub-account belongs to its PARENT's client, so the parent's liaison. A client still waiting for
+ * one (`liaison_needed`) has none. `companies.liaison` is Swordfish's typed name and is NOT the rule.
+ * And the liaison's own address must be on the firm's domain: Resend can send from nothing else, so
+ * a liaison with a private address is "nobody" here and the client gets reports@.
+ */
+export function clientLiaison(
+  companyId: string | null | undefined,
+  companies: Map<string, SenderCompany>,
+  people: Map<string, LiaisonPerson>,
+): LiaisonPerson | null {
+  let c = companyId ? companies.get(companyId) : undefined
+  for (let i = 0; c?.parentCompanyId && i < 10; i += 1) c = companies.get(c.parentCompanyId) ?? c
+  if (!c || c.liaisonNeeded || !c.accountOwnerId) return null
+  const p = people.get(c.accountOwnerId)
+  if (!p || p.status !== 'Active' || !(LIAISON_ROLES as readonly string[]).includes(p.role)) return null
+  if (!isFirmMainDomain(p.email) || !isSendableEmail(normaliseEmail(p.email))) return null
+  return p
+}
+
+/** Who ONE row goes from: the bare address, the name, whose it is, and how the preview names it. */
+export interface RowSender {
+  address: string
+  name: string | null
+  kind: 'news' | 'liaison' | 'reports' | 'address'
+  /** The liaison's profile, so the timeline line is credited to her. */
+  liaisonId: string | null
+  label: string
+}
+
+export interface SenderContext {
+  /** MARKETING_FROM taken apart. */
+  news: { name: string | null; address: string }
+  /** The chosen extra address, for `address`. */
+  extra?: { name: string | null; address: string } | null
+  liaisonOf: (companyId: string | null | undefined) => LiaisonPerson | null
+}
+
+/**
+ * THE SENDER FOR ONE RECIPIENT. A LEAD ALWAYS GOES FROM news@ whatever was chosen: a lead has no
+ * liaison, and the firm said only news lives on BF News -- the firm's own domain is for clients. A
+ * client or contact goes from the choice, and in `liaison` mode from its client's liaison, or
+ * reports@ when there is none.
+ */
+export function senderForRecipient(sendFrom: SendFrom, r: { companyId?: string | null; leadId?: string | null }, ctx: SenderContext): RowSender {
+  const news: RowSender = { address: ctx.news.address, name: ctx.news.name, kind: 'news', liaisonId: null, label: sendFrom === 'news' ? 'news@' : 'news@ (leads)' }
+  const reports: RowSender = { address: FIRM_REPORTS_ADDRESS, name: FIRM_SENDER_NAME, kind: 'reports', liaisonId: null, label: 'reports@' }
+  if (sendFrom === 'news' || !r.companyId) return news
+  if (sendFrom === 'reports') return reports
+  if (sendFrom === 'address') {
+    const x = ctx.extra
+    return x ? { address: x.address, name: x.name, kind: 'address', liaisonId: null, label: x.name || x.address } : reports
+  }
+  const l = ctx.liaisonOf(r.companyId)
+  if (!l) return reports
+  return { address: normaliseEmail(l.email), name: l.name, kind: 'liaison', liaisonId: l.id, label: (l.name ?? '').trim() || normaliseEmail(l.email) }
+}
+
+export interface SenderShare { label: string; address: string; kind: RowSender['kind']; count: number }
+
+/**
+ * THE SPLIT THE PREVIEW SHOWS BEFORE SEND: people by name, biggest first, then reports@, then the
+ * leads on news@ -- "From Nicole Loder 42 · Ryno 31 · reports@ 9 · news@ (leads) 12".
+ */
+export function senderSplit(rows: RowSender[]): SenderShare[] {
+  const by = new Map<string, SenderShare>()
+  for (const r of rows) {
+    const s = by.get(r.address) ?? { label: r.label, address: r.address, kind: r.kind, count: 0 }
+    s.count += 1
+    by.set(r.address, s)
+  }
+  const rank = (k: RowSender['kind']) => (k === 'liaison' || k === 'address' ? 0 : k === 'reports' ? 1 : 2)
+  return [...by.values()].sort((a, b) => rank(a.kind) - rank(b.kind) || b.count - a.count || a.label.localeCompare(b.label))
+}
+
+export function describeSplit(split: SenderShare[]): string {
+  return split.length ? `From ${split.map((s) => `${s.label} ${s.count}`).join(' · ')}` : ''
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Results, by sender -- the same counting as marketing_campaign_results(), per From address
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The marketing_sends columns a results row is counted from. */
+export interface SendResultRow {
+  sender: string | null
+  state: string
+  resend_id: string | null
+  delivered_at: string | null
+  delayed_at?: string | null
+  first_opened_at: string | null
+  first_clicked_at: string | null
+  unsubscribed_at: string | null
+  opted_in_at?: string | null
+}
+
+/**
+ * ONE ROW PER SENDER, counted exactly as the database's results function counts a campaign (each
+ * filter below is its filter), so the per-sender rows always add up to the campaign's own figures.
+ */
+export function resultsBySender(rows: SendResultRow[]): (Omit<CampaignResults, 'campaign_id'> & { sender: string })[] {
+  const by = new Map<string, Omit<CampaignResults, 'campaign_id'> & { sender: string }>()
+  for (const s of rows) {
+    const key = s.sender ?? ''
+    const r = by.get(key) ?? { sender: key, total: 0, queued: 0, accepted: 0, failed: 0, skipped: 0, delivered: 0, delayed: 0, bounced: 0, complained: 0, opened: 0, clicked: 0, unsubscribed: 0, opted_in: 0 }
+    r.total += 1
+    if (s.state === 'queued' || s.state === 'sending') r.queued += 1
+    if (s.resend_id && ['sent', 'bounced', 'complained'].includes(s.state)) r.accepted += 1
+    if (s.state === 'failed') r.failed += 1
+    if (s.state === 'skipped') r.skipped += 1
+    if (s.delivered_at && s.state !== 'bounced') r.delivered += 1
+    if (s.delayed_at && !s.delivered_at && s.state === 'sent') r.delayed += 1
+    if (s.state === 'bounced') r.bounced += 1
+    if (s.state === 'complained') r.complained += 1
+    if (s.first_opened_at) r.opened += 1
+    if (s.first_clicked_at) r.clicked += 1
+    if (s.unsubscribed_at) r.unsubscribed += 1
+    if (s.opted_in_at) r.opted_in += 1
+    by.set(key, r)
+  }
+  return [...by.values()].sort((a, b) => b.total - a.total)
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Workflows: a follow-up goes to who did (or did not) do something with the email before it
+ * ---------------------------------------------------------------------------------------------- */
+
+export type WorkflowAudience = 'everyone' | 'not_opened' | 'not_clicked' | 'opened' | 'clicked'
+
+export const WORKFLOW_AUDIENCE_LABELS: Record<WorkflowAudience, string> = {
+  everyone: 'Everybody it reached',
+  not_opened: 'Those who did not open it',
+  not_clicked: 'Those who did not click',
+  opened: 'Those who opened it',
+  clicked: 'Those who clicked',
+}
+
+export function parseWorkflowAudience(raw: unknown): WorkflowAudience {
+  return raw === 'everyone' || raw === 'not_clicked' || raw === 'opened' || raw === 'clicked' ? raw : 'not_opened'
+}
+
+/**
+ * WHO A FOLLOW-UP GOES TO, off the email before it. Only somebody it actually REACHED: a send that
+ * failed, was skipped, bounced or was marked as spam is never followed up, and somebody who
+ * unsubscribed from that very email is never written to again. (The drain reads the unsubscribes
+ * once more as it sends, so somebody who said stop since is held too.) "Did not open" includes
+ * people whose mail blocks pictures -- opens are approximate, and the screen says so.
+ */
+export function inWorkflowAudience(audience: WorkflowAudience, s: Pick<SendResultRow, 'state' | 'first_opened_at' | 'first_clicked_at' | 'unsubscribed_at'>): boolean {
+  if (s.state !== 'sent' || s.unsubscribed_at) return false
+  switch (audience) {
+    case 'everyone': return true
+    case 'not_opened': return !s.first_opened_at
+    case 'opened': return !!s.first_opened_at
+    case 'not_clicked': return !s.first_clicked_at
+    case 'clicked': return !!s.first_clicked_at
+  }
+}
+
+/** The day a follow-up is due: `waitDays` after the email before it FINISHED going out, Johannesburg's day. */
+export function followUpDueOn(previousFinishedAt: string | null | undefined, waitDays: number): string | null {
+  if (!previousFinishedAt) return null
+  const day = new Date(new Date(previousFinishedAt).getTime() + 2 * 3600_000).toISOString().slice(0, 10)
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + waitDays)
+  return d.toISOString().slice(0, 10)
 }
 
 /* ------------------------------------------------------------------------------------------------

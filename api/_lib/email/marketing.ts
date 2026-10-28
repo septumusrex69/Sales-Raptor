@@ -2,10 +2,13 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { credentialsKeyProblem } from '../crypto.js'
 import { can } from '../../../src/lib/capabilities.js'
-import { isProspectKind, parseKind, renderCampaignEmail } from '../../../src/lib/marketing.js'
 import {
-  drainMarketing, idempotencyKey, kindNotReady, loadCampaign, originFor, queueCampaign, resendSend, resolveOnServer,
-  senderConfig, senderForCampaign, testRecipient, unsubscribeToken,
+  FIRM_REPORTS_ADDRESS, FIRM_SENDER_NAME, firmSender, isFirmMainDomain, isProspectKind, normaliseEmail, parseKind,
+  renderCampaignEmail, resendKeyEnvFor, senderSplit,
+} from '../../../src/lib/marketing.js'
+import {
+  campaignFigures, drainMarketing, idempotencyKey, kindNotReady, loadCampaign, loadExtraSender, originFor, queueCampaign, resendSend,
+  resolveOnServer, sendFromNotReady, senderConfig, senderForCampaign, testRecipient, unsubscribeToken,
 } from '../marketing.js'
 import { knownAddresses, previewOf, rowsFrom, writeImport } from '../marketingLists.js'
 import { planProspectImport } from '../../../src/lib/prospectImport.js'
@@ -16,7 +19,9 @@ import { planProspectImport } from '../../../src/lib/prospectImport.js'
  * A route on the email dispatcher rather than a file of its own: api/ is at Vercel's twelve.
  *
  *   { step: 'config' }                     is the sender set up, and if not, what is missing
- *   { step: 'preview', audience, kind }    how many, a sample, and who was left out and why
+ *   { step: 'preview', audience, kind, sendFrom, senderAddressId }
+ *                                          how many, a sample, who was left out and why, and who it goes from
+ *   { step: 'figures', campaignId }        a campaign's results, whole and split by sender
  *   { step: 'import-preview', rows }       what an uploaded prospect list would add (S10, 22 Oct)
  *   { step: 'import', rows, name, fileName }   ...and adding it: a marketing_lists row and its leads
  *   { step: 'test', campaignId }           the campaign to the person pressing it, marked [Test]
@@ -46,6 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = (req.body ?? {}) as {
     step?: string; campaignId?: unknown; audience?: unknown; kind?: unknown; rows?: unknown; name?: unknown; fileName?: unknown
+    sendFrom?: unknown; senderAddressId?: unknown
   }
   const campaignId = typeof body.campaignId === 'string' ? body.campaignId : ''
   const hostHeader = req.headers['x-forwarded-host'] ?? req.headers.host
@@ -59,10 +65,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (body.step === 'preview') {
     const kind = parseKind(body.kind)
-    const resolved = await resolveOnServer(admin, body.audience, kind)
+    const resolved = await resolveOnServer(admin, body.audience, kind, {
+      sendFrom: body.sendFrom, senderAddressId: typeof body.senderAddressId === 'string' ? body.senderAddressId : null,
+    })
     if ('error' in resolved) { res.status(400).json({ error: resolved.error }); return }
     res.status(200).json({
       kind,
+      /* WHO IT GOES FROM, counted in the same pass as who it goes to (S13): the split approved is the split queued. */
+      senders: resolved.senders ? senderSplit(resolved.senders) : null,
       count: resolved.recipients.length,
       firstApproaches: resolved.recipients.filter((r) => r.firstApproach).length,
       sample: resolved.recipients.slice(0, 12).map((r) => ({
@@ -77,6 +87,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * A PROSPECT LIST, previewed and then written: the same plan both times (marketingLists.ts). The
    * leads it makes are the sales side's, so marketing.send -- checked above -- is the whole gate.
    */
+  if (body.step === 'figures') {
+    if (!campaignId) { res.status(400).json({ error: 'Which campaign?' }); return }
+    res.status(200).json(await campaignFigures(admin, campaignId))
+    return
+  }
+
   if (body.step === 'import-preview' || body.step === 'import') {
     const rows = rowsFrom(body.rows)
     if ('error' in rows) { res.status(400).json({ error: rows.error }); return }
@@ -116,8 +132,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (body.step === 'test') {
     const campaign = current
-    const sender = await senderForCampaign(admin, config, campaign)
+    let sender = await senderForCampaign(admin, config, campaign)
     if ('error' in sender) { res.status(412).json({ error: sender.error }); return }
+    let key = process.env.RESEND_API_KEY as string
+    /*
+     * A TEST FROM WHAT WAS CHOSEN (S13), so the From and Reply-To can be checked in a real inbox: reports@,
+     * the extra address, or -- in liaison mode -- the person pressing it if they are a liaison on the firm's
+     * domain, else reports@ (the address their clients without a liaison would get).
+     */
+    if (campaign.kind === 'news' && campaign.send_from !== 'news') {
+      const extra = campaign.send_from === 'address' ? await loadExtraSender(admin, campaign.sender_address_id) : null
+      const notReady = sendFromNotReady(config, campaign.send_from, extra?.address)
+      if (notReady) { res.status(412).json({ error: notReady }); return }
+      const mine = normaliseEmail(profile.email)
+      const choice = campaign.send_from === 'address' && extra ? firmSender(extra.display_name, extra.address)
+        : campaign.send_from === 'liaison' && ['Liaison', 'Liaison Manager'].includes(profile.role) && isFirmMainDomain(mine)
+          ? firmSender(profile.name, mine)
+          : firmSender(FIRM_SENDER_NAME, FIRM_REPORTS_ADDRESS)
+      if ('error' in choice) { res.status(412).json({ error: choice.error }); return }
+      sender = choice
+      key = process.env[resendKeyEnvFor(choice.replyTo ?? '')]?.trim() ?? ''
+    }
     const to = profile.email || caller.email
     const origin = originFor(host)
     if (!to || !origin) { res.status(400).json({ error: 'Your own address is not known, so there is nowhere to send a test.' }); return }
@@ -139,12 +174,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     )
     /* A TEST IS NOT A SEND: no row, no timeline line, and a fresh key each press so a second test
        after an edit is not answered with the first. */
-    const outcome = await resendSend(process.env.RESEND_API_KEY as string, [{
+    const outcome = await resendSend(key, [{
       from: sender.from, to: [r.email], ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
       subject: `[Test] ${rendered.subject}`, html: rendered.html, text: rendered.text, headers: {},
     }], idempotencyKey([campaignId, String(Date.now())]))
     if (!outcome.ok) { res.status(502).json({ error: `The test did not go: ${outcome.message}` }); return }
-    res.status(200).json({ sentTo: r.email })
+    res.status(200).json({ sentTo: r.email, from: sender.from })
     return
   }
 

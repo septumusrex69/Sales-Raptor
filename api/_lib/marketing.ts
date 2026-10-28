@@ -5,9 +5,13 @@ import { siteOrigin } from './workflow/siteOrigin.js'
 import { fetchAllRows } from '../../src/lib/fetchAll.js'
 import {
   DEFAULT_WARMUP_CEILING, LEAD_AUDIENCES, PROSPECT_SENDER_ENV, RESEND_BATCH_MAX, RESEND_MIN_GAP_MS, SENDER_ENV,
+  FIRM_SENDER_ENV, FIRM_SENDER_NAME, FIRM_REPORTS_ADDRESS,
+  clientLiaison, firmSender, inWorkflowAudience, parseSendFrom, parseWorkflowAudience, resendKeyEnvFor, resultRates,
+  resultsBySender, senderForRecipient, splitFrom,
   isProspectKind, isSendableEmail, newsSender, newsletterActivitySubject, normaliseEmail, parseAudience, parseKind,
   prospectSender, renderCampaignEmail, replyToFor, resolveAudience, sendBlockReason, stoppedClientEmails, warmupDailyCap, warmupWeek,
-  type AudienceResult, type CampaignKind, type Recipient, type SenderChoice,
+  type AudienceResult, type CampaignKind, type CampaignResults, type LiaisonPerson, type Recipient, type RowSender, type SendFrom,
+  type SendResultRow, type SenderChoice, type SenderCompany,
 } from '../../src/lib/marketing.js'
 
 /**
@@ -41,6 +45,11 @@ export interface SenderConfig {
   prospect: { ready: boolean; missing: string[]; problem: string | null; domain: string | null }
   /** The daily allowance a warmed-up prospect sender reaches. */
   warmupCeiling: number
+  /**
+   * SENDING FROM THE FIRM'S OWN DOMAIN -- a liaison, reports@, or an extra address there (S13). Needs
+   * RESEND_FIRM_API_KEY: the first key is restricted to the news domain and Resend refuses the rest.
+   */
+  firm: { ready: boolean; missing: string[] }
 }
 
 export function warmupCeiling(): number {
@@ -73,7 +82,23 @@ export async function senderConfig(admin: SupabaseClient): Promise<SenderConfig>
     webhook: !!process.env.RESEND_WEBHOOK_SECRET?.trim(),
     prospect: { ready: prospectMissing.length === 0 && !prospectProblem, missing: prospectMissing, problem: prospectProblem, domain },
     warmupCeiling: warmupCeiling(),
+    firm: process.env[FIRM_SENDER_ENV]?.trim() ? { ready: true, missing: [] } : { ready: false, missing: [FIRM_SENDER_ENV] },
   }
+}
+
+/**
+ * WHY A NEWS CAMPAIGN CANNOT GO FROM WHAT WAS CHOSEN, or null. Liaison and reports@ are on the firm's
+ * own domain and need the second key; an extra address needs it only when it is on that domain. Said
+ * on the screen in these words, and the queue refuses on the same ones.
+ */
+export function sendFromNotReady(config: SenderConfig, sendFrom: SendFrom, extraAddress?: string | null): string | null {
+  const needsFirmKey = sendFrom === 'liaison' || sendFrom === 'reports'
+    || (sendFrom === 'address' && !!extraAddress && resendKeyEnvFor(extraAddress) === FIRM_SENDER_ENV)
+  if (needsFirmKey && !config.firm.ready) {
+    return `Sending from ${sendFrom === 'liaison' ? 'the liaisons' : sendFrom === 'reports' ? 'reports@' : extraAddress} is not set up yet: ${FIRM_SENDER_ENV} must be set in Vercel.`
+  }
+  if (sendFrom === 'address' && !extraAddress) return 'Choose which address it goes from.'
+  return null
 }
 
 /** Whether a campaign of this kind can go at all, in words for the screen when it cannot. */
@@ -240,14 +265,65 @@ interface CampaignRow {
   status: string
   created_by: string | null
   queued_by: string | null
+  send_from: SendFrom
+  /** The extra address (marketing_senders) when send_from is 'address'. Absent until migration campaign_sender_address. */
+  sender_address_id?: string | null
 }
 
-const CAMPAIGN_COLUMNS = 'id, name, subject, preheader, body, image_url, audience, first_approach, kind, sender_id, status, created_by, queued_by'
+/*
+ * EVERY COLUMN, by '*', not a list: `sender_address_id` arrives with migration campaign_sender_address,
+ * and a named list would make every campaign unreadable on a database that has not had it yet.
+ */
+const CAMPAIGN_COLUMNS = '*'
+
+function asCampaign(row: CampaignRow): CampaignRow {
+  return { ...row, kind: parseKind(row.kind), send_from: parseSendFrom(row.send_from) }
+}
 
 export async function loadCampaign(admin: SupabaseClient, id: string): Promise<CampaignRow | null> {
   const { data } = await admin.from('marketing_campaigns').select(CAMPAIGN_COLUMNS).eq('id', id).maybeSingle()
   const row = data as CampaignRow | null
-  return row ? { ...row, kind: parseKind(row.kind) } : null
+  return row ? asCampaign(row) : null
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Who each row goes from
+ * ---------------------------------------------------------------------------------------------- */
+
+/** An extra address, as marketing_senders keeps it. */
+export interface ExtraSender { id: string; address: string; display_name: string; active: boolean }
+
+export async function loadExtraSender(admin: SupabaseClient, id: string | null | undefined): Promise<ExtraSender | null> {
+  if (!id) return null
+  const { data } = await admin.from('marketing_senders').select('id, address, display_name, active').eq('id', id).maybeSingle()
+  return (data as ExtraSender | null) ?? null
+}
+
+/** Everybody who could be somebody's liaison, keyed by id -- and by address, for crediting a timeline line. */
+async function loadPeople(admin: SupabaseClient): Promise<Map<string, LiaisonPerson>> {
+  const rows = await fetchAllRows<Record<string, unknown>>(() => admin.from('profiles')
+    .select('id, name, email, role, status').order('id'), { table: 'profiles' })
+  return new Map(rows.map((p) => [String(p.id), {
+    id: String(p.id), name: (p.name as string | null) ?? null, email: (p.email as string | null) ?? null,
+    role: String(p.role ?? ''), status: String(p.status ?? ''),
+  }]))
+}
+
+/**
+ * THE SENDER FOR EVERY RECIPIENT, decided when the list is drawn (preview and queue alike) and
+ * written onto each row at queue time, so the drain sends each from what the preview showed.
+ * Introductions and prospect campaigns are not part of this: their sender is the marketer's.
+ */
+export function sendersFor(
+  recipients: Recipient[], sendFrom: SendFrom, extra: ExtraSender | null,
+  companies: Map<string, SenderCompany>, people: Map<string, LiaisonPerson>,
+): RowSender[] {
+  const news = splitFrom(process.env.MARKETING_FROM)
+  const ctx = {
+    news, extra: extra ? { name: extra.display_name, address: extra.address } : null,
+    liaisonOf: (id: string | null | undefined) => clientLiaison(id, companies, people),
+  }
+  return recipients.map((r) => senderForRecipient(sendFrom, r, ctx))
 }
 
 /**
@@ -256,7 +332,8 @@ export async function loadCampaign(admin: SupabaseClient, id: string): Promise<C
  */
 export async function resolveOnServer(
   admin: SupabaseClient, audienceRaw: unknown, kindRaw: unknown,
-): Promise<AudienceResult | { error: string }> {
+  from: { sendFrom?: unknown; senderAddressId?: string | null } = {},
+): Promise<(AudienceResult & { senders: RowSender[] | null }) | { error: string }> {
   const audience = parseAudience(audienceRaw)
   if (!audience) return { error: 'This campaign has no list chosen.' }
   const kind = parseKind(kindRaw)
@@ -272,7 +349,8 @@ export async function resolveOnServer(
   try {
     const [companies, contacts, leads, activities, prefs, approached] = await Promise.all([
       fetchAllRows<Record<string, unknown>>(() => admin.from('companies')
-        .select('id, name, email, parent_company_id, services, contact_person, news_stopped_at').order('id'), { table: 'companies' }),
+        .select('id, name, email, parent_company_id, services, contact_person, news_stopped_at, account_owner_id, liaison_needed')
+        .order('id'), { table: 'companies' }),
       fetchAllRows<Record<string, unknown>>(() => admin.from('contacts')
         .select('id, first_name, email, company_id, lead_id').order('id'), { table: 'contacts' }),
       fetchAllRows<Record<string, unknown>>(() => admin.from('leads')
@@ -292,7 +370,7 @@ export async function resolveOnServer(
     /* THE FIRM'S "NOW", so dormancy on staging follows staging's clock as the status dates do. */
     const { data: firmNow } = await admin.rpc('raptor_now')
     const now = typeof firmNow === 'string' ? new Date(firmNow).toISOString() : new Date().toISOString()
-    return resolveAudience({
+    const resolved = resolveAudience({
       audience,
       firstApproach,
       kind,
@@ -318,6 +396,17 @@ export async function resolveOnServer(
       approachedLeads: new Set(approached.map((a) => String(a.lead_id))),
       now,
     })
+    /* WHO EACH GOES FROM, in the same pass: the split the preview shows is the split that is queued. */
+    if (kind !== 'news') return { ...resolved, senders: null }
+    const sendFrom = parseSendFrom(from.sendFrom)
+    const extra = sendFrom === 'address' ? await loadExtraSender(admin, from.senderAddressId) : null
+    if (sendFrom === 'address' && (!extra || !extra.active)) return { error: 'The address this campaign was to go from is no longer available. Choose another.' }
+    const people = sendFrom === 'liaison' ? await loadPeople(admin) : new Map<string, LiaisonPerson>()
+    const companyMap = new Map(companies.map((c) => [String(c.id), {
+      id: String(c.id), parentCompanyId: s(c.parent_company_id) ?? null, accountOwnerId: s(c.account_owner_id) ?? null,
+      liaisonNeeded: c.liaison_needed === true,
+    }]))
+    return { ...resolved, senders: sendersFor(resolved.recipients, sendFrom, extra, companyMap, people) }
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'The list could not be read.' }
   }
@@ -361,7 +450,13 @@ export async function queueCampaign(admin: SupabaseClient, campaignId: string, c
   if (campaign.status !== 'draft') return { error: 'This campaign has already been sent.', status: 409 }
   if (!campaign.subject.trim() || !campaign.body.trim()) return { error: 'Give it a subject and a body first.', status: 400 }
 
-  const resolved = await resolveOnServer(admin, campaign.audience, campaign.kind)
+  if (campaign.kind === 'news') {
+    const extra = campaign.send_from === 'address' ? await loadExtraSender(admin, campaign.sender_address_id) : null
+    const notReady = sendFromNotReady(await senderConfig(admin), campaign.send_from, extra?.address)
+    if (notReady) return { error: notReady, status: 412 }
+  }
+  const resolved = await resolveOnServer(admin, campaign.audience, campaign.kind,
+    { sendFrom: campaign.send_from, senderAddressId: campaign.sender_address_id ?? null })
   if ('error' in resolved) return { error: resolved.error, status: 500 }
   if (resolved.recipients.length === 0) return { error: 'Nobody on this list can be sent to.', status: 400 }
 
@@ -371,10 +466,17 @@ export async function queueCampaign(admin: SupabaseClient, campaignId: string, c
     .eq('id', campaignId).eq('status', 'draft').select('id')
   if (!claimed?.length) return { error: 'This campaign has already been sent.', status: 409 }
 
-  const rows = resolved.recipients.map((r) => ({
+  const rows = resolved.recipients.map((r, i) => ({
     campaign_id: campaignId, email: r.email, first_name: r.firstName, company_name: r.companyName,
     company_id: r.companyId ?? null, contact_id: r.contactId ?? null, lead_id: r.leadId ?? null,
     first_approach: r.firstApproach,
+    /*
+     * THE BARE FROM ADDRESS, decided now (S13): the drain sends each row from it, and the results are
+     * split by it. Null for the prospect kinds, whose sender marketing_claim_prospect writes as it
+     * counts that marketer's warm-up -- a liaison's or reports@'s address is on the firm's domain and
+     * can never be counted against a prospect sender's allowance.
+     */
+    sender: resolved.senders?.[i]?.address ?? null,
   }))
   const { error } = await admin.from('marketing_sends').insert(rows)
   if (error) {
@@ -404,6 +506,8 @@ interface SendRow {
   lead_id: string | null
   first_approach: boolean
   attempts: number
+  /** The bare From address written at queue time (S13), or null for rows queued before it. */
+  sender: string | null
 }
 
 interface Result { id: string; state: 'sent' | 'failed' | 'skipped' | 'queued'; resend_id?: string | null; error?: string | null }
@@ -456,6 +560,9 @@ export async function drainMarketing(
   const waiting = new Set<string>()
   /* Campaigns that cannot go at all just now (no sender) -- said once, not retried. */
   const blocked = new Set<string>()
+  /* Address -> the name it signs with, and -> the liaison's profile for the timeline. */
+  const names = new Map<string, string | null>()
+  const liaisonIds = new Map<string, string>()
   const config = await senderConfig(admin)
   const apiKey = process.env.RESEND_API_KEY?.trim() ?? ''
   const origin = originFor(opts.host)
@@ -477,7 +584,7 @@ export async function drainMarketing(
     let q = admin.from('marketing_campaigns').select(CAMPAIGN_COLUMNS).eq('status', 'sending')
     if (opts.campaignId) q = q.eq('id', opts.campaignId)
     const { data: live } = await q
-    const open = ((live ?? []) as CampaignRow[]).map((c) => ({ ...c, kind: parseKind(c.kind) }))
+    const open = ((live ?? []) as CampaignRow[]).map(asCampaign)
       .filter((c) => !waiting.has(c.id) && !blocked.has(c.id))
     if (!open.length) break
     let progressed = false
@@ -487,6 +594,16 @@ export async function drainMarketing(
       let sender = senders.get(campaign.id)
       if (!sender) { sender = await senderForCampaign(admin, config, campaign); senders.set(campaign.id, sender) }
       if ('error' in sender) { blocked.add(campaign.id); report.stoppedFor = sender.error; continue }
+      /*
+       * NOT CLAIMED AT ALL while the firm's key is missing: a claim counts an attempt, and a row
+       * claimed and put back on every five-minute sweep would be "given up" on within a quarter of an
+       * hour. Unclaimed, the rows simply wait for the key.
+       */
+      if (campaign.kind === 'news' && campaign.send_from !== 'news') {
+        const extra = campaign.send_from === 'address' ? await loadExtraSender(admin, campaign.sender_address_id) : null
+        const notReady = sendFromNotReady(config, campaign.send_from, extra?.address)
+        if (notReady) { blocked.add(campaign.id); report.stoppedFor = notReady; continue }
+      }
 
       let claimed: SendRow[]
       if (isProspectKind(campaign.kind)) {
@@ -515,14 +632,61 @@ export async function drainMarketing(
         if (!claimed.length) continue
       }
       progressed = true
-      halt = await sendChunk(campaign, sender, claimed)
+      if (campaign.kind !== 'news') { halt = await sendChunk(campaign, sender, claimed, apiKey); continue }
+      /*
+       * A NEWS CHUNK CAN CARRY SEVERAL SENDERS (S13): Nicole's clients, Ryno's, reports@ for the rest
+       * and news@ for leads. Each group goes as its own batch, from the address written on its rows at
+       * queue time, with the key its domain needs.
+       */
+      const newsAddress = bareAddress(sender.from)
+      const groups = new Map<string, SendRow[]>()
+      for (const r of claimed) {
+        const a = r.sender && r.sender !== newsAddress ? r.sender : ''
+        groups.set(a, [...(groups.get(a) ?? []), r])
+      }
+      for (const [address, rows] of groups) {
+        if (halt) {
+          /* Halted part-way: what was claimed and not tried goes back in the queue untouched. */
+          await admin.rpc('marketing_record_results', { p_results: rows.map((r) => ({ id: r.id, state: 'queued', error: null })) })
+          continue
+        }
+        if (!address) { halt = await sendChunk(campaign, sender, rows, apiKey); continue }
+        const env = resendKeyEnvFor(address)
+        const key = process.env[env]?.trim() ?? ''
+        const from = firmSender(await nameOf(address), address)
+        if (!key || 'error' in from) {
+          await admin.rpc('marketing_record_results', { p_results: rows.map((r) => ({ id: r.id, state: 'queued', error: null })) })
+          halt = 'error' in from
+            ? from.error
+            : `Sending from ${address} is not set up yet: ${env} must be set in Vercel. Those emails are waiting and go once it is.`
+          continue
+        }
+        halt = await sendChunk(campaign, from, rows, key, true)
+      }
     }
     if (!progressed) break
   }
   if (halt) report.stoppedFor = halt
   return finish()
 
-  async function sendChunk(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, claimed: SendRow[]): Promise<string | null> {
+  /* The name an address on the firm's domain signs with: the liaison's own, the extra address's, or the firm's. */
+  async function nameOf(address: string): Promise<string | null> {
+    if (address === FIRM_REPORTS_ADDRESS) return FIRM_SENDER_NAME
+    if (!names.has(address)) {
+      const [{ data: person }, { data: extra }] = await Promise.all([
+        admin.from('profiles').select('id, name').ilike('email', address).limit(1).maybeSingle(),
+        admin.from('marketing_senders').select('display_name').eq('address', address).maybeSingle(),
+      ])
+      const p = person as { id: string; name: string | null } | null
+      if (p) liaisonIds.set(address, p.id)
+      names.set(address, (extra as { display_name?: string } | null)?.display_name ?? p?.name ?? null)
+    }
+    return names.get(address) ?? null
+  }
+
+  async function sendChunk(
+    campaign: CampaignRow, sender: { from: string; replyTo: string | null }, claimed: SendRow[], key: string, personal = false,
+  ): Promise<string | null> {
     const results: Result[] = []
     const { data: prefRows } = await admin.from('marketing_preferences').select('email, status')
       .in('email', claimed.map((r) => r.email)).neq('status', 'subscribed')
@@ -557,7 +721,7 @@ export async function drainMarketing(
       if (block) { results.push({ id: row.id, state: 'skipped', error: block }); continue }
       if (!isSendableEmail(row.email)) { results.push({ id: row.id, state: 'failed', error: 'The address does not look right.' }); continue }
       if (row.attempts > MAX_ATTEMPTS) { results.push({ id: row.id, state: 'failed', error: `Gave up after ${MAX_ATTEMPTS} attempts.` }); continue }
-      toSend.push({ row, email: buildEmail(campaign, sender, row) })
+      toSend.push({ row, email: buildEmail(campaign, sender, row, personal) })
     }
 
     let stop: string | null = null
@@ -565,7 +729,7 @@ export async function drainMarketing(
       const wait = RESEND_MIN_GAP_MS - (Date.now() - lastCall)
       if (wait > 0) await sleep(wait)
       lastCall = Date.now()
-      const outcome = await resendSend(apiKey, toSend.map((t) => t.email), idempotencyKey(toSend.map((t) => t.row.id)), opts.fetchImpl)
+      const outcome = await resendSend(key, toSend.map((t) => t.email), idempotencyKey(toSend.map((t) => t.row.id)), opts.fetchImpl)
       if (outcome.ok) {
         toSend.forEach((t, i) => results.push({ id: t.row.id, state: 'sent', resend_id: outcome.ids[i] || null, error: null }))
       } else if (isValidationFailure(outcome.status) && toSend.length > 1) {
@@ -575,7 +739,7 @@ export async function drainMarketing(
           const w = RESEND_MIN_GAP_MS - (Date.now() - lastCall)
           if (w > 0) await sleep(w)
           lastCall = Date.now()
-          const one = await resendSend(apiKey, [t.email], idempotencyKey([t.row.id]), opts.fetchImpl)
+          const one = await resendSend(key, [t.email], idempotencyKey([t.row.id]), opts.fetchImpl)
           if (one.ok) results.push({ id: t.row.id, state: 'sent', resend_id: one.ids[0] || null, error: null })
           else if (isValidationFailure(one.status)) results.push({ id: t.row.id, state: 'failed', error: one.message.slice(0, 500) })
           else { results.push({ id: t.row.id, state: 'queued', error: one.message.slice(0, 500) }); stop = haltReason(one) }
@@ -595,11 +759,13 @@ export async function drainMarketing(
       else if (r.state === 'failed') report.failed += 1
       else if (r.state === 'skipped') report.skipped += 1
     }
-    await logOnTimelines(admin, campaigns, claimed, results)
+    /* In liaison mode the line on the client is credited to the liaison it went from (brief 1.1 rule 9). */
+    await logOnTimelines(admin, campaigns, claimed, results,
+      campaign.send_from === 'liaison' ? (r) => (r.sender ? liaisonIds.get(r.sender) ?? null : null) : undefined)
     return stop
   }
 
-  function buildEmail(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, row: SendRow): OutgoingEmail {
+  function buildEmail(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, row: SendRow, personal = false): OutgoingEmail {
     const token = unsubscribeToken(row.email)
     const introduction = campaign.kind === 'introduction'
     const rendered = renderCampaignEmail(
@@ -617,7 +783,8 @@ export async function drainMarketing(
       /* News answers to info@ from a lead and reports@ from a client (replyToFor); a prospect email
          keeps the marketer's own address. */
       ...((() => {
-        const to = campaign.kind === 'news'
+        /* From a liaison, reports@ or an extra address, a reply goes to that same address. */
+        const to = campaign.kind === 'news' && !personal
           ? replyToFor(row, {
             leads: process.env.MARKETING_REPLY_TO_LEADS?.trim() || null,
             clients: process.env.MARKETING_REPLY_TO_CLIENTS?.trim() || null,
@@ -669,15 +836,17 @@ function haltReason(o: { status: number; message: string }): string {
 
 /**
  * ONE LINE ON EACH TIMELINE IT REACHED: an Email activity, "Newsletter: <subject>". Under the name of
- * whoever pressed Send. meaningfulActivity.ts keeps these out of every rep's counts.
+ * whoever pressed Send -- or, sent from each client's liaison, under the liaison's (`creditTo`), because
+ * on the client's record it was her letter. meaningfulActivity.ts keeps these out of every rep's counts.
  */
 async function logOnTimelines(
   admin: SupabaseClient, campaigns: Map<string, CampaignRow>, claimed: SendRow[], results: Result[],
+  creditTo?: (row: SendRow) => string | null,
 ): Promise<void> {
   const sent = new Set(results.filter((r) => r.state === 'sent').map((r) => r.id))
   const rows = claimed.filter((r) => sent.has(r.id)).flatMap((r) => {
     const c = campaigns.get(r.campaign_id)
-    const userId = c?.queued_by ?? c?.created_by
+    const userId = creditTo?.(r) ?? c?.queued_by ?? c?.created_by
     if (!c || !userId) return []
     return [{
       type: 'Email', user_id: userId, subject: newsletterActivitySubject(c.subject),
@@ -697,23 +866,25 @@ export function testRecipient(name: string | null, email: string): Recipient {
 }
 
 /*
- * THE DAILY RUN FOR FOLLOW-UPS AND RESULTS EMAILS (S14, 28 Oct, for Ryno's campaign work).
+ * THE DAILY RUN FOR FOLLOW-UPS AND RESULTS EMAILS (S14 tables, 28 Oct; the sending, S13 for Ryno).
  *
  * Ryno: "send a campaign, wait a set number of days, then automatically send the next email (for example only
  * to people who didn't open it)" and "a day after a campaign ends, the results go automatically to the
  * marketing team". The database decides WHAT is due (marketing_workflow_steps_due, marketing_results_due --
- * migration marketing_workflows); this asks it every morning (vercel.json, /api/email/marketing-daily).
+ * migration marketing_workflows); this asks it every morning at 07:13 (vercel.json, /api/email/marketing-daily),
+ * queues each due follow-up and sends each due results email. The five-minute mail sweep then drains the
+ * follow-ups exactly as it drains a campaign somebody pressed Send on.
  *
- * THE SENDING IS RYNO'S TO WRITE, in his pull request: `sendWorkflowStep` (fill the step's campaign with the
- * previous campaign's sends filtered by the step's audience, queue it, stamp run_at) and `sendResultsEmail`
- * (the campaign's figures to the recipients, stamp results_sent_at). Until then this sends NOTHING and stamps
- * NOTHING -- a due step stays due, so the first morning his code is live it picks up everything waiting rather
- * than having been marked done unsent.
+ * NOTHING IS MARKED DONE UNSENT. A step is stamped `run_at` only in the same breath as its list is queued, and a
+ * results email's `results_sent_at` is put back if Resend refuses it -- so a morning that fails leaves the work
+ * due for the next one rather than quietly skipped.
  */
 export interface MarketingDailyResult {
   stepsDue: { step_id: string; workflow_id: string; step_position: number; campaign_id: string; audience: string; previous_campaign_id: string }[]
   resultsDue: { campaign_id: string; name: string; finished_at: string; recipients: string[] }[]
   sent: { steps: number; results: number }
+  /** What could not go this morning, and why -- logged and returned to whoever pressed it. */
+  problems: string[]
 }
 
 export async function marketingDailyTick(admin: SupabaseClient, today: string): Promise<MarketingDailyResult> {
@@ -723,9 +894,197 @@ export async function marketingDailyTick(admin: SupabaseClient, today: string): 
   ])
   if (steps.error) throw new Error(steps.error.message)
   if (results.error) throw new Error(results.error.message)
-  return {
+  const out: MarketingDailyResult = {
     stepsDue: (steps.data ?? []) as MarketingDailyResult['stepsDue'],
     resultsDue: (results.data ?? []) as MarketingDailyResult['resultsDue'],
     sent: { steps: 0, results: 0 },
+    problems: [],
   }
+  const config = await senderConfig(admin)
+  for (const step of out.stepsDue) {
+    const r = await queueWorkflowStep(admin, config, step)
+    if ('error' in r) out.problems.push(r.error)
+    else out.sent.steps += 1
+  }
+  /* The first chunks now; the five-minute sweep finishes them. */
+  if (out.sent.steps > 0) await drainMarketing(admin, { budgetMs: 60_000 }).catch(() => null)
+  for (const due of out.resultsDue) {
+    const r = await sendResultsEmail(admin, due.campaign_id, due.recipients)
+    if ('error' in r) out.problems.push(r.error)
+    else out.sent.results += 1
+  }
+  return out
+}
+
+/**
+ * ONE FOLLOW-UP, QUEUED: the step's own campaign, to whoever on the email before it fits the step's audience.
+ *
+ * The audience is read off the previous email's SENDS -- they already carry delivered, opened, clicked and
+ * unsubscribed for every address -- so there is nothing per client to keep in step. Each row goes from the
+ * step campaign's own Send from, decided as a pressed campaign's is.
+ */
+export async function queueWorkflowStep(
+  admin: SupabaseClient, config: SenderConfig, step: MarketingDailyResult['stepsDue'][number],
+): Promise<{ queued: number } | { error: string }> {
+  const campaign = await loadCampaign(admin, step.campaign_id)
+  const label = `Follow-up ${step.step_position}${campaign ? ` (${campaign.name})` : ''}`
+  if (!campaign) return { error: `${label}: its email is missing.` }
+  if (campaign.kind !== 'news') return { error: `${label}: only News can be a follow-up. Introductions and prospect mail go once, by hand.` }
+  if (campaign.status !== 'draft') {
+    /* Somebody sent it by hand already: the step is done, not sent twice. */
+    await admin.from('marketing_workflow_steps').update({ run_at: new Date().toISOString() }).eq('id', step.step_id).is('run_at', null)
+    return { error: `${label}: its email had already been sent by hand, so the workflow did not send it again.` }
+  }
+  if (!campaign.subject.trim() || !campaign.body.trim()) return { error: `${label}: it has no subject or no body yet. It goes the first morning it has both.` }
+  const extra = campaign.send_from === 'address' ? await loadExtraSender(admin, campaign.sender_address_id) : null
+  const notReady = kindNotReady(config, 'news') ?? sendFromNotReady(config, campaign.send_from, extra?.address)
+  if (notReady) return { error: `${label}: ${notReady}` }
+
+  const previous = await fetchAllRows<Record<string, unknown>>(() => admin.from('marketing_sends')
+    .select('id, email, first_name, company_name, company_id, contact_id, lead_id, state, first_opened_at, first_clicked_at, unsubscribed_at')
+    .eq('campaign_id', step.previous_campaign_id).order('id'), { table: 'marketing_sends' })
+  const audience = parseWorkflowAudience(step.audience)
+  const s = (v: unknown) => (typeof v === 'string' ? v : null)
+  const picked = previous.filter((r) => inWorkflowAudience(audience, {
+    state: String(r.state), first_opened_at: s(r.first_opened_at), first_clicked_at: s(r.first_clicked_at), unsubscribed_at: s(r.unsubscribed_at),
+  }))
+  const recipients: Recipient[] = picked.map((r) => ({
+    email: String(r.email), firstName: s(r.first_name), companyName: s(r.company_name),
+    companyId: s(r.company_id) ?? undefined, contactId: s(r.contact_id) ?? undefined, leadId: s(r.lead_id) ?? undefined,
+    firstApproach: false, via: r.lead_id && !r.company_id ? 'lead' : r.contact_id ? 'contact' : 'client',
+  }))
+
+  /* STAMPED FIRST, ON CONDITION: two mornings (or a press and the timer) cannot both queue this step. */
+  const nowIso = new Date().toISOString()
+  const { data: mine } = await admin.from('marketing_workflow_steps').update({ run_at: nowIso })
+    .eq('id', step.step_id).is('run_at', null).select('id')
+  if (!mine?.length) return { error: `${label}: already sent.` }
+  const { data: wf } = await admin.from('marketing_workflows').select('created_by').eq('id', step.workflow_id).maybeSingle()
+  const by = (wf as { created_by?: string | null } | null)?.created_by ?? campaign.created_by
+
+  if (!recipients.length) {
+    /* NOBODY LEFT TO FOLLOW UP -- everybody opened, say. The email is not sent, and the workflow is over:
+       every later step reads its audience off this one, which reached nobody. */
+    await admin.from('marketing_campaigns').update({ status: 'cancelled', finished_at: nowIso, recipient_count: 0, updated_at: nowIso })
+      .eq('id', campaign.id).eq('status', 'draft')
+    await admin.from('marketing_workflows').update({ status: 'finished', updated_at: nowIso }).eq('id', step.workflow_id)
+    return { queued: 0 }
+  }
+
+  let senders: RowSender[] | null = null
+  if (campaign.send_from !== 'news') {
+    const [companies, people] = await Promise.all([
+      fetchAllRows<Record<string, unknown>>(() => admin.from('companies')
+        .select('id, parent_company_id, account_owner_id, liaison_needed').order('id'), { table: 'companies' }),
+      campaign.send_from === 'liaison' ? loadPeople(admin) : Promise.resolve(new Map<string, LiaisonPerson>()),
+    ])
+    const map = new Map(companies.map((c) => [String(c.id), {
+      id: String(c.id), parentCompanyId: s(c.parent_company_id), accountOwnerId: s(c.account_owner_id), liaisonNeeded: c.liaison_needed === true,
+    }]))
+    senders = sendersFor(recipients, campaign.send_from, extra, map, people)
+  } else {
+    senders = sendersFor(recipients, 'news', null, new Map(), new Map())
+  }
+
+  const { data: claimed } = await admin.from('marketing_campaigns')
+    .update({ status: 'sending', queued_at: nowIso, queued_by: by, recipient_count: recipients.length, updated_at: nowIso })
+    .eq('id', campaign.id).eq('status', 'draft').select('id')
+  if (!claimed?.length) {
+    await admin.from('marketing_workflow_steps').update({ run_at: null }).eq('id', step.step_id)
+    return { error: `${label}: its email changed while it was being queued. It goes tomorrow.` }
+  }
+  const { error } = await admin.from('marketing_sends').insert(recipients.map((r, i) => ({
+    campaign_id: campaign.id, email: r.email, first_name: r.firstName, company_name: r.companyName,
+    company_id: r.companyId ?? null, contact_id: r.contactId ?? null, lead_id: r.leadId ?? null,
+    first_approach: false, sender: senders?.[i]?.address ?? null,
+  })))
+  if (error) {
+    await admin.from('marketing_campaigns').update({ status: 'draft', queued_at: null, queued_by: null, recipient_count: null }).eq('id', campaign.id)
+    await admin.from('marketing_workflow_steps').update({ run_at: null }).eq('id', step.step_id)
+    return { error: `${label}: the list could not be saved, so nothing was sent: ${error.message}` }
+  }
+  /* The last step sent: the workflow is done once its email has gone. */
+  const { data: later } = await admin.from('marketing_workflow_steps').select('id')
+    .eq('workflow_id', step.workflow_id).gt('position', step.step_position).limit(1)
+  if (!later?.length) await admin.from('marketing_workflows').update({ status: 'finished', updated_at: nowIso }).eq('id', step.workflow_id)
+  return { queued: recipients.length }
+}
+
+/** A campaign's figures, whole and per sender -- what the results email and the screen both say. */
+export async function campaignFigures(admin: SupabaseClient, campaignId: string)
+  : Promise<{ whole: CampaignResults | null; bySender: ReturnType<typeof resultsBySender> }> {
+  const [{ data: all }, rows] = await Promise.all([
+    admin.rpc('marketing_campaign_results'),
+    fetchAllRows<Record<string, unknown>>(() => admin.from('marketing_sends')
+      .select('sender, state, resend_id, delivered_at, delayed_at, first_opened_at, first_clicked_at, unsubscribed_at, opted_in_at')
+      .eq('campaign_id', campaignId).order('id'), { table: 'marketing_sends' }),
+  ])
+  const whole = ((all ?? []) as CampaignResults[]).find((c) => c.campaign_id === campaignId) ?? null
+  return { whole, bySender: resultsBySender(rows as unknown as SendResultRow[]) }
+}
+
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * THE RESULTS EMAIL: "a day after a campaign ends, the results go automatically to the marketing team".
+ * From the news address with the news key -- it is the firm writing to itself, and it needs nothing the
+ * administrator has not already set up. It says what Raptor knows and no more: opens are approximate, and
+ * nobody can say what was deleted unread, so it does not pretend to.
+ */
+export async function sendResultsEmail(admin: SupabaseClient, campaignId: string, recipients: string[])
+  : Promise<{ sent: true } | { error: string }> {
+  const to = [...new Set(recipients.map(normaliseEmail).filter(isSendableEmail))]
+  if (!to.length) return { error: 'The results email has nobody valid to go to.' }
+  const key = process.env.RESEND_API_KEY?.trim()
+  const news = newsSender(process.env.MARKETING_FROM, null)
+  if (!key || 'error' in news) return { error: 'The results email cannot go: news sending is not set up (RESEND_API_KEY, MARKETING_FROM).' }
+  const campaign = await loadCampaign(admin, campaignId)
+  if (!campaign) return { error: 'A campaign due its results email is missing.' }
+
+  /* STAMPED FIRST, ON CONDITION, so it can never go twice; put back if Resend refuses it. */
+  const { data: mine } = await admin.from('marketing_campaigns').update({ results_sent_at: new Date().toISOString() })
+    .eq('id', campaignId).is('results_sent_at', null).select('id')
+  if (!mine?.length) return { error: `${campaign.name}: its results email has already gone.` }
+
+  const { whole, bySender } = await campaignFigures(admin, campaignId)
+  const origin = originFor(null)
+  const r = whole ?? { total: 0, accepted: 0, delivered: 0, bounced: 0, opened: 0, clicked: 0, unsubscribed: 0, complained: 0, opted_in: 0, failed: 0, skipped: 0 } as CampaignResults
+  const rates = resultRates(r)
+  const pct = (v: number | null) => (v === null ? '' : ` (${v}%)`)
+  const lines: [string, string][] = [
+    ['On the list', String(r.total)],
+    ['Sent', String(r.accepted)],
+    ['Delivered', `${r.delivered}${pct(rates.delivered)}`],
+    ['Didn’t arrive', `${r.bounced}${pct(rates.bounced)}`],
+    ['Opened', `${r.opened}${pct(rates.opened)}`],
+    ['Not opened', String(Math.max(0, r.delivered - r.opened))],
+    ['Clicked', `${r.clicked}${pct(rates.clicked)}`],
+    ['Unsubscribed', `${r.unsubscribed}${pct(rates.unsubscribed)}`],
+    ['Marked as spam', String(r.complained)],
+  ]
+  const senderRows = bySender.length > 1
+    ? `<h3 style="font-size:14px;margin:20px 0 6px">By sender</h3><table cellpadding="4" style="border-collapse:collapse;font-size:13px">`
+      + `<tr><th align="left">From</th><th align="right">Sent</th><th align="right">Delivered</th><th align="right">Opened</th><th align="right">Clicked</th></tr>`
+      + bySender.map((b) => `<tr><td>${esc(b.sender || 'news@')}</td><td align="right">${b.accepted}</td><td align="right">${b.delivered}</td><td align="right">${b.opened}</td><td align="right">${b.clicked}</td></tr>`).join('')
+      + '</table>'
+    : ''
+  const link = origin ? `${origin}/news/${campaignId}` : null
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;font-size:14px">`
+    + `<p>The results of <b>${esc(campaign.name)}</b> (“${esc(campaign.subject)}”).</p>`
+    + `<table cellpadding="4" style="border-collapse:collapse;font-size:14px">${lines.map(([k, v]) => `<tr><td>${esc(k)}</td><td align="right"><b>${esc(v)}</b></td></tr>`).join('')}</table>`
+    + senderRows
+    + `<p style="font-size:12px;color:#64748b;margin-top:16px">Opens are approximate: Apple Mail opens every email for its reader, and mail that blocks pictures is never counted. No mail system reports what was deleted unread.</p>`
+    + (link ? `<p><a href="${link}">Open the campaign in Raptor</a></p>` : '')
+    + '</div>'
+  const text = [`The results of ${campaign.name} ("${campaign.subject}").`, '', ...lines.map(([k, v]) => `${k}: ${v}`),
+    ...(bySender.length > 1 ? ['', 'By sender:', ...bySender.map((b) => `${b.sender || 'news@'}: ${b.accepted} sent, ${b.delivered} delivered, ${b.opened} opened, ${b.clicked} clicked`)] : []),
+    '', 'Opens are approximate.', ...(link ? ['', link] : [])].join('\n')
+  const outcome = await resendSend(key, [{
+    from: news.from, to, subject: `Campaign results: ${campaign.name}`, html, text, headers: {},
+  }], idempotencyKey([`results-${campaignId}`]))
+  if (!outcome.ok) {
+    await admin.from('marketing_campaigns').update({ results_sent_at: null }).eq('id', campaignId)
+    return { error: `${campaign.name}: the results email did not go (${outcome.message}). It is tried again tomorrow.` }
+  }
+  return { sent: true }
 }
