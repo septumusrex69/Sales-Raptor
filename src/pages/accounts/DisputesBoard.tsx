@@ -63,7 +63,21 @@ const columnOf = (q: QueueRow): Column => (q.status === 'closed' ? 'resolved' : 
  * accepts nothing and the card takes you there instead.
  */
 export function DisputesBoard() {
-  const { users, userById } = useAppStore()
+  const { users, userById, companies } = useAppStore()
+  /*
+   * WHOSE CLIENT IT IS, on every ticket (S15). Stephan: the board said "Client asked" as the main thing --
+   * "this is a Bonnitta's Pharmacy query ... and the client asked this" -- "and you should also be able to
+   * filter the tickets by client." Named for the MAIN client, the way the portal and the client page treat a
+   * client and its sub-accounts as one relationship.
+   */
+  const clientOf = useCallback((companyId: string | null): { id: string; name: string } | null => {
+    if (!companyId) return null
+    const co = companies.find((c) => c.id === companyId)
+    if (!co) return null
+    const main = co.parentCompanyId ? companies.find((c) => c.id === co.parentCompanyId) ?? co : co
+    return { id: main.id, name: main.name }
+  }, [companies])
+  const [client, setClient] = useState('')
   const { currentUser } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -177,13 +191,25 @@ export function DisputesBoard() {
     return rows.filter((r) => {
       if (scope !== 'All' && !isMine(r, scope)) return false
       if (stage && columnOf(r) !== stage) return false
+      if (client && clientOf(r.companyId)?.id !== client) return false
       if (q) {
-        const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''} ${r.kind}`.toLowerCase()
+        const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''} ${r.kind} ${clientOf(r.companyId)?.name ?? ''}`.toLowerCase()
         if (!haystack.includes(q)) return false
       }
       return true
     })
-  }, [rows, scope, stage, search, isMine])
+  }, [rows, scope, stage, search, isMine, client, clientOf])
+  /* The clients that have a ticket on this person's board -- a picker of every client the firm has would
+     be two hundred names to scroll for the six that matter. */
+  const clientChoices = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const r of rows ?? []) {
+      if (scope !== 'All' && !isMine(r, scope)) continue
+      const c = clientOf(r.companyId)
+      if (c) seen.set(c.id, c.name)
+    }
+    return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  }, [rows, scope, isMine, clientOf])
 
   /*
    * Three numbers, and none of them is money.
@@ -261,6 +287,13 @@ export function DisputesBoard() {
           <option value="">All Stages</option>
           {COLUMNS.map((c) => <option key={c} value={c}>{COLUMN_LABEL[c]}</option>)}
         </select>
+        {clientChoices.length > 0 && (
+          <select value={client} onChange={(e) => setClient(e.target.value)} data-testid="board-client-filter"
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
+            <option value="">All clients</option>
+            {clientChoices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
         {/*
           * ONE PERSON AT A TIME, unless you are an Administrator. "All Owners" is not offered to a
           * leader at all -- the firm ruled the pooled view out in the same breath as granting them
@@ -319,6 +352,7 @@ export function DisputesBoard() {
                       key={q.id}
                       dispute={q}
                       ownerName={q.ownerId ? userById(q.ownerId)?.name ?? null : null}
+                      clientName={clientOf(q.companyId)?.name ?? null}
                       busy={moving === q.id}
                       onDragStart={() => setDragging(q.id)}
                       onOpen={() => navigate(`/queries/${q.id}`)}
@@ -346,7 +380,8 @@ export function DisputesBoard() {
             <table className="w-full list-table whitespace-nowrap">
               <thead>
                 <tr className="text-left text-slate-400 border-b border-slate-100">
-                  <th className="font-medium px-3 py-1.5">Debtor</th>
+                  <th className="font-medium px-3 py-1.5">Client</th>
+                  <th className="font-medium px-2 py-1.5">Debtor</th>
                   <th className="font-medium px-2 py-1.5">Dispute</th>
                   <th className="font-medium px-2 py-1.5">Owner</th>
                   <th className="font-medium px-2 py-1.5">Sitting with</th>
@@ -357,7 +392,8 @@ export function DisputesBoard() {
               <tbody>
                 {filtered.map((q) => (
                   <tr key={q.id} onClick={() => navigate(`/queries/${q.id}`)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
-                    <td className="px-3 py-1.5 max-w-[16rem] truncate" title={[q.debtorName, q.accountNumber].filter(Boolean).join(' · ')}>
+                    <td className="px-3 py-1.5 max-w-[12rem] truncate font-medium text-slate-700" data-testid="board-client">{clientOf(q.companyId)?.name ?? '—'}</td>
+                    <td className="px-2 py-1.5 max-w-[16rem] truncate" title={[q.debtorName, q.accountNumber].filter(Boolean).join(' · ')}>
                       {/* A query about a whole handover sheet has no account, so it is named
                           rather than linked to /accounts/null -- which renders as a page saying
                           the account is gone. */}
@@ -387,7 +423,7 @@ export function DisputesBoard() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">No disputes match.</td></tr>
+                  <tr><td colSpan={7} className="px-3 py-10 text-center text-sm text-slate-400">No disputes match.</td></tr>
                 )}
               </tbody>
             </table>
@@ -418,9 +454,11 @@ function StageChip({ column }: { column: Column }) {
   return <span className={`inline-block text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${chip[column]}`}>{COLUMN_LABEL[column]}</span>
 }
 
-function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
+function DisputeCard({ dispute: q, ownerName, clientName, busy, onDragStart, onOpen }: {
   dispute: QueueRow
   ownerName: string | null
+  /** Whose client it is (S15) -- the first thing on the card's second line. */
+  clientName: string | null
   busy: boolean
   onDragStart: () => void
   onOpen: () => void
@@ -431,7 +469,7 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       draggable={!closed && !busy}
       onDragStart={onDragStart}
       onClick={onOpen}
-      title={[q.description, q.debtorName, q.accountNumber, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}
+      title={[clientName, q.description, q.debtorName, q.accountNumber, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}
       className={`bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 cursor-pointer hover:border-slate-300 hover:shadow-sm transition ${busy ? 'opacity-60' : ''}`}
     >
       {/*
@@ -461,6 +499,7 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 text-[11px] whitespace-nowrap min-w-0">
         <span className="min-w-0 flex-1 truncate text-slate-400">
+          {clientName && <><span className="font-semibold text-navy-800" data-testid="card-client">{clientName}</span> · </>}
           <span className="text-slate-600">{q.debtorName}</span>
           {q.accountNumber && <> · {q.accountNumber}</>}
           {q.kind === 'dispute' && q.category && <> · {q.category}</>}

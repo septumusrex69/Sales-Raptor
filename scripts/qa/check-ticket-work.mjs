@@ -293,7 +293,10 @@ ok('sending to the client moves the ticket to them',
 ok('...and only when it went to the client', /const toClient = !answering\s*\|\| clientAddresses\.some/.test(page))
 /* ONLY ON THE WAY UP: a second email is a chase, not a fresh escalation, and nothing here moves a
    ticket back -- that is the liaison's decision when the client answers. */
-ok('...and only on the way up', !/stage: 'liaison'/.test(page))
+/* S15: the agent's feedback DOES send a ticket back to the liaison -- by the agent's own press, not by
+   an email going out. So the rule is held where it applies: nothing in onSent moves it back. */
+const onSent = page.slice(page.indexOf('onSent={(rawSubject'), page.indexOf('onSent={(rawSubject') + 6000)
+ok('...and only on the way up', onSent.length > 100 && !/stage: 'liaison'/.test(onSent))
 
 /*
  * AND "VIEW DISPUTE" OPENS THE DISPUTE.

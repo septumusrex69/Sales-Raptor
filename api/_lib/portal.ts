@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { adminClient, requireCaller } from './auth.js'
 import { credentialsKeyProblem, keyedHash, sameHex } from './crypto.js'
 import { sendAsUser } from './email/sendAsUser.js'
+import { EMAIL_IN_KIND, receivedEmailNote } from '../../src/lib/emailRules.js'
 import { can } from '../../src/lib/capabilities.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import {
@@ -271,7 +272,22 @@ async function fileClientMessage(admin: SupabaseClient, who: PortalCaller, t: { 
     received_by: t.ownerId, occurred_at: new Date().toISOString(), charged_excl_vat: 0,
   })
   if (error) console.error(`[portal] message not filed on ticket ${t.id}: ${error.message}`)
+  /*
+   * AND ON THE ACCOUNT'S ACTIVITY (S15). Stephan: "there should be an activity or a note, something for
+   * every query." The same note an emailed reply makes (emailSync.fileAccountEmail): a 'manual' email-in
+   * line on the account's timeline. NOT on the ticket's own thread -- the message above already is, and
+   * the conversation would show the client saying it twice.
+   */
+  if (!error && t.accountId) await note(admin, t.accountId, receivedEmailNote(`${who.name || who.email} (client portal)`, subject, body), EMAIL_IN_KIND, who)
   return !error
+}
+
+/** A line on the account's timeline, written by the client through the portal. */
+async function note(admin: SupabaseClient, accountId: string, body: string, kind: string, who: PortalCaller) {
+  const { error } = await admin.from('account_notes').insert({
+    account_id: accountId, body, kind, source: 'manual', author_name: `${who.name || who.email} (client portal)`,
+  })
+  if (error) console.error(`[portal] note not written on account ${accountId}: ${error.message}`)
 }
 
 const ticketReply: Handler = async (req, res, admin) => {
@@ -378,6 +394,8 @@ const paymentReport: Handler = async (req, res, admin) => {
   if (q) {
     await fileClientMessage(admin, who, { id: q.id as string, accountId: a.id, ownerId: owner },
       `Payment made to us directly: ${a.debtor} (${a.caseNumber})`, text)
+  } else {
+    await note(admin, a.id, text, 'note', who)
   }
   await ring(admin, tell, 'portal.payment',
     `${who.clientName} recorded a payment made to them directly: ${a.debtor} (${a.caseNumber}) paid ${portalRands(r.report.amount)} on ${r.report.paidOn}. It is waiting for approval in Trust.`,
@@ -412,6 +430,7 @@ const callback: Handler = async (req, res, admin) => {
     console.error(`[portal] callback task not made for ${who.companyId}: ${error.message}`)
     res.status(500).json({ error: 'Your request could not be sent just now. Please phone the firm.' }); return
   }
+  if (a) await note(admin, a.id, `The client asked to be called back from the client portal: ${title}`, 'note', who)
   await ring(admin, tell, 'portal.callback', `${who.clientName} asked to be called back: ${title.slice(0, 200)}`, `/companies/${who.companyId}`)
   res.status(200).json({ ok: true })
 }
