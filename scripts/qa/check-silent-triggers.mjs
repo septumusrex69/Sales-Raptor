@@ -324,7 +324,9 @@ for (const name of [
    */
   /* S14: except the finance block of protect_profile_privileged_fields, which raises only on a real
      change of somebody's finance access -- see check-admin-finance and check-capability-screen. */
-  ok(`...and reverts rather than raising`, !/raise\s+exception/i.test(body.replace(/-- S14: AN ADMINISTRATOR WITHOUT FINANCE[\s\S]*?\n  end if;\n  return new;/, '')))
+  /* S15: and the Big Boss block, which raises only when somebody without it tries to give or take it. */
+  ok(`...and reverts rather than raising`, !/raise\s+exception/i.test(body.replace(/-- S14: AN ADMINISTRATOR WITHOUT FINANCE[\s\S]*?\n  end if;\n  return new;/, '')
+    .replace(/-- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS[\s\S]*?\n  end if;\n/, '')))
 }
 
 if (failures.length) {

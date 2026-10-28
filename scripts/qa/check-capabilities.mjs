@@ -264,7 +264,7 @@ check('the database knows exactly the roles the app does', [...rolesInSql].sort(
  */
 check('an administrator has every capability there is, bar the ones no role is born with',
   [...ROLE_CAPABILITIES.Administrator, ...NO_ROLE_CAPABILITIES].sort(), [...CAPABILITY_ORDER].sort())
-check('people.pay is one of them, beside business.income', [...NO_ROLE_CAPABILITIES].sort(), ['business.income', 'people.pay'])
+check('people.pay is one of them, beside business.income -- and the Big Boss (S15)', [...NO_ROLE_CAPABILITIES].sort(), ['business.income', 'people.pay', 'raptor.boss'])
 check('...and a grant reaches it', canViewPay(asUser('Administrator', ['people.pay'])), true)
 check('...which a revoke takes back', canViewPay(asUser('Administrator', ['people.pay'], ['people.pay'])), false)
 check('...and no role at all is born with those',

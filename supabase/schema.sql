@@ -52753,3 +52753,221 @@ begin
   new.correspondent := public.account_email_correspondent(new.account_id, new.debtor_address, new.in_reply_to);
   return new;
 end $$;
+
+-- ============================================================================================
+-- big_boss (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A LEVEL ABOVE THE ADMINISTRATOR. Stephan: "I am the only person that can approve a suggestion for
+-- building Raptor", then "can we make another user? Big boss" -- asked, "above admin". Six people are
+-- Administrators on staging and every one of them could approve a build request.
+--
+-- A TICK, NOT A ROLE. A tenth role would be a rewrite of every list of role names in the app and the
+-- database, for one person; the firm's own pattern for "this person, by name" is a tick in no role's
+-- template (business.income, people.pay). `boss` is the third. The screen calls its holder Big Boss.
+--
+-- ONLY A BIG BOSS MAKES ANOTHER. Granted or revoked by anybody else -- an Administrator with finance
+-- included -- the profile guard RAISES, the same as it does for finance access, because a level that
+-- any Administrator could give themselves is not above them.
+--
+-- WHAT IT DECIDES: approving or declining a build request. A request moving new -> accepted or to
+-- declined needs it; "Not right yet" (a tester sending a released request back) does not, because
+-- testing is everybody's.
+-- ============================================================================================
+
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator') || array['business.income', 'people.pay', 'boss']
+$$;
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+    return new;
+  end if;
+
+  -- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS. Raised, not reverted, for the reason finance is:
+  -- a silent revert reads as "saved" to the person who tried.
+  if ('boss' = any(coalesce(new.grants, array[]::text[]))) is distinct from ('boss' = any(coalesce(old.grants, array[]::text[])))
+     or ('boss' = any(coalesce(new.revokes, array[]::text[]))) is distinct from ('boss' = any(coalesce(old.revokes, array[]::text[]))) then
+    if not public.has_capability('boss') then
+      raise exception 'Only the Big Boss can make somebody Big Boss, or stop them being one.' using errcode = '42501';
+    end if;
+  end if;
+
+  -- S14: AN ADMINISTRATOR WITHOUT FINANCE (see the top of this block).
+  if not public.has_capability('finance.view') then
+    if new.id = auth.uid() and (new.role is distinct from old.role or new.grants is distinct from old.grants
+        or new.revokes is distinct from old.revokes or new.department_id is distinct from old.department_id) then
+      raise exception 'An Administrator without finance access cannot change their own permissions.'
+        using errcode = '42501';
+    end if;
+    if public.finance_held(new.role, new.grants, new.revokes, new.department_id)
+       is distinct from public.finance_held(old.role, old.grants, old.revokes, old.department_id) then
+      raise exception 'Only an Administrator with finance access can give or take away finance access (Trust, Business, pay, approving payments).'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.change_request_boss_decides()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if coalesce(current_setting('role', true), '') = 'service_role' then return new; end if;
+  if new.status is distinct from old.status
+     and ((old.status = 'new' and new.status = 'accepted') or new.status = 'declined')
+     and not public.has_capability('boss') then
+    raise exception 'Only the Big Boss approves or declines what gets built in Raptor.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists change_request_boss_decides on public.change_requests;
+create trigger change_request_boss_decides before update of status on public.change_requests
+  for each row execute function public.change_request_boss_decides();
+
+-- STEPHAN IS THE BIG BOSS. By his address, which is the same on staging and production. Done as the
+-- server would do it: the guard above lets the service role through and nobody else.
+set local role service_role;
+update public.profiles set grants = array_append(coalesce(grants, array[]::text[]), 'boss')
+ where lower(email) = 'stephan@bredellferreira.co.za'
+   and not ('boss' = any(coalesce(grants, array[]::text[])));
+reset role;
+
+-- ============================================================================================
+-- big_boss_queue (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- TWO MORE DOORS TO THE SAME DECISION, AND THE TICK'S PROPER NAME.
+--
+-- big_boss locked new -> accepted and declining. Reopening a DECLINED request is approving it after
+-- all, and "Ask Claude to build it" (build_requested_at going from nothing to a time) is the go-ahead
+-- itself -- Stephan: "I am the only person that can approve a suggestion for building Raptor". Taking a
+-- request OFF the queue stays open to any Administrator: stopping work is never the dangerous
+-- direction. Reopening a RELEASED one ("Not right yet") stays everybody's, because testing is.
+--
+-- `boss` becomes `raptor.boss`: every other tick is area.thing, and check-capabilities holds that.
+-- Renamed everywhere it is read -- all_capabilities, the profile guard, the request trigger -- and on
+-- the one profile that holds it, in the same migration, so there is no moment it means nothing.
+-- ============================================================================================
+
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator') || array['business.income', 'people.pay', 'raptor.boss']
+$$;
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+    return new;
+  end if;
+
+  -- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS. Raised, not reverted, for the reason finance is:
+  -- a silent revert reads as "saved" to the person who tried.
+  if ('raptor.boss' = any(coalesce(new.grants, array[]::text[]))) is distinct from ('raptor.boss' = any(coalesce(old.grants, array[]::text[])))
+     or ('raptor.boss' = any(coalesce(new.revokes, array[]::text[]))) is distinct from ('raptor.boss' = any(coalesce(old.revokes, array[]::text[]))) then
+    if not public.has_capability('raptor.boss') then
+      raise exception 'Only the Big Boss can make somebody Big Boss, or stop them being one.' using errcode = '42501';
+    end if;
+  end if;
+
+  -- S14: AN ADMINISTRATOR WITHOUT FINANCE (see the top of this block).
+  if not public.has_capability('finance.view') then
+    if new.id = auth.uid() and (new.role is distinct from old.role or new.grants is distinct from old.grants
+        or new.revokes is distinct from old.revokes or new.department_id is distinct from old.department_id) then
+      raise exception 'An Administrator without finance access cannot change their own permissions.'
+        using errcode = '42501';
+    end if;
+    if public.finance_held(new.role, new.grants, new.revokes, new.department_id)
+       is distinct from public.finance_held(old.role, old.grants, old.revokes, old.department_id) then
+      raise exception 'Only an Administrator with finance access can give or take away finance access (Trust, Business, pay, approving payments).'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.change_request_boss_decides()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if coalesce(current_setting('role', true), '') = 'service_role' then return new; end if;
+  if not public.has_capability('raptor.boss') and (
+       (new.status is distinct from old.status
+        and ((old.status in ('new', 'declined') and new.status = 'accepted') or new.status = 'declined'))
+    or (old.build_requested_at is null and new.build_requested_at is not null)) then
+    raise exception 'Only the Big Boss approves or declines what gets built in Raptor.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists change_request_boss_decides on public.change_requests;
+create trigger change_request_boss_decides before update of status, build_requested_at on public.change_requests
+  for each row execute function public.change_request_boss_decides();
+
+set local role service_role;
+update public.profiles
+   set grants = array_replace(grants, 'boss', 'raptor.boss'),
+       revokes = array_replace(revokes, 'boss', 'raptor.boss')
+ where 'boss' = any(coalesce(grants, array[]::text[])) or 'boss' = any(coalesce(revokes, array[]::text[]));
+reset role;

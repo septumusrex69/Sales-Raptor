@@ -18,7 +18,7 @@ import { needsDeviceCode } from '../../lib/loginCode'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
-import { hasFinanceAccess } from '../../lib/capabilities.ts'
+import { can, hasFinanceAccess } from '../../lib/capabilities.ts'
 import { useAppStore } from '../../store/AppStore'
 import { byDepartment, departmentOf, matchesPerson, teamKindForRole, teamsForRole } from '../../lib/departments'
 import { groupByStoredDepartment, placeInDepartment, placeInTeam, sortDepartments, teamsIn } from '../../lib/orgStructure'
@@ -620,7 +620,12 @@ function UsersTab() {
                     too while testing, removed at go-live). One role; this is its finance access, said by name.
                     A plain Administrator is one without.
                   */}
-                  {u.role === 'Administrator' && hasFinanceAccess(u) && (
+                  {/* S15: ABOVE THE GENERAL MANAGER. Stephan, asked what "Big boss" meant: "above admin". */}
+                  {can(u, 'raptor.boss') && (
+                    <span className="ml-1.5 rounded bg-navy-900 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                      title="Decides what gets built in Raptor. Only a Big Boss can make somebody else one." data-testid="big-boss">Big Boss</span>
+                  )}
+                  {u.role === 'Administrator' && hasFinanceAccess(u) && !can(u, 'raptor.boss') && (
                     <span className="ml-1.5 rounded bg-gold-100 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--c-gold-deep)]"
                       title="Administrator with finance access: Trust, Business, pay and approving payments" data-testid="general-manager">General Manager</span>
                   )}

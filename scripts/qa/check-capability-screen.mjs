@@ -77,7 +77,10 @@ ok('...rather than with a bare comparison', !/current_user_role\(\) <> /.test(gu
 /* S14: THE ONE EXCEPTION, the finance block, raises -- and only when a permission value actually
    CHANGES (is distinct from), so the ordinary self-edit above, which sends the same values back, still
    passes. A silent revert there would tell an Administrator without finance it had saved. */
+/* S15: AND THE BIG BOSS BLOCK, which raises for the same reason -- a level somebody tried to give themselves
+   must not read as saved. Taken out too, so what is left is the silent part. */
 const outsideFinance = guard.replace(/-- S14: AN ADMINISTRATOR WITHOUT FINANCE[\s\S]*?\n  end if;\n  return new;/, '')
+  .replace(/-- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS[\s\S]*?\n  end if;\n/, '')
 ok('...silently, so an ordinary self-edit still works', !/raise exception/.test(outsideFinance)
   && /new\.id = auth\.uid\(\) and \(new\.role is distinct from old\.role/.test(guard))
 /* AND IT IS ACTUALLY ATTACHED. A function nothing fires is a comment. */
@@ -167,7 +170,9 @@ check('the ones marked as enforced are the ones the database really checks',
     'people.leave',
     /* 23 Oct: may_load_accounts() asks for it, and the insert policies on handovers, handover_drafts,
        handover_draft_rows and debtor_accounts ask that. */
-    'handover.upload'].sort())
+    'handover.upload',
+    /* S15: change_request_boss_decides and the profile guard ask for it (Big Boss). */
+    'raptor.boss'].sort())
 /*
  * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
  *
@@ -188,7 +193,7 @@ for (const c of CAPABILITY_ORDER.filter((x) => CAPABILITIES[x].inDatabase)) {
 
 /* A CAPABILITY IN NO GROUP IS DRAWN NOWHERE. The screen builds its blocks from the group on each
    entry, so an entry with a group nothing renders is a permission that silently cannot be given. */
-const GROUPS = ['Money', 'The book', 'Clients and disputes', 'The library']
+const GROUPS = ['Money', 'The book', 'Clients and disputes', 'The library', 'Raptor itself']
 for (const c of CAPABILITY_ORDER) {
   ok(`${c} is in a group the screen draws`, GROUPS.includes(CAPABILITIES[c].group))
 }

@@ -16,7 +16,9 @@ import { PROFILE, TEAM } from './fixtures.mjs'
 
 const t = makeRunner('change-requests')
 const TESTER = { ...PROFILE, id: 'u-ali', name: 'Alianna Botha', email: 'a@x.co.za', role: 'Pre-legal Agent' }
-const ADMIN = { ...PROFILE, id: 'u-stephan', name: 'Stephan', email: 's@x.co.za', role: 'Administrator' }
+/* THE BIG BOSS (S15): Stephan holds raptor.boss, which is what approving and declining ask. */
+const ADMIN = { ...PROFILE, id: 'u-stephan', name: 'Stephan', email: 's@x.co.za', role: 'Administrator', grants: ['raptor.boss'] }
+const OTHER_ADMIN = { ...PROFILE, id: 'u-camille', name: 'Camille', email: 'c@x.co.za', role: 'Administrator' }
 const NONE = { tested_ok: null, tested_note: null, tested_at: null, tested_by: null, assigned_to: null,
   review_title: null, review_verdict: null, review_size: null, review_summary: null, review_questions: [], reviewed_at: null,
   build_requested_at: null, build_requested_by: null }
@@ -228,7 +230,21 @@ try {
     JSON.stringify(writes.find((w) => w.table === 'edit')?.body), JSON.stringify({ p_number: 7, p_description: 'Diary: make broken promises red, please' }))
   await page.context().close()
 
-  /* 3. An Administrator works a ticket from the panel. */
+  /* 2b. ANOTHER ADMINISTRATOR IS NOT THE BIG BOSS (Stephan, S15: "I am the only person that can approve a
+     suggestion for building Raptor"). They may ask and note, never approve, decline or ask Claude. */
+  {
+    const { page: op } = await signedInPage(browser, OTHER_ADMIN, handlers(OTHER_ADMIN, []), [], { now: '2026-10-26T10:00:00+02:00' })
+    await open(op, '/requests?r=7')
+    const od = op.getByTestId('request-panel')
+    await od.getByTestId('request-actions').waitFor({ timeout: 20000 })
+    t.check('another Administrator is offered no approve, decline or build',
+      await od.locator('[data-testid="request-approve-build"], [data-testid="request-approve"], [data-testid="request-decline"], [data-testid="request-build"]').count(), 0)
+    t.ok('...and is told who decides', /Only the Big Boss approves what gets built/.test(await od.getByTestId('request-actions').innerText()))
+    t.ok('...but can still ask the person who sent it', await od.getByTestId('request-ask').isVisible())
+    await op.context().close()
+  }
+
+  /* 3. The Big Boss works a ticket from the panel. */
   const adminWrites = []
   const { page: ap } = await signedInPage(browser, ADMIN, handlers(ADMIN, adminWrites), [], { now: '2026-10-26T10:00:00+02:00' })
   await open(ap, '/requests?r=7')

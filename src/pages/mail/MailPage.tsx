@@ -1235,7 +1235,11 @@ export function MailPage() {
             */}
             {checkedAt && (
               <span className="hidden sm:inline shrink-0 text-xs text-slate-400">
-                Checked {agoLabel(checkedAt)}
+                {/* ON THE REAL CLOCK (S15). Stephan: "my thing says checked 14 days ago". The sync is stamped
+                    on the real clock and agoLabel measures from the firm's (staging) day by default, so on
+                    staging set to 11 Nov a check made a minute ago read as fourteen days -- the bell's old
+                    fault (notificationGroups). Mail arrives in real time; how long ago it was read is too. */}
+                Checked {agoLabel(checkedAt, new Date())}
               </span>
             )}
             <button onClick={() => void syncMine()} disabled={syncing}
