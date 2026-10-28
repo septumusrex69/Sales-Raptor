@@ -9,8 +9,9 @@ import { can } from '../../../src/lib/capabilities.js'
  *
  * Vercel's timer calls it at 07:13 Johannesburg time (vercel.json) and proves itself with CRON_SECRET, as the
  * other timed routes do; somebody holding marketing.send may also press it, to see what is due. What it does is
- * marketingDailyTick in api/_lib/marketing.ts -- see the note there: until Ryno's sending code lands it reports
- * what is due and sends nothing.
+ * marketingDailyTick in api/_lib/marketing.ts: it queues each follow-up that is due (the five-minute mail sweep
+ * then sends it, as it sends any campaign) and sends each results email that is due. What could not go is
+ * logged with why, and stays due for the next morning.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = adminClient()
@@ -37,7 +38,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const result = await marketingDailyTick(admin, today)
     console.log(`[marketing-daily] ${today}: ${result.stepsDue.length} follow-up(s) due, ${result.resultsDue.length} results email(s) due, `
-      + `${result.sent.steps + result.sent.results} sent`)
+      + `${result.sent.steps} follow-up(s) queued, ${result.sent.results} results email(s) sent`
+      + (result.problems.length ? `; not sent: ${result.problems.join(' | ')}` : ''))
     res.status(200).json({ today, ...result })
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) })

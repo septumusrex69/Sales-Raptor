@@ -3,6 +3,59 @@
 > **Every session, commit, handoff, brief and reply says "Raptor · Handoff N"** (CLAUDE.md, top). This file is
 > **Raptor Handoff 14**, written by S14, which started from Raptor Handoff 13. The next session is S15 and writes Handoff 15.
 
+## S13 · CAMPAIGNS -- RYNO'S SESSION (28 Oct, branch `claude/s13-reino-campaigns`)
+
+Ryno's session on News & campaigns, from the S13 brief as rewritten on 28 Oct (Raptor · Handover 14). **A pull
+request into `claude/sales-raptor-review-p1pzx2`, not merged yet.** All for the firm's own clients (about 2 800 and
+their contacts); introductions and prospect campaigns are unchanged.
+
+**Shipped on the branch:**
+- **Send from** on every News campaign: BF News (default, every old campaign), each client's liaison (reports@ for a
+  client without one), reports@, or an extra address. The rule is `senderForRecipient` / `clientLiaison` in
+  `src/lib/marketing.ts`: the client's `account_owner_id` only when Active and Liaison / Liaison Manager; a
+  sub-account and its contacts follow the PARENT; `liaison_needed` or a liaison whose own address is not on
+  bredellferreira.co.za -> reports@; **a lead always goes from news@**. Decided when the list is drawn and written
+  per row into `marketing_sends.sender` at queue time; the drain sends each row from it, `RESEND_FIRM_API_KEY` for
+  the firm's domain and `RESEND_API_KEY` for bfnews.co.za. Reply-To is the sender's own address. The preview
+  returns the split from the same `resolveOnServer` pass ("From Nicole Loder 42 · Ryno 31 · reports@ 9 · news@
+  (leads) 12") and Send's confirm repeats it. The 22 Oct lock still refuses MARKETING_FROM and the prospect domain
+  on bredellferreira.co.za; `firmSender` is the only door. In liaison mode the client's timeline line is credited
+  to the liaison.
+- **Without `RESEND_FIRM_API_KEY`** the liaisons and reports@ are not offered ("Sending from the liaisons is not set
+  up yet: RESEND_FIRM_API_KEY must be set in Vercel"), the queue refuses them, and the drain does NOT claim such a
+  campaign's rows (a claim counts an attempt; three sweeps would have given up on them).
+- **The screens, split out of the one 780-line NewsPage:** tabs Campaigns | Workflows | Senders & results. The editor
+  is five steps, Who -> Write -> Check -> Send -> Results; Check shows the email as an inbox lists it and opens it,
+  at phone / iPad / desktop width. The list filters by sender, sums what went from it, and shows the open rate as a
+  bar. Results refresh every 15 s while sending, add "Not opened", and split by sender; clicks on the firm's domain
+  read "not counted" (tracking there is opens on, clicks off -- Stephan, 28 Oct). Nothing claims "deleted unread":
+  no mail system reports it.
+- **Workflows, on the tables built 28 Oct:** a News campaign and its follow-ups, each its own campaign, "wait N
+  days, then send to" everybody it reached / did not open / did not click / opened / clicked. `marketingDailyTick`
+  now SENDS: `queueWorkflowStep` stamps `run_at` on condition before queueing (un-stamps if the insert fails), reads
+  the audience off the previous email's sends (only `sent`, never an unsubscriber), gives each row its sender, and
+  finishes the workflow after its last step or when a step reaches nobody. The five-minute sweep drains them.
+- **Results email:** `sendResultsEmail` from news@ with the news key, stamped `results_sent_at` before it goes and
+  un-stamped if Resend refuses. Who gets it and after how long: Senders & results.
+- **Extra addresses** (`marketing_senders`): added and switched off on Senders & results; only bfnews.co.za and
+  bredellferreira.co.za, the same two the table's check holds. No sign-in: Resend sends from any address on a
+  verified domain.
+
+**Waiting:**
+1. **Migration `campaign_sender_address`** (`docs/briefs/S13-migration-campaign-sender-address.sql`): NOT applied
+   anywhere. The S13 session had no database tool. Until it is applied, "Another address" is simply not offered
+   (the screens read campaigns with `select('*')` and look for the column); everything else works. Apply to
+   staging, append to `schema.sql`, check the md5.
+2. **`RESEND_FIRM_API_KEY`** in Vercel (Stephan). Until then only BF News sends.
+3. **Test on the preview** with Stephan's Test Client: once from BF News, each liaison, reports@; check From,
+   Reply-To, the unsubscribe link and the results split. Then a two-step workflow with a 1-day wait.
+
+**Checks:** new `check-campaign-senders` (68) and `e2e/campaign-senders` (36). Each rule was broken once and seen to
+fail (inactive liaison, sub-account, lead's sender, the domain lock, claiming without the key, the key per domain,
+the timeline credit, bounces counted as delivered, unsubscribers followed up, the queue's sender). Five source checks
+re-pointed from NewsPage to the files it became (`check-marketing`, `-prospects`, `check-client-news`,
+`check-news-replies`); `news-campaigns` and `news-prospects` step through the editor.
+
 ## S14 -- WHERE IT STANDS, AND WHERE S15 STARTS (Raptor · Handoff 14, 28 Oct)
 
 **S14 · Loose Ends** -- branch `claude/s14-loose-ends`, every commit also fast-forwarded onto the preview

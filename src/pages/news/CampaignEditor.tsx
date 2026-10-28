@@ -251,7 +251,7 @@ export function CampaignEditor({ id }: { id: string }) {
   ].filter((x): x is string => !!x)
   const canSend = !locked && !isFollowUp && blockers.length === 0
   const done: Record<Step, boolean> = {
-    who: true, write: !!draft.subject.trim() && !!draft.body.trim() && unknown.length === 0, check: !!preview, send: locked, results: false,
+    who: locked, write: locked || (!!draft.subject.trim() && !!draft.body.trim() && unknown.length === 0), check: locked || !!preview, send: locked, results: false,
   }
   const at = STEPS.findIndex((s) => s.key === step)
   const go = (s: Step) => { void save(); setStep(s) }
@@ -291,8 +291,8 @@ export function CampaignEditor({ id }: { id: string }) {
               aria-current={step === s.key ? 'step' : undefined}
               className={`flex-1 min-w-[6.5rem] flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${step === s.key
                 ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-              <span className={`grid place-items-center h-5 w-5 rounded-full text-[11px] ${step === s.key ? 'bg-white/20' : done[s.key] && s.key !== 'who' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                {done[s.key] && s.key !== 'who' && step !== s.key ? <Check size={12} /> : i + 1}
+              <span className={`grid place-items-center h-5 w-5 rounded-full text-[11px] ${step === s.key ? 'bg-white/20' : done[s.key] ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                {done[s.key] && step !== s.key ? <Check size={12} /> : i + 1}
               </span>
               {s.label}
             </button>

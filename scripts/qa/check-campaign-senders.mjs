@@ -208,7 +208,8 @@ const capture = (calls) => async (url, init) => {
   const s = (sender, state, extra = {}) => ({ sender, state, resend_id: state === 'queued' ? null : 'r', delivered_at: null, first_opened_at: null, first_clicked_at: null, unsubscribed_at: null, ...extra })
   const rows = [
     s('nicole@bredellferreira.co.za', 'sent', { delivered_at: 't', first_opened_at: 't' }),
-    s('nicole@bredellferreira.co.za', 'bounced'),
+    /* A late bounce: reported delivered first, then bounced -- not delivered. */
+    s('nicole@bredellferreira.co.za', 'bounced', { delivered_at: 't' }),
     s('reports@bredellferreira.co.za', 'sent', { delivered_at: 't', first_clicked_at: 't', first_opened_at: 't' }),
     s('reports@bredellferreira.co.za', 'sent', { delivered_at: 't', unsubscribed_at: 't' }),
     s(null, 'queued'), s(null, 'skipped'),
