@@ -237,18 +237,24 @@ export function nextAction(input: { stage: string; status: string }): string | n
  * leader has a question or needs clarity, there must be a button that refers it back to the clerk
  * and takes it off the team leader's desk -- "currently the clerk is not notified once there is a
  * question from the team leader ... so he will then not be aware and the query will not be
- * resolved."
+ * resolved." Tested, then widened: "can we have it on the call centre manager as well as client
+ * liaisons as well."
  *
- * ONLY WHILE IT IS AWAITING THE TEAM LEADER, and only to somebody who is not the clerk themselves.
+ * WHILE IT IS ON SOMEBODY ELSE'S DESK, and only to somebody who is not the clerk themselves. That is
+ * the team leader's stage, the liaison's stage, and -- for the Call Centre Manager, who is not a team
+ * leader and so holds a ticket at the `agent` stage (`stageForAssignee`) -- a ticket handed to the
+ * actor by name. Reading "mine" off `ownerId` rather than off the role keeps the rule to what is true
+ * of the ticket: whoever it was handed to may hand it back. The `client` stage is not anybody's desk.
  * Back is the `agent` stage with the raiser as owner -- the same two fields a hand-over writes, so
  * the board, the badge and the bell need nothing new to know about it. A closed ticket is finished.
  */
 export function canSendBack(
-  q: { stage: string; status: string; raisedBy: string | null },
+  q: { stage: string; status: string; raisedBy: string | null; ownerId?: string | null },
   actorId: string | null | undefined,
 ): boolean {
-  if (q.status === 'closed' || q.stage !== 'team_leader') return false
-  return !!q.raisedBy && q.raisedBy !== actorId
+  if (q.status === 'closed' || !q.raisedBy || q.raisedBy === actorId) return false
+  if (q.stage === 'team_leader' || q.stage === 'liaison') return true
+  return q.stage === 'agent' && !!actorId && q.ownerId === actorId
 }
 
 /** The question, as it is filed on the ticket's thread where the clerk will read it. */
