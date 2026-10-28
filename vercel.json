@@ -63,6 +63,10 @@
     {
       "path": "/api/workflow/balances",
       "schedule": "5 22 * * *"
+    },
+    {
+      "path": "/api/email/marketing-daily",
+      "schedule": "13 5 * * *"
     }
   ]
 }

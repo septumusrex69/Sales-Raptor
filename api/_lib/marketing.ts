@@ -695,3 +695,37 @@ export function testRecipient(name: string | null, email: string): Recipient {
     firstApproach: false, via: 'client',
   }
 }
+
+/*
+ * THE DAILY RUN FOR FOLLOW-UPS AND RESULTS EMAILS (S14, 28 Oct, for Ryno's campaign work).
+ *
+ * Ryno: "send a campaign, wait a set number of days, then automatically send the next email (for example only
+ * to people who didn't open it)" and "a day after a campaign ends, the results go automatically to the
+ * marketing team". The database decides WHAT is due (marketing_workflow_steps_due, marketing_results_due --
+ * migration marketing_workflows); this asks it every morning (vercel.json, /api/email/marketing-daily).
+ *
+ * THE SENDING IS RYNO'S TO WRITE, in his pull request: `sendWorkflowStep` (fill the step's campaign with the
+ * previous campaign's sends filtered by the step's audience, queue it, stamp run_at) and `sendResultsEmail`
+ * (the campaign's figures to the recipients, stamp results_sent_at). Until then this sends NOTHING and stamps
+ * NOTHING -- a due step stays due, so the first morning his code is live it picks up everything waiting rather
+ * than having been marked done unsent.
+ */
+export interface MarketingDailyResult {
+  stepsDue: { step_id: string; workflow_id: string; step_position: number; campaign_id: string; audience: string; previous_campaign_id: string }[]
+  resultsDue: { campaign_id: string; name: string; finished_at: string; recipients: string[] }[]
+  sent: { steps: number; results: number }
+}
+
+export async function marketingDailyTick(admin: SupabaseClient, today: string): Promise<MarketingDailyResult> {
+  const [steps, results] = await Promise.all([
+    admin.rpc('marketing_workflow_steps_due', { p_today: today }),
+    admin.rpc('marketing_results_due'),
+  ])
+  if (steps.error) throw new Error(steps.error.message)
+  if (results.error) throw new Error(results.error.message)
+  return {
+    stepsDue: (steps.data ?? []) as MarketingDailyResult['stepsDue'],
+    resultsDue: (results.data ?? []) as MarketingDailyResult['resultsDue'],
+    sent: { steps: 0, results: 0 },
+  }
+}

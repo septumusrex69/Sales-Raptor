@@ -52060,3 +52060,123 @@ begin
 end $$;
 create trigger account_query_stages_go_with_ticket after delete on public.account_queries
   for each row execute function public.account_query_stages_go_with_ticket();
+
+-- S14 (28 Oct, Raptor H13): WHAT RYNO'S CAMPAIGN WORK NEEDS FROM THE DATABASE. Ryno (S13 brief), 28 Oct, for our own
+-- clients (about 2 800 and their contacts): extra sender addresses; follow-up workflows ("send a campaign, wait a
+-- set number of days, then automatically send the next email, for example only to people who didn't open it"); and
+-- a results email "a day after a campaign ends ... automatically to the marketing team". His brief bars him from the
+-- database, so the administrator's session builds the tables and the daily timer; the screens and the sending are
+-- his (api/_lib/marketing.ts, src/pages/news/).
+--
+-- A FOLLOW-UP'S AUDIENCE IS READ OFF THE PREVIOUS STEP'S SENDS, not kept per client: marketing_sends already records
+-- delivered, bounced, first_opened_at, first_clicked_at and unsubscribed_at for every address, so "who didn't open
+-- step 1" is a question that table answers. Nothing to keep in step, nothing to drift.
+
+-- EXTRA SENDERS. Only the two domains Resend can send from; switched off rather than deleted, so a campaign that
+-- went from one keeps saying who it came from.
+create table if not exists public.marketing_senders (
+  id uuid primary key default gen_random_uuid(),
+  address text not null unique check (address = lower(btrim(address))
+    and address ~ '^[a-z0-9._%+-]+@(bredellferreira\.co\.za|bfnews\.co\.za)$'),
+  display_name text not null check (length(btrim(display_name)) > 0),
+  active boolean not null default true,
+  created_by uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at timestamptz not null default public.raptor_now()
+);
+
+create table if not exists public.marketing_workflows (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (length(btrim(name)) > 0),
+  -- The campaign it starts with; its sends are step 1's audience for step 2.
+  first_campaign_id uuid not null references public.marketing_campaigns(id),
+  status text not null default 'draft' check (status in ('draft', 'active', 'paused', 'finished')),
+  created_by uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at timestamptz not null default public.raptor_now(),
+  updated_at timestamptz not null default public.raptor_now()
+);
+
+-- One follow-up each: wait_days after the PREVIOUS email finished going out, send campaign_id to the audience rule.
+create table if not exists public.marketing_workflow_steps (
+  id uuid primary key default gen_random_uuid(),
+  workflow_id uuid not null references public.marketing_workflows(id) on delete cascade,
+  position integer not null check (position >= 1),
+  campaign_id uuid not null references public.marketing_campaigns(id),
+  wait_days integer not null check (wait_days between 1 and 90),
+  audience text not null default 'not_opened'
+    check (audience in ('everyone', 'not_opened', 'not_clicked', 'opened', 'clicked')),
+  -- Stamped by the daily run when it sends this step; never sent twice.
+  run_at timestamptz,
+  unique (workflow_id, position)
+);
+
+-- WHO GETS THE RESULTS EMAIL, AND WHEN. One row.
+create table if not exists public.marketing_results_settings (
+  id boolean primary key default true check (id),
+  enabled boolean not null default true,
+  recipients text[] not null default array[]::text[],
+  after_hours integer not null default 24 check (after_hours between 1 and 168),
+  updated_by uuid references public.profiles(id) on delete set null,
+  updated_at timestamptz not null default public.raptor_now()
+);
+insert into public.marketing_results_settings (id) values (true) on conflict (id) do nothing;
+alter table public.marketing_campaigns add column if not exists results_sent_at timestamptz;
+-- Campaigns that went out before this existed are not reported all at once on the first morning.
+update public.marketing_campaigns set results_sent_at = finished_at where status = 'sent' and results_sent_at is null;
+
+-- EVERYBODY WHO MAY SEND CAMPAIGNS MAY RUN THESE (marketing.send), like the campaigns themselves.
+alter table public.marketing_senders enable row level security;
+alter table public.marketing_workflows enable row level security;
+alter table public.marketing_workflow_steps enable row level security;
+alter table public.marketing_results_settings enable row level security;
+create policy marketing_senders_select on public.marketing_senders for select to authenticated using (public.has_capability('marketing.send'));
+create policy marketing_senders_insert on public.marketing_senders for insert to authenticated with check (public.has_capability('marketing.send'));
+create policy marketing_senders_update on public.marketing_senders for update to authenticated
+  using (public.has_capability('marketing.send')) with check (public.has_capability('marketing.send'));
+create policy marketing_workflows_select on public.marketing_workflows for select to authenticated using (public.has_capability('marketing.send'));
+create policy marketing_workflows_insert on public.marketing_workflows for insert to authenticated with check (public.has_capability('marketing.send'));
+create policy marketing_workflows_update on public.marketing_workflows for update to authenticated
+  using (public.has_capability('marketing.send')) with check (public.has_capability('marketing.send'));
+create policy marketing_workflow_steps_select on public.marketing_workflow_steps for select to authenticated using (public.has_capability('marketing.send'));
+-- A step may be added, changed or taken away only while it has not run.
+create policy marketing_workflow_steps_insert on public.marketing_workflow_steps for insert to authenticated
+  with check (public.has_capability('marketing.send') and run_at is null);
+create policy marketing_workflow_steps_update on public.marketing_workflow_steps for update to authenticated
+  using (public.has_capability('marketing.send') and run_at is null) with check (public.has_capability('marketing.send') and run_at is null);
+create policy marketing_workflow_steps_delete on public.marketing_workflow_steps for delete to authenticated
+  using (public.has_capability('marketing.send') and run_at is null);
+create policy marketing_results_settings_select on public.marketing_results_settings for select to authenticated using (public.has_capability('marketing.send'));
+create policy marketing_results_settings_update on public.marketing_results_settings for update to authenticated
+  using (public.has_capability('marketing.send')) with check (public.has_capability('marketing.send'));
+
+-- WHAT THE DAILY RUN SENDS TODAY. A step is due when its workflow is active, it has not run, the email before it
+-- (step position-1, or the workflow's first campaign) has finished going out, and wait_days have passed since.
+create or replace function public.marketing_workflow_steps_due(p_today date default public.raptor_today())
+returns table (step_id uuid, workflow_id uuid, step_position integer, campaign_id uuid, audience text, previous_campaign_id uuid)
+language sql stable security invoker set search_path to 'public' as $$
+  select s.id, s.workflow_id, s.position, s.campaign_id, s.audience, prev.campaign_id
+    from public.marketing_workflow_steps s
+    join public.marketing_workflows w on w.id = s.workflow_id and w.status = 'active'
+    cross join lateral (
+      select coalesce(
+        (select p.campaign_id from public.marketing_workflow_steps p where p.workflow_id = s.workflow_id and p.position = s.position - 1),
+        case when s.position = 1 then w.first_campaign_id end) as campaign_id
+    ) prev
+    join public.marketing_campaigns pc on pc.id = prev.campaign_id
+   where s.run_at is null
+     and pc.status = 'sent' and pc.finished_at is not null
+     and (pc.finished_at at time zone 'Africa/Johannesburg')::date + s.wait_days <= p_today
+   order by s.workflow_id, s.position
+$$;
+
+-- WHICH CAMPAIGNS ARE DUE THEIR RESULTS EMAIL: finished, not yet reported, after_hours gone by.
+create or replace function public.marketing_results_due(p_now timestamptz default public.raptor_now())
+returns table (campaign_id uuid, name text, finished_at timestamptz, recipients text[])
+language sql stable security invoker set search_path to 'public' as $$
+  select c.id, c.name, c.finished_at, st.recipients
+    from public.marketing_campaigns c
+    cross join public.marketing_results_settings st
+   where st.enabled and cardinality(st.recipients) > 0
+     and c.status = 'sent' and c.finished_at is not null and c.results_sent_at is null
+     and c.finished_at + make_interval(hours => st.after_hours) <= p_now
+   order by c.finished_at
+$$;

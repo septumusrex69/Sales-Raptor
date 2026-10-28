@@ -15,6 +15,7 @@ import marketing from '../_lib/email/marketing.js'
 import unsubscribe from '../_lib/email/unsubscribe.js'
 import resendWebhook from '../_lib/email/resendWebhook.js'
 import optIn from '../_lib/email/optIn.js'
+import marketingDaily from '../_lib/email/marketingDaily.js'
 
 /**
  * One serverless function for every /api/email/* route.
@@ -62,6 +63,9 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* ANONYMOUS, like unsubscribe: "Yes, keep me informed" in an introduction email (S10, 22 Oct).
      The signed token names the send; pressing it records the lead's consent. */
   'opt-in': optIn,
+  /* THE MORNING RUN FOR CAMPAIGN FOLLOW-UPS AND RESULTS EMAILS (S14): Vercel's timer, or somebody with
+     marketing.send. Here because it is a campaign route, and api/ has functions to spare but no need for one. */
+  'marketing-daily': marketingDaily,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
