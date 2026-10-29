@@ -192,7 +192,12 @@ export async function stubSupabase(page, handlers, seen) {
  * the day before, for every reader west of Greenwich. Running the container under TZ=... does
  * not reach the page; this does.
  */
-export async function signedInPage(browser, profile, handlers, seen, { now = null, timezone = null } = {}) {
+/*
+ * `skin`, when a test is ABOUT one skin's look (performance.mjs measures the Raptor hero's line, face and size):
+ * the browser remembers that skin, exactly as a person's would. Without it a page wears the firm's default, which
+ * moved from Raptor to Africa on 29 Oct (S16) -- and a test that relied on the default stopped meaning what it said.
+ */
+export async function signedInPage(browser, profile, handlers, seen, { now = null, timezone = null, skin = null } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     ...(timezone ? { timezoneId: timezone } : {}),
@@ -208,6 +213,7 @@ export async function signedInPage(browser, profile, handlers, seen, { now = nul
     ([key, session]) => { try { window.localStorage.setItem(key, session) } catch { /* ignore */ } },
     [`sb-${PROJECT_REF}-auth-token`, JSON.stringify(fakeSession(profile.id, profile.email, nowMs))],
   )
+  if (skin) await context.addInitScript((id) => { try { window.localStorage.setItem('crm.theme', id) } catch { /* ignore */ } }, skin)
   return { context, page }
 }
 

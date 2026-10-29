@@ -154,7 +154,7 @@ try {
 
   /* ---------- the promise the screen was agreed under ---------- */
   t.ok('no commission on the screen', !/commission/i.test(text.replace(/Commission and Annexure B income are deliberately not on[\s\S]*?audience\./, '')))
-  t.ok('the hero is still the company hero', /the beginning/i.test(text))
+  t.ok('the hero is still the company hero', /our roots/i.test(text))
 
   await page.setViewportSize({ width: 1300, height: 900 })
   await t.shot(page, 'company-dashboard')

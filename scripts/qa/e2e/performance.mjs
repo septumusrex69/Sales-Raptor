@@ -229,7 +229,8 @@ let browser
 try {
   server = startServer()
   browser = await chromium.launch()
-  const { page } = await signedInPage(browser, PROFILE, handlers, seen)
+  /* On the Raptor skin, deliberately: the hero checks below measure that skin's line, face and size. */
+  const { page } = await signedInPage(browser, PROFILE, handlers, seen, { skin: 'raptor' })
 
   const errors = []
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
@@ -450,7 +451,7 @@ try {
    * capitals — which is the assertion worth making. Reading textContent instead would return
    * the sentence-case source and pass whether the transform applied or not.
    */
-  /* THE DEFAULT SKIN'S line -- each skin carries its own now, and the browser is on raptor. */
+  /* THE RAPTOR SKIN'S line -- each skin carries its own, and this browser is put on raptor above (signedInPage skin). */
   t.check('the title is the firm’s own line',
     heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
   /*
