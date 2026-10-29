@@ -20,7 +20,7 @@ ok('To asks for focus while it is empty', /autoFocus=\{!address\}/.test(compose)
 ok('the message box asks for focus only once somebody is addressed', /autoFocus=\{!!initialSubject && !!address\}/.test(compose))
 ok('no other autofocus on the message box', !/autoFocus=\{!!initialSubject\} \/>/.test(compose))
 ok('a reply with nobody on it is not titled "Reply to"', /initialSubject && \(to \?\? address\) \? `Reply to/.test(compose))
-ok('the mail page titles a forward Forward', /<ComposeEmailModal\s+title="Forward"\s+initialSubject=\{forwardSubject/.test(mail))
+ok('the mail page titles a forward Forward', /<ComposeEmailModal\s+(forwardOf=\{forwarding\.mail\.id\}\s+)?title="Forward"\s+initialSubject=\{forwardSubject/.test(mail))
 
 if (failures.length) {
   console.error(`check-compose-focus: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`)

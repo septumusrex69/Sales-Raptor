@@ -201,7 +201,7 @@ ok('...and the button under it', /appendHtml: signingButtonHtml\(url\)/.test(pan
 ok('the composer appends it as markup', /emailBodyHtml\(body\) \+ \(appendHtml \?\? ''\)/.test(composer))
 /* AFTER THE PROSE AND BEFORE THE QUOTED ORIGINAL: the button is about the words above it. */
 ok('...after what was typed and before any forward',
-  /emailBodyHtml\(body\) \+ \(appendHtml \?\? ''\) \+ \(quotedHtml \?\? ''\)/.test(composer))
+  /emailBodyHtml\(body\) \+ \(appendHtml \?\? ''\) \+ \(quotedHtml \? \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(composer))
 /* AND SAID ON THE SCREEN, so nobody has to send one to find out what goes out under their words. */
 ok('the box says the button is included', /appendHtml && appendNote/.test(composer))
 /* THE ACCOUNT PAGE OPENS ITS OWN COMPOSER with it -- not a second send box inside the panel,
