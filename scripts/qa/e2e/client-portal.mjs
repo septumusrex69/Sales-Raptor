@@ -140,6 +140,19 @@ try {
   await page.getByTestId('portal-new-password').fill('tafelberg sunrise')
   await page.getByTestId('portal-new-password-again').fill('tafelberg sunrise')
   await page.getByTestId('portal-save-password').click()
+  /* S16, Stephan: "make it linger a little bit longer ... our logo ... some sort of epic cool animation ...
+     PlayStation 2 vibes." The first opening in a tab is the full one, and it lingers, then the portal. */
+  await page.getByTestId('portal-splash').waitFor({ timeout: 5000 })
+  t.ok('the portal opens on the full opening, the logo and the drawn ring', await page.locator('[data-splash="full"]').count() === 1
+    && await page.locator('.portal-splash-ring').count() === 1)
+  await page.waitForTimeout(1700)
+  await t.shot(page, 'client-portal-opening-1')
+  t.ok('...and lingers: at 1.7 s it still covers the portal', await page.getByTestId('portal-splash').isVisible())
+  await page.waitForTimeout(1100)
+  await t.shot(page, 'client-portal-opening-2')
+  await page.getByTestId('portal-dashboard').waitFor({ timeout: 8000 })
+  await page.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 8000 })
+  t.ok('...then dissolves into the dashboard', await page.getByTestId('portal-dashboard').isVisible())
   /* S15: the DASHBOARD opens first, with the sidebar in Stephan's order. */
   await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
   const nav = (await page.getByTestId('portal-sidebar').innerText()).replace(/\s+/g, ' ')
@@ -340,7 +353,10 @@ try {
   await page.getByTestId('portal-password').fill('tafelberg sunrise')
   await page.getByTestId('portal-remember').check()
   await page.getByTestId('portal-sign-in-button').click()
+  await page.getByTestId('portal-splash').waitFor({ timeout: 5000 })
+  t.ok('a second opening in the same tab is the short one', await page.locator('[data-splash="short"]').count() === 1)
   await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
+  await page.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 5000 })
   t.ok('Keep me signed in is asked for, and the browser keeps the session', calls.filter((c) => c.action === 'sign-in').pop()?.body?.remember === true
     && await page.evaluate(() => Object.keys(localStorage).some((k) => /portal/i.test(k))))
   t.ok('the next visit signs in with the password, and no code is emailed', calls.filter((c) => c.action === 'request-code').length === codesBefore)

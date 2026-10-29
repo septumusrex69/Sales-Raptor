@@ -46,3 +46,90 @@ html .portal-brand .card {
   box-shadow: 0 1px 2px rgba(17, 30, 45, 0.04);
   backdrop-filter: none;
 }
+
+/*
+ * THE OPENING (S16, PortalSplash.tsx). Stephan: "some sort of epic cool animation ... PlayStation 2 vibes."
+ * One timeline, in step with the sound: lights from 0 s, the ring draws 0.3-1.4 s, the flare and the monogram on
+ * the chord at 1.4 s, the wordmark opens 1.7-2.5 s with a light across it, "Client portal" at 2.4 s. The short
+ * version (a second visit in the tab) is the finished logo fading up.
+ */
+.portal-splash {
+  position: fixed; inset: 0; z-index: 60; overflow: hidden; cursor: default;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 55%, #1a2d44 0%, #111e2d 45%, #070d15 100%);
+  transition: opacity 0.55s ease;
+}
+.portal-splash.is-leaving { opacity: 0; }
+.portal-splash-glow {
+  position: absolute; left: 50%; top: 50%; width: 70vmax; height: 70vmax; transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(70, 96, 123, 0.35) 0%, rgba(17, 30, 45, 0) 60%);
+  animation: ps-breathe 4s ease-in-out infinite;
+}
+.portal-splash-light {
+  position: absolute; border-radius: 9999px; background: #cfe0ef; opacity: 0;
+  box-shadow: 0 0 8px rgba(151, 180, 204, 0.9);
+  animation-name: ps-drift; animation-iteration-count: infinite; animation-timing-function: ease-in-out;
+}
+.portal-splash-pillar {
+  position: absolute; bottom: 0; width: 2.2vw; min-width: 10px; transform-origin: bottom; transform: scaleY(0);
+  background: linear-gradient(to top, rgba(151, 180, 204, 0.22), rgba(151, 180, 204, 0));
+  filter: blur(2px);
+  animation: ps-pillar 2.4s cubic-bezier(.2, .7, .2, 1) forwards;
+}
+.portal-splash-flare {
+  position: absolute; left: 50%; top: 46%; width: 10px; height: 10px; border-radius: 9999px; transform: translate(-50%, -50%) scale(0);
+  background: radial-gradient(circle, rgba(255, 244, 220, 0.95) 0%, rgba(198, 159, 84, 0.55) 30%, rgba(198, 159, 84, 0) 70%);
+  animation: ps-flare 1.4s ease-out 1.35s forwards;
+}
+.portal-splash-mark { position: relative; width: 132px; height: 132px; }
+.portal-splash-ring { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); transform: rotate(-90deg); }
+.portal-splash-ring circle {
+  stroke-dasharray: 340; stroke-dashoffset: 340;
+  filter: drop-shadow(0 0 6px rgba(198, 159, 84, 0.8));
+  animation: ps-draw 1.1s cubic-bezier(.6, 0, .3, 1) 0.3s forwards, ps-fade-out 0.6s ease 1.5s forwards;
+}
+.portal-splash-monogram { width: 100%; height: 100%; }
+.is-epic .portal-splash-monogram {
+  opacity: 0; transform: scale(0.82); filter: blur(10px) brightness(2.2);
+  animation: ps-monogram 1.1s cubic-bezier(.2, .8, .2, 1) 1.38s forwards;
+}
+.portal-splash-word { position: relative; margin-top: 30px; overflow: hidden; }
+.is-epic .portal-splash-word img {
+  clip-path: inset(0 50% 0 50%); opacity: 0;
+  animation: ps-open 0.9s cubic-bezier(.3, .7, .2, 1) 1.7s forwards;
+}
+.portal-splash-sweep {
+  position: absolute; top: -20%; bottom: -20%; width: 34%; left: -40%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0) 0%, rgba(255, 236, 196, 0.85) 50%, rgba(255, 255, 255, 0) 100%);
+  mix-blend-mode: screen;
+  animation: ps-sweep 0.9s ease-in-out 2.45s forwards;
+}
+.portal-splash-label {
+  margin-top: 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.42em; text-transform: uppercase; color: #C69F54;
+}
+.is-epic .portal-splash-label { opacity: 0; animation: ps-rise 0.8s ease 2.4s forwards; }
+.is-short .portal-splash-mark, .is-short .portal-splash-word, .is-short .portal-splash-label { animation: ps-rise 0.5s ease both; }
+
+@keyframes ps-breathe { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+@keyframes ps-drift {
+  0% { opacity: 0; transform: translateY(0); }
+  30% { opacity: 0.85; }
+  100% { opacity: 0; transform: translateY(-60px); }
+}
+@keyframes ps-pillar { 0% { transform: scaleY(0); opacity: 0; } 60% { opacity: 1; } 100% { transform: scaleY(1); opacity: 0.8; } }
+@keyframes ps-draw { to { stroke-dashoffset: 0; } }
+@keyframes ps-fade-out { to { opacity: 0; } }
+@keyframes ps-flare {
+  0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
+  35% { opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(90); opacity: 0; }
+}
+@keyframes ps-monogram { to { opacity: 1; transform: scale(1); filter: blur(0) brightness(1); } }
+@keyframes ps-open { to { clip-path: inset(0 0 0 0); opacity: 1; } }
+@keyframes ps-sweep { to { left: 110%; } }
+@keyframes ps-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-splash *, .portal-splash { animation: none !important; transition: none !important; }
+  .portal-splash .portal-splash-monogram, .portal-splash .portal-splash-word img, .portal-splash .portal-splash-label { opacity: 1 !important; clip-path: none !important; filter: none !important; transform: none !important; }
+}

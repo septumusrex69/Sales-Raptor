@@ -14,6 +14,8 @@ import { PortalReports } from './PortalReports'
 import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
 import './portal.css'
+import { PortalSplash } from './PortalSplash'
+import { primeSplashAudio } from './portalSound'
 import '@fontsource-variable/raleway'
 import '@fontsource-variable/open-sans'
 
@@ -32,6 +34,7 @@ const NAVY = '#111E2D'
 export default function PortalPage() {
   const [token, setToken] = useState<string | null>(() => portalToken())
   const [me, setMe] = useState<PortalMe | null>(null)
+  const [opened, setOpened] = useState(false)
 
   const signedOut = useCallback(() => { savePortalToken(null); setToken(null); setMe(null) }, [])
 
@@ -42,15 +45,14 @@ export default function PortalPage() {
     return () => { live = false }
   }, [token, signedOut])
 
-  if (!token) return <SignIn onSignedIn={(t, remember) => { savePortalToken(t, remember); setToken(t) }} />
-  if (!me) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: NAVY }} data-testid="portal-page">
-        <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-5 opacity-80 animate-pulse" />
-      </div>
-    )
-  }
-  return <Signed token={token} me={me} onSignedOut={() => { portalSignOut(token).catch(() => {}); signedOut() }} onExpired={signedOut} />
+  if (!token) return <SignIn onSignedIn={(t, remember) => { savePortalToken(t, remember); setToken(t); setOpened(false) }} />
+  /* THE OPENING plays while the portal reads who this is, and a little longer (PortalSplash) -- ON TOP of the
+     portal once it is there, so its fade dissolves into the dashboard rather than into an empty page. */
+  /* One element in one place, so the opening is never remounted (and restarted) when the portal arrives. */
+  return <>
+    {!opened && <PortalSplash ready={!!me} onDone={() => setOpened(true)} />}
+    {me && <Signed token={token} me={me} onSignedOut={() => { portalSignOut(token).catch(() => {}); signedOut() }} onExpired={signedOut} />}
+  </>
 }
 
 /* ------------------------------------------------------------------ signing in */
@@ -106,10 +108,11 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
     setBusy(true); setError(null)
     try { await f() } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
   }
-  const signIn = (e: React.FormEvent) => { e.preventDefault(); run(async () => onSignedIn((await portalSignInWithPassword(email, password, remember)).token, remember)) }
+  const signIn = (e: React.FormEvent) => { e.preventDefault(); primeSplashAudio(); run(async () => onSignedIn((await portalSignInWithPassword(email, password, remember)).token, remember)) }
   const send = (e?: React.FormEvent) => { e?.preventDefault(); run(async () => { setSent((await requestPortalCode(email)).message); setStep('code') }) }
   const check = (e: React.FormEvent) => {
     e.preventDefault()
+    primeSplashAudio()
     run(async () => {
       /* Always asked for a password after a code: the code is the first visit or the reset. */
       const r = await verifyPortalCode(email, code, true, remember)
@@ -121,6 +124,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
     if (password !== again) { setError('The two passwords are not the same.'); return }
     const problem = portalPasswordProblem(password, email)
     if (problem) { setError(problem); return }
+    primeSplashAudio()
     run(async () => { await setPortalPassword(pending!, password); onSignedIn(pending!, remember) })
   }
   const go = (s: Step) => { setStep(s); setError(null); setCode(''); if (s !== 'set') setAgain('') }
