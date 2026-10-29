@@ -1161,8 +1161,12 @@ export async function releaseSync(admin: any, userId: string): Promise<void> {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export interface SentAppender {
-  /** File the message. A mailbox with no Sent folder does nothing and says so by returning false. */
-  append(rawMessage: string | Buffer): Promise<boolean>
+  /**
+   * File the message. A mailbox with no Sent folder does nothing and says so by returning null.
+   * WHERE IT WENT (S15): the folder and, where the server says (UIDPLUS), the uid -- the two things the
+   * sync keys a mailbox row on, so the sender's Sent list can show it NOW rather than at the next sync.
+   */
+  append(rawMessage: string | Buffer): Promise<{ folder: string; uid: number | null } | null>
   close(): Promise<void>
 }
 
@@ -1194,9 +1198,10 @@ export async function openSentAppender(
   const sentPath = findFolder(mailboxes, '\\Sent', ['sent', 'sent items', 'sent messages', 'inbox.sent', 'inbox/sent'])
   return {
     async append(rawMessage) {
-      if (!sentPath) return false
-      await client.append(sentPath, rawMessage, ['\\Seen'])
-      return true
+      if (!sentPath) return null
+      const r = await client.append(sentPath, rawMessage, ['\\Seen'])
+      const uid = r && typeof r === 'object' && typeof (r as { uid?: unknown }).uid === 'number' ? (r as { uid: number }).uid : null
+      return { folder: sentPath, uid }
     },
     async close() {
       await client.logout().catch(() => {})

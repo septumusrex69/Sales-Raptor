@@ -187,6 +187,16 @@ export function forwardQuoteHtml(
 }
 
 /**
+ * A PLAIN-TEXT ORIGINAL AS MARKUP FOR forwardQuoteHtml (S15), so a forward of a text-only message rides
+ * underneath in the same editable box as one written in HTML. Escaped -- it is somebody else's words -- with
+ * its lines kept as lines. Where only the stored preview was available it says so, as forwardBody does.
+ */
+export function forwardTextHtml(text: string, complete = true): string {
+  const lines = escapeHtml(text.trim()).split(/\r?\n/).join('<br>')
+  return `<div>${lines}${complete ? '' : '<br><br><i>[Only the stored preview of this message was available.]</i>'}</div>`
+}
+
+/**
  * Every Message-ID a reply names, newest first.
  *
  * In-Reply-To is the direct parent and is checked first. References is checked as well because

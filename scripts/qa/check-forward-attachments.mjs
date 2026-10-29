@@ -48,7 +48,7 @@ const has = (p, re) => re.test(src(p))
 check('mail page forward passes the files', has('src/pages/mail/MailPage.tsx', /forwardAttachments=\{\{ mailId: forwarding\.mail\.id, names: forwarding\.mail\.attachmentNames/), true)
 check('account forward passes the files', has('src/pages/accounts/AccountDetail.tsx', /forwardAttachments=\{forwardOf[\s\S]{0,80}forwardOf\.attachmentNames/), true)
 check('ticket forward passes the files', has('src/pages/queries/QueryDetail.tsx', /forwardAttachments=\{forwarding[\s\S]{0,80}forwarding\.attachmentNames/), true)
-check('the composer fetches them and holds Send until they arrive', has('src/components/ComposeEmailModal.tsx', /disabled=\{submitting \|\| fetchingForward\}/), true)
+check('the composer fetches them and holds Send until they arrive', has('src/components/ComposeEmailModal.tsx', /disabled=\{submitting \|\| fetchingForward( \|\| quotedLoading)?\}/), true)
 
 console.log(`\ncheck-forward-attachments: ${pass} passed, ${failures.length} failed`)
 if (failures.length) { console.log(failures.join('\n')); process.exit(1) }

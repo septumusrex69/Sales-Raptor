@@ -25,6 +25,17 @@ export function Modal({ title, subtitle, onClose, children, width = 480, headerR
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
+      /*
+       * BACKSPACE NEVER LEAVES A DIALOG (S15). Stephan, forwarding an email: "if I highlight a specific
+       * area in the text and I press backspace, it takes me out of that email draft." With the selection
+       * in something that is not a box you type in, the browser reads Backspace as Back -- and the page,
+       * the dialog and the half-written message go with it. Inside a field it still deletes, as it should.
+       */
+      if (e.key === 'Backspace') {
+        const t = e.target as HTMLElement | null
+        const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+        if (!typing) e.preventDefault()
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
