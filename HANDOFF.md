@@ -152,7 +152,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   always wears the firm's default (AuthShell, 23 Oct, so nobody meets the last person's skin) and the default was
   Raptor, while his own remembered skin is Africa. `DEFAULT_THEME = 'africa'` and index.html's pre-paint default with
   it (check-themes holds the pair); a browser's own choice is still remembered and returns after sign-in. e2e
-  login-reset 30 (every remembered skin -> Africa at the door, the choice kept; a new browser -> Africa).
+  login-reset 30 (every remembered skin -> Africa at the door, the choice kept; a new browser -> Africa). The full
+  suite then found three e2e that knew the company hero by Raptor's line "The sky is only the beginning":
+  dashboard-landing and company-dashboard now look for Africa's "our roots"; performance.mjs, which MEASURES the
+  Raptor hero, is put on Raptor on purpose (`signedInPage(..., { skin: 'raptor' })`, new option in harness.mjs).
+  Full run after: 437 of 438; `trust-sort-statement` ("the receipt in suspense is on it") failed once under the
+  full run's load and passes alone 3 of 3 -- untouched today; a flake to watch, not chased.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
