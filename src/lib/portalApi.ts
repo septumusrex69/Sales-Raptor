@@ -10,10 +10,14 @@ import { PORTAL_TOKEN_HEADER, type PortalHandover, type PortalLine, type PortalM
 const KEY = 'raptor.portal.token'
 
 export function portalToken(): string | null {
-  try { return localStorage.getItem(KEY) } catch { return null }
+  try { return localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY) } catch { return null }
 }
-export function savePortalToken(token: string | null): void {
-  try { if (token) localStorage.setItem(KEY, token); else localStorage.removeItem(KEY) } catch { /* signed in for this tab only */ }
+/** Kept in this browser (Keep me signed in), or for this tab only -- closing it signs out (S16). */
+export function savePortalToken(token: string | null, remember = true): void {
+  try {
+    localStorage.removeItem(KEY); sessionStorage.removeItem(KEY)
+    if (token) (remember ? localStorage : sessionStorage).setItem(KEY, token)
+  } catch { /* signed in for this tab only */ }
 }
 
 export class PortalSignedOut extends Error {}
@@ -31,10 +35,11 @@ async function call<T>(action: string, body: Record<string, unknown> = {}, token
 }
 
 export const requestPortalCode = (email: string) => call<{ message: string }>('request-code', { email })
-export const verifyPortalCode = (email: string, code: string, reset = false) =>
-  call<{ token: string; expiresAt: string; needsPassword: boolean }>('verify', { email, code, reset })
+export const verifyPortalCode = (email: string, code: string, reset = false, remember = true) =>
+  call<{ token: string; expiresAt: string; needsPassword: boolean }>('verify', { email, code, reset, remember })
 /* S16: the everyday sign-in, and the password set after a code. */
-export const portalSignInWithPassword = (email: string, password: string) => call<{ token: string; expiresAt: string }>('sign-in', { email, password })
+export const portalSignInWithPassword = (email: string, password: string, remember = true) =>
+  call<{ token: string; expiresAt: string }>('sign-in', { email, password, remember })
 export const setPortalPassword = (token: string, password: string) => call<{ ok: boolean }>('set-password', { password }, token)
 
 export interface PortalMe { name: string; email: string; client: string }

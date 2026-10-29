@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronsLeft, ChevronsRight, FileText, FolderUp, LayoutDashboard, List, LogOut, Phone, Ticket } from 'lucide-react'
+import { ArrowRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, Headphones, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
 import { PORTAL_PASSWORD_MIN, portalPasswordProblem } from '../../lib/clientPortal'
@@ -14,6 +14,8 @@ import { PortalReports } from './PortalReports'
 import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
 import './portal.css'
+import '@fontsource-variable/raleway'
+import '@fontsource-variable/open-sans'
 
 /**
  * THE CLIENT PORTAL (S14, Raptor H13) -- outside the firm, like /sign/:token: no staff login, no staff
@@ -40,7 +42,7 @@ export default function PortalPage() {
     return () => { live = false }
   }, [token, signedOut])
 
-  if (!token) return <SignIn onSignedIn={(t) => { savePortalToken(t); setToken(t) }} />
+  if (!token) return <SignIn onSignedIn={(t, remember) => { savePortalToken(t, remember); setToken(t) }} />
   if (!me) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: NAVY }} data-testid="portal-page">
@@ -56,17 +58,44 @@ export default function PortalPage() {
 /*
  * SIGNING IN (S16): THE ADDRESS AND A PASSWORD. Stephan: "I want ... a password. So I'm still receiving emails.
  * With codes. Shouldn't be like that." The emailed code is now the way in only the first time and when the
- * password is forgotten -- and either way it ends by setting a password, so the next visit needs no email.
+ * password is forgotten -- and either way it ends by choosing a password, so the next visit needs no email.
+ *
+ * DRAWN TO STEPHAN'S BRIEF (29 Oct, with a mock-up): a split screen in a rounded frame -- the remittance
+ * advice's coastline on the left with the BF ring and wordmark, the promise at its foot over a gold rule; a
+ * warm white panel on the right with fine gold curves, "Secure client portal", the fields with their icons, a
+ * way to see the password, Keep me signed in, Forgot your password, and a way to reach the firm. Raleway for
+ * headings and the tracked labels, Open Sans for the rest; the brief's navy, slate, light blue and gold.
+ * Visual only: the steps, the rules and every message are the ones above. The mock-up's "Continue with
+ * Microsoft" is left out on purpose -- the brief: not unless Microsoft sign-in is already set up, and it is not.
  */
 type Step = 'password' | 'email' | 'code' | 'set'
 
-function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
+const C = { navy: '#101F2C', slate: '#46607B', light: '#97B4CC', gold: '#C69F54', off: '#F4F4F4' }
+const HEAD = "'Raleway Variable', 'Raleway', 'Poppins', sans-serif"
+const BODY = "'Open Sans Variable', 'Open Sans', sans-serif"
+/** Where "Need help signing in?" writes to: the firm's own address, as on every remittance advice. */
+const SUPPORT = 'mailto:info@bredellferreira.co.za?subject=Client%20portal%20sign-in'
+
+/* An input with its icon. Out here, not inside SignIn: a component defined in a render is a new component every
+   render, and React would rebuild the input under the client's fingers on every keystroke. */
+function Field({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2" style={{ color: C.slate }}>{icon}</span>
+      {children}
+    </div>
+  )
+}
+
+function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean) => void }) {
   const [step, setStep] = useState<Step>('password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [again, setAgain] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState<string | null>(null)
+  const [remember, setRemember] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   /* The session the code opened, held until the new password is saved: a client who walks away at that
      step has not been left signed in without one. */
   const [pending, setPending] = useState<string | null>(null)
@@ -77,14 +106,14 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
     setBusy(true); setError(null)
     try { await f() } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
   }
-  const signIn = (e: React.FormEvent) => { e.preventDefault(); run(async () => onSignedIn((await portalSignInWithPassword(email, password)).token)) }
+  const signIn = (e: React.FormEvent) => { e.preventDefault(); run(async () => onSignedIn((await portalSignInWithPassword(email, password, remember)).token, remember)) }
   const send = (e?: React.FormEvent) => { e?.preventDefault(); run(async () => { setSent((await requestPortalCode(email)).message); setStep('code') }) }
   const check = (e: React.FormEvent) => {
     e.preventDefault()
     run(async () => {
       /* Always asked for a password after a code: the code is the first visit or the reset. */
-      const r = await verifyPortalCode(email, code, true)
-      if (r.needsPassword) { setPending(r.token); setStep('set') } else onSignedIn(r.token)
+      const r = await verifyPortalCode(email, code, true, remember)
+      if (r.needsPassword) { setPending(r.token); setStep('set') } else onSignedIn(r.token, remember)
     })
   }
   const save = (e: React.FormEvent) => {
@@ -92,79 +121,148 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
     if (password !== again) { setError('The two passwords are not the same.'); return }
     const problem = portalPasswordProblem(password, email)
     if (problem) { setError(problem); return }
-    run(async () => { await setPortalPassword(pending!, password); onSignedIn(pending!) })
+    run(async () => { await setPortalPassword(pending!, password); onSignedIn(pending!, remember) })
   }
   const go = (s: Step) => { setStep(s); setError(null); setCode(''); if (s !== 'set') setAgain('') }
 
-  const input = 'w-full rounded-lg border border-[#D5DBE3] px-3.5 py-2.5 text-[#111E2D] focus:outline-none focus:ring-2 focus:ring-[#C69F54]/50'
-  const button = 'w-full rounded-lg py-2.5 font-semibold text-white disabled:opacity-50'
+  const field = 'w-full rounded-[13px] border bg-white pl-11 pr-4 py-3 text-[15px] placeholder:text-[#97B4CC] focus:outline-none focus:ring-2 focus:ring-[#C69F54]/40 focus:border-[#C69F54]/70'
+  const fieldStyle = { borderColor: '#DCE3EA', color: C.navy }
+  const primary = 'w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white flex items-center justify-center gap-2 shadow-sm hover:brightness-125 disabled:opacity-80 disabled:cursor-not-allowed transition'
+  const link = 'font-semibold underline-offset-4 hover:underline'
+  const label = 'text-[11px] font-bold uppercase tracking-[0.24em]'
+  const secret = (value: string, set: (v: string) => void, placeholder: string, testId: string, auto: string) => (
+    <Field icon={<Lock size={18} />}>
+      <input type={showPassword ? 'text' : 'password'} required autoComplete={auto} value={value} onChange={(e) => set(e.target.value)}
+        placeholder={placeholder} className={`${field} pr-12`} style={fieldStyle} data-testid={testId} />
+      <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? 'Hide the password' : 'Show the password'}
+        aria-pressed={showPassword} data-testid={`${testId}-show`}
+        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-[#F4F4F4]" style={{ color: C.slate }}>
+        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </Field>
+  )
+
   return (
-    <div className="min-h-screen grid lg:grid-cols-[1.1fr_1fr] bg-white" data-testid="portal-page">
-      {/* THE ADVICE'S COVER, as the door: the same coastline a client sees on every remittance advice. */}
-      <div className="hidden lg:flex relative flex-col justify-between p-10 text-white"
-        style={{ background: `linear-gradient(180deg, rgba(17,30,45,0.35) 0%, rgba(17,30,45,0.85) 100%), url('/brand/remittance-cover.jpg') center / cover` }}>
-        <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-5 w-auto self-start" />
-        <div>
-          <PortalLabel invert>Client portal</PortalLabel>
-          <p className="text-3xl font-bold mt-2 max-w-md leading-tight">Your book, where it stands, whenever you want to look.</p>
-          <p className="text-[#AEBBCB] mt-3 max-w-md">Every account you have handed over, what has been collected, your reports and your tickets.</p>
-        </div>
-      </div>
-      <div className="flex items-center justify-center p-6">
-        <div className="w-full max-w-sm" data-testid="portal-sign-in">
-          <div className="lg:hidden rounded-xl p-4 mb-8" style={{ background: NAVY }}>
-            <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-4 w-auto" />
+    <div className="relative min-h-screen overflow-hidden lg:flex lg:items-center lg:justify-center lg:p-8" data-testid="portal-page"
+      style={{ fontFamily: BODY, background: C.off }}>
+      {/* THE ROOM AROUND THE FRAME: the same coastline, softened -- a background, so a phone never fetches it twice. */}
+      <div aria-hidden className="hidden lg:block absolute inset-0 scale-110 blur-2xl opacity-60"
+        style={{ background: `url('/brand/remittance-cover.jpg') center / cover` }} />
+      <div className="relative w-full min-h-screen lg:max-w-[1360px] lg:min-h-[640px] lg:h-[min(860px,calc(100vh-4rem))] lg:rounded-[24px] lg:overflow-hidden
+        lg:shadow-[0_30px_80px_-20px_rgba(16,31,44,0.45)] lg:ring-1 lg:ring-white/40 flex flex-col lg:grid lg:grid-cols-[58fr_42fr] bg-[#FBFAF7]">
+        {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. */}
+        <div className="relative text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14 min-h-[300px] sm:min-h-[380px] lg:min-h-0"
+          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), url('/brand/remittance-cover.jpg') 28% center / cover` }}>
+          <div className="flex items-center gap-3.5" data-testid="portal-sign-in-logo">
+            <img src="/brand/icon-light.svg" alt="" className="h-14 w-14 sm:h-20 sm:w-20" />
+            <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 sm:h-[18px] w-auto" />
           </div>
-          <PortalLabel>Client portal</PortalLabel>
-          <h1 className="text-2xl font-bold text-[#111E2D] mt-1">{step === 'set' ? 'Choose a password' : 'Sign in'}</h1>
-          <p className="text-sm text-[#5A6B80] mt-1 mb-6">
-            {step === 'password' && 'Your email address and your password.'}
-            {step === 'email' && 'First time here, or forgot your password? We email you a code, then you choose a password.'}
-            {step === 'code' && sent}
-            {step === 'set' && `From now on you sign in with ${email} and this password. At least ${PORTAL_PASSWORD_MIN} characters; a short phrase is easiest to remember.`}
+          <div className="mt-10 max-w-xl">
+            <p className={label} style={{ color: C.gold, fontFamily: HEAD }}>Client portal</p>
+            <h2 className="mt-3 text-[30px] sm:text-[40px] lg:text-[46px] leading-[1.12] font-bold" style={{ fontFamily: HEAD }}>
+              Your book, where it stands, whenever you want to look.
+            </h2>
+            <div className="mt-6 h-[2px] w-16 rounded" style={{ background: C.gold }} />
+            <p className="mt-5 text-[15px] sm:text-base leading-relaxed text-white/85 max-w-lg">
+              Every account you have handed over, what has been collected, your reports and your tickets — all in one place.
+            </p>
+          </div>
+        </div>
+
+        {/* RIGHT: THE DOOR. */}
+        <div className="relative flex flex-col flex-1 px-6 sm:px-12 lg:px-16 py-10 lg:py-12 overflow-hidden" style={{ background: '#FBFAF7' }}>
+          {/* The fine gold curves of the mock-up: decoration, so pointer-events off and hidden from readers. */}
+          <svg aria-hidden className="pointer-events-none absolute -left-24 -top-24 h-80 w-80" viewBox="0 0 320 320" fill="none">
+            <circle cx="160" cy="160" r="150" stroke={C.gold} strokeOpacity="0.45" strokeWidth="1" />
+          </svg>
+          <svg aria-hidden className="pointer-events-none absolute -right-28 -bottom-28 h-80 w-80" viewBox="0 0 320 320" fill="none">
+            <circle cx="160" cy="160" r="150" stroke={C.gold} strokeOpacity="0.45" strokeWidth="1" />
+          </svg>
+          <p className={`relative flex items-center justify-end gap-2 ${label} text-[10.5px]`} style={{ color: C.slate, fontFamily: HEAD }}>
+            <Lock size={14} /> Secure client portal
           </p>
-          {step === 'password' && (
-            <form onSubmit={signIn} className="space-y-3">
-              <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.co.za" className={input} data-testid="portal-email" />
-              <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password" className={input} data-testid="portal-password" />
-              <button type="submit" disabled={busy || !email || !password} className={button} style={{ background: NAVY }} data-testid="portal-sign-in-button">Sign in</button>
-              <button type="button" onClick={() => go('email')} className="w-full text-xs text-[#3F5F86] underline" data-testid="portal-use-code">
-                First time here, or forgot your password? Email me a code
-              </button>
-            </form>
-          )}
-          {step === 'email' && (
-            <form onSubmit={send} className="space-y-3">
-              <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.co.za" className={input} data-testid="portal-email" />
-              <button type="submit" disabled={busy || !email} className={button} style={{ background: NAVY }}>Email me a code</button>
-              <button type="button" onClick={() => go('password')} className="w-full text-xs text-[#3F5F86] underline">I have a password</button>
-            </form>
-          )}
-          {step === 'code' && (
-            <form onSubmit={check} className="space-y-3">
-              <p className="sr-only" data-testid="portal-code-sent">{sent}</p>
-              <input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)}
-                placeholder="123 456" className={`${input} tracking-[0.3em] text-lg`} data-testid="portal-code" />
-              <button type="submit" disabled={busy || !code} className={button} style={{ background: NAVY }}>Continue</button>
-              <div className="flex justify-between text-xs text-[#5A6B80]">
-                <button type="button" className="underline" onClick={() => go('email')}>Use another address</button>
-                <button type="button" className="underline" disabled={busy} onClick={() => send()}>Send a new code</button>
-              </div>
-            </form>
-          )}
-          {step === 'set' && (
-            <form onSubmit={save} className="space-y-3">
-              <input type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="New password" className={input} data-testid="portal-new-password" />
-              <input type="password" required autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)}
-                placeholder="The same again" className={input} data-testid="portal-new-password-again" />
-              <button type="submit" disabled={busy || !password || !again} className={button} style={{ background: NAVY }} data-testid="portal-save-password">Save and sign in</button>
-            </form>
-          )}
-          {error && <p className="text-sm text-red-700 mt-3" data-testid="portal-error">{error}</p>}
+
+          <div className="relative flex-1 flex flex-col justify-center w-full max-w-[420px] mx-auto py-10" data-testid="portal-sign-in">
+            <h1 className="text-[36px] sm:text-[42px] font-bold leading-tight" style={{ color: C.navy, fontFamily: HEAD }}>
+              {step === 'set' ? 'Choose a password' : 'Sign in'}
+            </h1>
+            <p className="mt-2 mb-8 text-[15px] leading-relaxed" style={{ color: C.slate }}>
+              {step === 'password' && 'Access your collection data, reports and support.'}
+              {step === 'email' && 'First time here, or forgot your password? We email you a code, then you choose a password.'}
+              {step === 'code' && sent}
+              {step === 'set' && `From now on you sign in with ${email} and this password. At least ${PORTAL_PASSWORD_MIN} characters; a short phrase is easiest to remember.`}
+            </p>
+
+            {step === 'password' && (
+              <form onSubmit={signIn} className="space-y-4">
+                <Field icon={<Mail size={18} />}>
+                  <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@company.co.za" className={field} style={fieldStyle} data-testid="portal-email" />
+                </Field>
+                {secret(password, setPassword, 'Password', 'portal-password', 'current-password')}
+                <div className="flex items-center justify-between gap-3 text-sm pt-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer" style={{ color: C.navy }}>
+                    <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} data-testid="portal-remember"
+                      className="h-[18px] w-[18px] rounded border-[#B9C6D3] accent-[#101F2C]" />
+                    Keep me signed in
+                  </label>
+                  <button type="button" onClick={() => go('email')} className={`${link} underline`} style={{ color: C.slate }} data-testid="portal-forgot">
+                    Forgot your password?
+                  </button>
+                </div>
+                <button type="submit" disabled={busy || !email || !password} className={`${primary} mt-3`} style={{ background: C.navy }} data-testid="portal-sign-in-button">
+                  Sign in <ArrowRight size={18} />
+                </button>
+                <p className="text-center text-sm pt-2" style={{ color: C.slate }}>
+                  First time here?{' '}
+                  <button type="button" onClick={() => go('email')} className={link} style={{ color: C.navy }} data-testid="portal-use-code">Email me a sign-in code</button>
+                </p>
+              </form>
+            )}
+            {step === 'email' && (
+              <form onSubmit={send} className="space-y-4">
+                <Field icon={<Mail size={18} />}>
+                  <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@company.co.za" className={field} style={fieldStyle} data-testid="portal-email" />
+                </Field>
+                <button type="submit" disabled={busy || !email} className={primary} style={{ background: C.navy }}>Email me a code</button>
+                <button type="button" onClick={() => go('password')} className={`w-full text-sm ${link}`} style={{ color: C.slate }}>I have a password</button>
+              </form>
+            )}
+            {step === 'code' && (
+              <form onSubmit={check} className="space-y-4">
+                <p className="sr-only" data-testid="portal-code-sent">{sent}</p>
+                <Field icon={<KeyRound size={18} />}>
+                  <input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)}
+                    placeholder="123 456" className={`${field} tracking-[0.3em] text-lg`} style={fieldStyle} data-testid="portal-code" />
+                </Field>
+                <button type="submit" disabled={busy || !code} className={primary} style={{ background: C.navy }}>Continue</button>
+                <div className="flex justify-between text-sm" style={{ color: C.slate }}>
+                  <button type="button" className={link} onClick={() => go('email')}>Use another address</button>
+                  <button type="button" className={link} disabled={busy} onClick={() => send()}>Send a new code</button>
+                </div>
+              </form>
+            )}
+            {step === 'set' && (
+              <form onSubmit={save} className="space-y-4">
+                {secret(password, setPassword, 'New password', 'portal-new-password', 'new-password')}
+                {secret(again, setAgain, 'The same again', 'portal-new-password-again', 'new-password')}
+                <button type="submit" disabled={busy || !password || !again} className={primary} style={{ background: C.navy }} data-testid="portal-save-password">
+                  Save and sign in <ArrowRight size={18} />
+                </button>
+              </form>
+            )}
+            {error && <p className="text-sm text-red-700 mt-4 rounded-lg bg-red-50 border border-red-100 px-3 py-2" data-testid="portal-error">{error}</p>}
+          </div>
+
+          <a href={SUPPORT} className="relative mx-auto w-full max-w-[420px] flex items-center gap-4 group" data-testid="portal-support">
+            <span className="h-12 w-12 shrink-0 rounded-full flex items-center justify-center" style={{ background: '#F1ECE1', color: C.navy }}><Headphones size={20} /></span>
+            <span className="h-10 w-px" style={{ background: '#DCE3EA' }} />
+            <span>
+              <span className="block text-[15px] font-semibold" style={{ color: C.navy }}>Need help signing in?</span>
+              <span className="flex items-center gap-1.5 text-sm group-hover:underline" style={{ color: C.slate }}>Contact our support team <ArrowRight size={14} /></span>
+            </span>
+          </a>
         </div>
       </div>
     </div>
