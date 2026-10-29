@@ -128,7 +128,7 @@ function fakeAdmin(db) {
 const row = (i) => ({ id: `s${i}`, campaign_id: 'c', email: `p${i}@x.co`, first_name: 'A', company_name: 'Co', company_id: 'c1', contact_id: null, lead_id: null, first_approach: false, attempts: 1, sender: null })
 const campaign = (o) => ({ id: 'c', name: 'n', subject: 'S', preheader: '', body: 'Hi', image_url: null, audience: { kind: 'all_clients' }, first_approach: false, kind: 'news', status: 'sending', created_by: 'u', queued_by: 'u', send_from: 'news', ...o })
 const resend = async (url, init) => {
-  const list = JSON.parse(init.body); const n = Array.isArray(list) ? list.length : 1
+  const list = JSON.parse(init.body)
   return { ok: true, status: 200, json: async () => (Array.isArray(list) ? { data: list.map((_, i) => ({ id: `r${i}` })) } : { id: 'r0' }) }
 }
 {
