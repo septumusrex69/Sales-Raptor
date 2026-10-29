@@ -48,6 +48,28 @@ export function isPortalToken(value: unknown): value is string {
  */
 export const CODE_SENT_MESSAGE = 'If that address may sign in, a code is on its way. It lasts 10 minutes.'
 
+/*
+ * A PASSWORD, AFTER THE FIRST CODE (S16, Raptor · Handover 15). Stephan: "Maybe the first time [a code], but ...
+ * if you have a password, then that's fine" -- and then, still being emailed codes: "Shouldn't be like that."
+ * The code proves the address once and stays as the reset; every other visit is the address and a password.
+ * Length is the rule, not a recipe of symbols -- a long phrase a person remembers beats "P@ssw0rd!" -- and the
+ * address itself is refused, being the first guess anybody makes.
+ */
+export const PORTAL_PASSWORD_MIN = 8
+export const PORTAL_PASSWORD_FAILURES = 5
+export const PORTAL_PASSWORD_LOCK_MINUTES = 15
+/** The same answer for an unknown address, a login with no password yet and a wrong password. */
+export const PORTAL_PASSWORD_WRONG = 'That email address and password do not match. Forgot it, or first time here? Email yourself a code.'
+
+/** Why a chosen password will not do, in words for the client; null when it will. */
+export function portalPasswordProblem(password: unknown, email: string | null): string | null {
+  if (typeof password !== 'string' || password.length < PORTAL_PASSWORD_MIN) return `Use at least ${PORTAL_PASSWORD_MIN} characters.`
+  if (password.length > 200) return 'That is longer than a password needs to be.'
+  if (/^(.)\1*$/.test(password)) return 'Use more than one character, repeated.'
+  if (email && password.trim().toLowerCase() === email.toLowerCase()) return 'Use something other than your email address.'
+  return null
+}
+
 export type PortalCodeCheck = 'none' | 'expired' | 'used-up' | 'compare'
 
 export function portalCodeCheck(stored: { expiresAt: string; attempts: number } | null, nowMs: number): PortalCodeCheck {
@@ -69,33 +91,77 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/** The code email. The code in the body, not the subject, so a lock screen does not show it. */
-export function portalCodeEmail(input: { name: string; code: string }): { subject: string; html: string } {
+/*
+ * THE PORTAL'S EMAILS, DRAWN LIKE THE REMITTANCE ADVICE (S16, Raptor · Handover 15). Stephan: "make it look
+ * nicer ... the link should be like a thing, like press here", and "don't say anything about ... at no
+ * charge". One layout for both: a navy band with the firm's name in tracked gold capitals (TEXT, not a
+ * picture -- a mail client that blocks images still shows who it is from), the message, the code in a box
+ * of its own where there is one, and a gold BUTTON to the portal. Tables and inline styles only, because
+ * that is all Outlook draws; the button is a padded link inside a cell, which every client draws alike.
+ * The face is the firm's (CHARTER_EMAIL_STACK in emailStyle.ts, written out here because the server imports
+ * this file and it imports nothing).
+ */
+const MAIL_FONT = "Charter, 'Bitstream Charter', Georgia, 'Times New Roman', serif"
+
+export function portalEmailHtml(input: { lines: string[]; code?: string; codeNote?: string; button?: { url: string; label: string }; signOff: string }): string {
+  const p = (html: string) => `<p style="margin:0 0 16px;font-family:${MAIL_FONT};font-size:16px;line-height:1.55;color:#1B2B3E">${html}</p>`
+  const code = input.code ? `
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px"><tr>
+          <td style="background:#F2F5F8;border:1px solid #D5DBE3;border-radius:10px;padding:16px 28px;font-family:Consolas,'Courier New',monospace;font-size:30px;font-weight:bold;letter-spacing:8px;color:#111E2D">${escapeHtml(input.code)}</td>
+        </tr></table>${input.codeNote ? p(`<span style="color:#5A6B80;font-size:14px">${input.codeNote}</span>`) : ''}` : ''
+  const button = input.button ? `
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px"><tr>
+          <td style="background:#C69F54;border-radius:8px">
+            <a href="${escapeHtml(input.button.url)}" style="display:inline-block;padding:13px 26px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#111E2D;text-decoration:none">${escapeHtml(input.button.label)} &rarr;</a>
+          </td>
+        </tr></table>` : ''
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F2F5F8;padding:24px 0"><tr><td align="center">
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#FFFFFF;border:1px solid #D5DBE3;border-radius:12px;overflow:hidden">
+    <tr><td style="background:#111E2D;padding:22px 32px;border-bottom:3px solid #C69F54">
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;letter-spacing:4px;font-weight:bold;color:#C69F54">BREDELL FERREIRA</div>
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;color:#AEBBCB;margin-top:4px">CLIENT PORTAL</div>
+    </td></tr>
+    <tr><td style="padding:30px 32px 14px">
+        ${input.lines.map(p).join('\n        ')}${code}${button}
+        ${p(input.signOff)}
+    </td></tr>
+    <tr><td style="padding:14px 32px 22px;border-top:1px solid #EEF2F6;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5A6B80">
+      Bredell Ferreira &middot; Debt collection
+    </td></tr>
+  </table>
+</td></tr></table>`
+}
+
+/** The six digits the sign-in emails: the first visit, or a forgotten password (S16). The code in the body, not
+    the subject, so a lock screen does not show it. */
+export function portalCodeEmail(input: { name: string; code: string; url?: string; from?: string }): { subject: string; html: string } {
   const first = input.name.trim().split(' ')[0] || 'there'
   return {
     subject: 'Your Bredell Ferreira client portal code',
-    html: [
-      `Hi ${escapeHtml(first)},`,
-      `Your code is <b style="font-size:20px;letter-spacing:3px">${escapeHtml(input.code)}</b>. It expires in ${PORTAL_CODE_MINUTES} minutes.`,
-      'If you did not ask for it, you can ignore this email: nobody can sign in without the code.',
-      'Bredell Ferreira',
-    ].join('<br><br>'),
+    html: portalEmailHtml({
+      lines: [`Hi ${escapeHtml(first)},`, 'Here is your code to sign in to the client portal:'],
+      code: input.code,
+      codeNote: `It works once, for ${PORTAL_CODE_MINUTES} minutes. Next you choose a password, so you will not need a code to sign in again.`,
+      button: input.url ? { url: input.url, label: 'Open the client portal' } : undefined,
+      signOff: `If you did not ask for this code, you can ignore this email: nobody can sign in without it.<br><br>Kind regards<br>${input.from ? `${escapeHtml(input.from)}<br>` : ''}Bredell Ferreira`,
+    }),
   }
 }
 
 /** The invitation the liaison's Invite sends, from the liaison's own mailbox. */
 export function portalInviteEmail(input: { name: string; clientName: string; url: string; from: string }): { subject: string; html: string } {
   const first = input.name.trim().split(' ')[0] || 'there'
-  const url = escapeHtml(input.url)
   return {
     subject: `${input.clientName}: your Bredell Ferreira client portal`,
-    html: [
-      `Hi ${escapeHtml(first)},`,
-      `You can now see ${escapeHtml(input.clientName)}'s accounts with us online: every debtor, what has been paid and where each one stands.`,
-      `Open <a href="${url}">${url}</a> and type this email address. We email you a code each time you sign in; there is no password to remember.`,
-      'The portal is included in our service at no charge.',
-      `Kind regards<br>${escapeHtml(input.from)}<br>Bredell Ferreira`,
-    ].join('<br><br>'),
+    html: portalEmailHtml({
+      lines: [
+        `Hi ${escapeHtml(first)},`,
+        `You can now see ${escapeHtml(input.clientName)}'s accounts with us online: every debtor, what has been collected, where each one stands, and every remittance advice we have sent you.`,
+        'Press the button below and type this email address. The first time, we email you a code and you choose a password; after that you sign in with your password.',
+      ],
+      button: { url: input.url, label: 'Open the client portal' },
+      signOff: `Kind regards<br>${escapeHtml(input.from)}<br>Bredell Ferreira`,
+    }),
   }
 }
 

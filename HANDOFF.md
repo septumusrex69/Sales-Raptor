@@ -45,8 +45,30 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   scope and the chart each seen failing.
   **Not done from Stephan's list:** a ticket or a payment still needs an account (the dashboard buttons send the
   client to Accounts); item 4 (a ticket from the Tickets section with no account) needs a server route.
+- **THE PORTAL SIGNS IN WITH A PASSWORD** (Stephan: "I want ... a password. So I'm still receiving emails. With
+  codes. Shouldn't be like that."). Staging migration **`portal_passwords`** (columns on `client_portal_users`:
+  `password_hash`, `password_set_at`, `password_failures`, `password_locked_until`). The sign-in opens on email +
+  password (`/api/portal/sign-in`); "First time here, or forgot your password? Email me a code" is the code, which
+  now ALWAYS ends by choosing a password (`verify` with `reset: true` -> `needsPassword`; the session is held in
+  the browser until `set-password` saves it). scrypt (salted) over `keyedHash('portal-password', ...)`
+  (`hashPassword`/`passwordMatches`, api/_lib/crypto.ts). One answer for every wrong sign-in; five wrong lock it
+  15 minutes; a code clears the lock. `check-portal-password` (27, seen failing), e2e client-portal +5.
+  **Why Stephan "never got a code" (29 Oct):** the 09:52 request WAS sent (Vercel log: from his own mailbox) to
+  **stephan@urbanhausgroup.co.za**, the address his portal login is under; the 06:06 one was for
+  stephan@bredellferreira.co.za, which has no portal login. Look in the log (`[portal]`) before the code.
+- **THE PORTAL'S EMAILS LOOK LIKE THE ADVICE** (Stephan: "make it look nicer ... the link should be like a thing,
+  like press here ... don't say anything about ... at no charge"). `portalEmailHtml` (clientPortal.ts): navy band
+  with the name in tracked gold TEXT (no image to block), the code in a box, a gold "Open the client portal"
+  button, signed by whoever sent it. The invitation says code-then-password, not "no password"; "no charge" gone.
+  **Put to Stephan:** a portal@ address vs the liaison's mailbox as the sender (see the reply in the session).
+- **THE RING AND THE THREE ARRANGEMENTS** (Stephan: "the circle you used on the dashboard ... with the little
+  white offcuts ... use this type of pie chart"; "the three panes, everything underneath each other, the two
+  panes"). The company dashboard's ring moved to `components/ui/GapRing.tsx` (The book uses it unchanged); the
+  portal's open and finished accounts are drawn on it. The portal dashboard is in `DashboardPanes`
+  (`raptor.portal.dashboard.layout`, opens Wide): figures full, the chart and open accounts wide, the liaison,
+  what-to-do and finished narrow. e2e checks each arrangement by where the panes land.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
-- **AT GO-LIVE:** add `portal_handovers_by_day` after `portal_handovers` in the S15 list below. The test history is staging-only.
+- **AT GO-LIVE:** add `portal_handovers_by_day` and `portal_passwords` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
 ## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
 

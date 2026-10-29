@@ -53732,3 +53732,22 @@ as $$
 $$;
 revoke all on function public.portal_handovers_by_day(uuid, date) from public, anon, authenticated;
 grant execute on function public.portal_handovers_by_day(uuid, date) to service_role;
+
+-- ============================================================================================
+-- portal_passwords (S16, Raptor · Handover 15, 29 Oct 2026) -- A PORTAL LOGIN HAS A PASSWORD.
+--
+-- Stephan: "Should I get a code every time? ... Maybe the first time, but ... if you have a password, then
+-- that's fine", and later: "I want the email you to have a password. So I'm still receiving emails. With
+-- codes. Shouldn't be like that." So the emailed code proves the address ONCE, the client then sets a
+-- password, and from there signs in with it; the code stays as the reset. Portal users are not Supabase
+-- users, so it lives here: scrypt (salted) over the server-keyed hash of the password, written and read only
+-- by api/portal with the service role -- the table has no policies. Five wrong passwords lock the login for
+-- fifteen minutes (the code still works, so a locked-out client is never stuck).
+-- ============================================================================================
+alter table public.client_portal_users
+  add column if not exists password_hash text,
+  add column if not exists password_set_at timestamptz,
+  add column if not exists password_failures integer not null default 0,
+  add column if not exists password_locked_until timestamptz;
+comment on column public.client_portal_users.password_hash is
+  'scrypt of the keyed hash of the password, salted (S16). Only api/portal (service role) reads or writes it; never sent to a browser.';

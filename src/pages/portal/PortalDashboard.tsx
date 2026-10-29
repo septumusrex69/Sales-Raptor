@@ -7,7 +7,8 @@ import { monthTrack } from '../../lib/clientBook.ts'
 import { MonthTrackCard } from '../../components/dashboard/MonthTrackCard'
 import { CLIENT_POSITIONS, CLIENT_POSITION_COLOUR, type ClientPosition } from '../../lib/clientPosition'
 import { PORTAL_ENDING_COLOUR, type PortalOutcome, type PortalOutcomeLine } from '../../lib/clientPortal'
-import { RingDonut } from '../../components/ui/RingDonut'
+import { GapRing } from '../../components/ui/GapRing'
+import { DashboardPanes } from '../../components/dashboard/DashboardPanes'
 import { PortalSignedOut, fetchPortalDashboard, type PortalDashboard as Dash } from '../../lib/portalApi'
 import { PortalHeading, PortalLabel } from './portalStyle'
 import type { Section } from './PortalPage'
@@ -78,19 +79,42 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
         </button>
       )}
 
-      <section className="grid grid-cols-2 xl:grid-cols-4 gap-3" data-testid="portal-figures">
-        <Tile icon={<Landmark size={19} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`} />
-        <Tile icon={<BarChart3 size={19} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`} invert />
-        <Tile icon={<CalendarDays size={19} />} label="Collected this month" value={rand(f.collectedThisMonth)} />
-        <Tile icon={<ReceiptText size={19} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`} />
-      </section>
-
-      <section className="grid lg:grid-cols-[1.6fr_1fr] gap-6 items-start">
-        <MonthTrackCard kind="existing" rows={track} months={months} onMonths={setMonths} testId="portal-handovers"
-          title="Your handovers, month by month"
-          subtitle="The accounts you handed us each month. Switch to Rand for the capital, or to a line for the trend." />
-        <div className="space-y-4">
-          <Liaison liaison={d.liaison} onCall={() => onAsk('callback')} />
+      {/*
+        IN RAPTOR'S THREE ARRANGEMENTS (S16; Stephan: "the views, the three panes, everything underneath each
+        other, the two panes, the split pane"): DashboardPanes, the same switcher and memory as every Raptor
+        dashboard. The figures stay across the page in all three; the chart and the open accounts need the
+        width; the liaison, what to do and the finished accounts read fine in a third. Opens on the split
+        pane, the mock-ups' own drawing.
+      */}
+      <DashboardPanes layoutKey="raptor.portal.dashboard.layout" initial="wide" panes={[
+        { id: 'figures', kind: 'full', node: (
+          <section className="grid grid-cols-2 xl:grid-cols-4 gap-3" data-testid="portal-figures">
+            <Tile icon={<Landmark size={19} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`} />
+            <Tile icon={<BarChart3 size={19} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`} invert />
+            <Tile icon={<CalendarDays size={19} />} label="Collected this month" value={rand(f.collectedThisMonth)} />
+            <Tile icon={<ReceiptText size={19} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`} />
+          </section>
+        ) },
+        { id: 'handovers', kind: 'wide', node: (
+          <MonthTrackCard kind="existing" rows={track} months={months} onMonths={setMonths} testId="portal-handovers"
+            title="Your handovers, month by month"
+            subtitle="The accounts you handed us each month. Switch to Rand for the capital, or to a line for the trend." />
+        ) },
+        { id: 'open', kind: 'wide', node: (
+          <div className="card p-5">
+            <PortalHeading title="Where your open accounts stand" subtitle="Every account we are still collecting, by where it is."
+              action={<button type="button" onClick={() => onOpen('accounts')} className="text-sm font-semibold text-[#3F5F86] hover:underline">See every account</button>} />
+            {open.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">No open accounts.</p> : (
+              <div className="mt-4 flex flex-wrap items-center gap-6">
+                <GapRing testId="portal-open-ring" total={String(d.open)} label="Open"
+                  slices={open.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
+                <div className="flex-1 min-w-[240px]"><OutcomeTable lines={open} total={d.open} testId="portal-positions" /></div>
+              </div>
+            )}
+          </div>
+        ) },
+        { id: 'liaison', node: <Liaison liaison={d.liaison} onCall={() => onAsk('callback')} /> },
+        { id: 'actions', node: (
           <div className="card p-5" data-testid="portal-actions">
             <PortalHeading title="What would you like to do?" />
             <div className="grid grid-cols-2 gap-2 mt-3">
@@ -102,35 +126,27 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
               <Action icon={<MessageCircle size={18} />} label="Your tickets" hint={d.tickets.open ? `${d.tickets.open} open` : undefined} onClick={() => onOpen('tickets')} testId="tickets" />
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="grid lg:grid-cols-[1.4fr_1fr] gap-6">
-        <div className="card p-5">
-          <PortalHeading title="Where your open accounts stand" subtitle="Every account we are still collecting, by where it is."
-            action={<button type="button" onClick={() => onOpen('accounts')} className="text-sm font-semibold text-[#3F5F86] hover:underline">See every account</button>} />
-          {open.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">No open accounts.</p> : (
-            <div className="mt-4 grid sm:grid-cols-[auto_1fr] gap-6 items-center">
-              <RingDonut legend={false} centerValue={String(d.open)} centerLabel="open"
-                data={open.map((o) => ({ name: o.label, value: o.accounts, color: colour(o.outcome) }))} />
-              <OutcomeTable lines={open} total={d.open} testId="portal-positions" />
-            </div>
-          )}
-        </div>
-        <div className="card p-5">
-          <PortalHeading title="Finished accounts" subtitle="How the accounts we are no longer collecting ended." />
-          {finished.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">None finished yet.</p> : (
-            <>
-              <div className="mt-4 rounded-xl bg-[#111E2D] text-white p-4">
-                <PortalLabel invert>Paid up in full</PortalLabel>
-                <p className="text-3xl font-bold mt-1 tabular-nums" data-testid="portal-paid-up">{paidUp}</p>
-                <p className="text-xs text-[#AEBBCB] mt-0.5">{pct(paidUp, d.accounts)} of every account handed over</p>
-              </div>
-              <OutcomeTable lines={finished} total={d.accounts - d.open} testId="portal-finished" />
-            </>
-          )}
-        </div>
-      </section>
+        ) },
+        { id: 'finished', node: (
+          <div className="card p-5">
+            <PortalHeading title="Finished accounts" subtitle="How the accounts we are no longer collecting ended." />
+            {finished.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">None finished yet.</p> : (
+              <>
+                <div className="mt-4 rounded-xl bg-[#111E2D] text-white p-4">
+                  <PortalLabel invert>Paid up in full</PortalLabel>
+                  <p className="text-3xl font-bold mt-1 tabular-nums" data-testid="portal-paid-up">{paidUp}</p>
+                  <p className="text-xs text-[#AEBBCB] mt-0.5">{pct(paidUp, d.accounts)} of every account handed over</p>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-5">
+                  <GapRing testId="portal-finished-ring" size={128} stroke={18} total={String(d.accounts - d.open)} label="Finished"
+                    slices={finished.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
+                  <div className="flex-1 min-w-[200px]"><OutcomeTable lines={finished} total={d.accounts - d.open} testId="portal-finished" /></div>
+                </div>
+              </>
+            )}
+          </div>
+        ) },
+      ]} />
     </div>
   )
 }

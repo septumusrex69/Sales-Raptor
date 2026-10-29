@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChevronsLeft, ChevronsRight, FileText, FolderUp, LayoutDashboard, List, LogOut, Phone, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
+import { PORTAL_PASSWORD_MIN, portalPasswordProblem } from '../../lib/clientPortal'
 import {
-  PortalSignedOut, fetchPortalBook, fetchPortalMe, portalSignOut, portalToken, requestPortalCode, savePortalToken,
-  verifyPortalCode, type PortalBook, type PortalMe,
+  PortalSignedOut, fetchPortalBook, fetchPortalMe, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
+  savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
 import { PortalTickets } from './PortalTickets'
 import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
@@ -52,23 +53,48 @@ export default function PortalPage() {
 
 /* ------------------------------------------------------------------ signing in */
 
+/*
+ * SIGNING IN (S16): THE ADDRESS AND A PASSWORD. Stephan: "I want ... a password. So I'm still receiving emails.
+ * With codes. Shouldn't be like that." The emailed code is now the way in only the first time and when the
+ * password is forgotten -- and either way it ends by setting a password, so the next visit needs no email.
+ */
+type Step = 'password' | 'email' | 'code' | 'set'
+
 function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
+  const [step, setStep] = useState<Step>('password')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [again, setAgain] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState<string | null>(null)
+  /* The session the code opened, held until the new password is saved: a client who walks away at that
+     step has not been left signed in without one. */
+  const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  async function send(e?: React.FormEvent) {
-    e?.preventDefault()
+  const run = async (f: () => Promise<void>) => {
     setBusy(true); setError(null)
-    try { setSent((await requestPortalCode(email)).message) } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+    try { await f() } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
   }
-  async function check(e: React.FormEvent) {
+  const signIn = (e: React.FormEvent) => { e.preventDefault(); run(async () => onSignedIn((await portalSignInWithPassword(email, password)).token)) }
+  const send = (e?: React.FormEvent) => { e?.preventDefault(); run(async () => { setSent((await requestPortalCode(email)).message); setStep('code') }) }
+  const check = (e: React.FormEvent) => {
     e.preventDefault()
-    setBusy(true); setError(null)
-    try { onSignedIn((await verifyPortalCode(email, code)).token) } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+    run(async () => {
+      /* Always asked for a password after a code: the code is the first visit or the reset. */
+      const r = await verifyPortalCode(email, code, true)
+      if (r.needsPassword) { setPending(r.token); setStep('set') } else onSignedIn(r.token)
+    })
   }
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (password !== again) { setError('The two passwords are not the same.'); return }
+    const problem = portalPasswordProblem(password, email)
+    if (problem) { setError(problem); return }
+    run(async () => { await setPortalPassword(pending!, password); onSignedIn(pending!) })
+  }
+  const go = (s: Step) => { setStep(s); setError(null); setCode(''); if (s !== 'set') setAgain('') }
 
   const input = 'w-full rounded-lg border border-[#D5DBE3] px-3.5 py-2.5 text-[#111E2D] focus:outline-none focus:ring-2 focus:ring-[#C69F54]/50'
   const button = 'w-full rounded-lg py-2.5 font-semibold text-white disabled:opacity-50'
@@ -90,24 +116,52 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
             <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-4 w-auto" />
           </div>
           <PortalLabel>Client portal</PortalLabel>
-          <h1 className="text-2xl font-bold text-[#111E2D] mt-1">Sign in</h1>
-          <p className="text-sm text-[#5A6B80] mt-1 mb-6">Type the email address we invited. We email you a code — there is no password.</p>
-          {!sent ? (
+          <h1 className="text-2xl font-bold text-[#111E2D] mt-1">{step === 'set' ? 'Choose a password' : 'Sign in'}</h1>
+          <p className="text-sm text-[#5A6B80] mt-1 mb-6">
+            {step === 'password' && 'Your email address and your password.'}
+            {step === 'email' && 'First time here, or forgot your password? We email you a code, then you choose a password.'}
+            {step === 'code' && sent}
+            {step === 'set' && `From now on you sign in with ${email} and this password. At least ${PORTAL_PASSWORD_MIN} characters; a short phrase is easiest to remember.`}
+          </p>
+          {step === 'password' && (
+            <form onSubmit={signIn} className="space-y-3">
+              <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.co.za" className={input} data-testid="portal-email" />
+              <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password" className={input} data-testid="portal-password" />
+              <button type="submit" disabled={busy || !email || !password} className={button} style={{ background: NAVY }} data-testid="portal-sign-in-button">Sign in</button>
+              <button type="button" onClick={() => go('email')} className="w-full text-xs text-[#3F5F86] underline" data-testid="portal-use-code">
+                First time here, or forgot your password? Email me a code
+              </button>
+            </form>
+          )}
+          {step === 'email' && (
             <form onSubmit={send} className="space-y-3">
               <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.co.za" className={input} data-testid="portal-email" />
               <button type="submit" disabled={busy || !email} className={button} style={{ background: NAVY }}>Email me a code</button>
+              <button type="button" onClick={() => go('password')} className="w-full text-xs text-[#3F5F86] underline">I have a password</button>
             </form>
-          ) : (
+          )}
+          {step === 'code' && (
             <form onSubmit={check} className="space-y-3">
-              <p className="text-sm text-[#5A6B80]" data-testid="portal-code-sent">{sent}</p>
+              <p className="sr-only" data-testid="portal-code-sent">{sent}</p>
               <input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)}
                 placeholder="123 456" className={`${input} tracking-[0.3em] text-lg`} data-testid="portal-code" />
-              <button type="submit" disabled={busy || !code} className={button} style={{ background: NAVY }}>Sign in</button>
+              <button type="submit" disabled={busy || !code} className={button} style={{ background: NAVY }}>Continue</button>
               <div className="flex justify-between text-xs text-[#5A6B80]">
-                <button type="button" className="underline" onClick={() => { setSent(null); setCode('') }}>Use another address</button>
+                <button type="button" className="underline" onClick={() => go('email')}>Use another address</button>
                 <button type="button" className="underline" disabled={busy} onClick={() => send()}>Send a new code</button>
               </div>
+            </form>
+          )}
+          {step === 'set' && (
+            <form onSubmit={save} className="space-y-3">
+              <input type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="New password" className={input} data-testid="portal-new-password" />
+              <input type="password" required autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)}
+                placeholder="The same again" className={input} data-testid="portal-new-password-again" />
+              <button type="submit" disabled={busy || !password || !again} className={button} style={{ background: NAVY }} data-testid="portal-save-password">Save and sign in</button>
             </form>
           )}
           {error && <p className="text-sm text-red-700 mt-3" data-testid="portal-error">{error}</p>}

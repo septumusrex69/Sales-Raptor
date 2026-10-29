@@ -31,7 +31,11 @@ async function call<T>(action: string, body: Record<string, unknown> = {}, token
 }
 
 export const requestPortalCode = (email: string) => call<{ message: string }>('request-code', { email })
-export const verifyPortalCode = (email: string, code: string) => call<{ token: string; expiresAt: string }>('verify', { email, code })
+export const verifyPortalCode = (email: string, code: string, reset = false) =>
+  call<{ token: string; expiresAt: string; needsPassword: boolean }>('verify', { email, code, reset })
+/* S16: the everyday sign-in, and the password set after a code. */
+export const portalSignInWithPassword = (email: string, password: string) => call<{ token: string; expiresAt: string }>('sign-in', { email, password })
+export const setPortalPassword = (token: string, password: string) => call<{ ok: boolean }>('set-password', { password }, token)
 
 export interface PortalMe { name: string; email: string; client: string }
 export const fetchPortalMe = (token: string) => call<PortalMe>('me', {}, token)

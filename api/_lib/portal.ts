@@ -2,13 +2,14 @@ import crypto from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { adminClient, requireCaller } from './auth.js'
-import { credentialsKeyProblem, keyedHash, sameHex } from './crypto.js'
+import { credentialsKeyProblem, hashPassword, keyedHash, passwordMatches, sameHex } from './crypto.js'
 import { sendAsUser } from './email/sendAsUser.js'
 import { EMAIL_IN_KIND, receivedEmailNote } from '../../src/lib/emailRules.js'
 import { can } from '../../src/lib/capabilities.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import {
-  CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_CODE_MINUTES, PORTAL_SESSION_DAYS, PORTAL_TOKEN_HEADER,
+  CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_PASSWORD_FAILURES, PORTAL_PASSWORD_LOCK_MINUTES, PORTAL_PASSWORD_WRONG,
+  portalPasswordProblem, PORTAL_CODE_MINUTES, PORTAL_SESSION_DAYS, PORTAL_TOKEN_HEADER,
   isPortalToken, normalisePortalEmail, portalCallback, portalCodeCheck, portalCodeEmail, portalInviteEmail, portalLine,
   portalHandoverPdfName, portalHandoverSheetName, portalMessageText, portalOutcomes, portalSingleHandover,
   PORTAL_HANDOVER_MAX_BYTES, portalPaymentReport, portalPaymentText, portalQuestion, portalRands, portalTicketNo, portalTopic,
@@ -23,8 +24,8 @@ import {
  * request can only change what they search for inside their own book.
  *
  * Two kinds of caller, never mixed:
- *   anonymous    request-code, verify               (the code is the authority)
- *   portal user  me, book, sign-out,                (x-portal-token)
+ *   anonymous    request-code, verify, sign-in      (the code, or the password set after it, is the authority)
+ *   portal user  me, book, sign-out, set-password,  (x-portal-token)
  *                tickets, ticket, ticket-reply, ask, callback, payment-report,
  *                dashboard, reports, report-file, handovers, handover-sheet, handover-single
  *   staff        staff-list, staff-invite, staff-set-active   (a Raptor session + dispute.write_to_client)
@@ -81,10 +82,14 @@ const requestCode: Handler = async (req, res, admin) => {
   const order = codeSenderOrder((user.invited_by as string | null) ?? '', (staff ?? []).map((p) => ({
     id: p.id as string, name: String(p.name ?? ''), hasMailbox: withMailbox.has(p.id as string), active: p.status === 'Active',
   })))
-  const mail = portalCodeEmail({ name: String(user.name ?? ''), code })
+  /* The button goes back to the portal the client asked from, and the email is signed by whoever sends it. */
+  const host = req.headers['x-forwarded-host'] ?? req.headers.host
+  const url = host ? `https://${String(host)}/portal` : undefined
+  const nameOf = new Map((staff ?? []).map((p) => [p.id as string, String(p.name ?? '')]))
   let sent = false
   let lastError = 'Nobody at the firm has a mailbox connected to send it from.'
   for (const senderId of order) {
+    const mail = portalCodeEmail({ name: String(user.name ?? ''), code, url, from: nameOf.get(senderId) })
     const r = await sendAsUser(admin, senderId, { to: user.email as string, subject: mail.subject, bodyHtml: mail.html })
     if (r.ok) { sent = true; console.log(`[portal] code for portal user ${user.id} sent from ${senderId}`); break }
     lastError = r.error
@@ -102,7 +107,7 @@ const verify: Handler = async (req, res, admin) => {
   const email = normalisePortalEmail(body.email)
   const code = normaliseCode(body.code)
   if (!email || !code) { res.status(400).json({ error: 'Type the six digits from the email.' }); return }
-  const { data: user } = await admin.from('client_portal_users').select('id, active').ilike('email', email).maybeSingle()
+  const { data: user } = await admin.from('client_portal_users').select('id, active, password_hash').ilike('email', email).maybeSingle()
   const { data: stored } = user?.active
     ? await admin.from('client_portal_codes').select('code_hash, expires_at, attempts').eq('user_id', user.id).maybeSingle()
     : { data: null }
@@ -116,15 +121,59 @@ const verify: Handler = async (req, res, admin) => {
 
   /* Spent the moment it matches, so the same six digits cannot open a second browser. */
   await admin.from('client_portal_codes').delete().eq('user_id', user!.id)
+  const session = await openSession(admin, req, user!.id, t)
+  if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
+  /* A CODE IS THE FIRST VISIT OR THE RESET (S16), so the browser asks for a password next: always when there
+     is none yet, and when the client came here because they forgot it. The code also clears a lock. */
+  await admin.from('client_portal_users').update({ password_failures: 0, password_locked_until: null }).eq('id', user!.id)
+  res.status(200).json({ ...session, needsPassword: !user!.password_hash || body.reset === true })
+}
+
+/** A new signed-in browser: the token goes to it once, only its keyed hash is kept. */
+async function openSession(admin: SupabaseClient, req: VercelRequest, userId: string, t: number): Promise<{ token: string; expiresAt: string } | null> {
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(t + PORTAL_SESSION_DAYS * 86_400_000).toISOString()
   const { error } = await admin.from('client_portal_sessions').insert({
-    user_id: user!.id, token_hash: keyedHash('portal-session', token), expires_at: expiresAt,
+    user_id: userId, token_hash: keyedHash('portal-session', token), expires_at: expiresAt,
     device: deviceLabel(req.headers['user-agent'] as string | undefined),
   })
-  if (error) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
-  await admin.from('client_portal_users').update({ last_login_at: new Date(t).toISOString() }).eq('id', user!.id)
-  res.status(200).json({ token, expiresAt })
+  if (error) return null
+  await admin.from('client_portal_users').update({ last_login_at: new Date(t).toISOString() }).eq('id', userId)
+  return { token, expiresAt }
+}
+
+/*
+ * THE EVERYDAY SIGN-IN (S16): the address and the password set after the first code. One answer for an
+ * unknown address, a login with no password yet and a wrong password (PORTAL_PASSWORD_WRONG), for the same
+ * reason the code's answer never says whether an address is a client's. Five wrong in a row lock it for a
+ * quarter of an hour; the emailed code still opens it.
+ */
+const signIn: Handler = async (req, res, admin) => {
+  const body = req.body ?? {}
+  const email = normalisePortalEmail(body.email)
+  const password = typeof body.password === 'string' ? body.password : ''
+  if (!email || !password) { res.status(400).json({ error: 'Type your email address and your password.' }); return }
+  const { data: user } = await admin.from('client_portal_users')
+    .select('id, active, password_hash, password_failures, password_locked_until').ilike('email', email).maybeSingle()
+  const t = now()
+  if (user?.password_locked_until && Date.parse(user.password_locked_until as string) > t) {
+    res.status(429).json({ error: `Too many wrong passwords. Try again in ${PORTAL_PASSWORD_LOCK_MINUTES} minutes, or email yourself a code.` }); return
+  }
+  if (!user || !user.active || !user.password_hash || !passwordMatches(password, user.password_hash as string)) {
+    if (user?.password_hash) {
+      const failures = Number(user.password_failures ?? 0) + 1
+      await admin.from('client_portal_users').update({
+        password_failures: failures >= PORTAL_PASSWORD_FAILURES ? 0 : failures,
+        password_locked_until: failures >= PORTAL_PASSWORD_FAILURES ? new Date(t + PORTAL_PASSWORD_LOCK_MINUTES * 60_000).toISOString() : null,
+      }).eq('id', user.id)
+      if (failures >= PORTAL_PASSWORD_FAILURES) console.log(`[portal] password locked for portal user ${user.id}`)
+    }
+    res.status(400).json({ error: PORTAL_PASSWORD_WRONG }); return
+  }
+  const session = await openSession(admin, req, user.id as string, t)
+  if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
+  await admin.from('client_portal_users').update({ password_failures: 0, password_locked_until: null }).eq('id', user.id)
+  res.status(200).json(session)
 }
 
 /* ------------------------------------------------------------------ a signed-in client */
@@ -179,6 +228,22 @@ const book: Handler = async (req, res, admin) => {
 const signOut: Handler = async (req, res, admin) => {
   const who = await requirePortalUser(req, admin)
   if (who) await admin.from('client_portal_sessions').delete().eq('id', who.sessionId)
+  res.status(200).json({ ok: true })
+}
+
+/* SETTING THE PASSWORD (S16), from a browser the code just signed in. Hashed here, never stored as typed. */
+const setPassword: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const password = (req.body ?? {}).password
+  const problem = portalPasswordProblem(password, who.email)
+  if (problem) { res.status(400).json({ error: problem }); return }
+  const { error } = await admin.from('client_portal_users').update({
+    password_hash: hashPassword(password as string), password_set_at: new Date(now()).toISOString(),
+    password_failures: 0, password_locked_until: null,
+  }).eq('id', who.userId)
+  if (error) { res.status(500).json({ error: 'Your password could not be saved just now. Try again.' }); return }
+  console.log(`[portal] password set for portal user ${who.userId}`)
   res.status(200).json({ ok: true })
 }
 
@@ -713,6 +778,8 @@ const staffSetActive: Handler = async (req, res, admin) => {
 export const PORTAL_ROUTES: Record<string, Handler> = {
   'request-code': requestCode,
   verify,
+  'sign-in': signIn,
+  'set-password': setPassword,
   me,
   book,
   'sign-out': signOut,

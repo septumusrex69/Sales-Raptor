@@ -1,4 +1,5 @@
 import { DashboardPanes } from '../components/dashboard/DashboardPanes'
+import { GapRing } from '../components/ui/GapRing'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
@@ -587,7 +588,8 @@ function BookRing({ book, links }: {
   const to: Partial<Record<BookSlice['key'], string>> = { worked: links.worked, unallocated: links.unallocated }
   return (
     <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-center" data-testid="book-ring">
-      <Ring slices={slices} total={book.bookAccounts} />
+      <GapRing slices={slices.map((x) => ({ key: x.key, value: x.value, color: RING_COLOUR[x.key] }))}
+        total={count(book.bookAccounts)} label={book.bookAccounts === 1 ? 'Account' : 'Accounts'} />
       <ul className="w-full space-y-2 text-sm">
         {slices.map((s) => {
           /* NOT YET ALLOCATED IS A JOB, so it is gold when it is not nought (the firm, 18 Oct). */
@@ -608,40 +610,6 @@ function BookRing({ book, links }: {
             tone={book.quietAccounts > 0 ? 'bad' : undefined} />
         </li>
       </ul>
-    </div>
-  )
-}
-
-/**
- * THE RING ITSELF. Not RingDonut: that one draws its own legend under the ring in a single line,
- * which on a half-width panel ran off the card, and this panel's legend is the list beside it.
- * A plain stroked circle per slice, as RingDonut draws them, so every ring in the app reads alike.
- */
-function Ring({ slices, total }: { slices: BookSlice[]; total: number }) {
-  const size = 168, stroke = 24, r = (size - stroke) / 2, c = 2 * Math.PI * r
-  const sum = slices.reduce((t, x) => t + x.value, 0)
-  const live = slices.filter((x) => x.value > 0)
-  const gap = live.length > 1 ? 3 : 0
-  let at = 0
-  return (
-    <div className="relative h-[168px] w-[168px] shrink-0">
-      <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" aria-hidden>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-slate-100)" strokeWidth={stroke} />
-        {sum > 0 && live.map((x) => {
-          const raw = (x.value / sum) * c
-          const len = Math.max(raw - gap, 0.01)
-          const el = (
-            <circle key={x.key} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={RING_COLOUR[x.key]}
-              strokeWidth={stroke} strokeDasharray={`${len} ${c - len}`} strokeDashoffset={-at} />
-          )
-          at += raw
-          return el
-        })}
-      </svg>
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold tabular-nums text-slate-800">{count(total)}</span>
-        <span className="text-xs text-slate-500">{total === 1 ? 'Account' : 'Accounts'}</span>
-      </div>
     </div>
   )
 }

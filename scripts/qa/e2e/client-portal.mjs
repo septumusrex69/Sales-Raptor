@@ -61,7 +61,10 @@ try {
     calls.push({ action, body, token })
     const json = (status, b) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
     if (action === 'request-code') return json(200, { message: 'If that address may sign in, a code is on its way. It lasts 10 minutes.' })
-    if (action === 'verify') return String(body.code).replace(/\s/g, '') === '123456' ? json(200, { token: TOKEN, expiresAt: '2026-11-27T08:00:00Z' }) : json(400, { error: 'That code is not right. Check it, or ask for a new one.' })
+    if (action === 'verify') return String(body.code).replace(/\s/g, '') === '123456' ? json(200, { token: TOKEN, expiresAt: '2026-11-27T08:00:00Z', needsPassword: true }) : json(400, { error: 'That code is not right. Check it, or ask for a new one.' })
+    /* S16: the password, set after the first code and used every visit after. */
+    if (action === 'sign-in') return body.password === 'tafelberg sunrise' ? json(200, { token: TOKEN, expiresAt: '2026-11-27T08:00:00Z' }) : json(400, { error: 'That email address and password do not match.' })
+    if (action === 'set-password') return token === TOKEN ? json(200, { ok: true }) : json(401, { error: 'Please sign in again.' })
     if (token !== TOKEN) return json(401, { error: 'Please sign in again.' })
     if (action === 'me') return json(200, { name: 'Jan Pharma', email: 'jan@alianna.co.za', client: 'Alianna Pharmacy' })
     if (action === 'book') {
@@ -87,18 +90,36 @@ try {
   await page.getByTestId('portal-sign-in').waitFor({ timeout: 20000 })
   t.check('no staff navigation on the portal', await page.locator('nav').count(), 0)
 
+  /* S16: the door is the address and a password; a wrong one is refused without saying which half was wrong. */
   await page.getByTestId('portal-email').fill('jan@alianna.co.za')
+  await page.getByTestId('portal-password').fill('guess')
+  await page.getByTestId('portal-sign-in-button').click()
+  await page.getByTestId('portal-error').waitFor({ timeout: 5000 })
+  t.ok('a wrong password is refused, and nothing is emailed for it', /do not match/.test(await page.getByTestId('portal-error').innerText())
+    && !calls.some((c) => c.action === 'request-code'))
+  /* The first visit: a code, then a password. */
+  await page.getByTestId('portal-use-code').click()
   await page.getByRole('button', { name: 'Email me a code' }).click()
   await page.getByTestId('portal-code-sent').waitFor({ timeout: 5000 })
   t.ok('the answer does not say whether the address is known', /If that address may sign in/.test(await page.getByTestId('portal-code-sent').innerText()))
 
   await page.getByTestId('portal-code').fill('111 111')
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
   await page.getByTestId('portal-error').waitFor({ timeout: 5000 })
   t.ok('a wrong code is refused and says so', /not right/.test(await page.getByTestId('portal-error').innerText()))
 
   await page.getByTestId('portal-code').fill('123 456')
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await page.getByTestId('portal-new-password').waitFor({ timeout: 5000 })
+  t.ok('after the code, the client is asked to choose a password before going in', await page.getByTestId('portal-dashboard').count() === 0)
+  await page.getByTestId('portal-new-password').fill('short')
+  await page.getByTestId('portal-new-password-again').fill('short')
+  await page.getByTestId('portal-save-password').click()
+  t.ok('...a short one is refused in words', /at least 8/.test(await page.getByTestId('portal-error').innerText())
+    && !calls.some((c) => c.action === 'set-password'))
+  await page.getByTestId('portal-new-password').fill('tafelberg sunrise')
+  await page.getByTestId('portal-new-password-again').fill('tafelberg sunrise')
+  await page.getByTestId('portal-save-password').click()
   /* S15: the DASHBOARD opens first, with the sidebar in Stephan's order. */
   await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
   const nav = (await page.getByTestId('portal-sidebar').innerText()).replace(/\s+/g, ' ')
@@ -131,6 +152,23 @@ try {
   t.ok('the navy is the firm\'s inside the portal, whatever skin the browser has', (await page.getByTestId('portal-page')
     .evaluate((e) => getComputedStyle(e).getPropertyValue('--color-navy-900'))).trim().toLowerCase() === '#111e2d')
   await t.shot(page, 'client-portal-dashboard')
+  /* S16: the company dashboard's ring, white cuts between the slices (Stephan: "use this type of pie chart"). */
+  t.check('the open accounts are drawn on the cut ring, a slice per position', await page.getByTestId('portal-open-ring').locator('circle[data-slice]').count(), 2)
+  /* And Raptor's three arrangements, the same switcher (Stephan: "the three panes, everything underneath each
+     other, the two panes"). It opens on the split pane: the chart and the liaison side by side. */
+  const panes = page.getByTestId('dashboard-panes')
+  const box = async (id) => (await page.locator(`[data-pane="${id}"]`).boundingBox())
+  t.ok('it opens on the split pane, the liaison beside the chart', await panes.getAttribute('data-layout') === 'wide'
+    && (await box('liaison')).x > (await box('handovers')).x + 200)
+  await page.getByRole('button', { name: 'One column' }).click()
+  t.ok('one column puts everything under each other', await panes.getAttribute('data-layout') === 'stacked'
+    && Math.abs((await box('liaison')).x - (await box('handovers')).x) < 2 && (await box('liaison')).y > (await box('open')).y)
+  await t.shot(page, 'client-portal-dashboard-stacked')
+  await page.getByRole('button', { name: 'Three columns' }).click()
+  t.ok('three columns sets the liaison, the actions and the finished accounts three abreast', await panes.getAttribute('data-layout') === 'columns'
+    && Math.abs((await box('liaison')).y - (await box('finished')).y) < 2 && (await box('finished')).x > (await box('actions')).x)
+  await t.shot(page, 'client-portal-dashboard-columns')
+  await page.getByRole('button', { name: 'Wide' }).click()
   await page.getByTestId('portal-action-handover').click()
   t.ok('a button on the dashboard takes the client where they act', await page.getByTestId('portal-nav-handover').getAttribute('aria-current') === 'page')
   await page.getByTestId('portal-nav-dashboard').click()
@@ -238,11 +276,19 @@ try {
   await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByTestId('portal-sign-in').waitFor({ timeout: 5000 })
   t.ok('signing out asks the server to end the session', calls.some((c) => c.action === 'sign-out' && c.token === TOKEN))
+  t.ok('the password was saved with the session the code opened', calls.some((c) => c.action === 'set-password' && c.token === TOKEN && c.body?.password === 'tafelberg sunrise'))
+  /* And the next visit is the password, no email. */
+  const codesBefore = calls.filter((c) => c.action === 'request-code').length
+  await page.getByTestId('portal-email').fill('jan@alianna.co.za')
+  await page.getByTestId('portal-password').fill('tafelberg sunrise')
+  await page.getByTestId('portal-sign-in-button').click()
+  await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
+  t.ok('the next visit signs in with the password, and no code is emailed', calls.filter((c) => c.action === 'request-code').length === codesBefore)
 } catch (e) {
   t.ok(`the run finished without throwing (${String(e).slice(0, 200)})`, false)
 } finally {
   await browser.close()
   await stopServer(server)
 }
-const good = t.finish('A client signs in to the portal with an emailed code and sees one line per debtor, with no staff login and nothing but their own book.')
+const good = t.finish('A client signs in to the portal with a code the first time and a password after, and sees one line per debtor, with no staff login and nothing but their own book.')
 process.exit(good ? 0 : 1)
