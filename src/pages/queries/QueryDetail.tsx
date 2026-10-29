@@ -99,7 +99,7 @@ export function QueryDetail() {
   const { currentUser, session } = useAuth()
   /* Only to put a NAME on the owner. The ticket stores an id, and "With f1a187f8-…" is not a thing
      to show somebody who wants to know whether it is still sitting with the liaison. */
-  const { users } = useAppStore()
+  const { users, addActivity } = useAppStore()
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchQuery>>>(null)
   const [draft, setDraft] = useState<JudgedDraft | null>(null)
   /**
@@ -1124,6 +1124,17 @@ export function QueryDetail() {
             const toClient = !answering
               || clientAddresses.some((a) => a.trim().toLowerCase() === answering.debtorAddress.trim().toLowerCase())
             setForwarding(null); setWriting(false); setReplyTo(null)
+            /*
+             * AND ON THE CLIENT'S OWN EMAILS (R-12). Nicole asked a client for a statement from a ticket and
+             * the client's profile showed nothing: the message was filed on the ticket and the account, which is
+             * where the debtor's record lives, and the client's Emails tab reads Email ACTIVITIES. Only a
+             * message that went to the client -- answering the debtor from here is not the client's correspondence.
+             * No charge: that is raised by recordSentEmail below, once.
+             */
+            const clientId = data.batch?.companyId ?? data.account?.companyId
+            if (toClient && clientId) {
+              addActivity({ type: 'Email', subject: rawSubject, notes: bodyText, companyId: clientId, emailMessageId: messageId ?? undefined })
+            }
             /*
              * CHARGED, RECORDED AND FILED ON THE TICKET. The firm's ruling: "raising the dispute
              * charges a charge. I think it should charge the debtor for it. And also
