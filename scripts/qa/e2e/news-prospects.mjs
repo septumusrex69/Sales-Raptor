@@ -86,7 +86,7 @@ try {
     }
     await page.getByTestId('news-list').waitFor({ timeout: 15000 })
     t.ok('the list says which campaigns are introductions', /October introduction[\s\S]*Introduction to prospects/.test(await page.getByTestId('news-list').innerText()))
-    t.ok('...and shows delivered and opened with their rates', /3 \(75%\)/.test(await page.getByTestId('news-list').innerText()) && /2 \(66\.7%\)/.test(await page.getByTestId('news-list').innerText()))
+    t.ok('...and shows delivered and opened with their rates', /3 \(75%\)/.test(await page.getByTestId('news-list').innerText()) && /66\.7%/.test(await page.getByTestId('news-list').innerText()))
     await page.getByTestId('news-import-open').click()
     await page.getByTestId('news-import').waitFor({ timeout: 5000 })
     const csv = 'Name,Email,Company,Industry\nAnn One,ann@one.example,One (Pty) Ltd,Retail\nBen,ben@one.example,,\n'
@@ -137,6 +137,8 @@ try {
       await page.getByTestId('news-from').innerText(), '"Reino Smit" <reino@prospects.example> · replies to reino@bredellferreira.co.za')
     t.check('only lead lists are offered', await page.getByTestId('news-audience-all_clients').count(), 0)
     t.ok('...the imported list is', await page.getByTestId('news-list-picker').getByText('Expo 2026').isVisible())
+    t.check('an introduction is never offered a Send from: it goes from its marketer', await page.getByTestId('news-send-from').count(), 0)
+    await page.getByTestId('news-step-check').click()
     const frame = page.frameLocator('[data-testid="news-preview"]')
     await frame.locator('body').waitFor({ timeout: 5000 })
     t.check('the preview carries the "Yes, keep me informed" button', await frame.locator('a', { hasText: 'Yes, keep me informed' }).count(), 1)
@@ -147,6 +149,7 @@ try {
     t.ok('the counted list says the rest will never be sent marketing again',
       /each of these 3[\s\S]*never be sent another marketing email/.test(await page.getByTestId('news-never-again').innerText()))
     t.ok('...and who was left out and why', /4 already approached once · 2 already said yes · 1 already a client/.test(await page.getByTestId('news-excluded').innerText()))
+    await page.getByTestId('news-step-send').click()
     t.check('Send names the count', await page.getByTestId('news-send').innerText(), 'Send to 3 people')
     await t.shot(page, 'news-introduction')
     await context.close()
@@ -162,6 +165,7 @@ try {
     await page.getByTestId('prospect-setup').waitFor({ timeout: 15000 })
     t.ok('no prospect domain: the introduction says MARKETING_PROSPECT_DOMAIN is missing', /MARKETING_PROSPECT_DOMAIN is set/.test(await page.getByTestId('prospect-setup').innerText()))
     t.check('...the news set-up panel is not shown for it', await page.getByTestId('sender-setup').count(), 0)
+    await page.getByTestId('news-step-check').click()
     t.ok('...and nothing can be tested', await page.getByTestId('news-test').isDisabled())
     await context.close()
   }

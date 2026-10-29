@@ -403,12 +403,17 @@ ok('the unsubscribe page is outside the sign-in', app.indexOf('path="/unsubscrib
 const side = code('src/components/layout/Sidebar.tsx')
 ok('the menu item shows only to those who may send', /n\.to !== '\/news' \|\| canSendMarketing\(currentUser\)/.test(side))
 ok('...and sits under Clients', side.indexOf("to: '/news'") > side.indexOf("to: '/companies'") && side.indexOf("to: '/news'") < side.indexOf("to: '/accounts'"))
-const page = code('src/pages/news/NewsPage.tsx')
+/* S13: the one page became files -- the set-up card in shared.tsx, the editor in CampaignEditor.tsx. */
+const page = code('src/pages/news/CampaignEditor.tsx')
 ok('the screen says what the firm must set up when the sender is not, per kind',
-  /\(prospect \? PROSPECT_SETUP_STEPS : SENDER_SETUP_STEPS\)\.map/.test(page))
+  /\(prospect \? PROSPECT_SETUP_STEPS : SENDER_SETUP_STEPS\)\.map/.test(code('src/pages/news/shared.tsx')))
 ok('...the steps name the two variables and the DNS step',
   M.SENDER_SETUP_STEPS.some((s) => s.includes('RESEND_API_KEY') && s.includes('MARKETING_FROM')) && M.SENDER_SETUP_STEPS.some((s) => /DNS/.test(s)))
-ok('nothing is sent before the list has been counted', /const canSend = !locked && ready && !senderProblem && !!preview && preview\.count > 0/.test(page))
+/* Send is enabled only with no blocker, and "not counted" and "counted nobody" are blockers -- each asserted present. */
+ok('nothing is sent before the list has been counted',
+  /const canSend = !locked && !isFollowUp && blockers\.length === 0/.test(page)
+  && /!preview && 'Count who gets it first/.test(page) && /preview && preview\.count === 0 &&/.test(page)
+  && /!ready && 'Sending is not set up yet/.test(page) && /disabled=\{!canSend \|\| !!busy\}[\s\S]{0,60}data-testid="news-send"/.test(page))
 
 console.log(`\ncheck-marketing: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

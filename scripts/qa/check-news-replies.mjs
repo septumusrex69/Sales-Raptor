@@ -28,8 +28,11 @@ check('a lead who became a client is a client', replyToFor({ lead_id: 'l', compa
 check('an unset address falls back, never to nothing', replyToFor({ lead_id: 'l', company_id: null, contact_id: null }, { leads: null, clients: null }, 'fallback@firm.test'), 'fallback@firm.test')
 
 const drain = strip(readFileSync(new URL('../../api/_lib/marketing.ts', import.meta.url), 'utf8'))
-ok('the drain uses it for news, and only news', /campaign\.kind === 'news'\s*\?\s*replyToFor\(row, \{\s*leads: process\.env\.MARKETING_REPLY_TO_LEADS[\s\S]{0,120}clients: process\.env\.MARKETING_REPLY_TO_CLIENTS/.test(drain))
-const page = strip(readFileSync(new URL('../../src/pages/news/NewsPage.tsx', import.meta.url), 'utf8'))
+ok('the drain uses it for news, and only news', /campaign\.kind === 'news' && !personal\s*\?\s*replyToFor\(row, \{\s*leads: process\.env\.MARKETING_REPLY_TO_LEADS[\s\S]{0,120}clients: process\.env\.MARKETING_REPLY_TO_CLIENTS/.test(drain))
+/* S13: News from a liaison, reports@ or an extra address answers to that same address -- the client is writing back to Nicole. */
+ok('...and news from a person replies to that person', /firmSender\(await nameOf\(address\), address\)/.test(drain)
+  && /halt = await sendChunk\(campaign, from, rows, key, true\)/.test(drain))
+const page = strip(readFileSync(new URL('../../src/pages/news/CampaignList.tsx', import.meta.url), 'utf8'))
 ok('the News page lists what did not arrive', /<UndeliveredCard \/>/.test(page))
 const card = strip(readFileSync(new URL('../../src/pages/news/UndeliveredCard.tsx', import.meta.url), 'utf8'))
 ok('...read from the undeliverable and complained addresses', /\.or\('status\.eq\.undeliverable,how\.eq\.complaint'\)/.test(card))

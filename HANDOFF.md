@@ -5,6 +5,83 @@
 > Handover 16. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
 > and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
 
+## S13 · CAMPAIGNS -- RYNO'S SESSION (Raptor · Handover 15, 28-29 Oct, branch `claude/s13-reino-campaigns`)
+
+Ryno's session on News & campaigns, from the S13 brief as rewritten on 28 Oct. **Pull request #2 into
+`claude/sales-raptor-review-p1pzx2`, not merged yet.** It waits for Stephan only because it touches `api/` money-free
+code he reviews and the checks; nothing touches money or `supabase/`.
+
+### 29 Oct -- what Ryno asked for next, and what was built
+Ryno, 29 Oct, in his words: an **"Email addresses" drop-down** at the top of the campaigns, "with all the email
+addresses that we have saved", "a plus icon ... to add additional email addresses", and when "the domain does not
+match up ... a reminder that we should link it and ... a step by step guide"; picking one opens **"a dummy screen of
+how it looks like in Outlook ... ribbon and formatting ... import your own signatures"**; **templates** "with the
+context and everything", with their sender ("only Nicole sends this type of newsletter"); **"an additional pop-up ...
+how many emails at a time, the frequency, which emails you send when"**; and **a sheet: email in column one, then
+"Sent 1", "Sent 2" ...**, filled in as each goes, downloadable.
+
+- **Email addresses** (`EmailAddresses.tsx`): BF News, each liaison, reports@ and every added address, each with
+  Ready / Domain needs setting up / Waiting for its key. The + takes ANY address on a domain the firm owns (never a
+  public mail service: nobody can verify gmail.com). A domain not set up is saved and shows `domainSetupSteps` (Resend,
+  the DNS records, Verify, tracking, a key named `RESEND_KEY_<DOMAIN>` for Stephan to add in Vercel), then "The domain
+  is verified in Resend" marks it (`marketing_senders.domain_ready_at`). Picking an address filters the history and
+  offers "New email from this address" and "Signature".
+- **Outlook-style compose** (`RichEditor.tsx`): ribbon tabs Message / Insert / Format text; From, To, Subject,
+  Preview line between ribbon and body. The body is HTML, stored with `<!--raptor:html-->` in front so every older
+  campaign stays text. **Everything the editor or a paste makes goes through `sanitiseCampaignHtml`
+  (`src/lib/campaignHtml.ts`) -- a closed set of tags, attributes and style properties, rebuilt, never copied --
+  on save, preview AND send.** NOT `src/lib/emailHtml.ts`: that is the mail READER's sanitiser for strangers' mail and
+  is a different thing. Pictures upload to the existing public `email-signatures` bucket under the person's own folder.
+- **Signatures:** `{{signature}}` is filled per email with the signature of the address it goes from
+  (`signatureFor`): the address's own (`marketing_senders.signature_html`, set or imported from an Outlook .htm on
+  the drop-down), else a liaison's profile signature. So a liaison campaign signs each client's copy with that
+  client's liaison.
+- **Templates** (tab, `TemplatesPanel.tsx`, `marketing_templates`): Save as template from Write; Use it; Edit; Archive
+  (never deleted). A campaign started from one takes its words, design and sender, and remembers `template_id`.
+- **The send pop-up** (`SendModal.tsx`): all at once, or **batches** of N every 15 min ... a day
+  (`batch_size`, `batch_every_minutes`; the drain claims no more than the batch, writes `next_batch_at`, and sends
+  nothing before it -- the five-minute sweep is the clock); and **follow-ups**, which become a workflow, started at
+  once when each has a template, otherwise left on the Workflows tab to be written.
+- **The sheet** (`workflowSheet`, Workflows -> The sheet): one row per address of the first email, a column per email,
+  the strongest thing that happened (Unsubscribed > spam > Didn't arrive > Clicked > Opened > Delivered > Sent);
+  Download Excel through `xlsxWrite`. Read off the sends, never stored.
+- **Cold campaigns from a chosen address:** an introduction or prospect campaign may go from an added address on
+  any domain EXCEPT bredellferreira.co.za (`prospectAddressSender`).
+- **Kept, deliberately:** a lead with no recorded yes gets the one introduction and nothing more (POPIA s69,
+  `sendBlockReason`). Ryno asked to remove it on 29 Oct; it was not removed, and he put the question to Stephan and
+  the directors. Do not remove it without the firm's written decision.
+
+### 28 Oct -- the first part
+- **Send from** on every News campaign: BF News, each client's liaison (reports@ for a client without one), reports@,
+  or an added address. `senderForRecipient` / `clientLiaison`: the client's `account_owner_id` only when Active and
+  Liaison / Liaison Manager; a sub-account follows its PARENT; **a lead always goes from news@**. Written per row into
+  `marketing_sends.sender` at queue time; the drain sends each row from it with the key its domain needs. The preview
+  shows the split from the same `resolveOnServer` pass. The 22 Oct lock still refuses MARKETING_FROM and the prospect
+  domain on bredellferreira.co.za. Without `RESEND_FIRM_API_KEY` the liaisons and reports@ are not offered and the
+  drain does not claim such rows.
+- Five-step editor (Who -> Write -> Check -> Send -> Results), inbox preview at phone / iPad / desktop width, history
+  by sender, live results split by sender ("not counted" for clicks on the firm's domain), workflows sent by
+  `marketingDailyTick`, the results email.
+
+### Waiting
+1. **Migration `campaign_compose`** (`docs/briefs/S13-migration-campaign-compose.sql`) -- **NOT applied anywhere**; the
+   S13 session had no database tool. It makes any-domain senders, domain-ready, signatures, a campaign from an added
+   address, batches and templates. Until it is applied the config says `schemaReady: false` and the screens offer
+   what works without it and say what is waiting. A Ryno session with the Supabase tool applies it to STAGING,
+   appends it to `schema.sql`, checks the md5. (It replaces the 28 Oct `campaign_sender_address` file.)
+2. **`RESEND_FIRM_API_KEY`** in Vercel (Stephan). Until then only BF News sends.
+3. **Any new domain:** set up in Resend and its key added in Vercel as `RESEND_KEY_<DOMAIN>` (Stephan) -- the guide on
+   the screen says how.
+4. **Merge PR #2** (Stephan), then test on the preview with the Test Client: from BF News, each liaison, reports@;
+   a template; batches of 10 every 15 minutes; a two-step workflow and its sheet.
+
+### Checks
+`check-campaign-senders` (75), `check-campaign-compose` (44), `e2e/campaign-senders` (36), `e2e/campaign-compose` (30).
+Every rule was broken once and seen to fail; three checks passed on broken code the first time (a bounce counted as
+delivered, the url() style guard, a name with angle brackets) and were sharpened until they failed. `news-campaigns`
+and `news-prospects` step through the editor and the pop-up. **Known red, not ours:** `e2e/performance.mjs` (the
+collections floor) fails the same way on the untouched preview.
+
 ## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
 
 **S15 · Side Panel** -- branch `claude/s15-side-panel`, from the preview `claude/sales-raptor-review-p1pzx2` at
