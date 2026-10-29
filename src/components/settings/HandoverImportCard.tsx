@@ -1,3 +1,4 @@
+import { clientHandoverFiles, decideClientHandover, fetchClientHandover, type ClientHandoverSubmission } from '../../lib/portalHandoverStaff'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { handoverRateBlock } from '../../lib/commissionRule'
@@ -158,7 +159,11 @@ async function readSheet(file: File): Promise<(string | null)[][]> {
  * a corrected cell is judged by the code that judged the file — the screen cannot go on refusing
  * a row for something already fixed.
  */
-export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | null } = {}) {
+export function HandoverImportCard({ forCompanyId, submissionId }: {
+  forCompanyId?: string | null
+  /** A handover the client sent from the portal (S15): its files are put in the two inputs below. */
+  submissionId?: string | null
+} = {}) {
   const { companies, deals, users } = useAppStore()
   const navigate = useNavigate()
   /* The approver's own session, so the corrections email goes out on their mailbox. */
@@ -200,6 +205,30 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   }, [forCompanyId, clients, seeded])
   const [sheet, setSheet] = useState<File>()
   const [pdfs, setPdfs] = useState<File[]>([])
+  /*
+   * FROM THE PORTAL (S15, phase 2b). The client's sheet (or the one account, written as a one-line sheet) and
+   * their PDFs, fetched exactly as sent and dropped into the two inputs -- then everything below is the
+   * ordinary import: read, judged, corrected, held, approved. When it is approved the submission is marked
+   * loaded with the batch it became, which is what the client sees in the portal.
+   */
+  const [fromPortal, setFromPortal] = useState<ClientHandoverSubmission | null>(null)
+  useEffect(() => {
+    if (!submissionId) return
+    let live = true
+    void (async () => {
+      try {
+        const sub = await fetchClientHandover(submissionId)
+        if (!live || !sub) return
+        if (sub.status !== 'received') { setError(`That portal handover was already ${sub.status}.`); return }
+        const files = await clientHandoverFiles(sub)
+        if (!live) return
+        setFromPortal(sub); setSheet(files.sheet); setPdfs(files.pdfs); setPlan(null)
+      } catch (e) {
+        if (live) setError(e instanceof Error ? e.message : String(e))
+      }
+    })()
+    return () => { live = false }
+  }, [submissionId])
   const [plan, setPlan] = useState<HandoverPlan | null>(null)
   const [docs, setDocs] = useState<MatchPlan | null>(null)
   /*
@@ -464,6 +493,13 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       if (result.created > 0) {
         setAllocate({ handoverId: result.handoverId, count: result.created })
       }
+      /* THE PORTAL HANDOVER IS LOADED, and the client is shown so. Never fatal: the accounts are open
+         either way, and the card on the client's page can still mark it by hand. */
+      if (fromPortal && result.created > 0) {
+        await decideClientHandover(fromPortal.id, 'loaded', { handoverId: result.handoverId })
+          .then(() => setFromPortal(null))
+          .catch(() => { /* see above */ })
+      }
       /*
        * THE REFUSED ROWS, STRAIGHT INTO THEIR DOWNLOADS. THE FIRM: "it should also be downloaded
        * automatically for the user."
@@ -698,6 +734,12 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       )}
 
       <HandoverSheetDownload />
+      {fromPortal && (
+        <p className="mb-3 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2 text-sm text-slate-700" data-testid="from-portal">
+          From the client portal: {fromPortal.kind === 'single' ? 'one account' : fromPortal.fileName}, sent by {fromPortal.submittedBy}.
+          {fromPortal.note ? ` “${fromPortal.note}”` : ''} Read it below as you would any sheet.
+        </p>
+      )}
 
       <div className="space-y-3">
         <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">

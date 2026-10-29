@@ -134,7 +134,7 @@ ok('...and the modal itself', /\{debtorOpen && mayLoad && \(/.test(detail))
 
 const page = code('src/pages/companies/ClientUpload.tsx')
 ok('the upload page draws the Settings card itself -- one component, not a copy',
-  /<HandoverImportCard forCompanyId=\{id\} \/>/.test(page))
+  /<HandoverImportCard forCompanyId=\{id\}( submissionId=\{submission\})? \/>/.test(page))
 ok('...only for somebody who may load for this client', /\{client && allowed && <HandoverImportCard/.test(page)
   && /const allowed = mayLoadAccountsFor\(currentUser, client, users\)/.test(page))
 ok('...and never the Swordfish import or the rest of Data Import', !/DataImportTab|Swordfish|LeadsImportCard/.test(page))

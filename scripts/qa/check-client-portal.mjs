@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, isPortalToken, normalisePortalEmail, portalCodeCheck, portalLine,
   PORTAL_MESSAGE_MAX, PORTAL_TICKET_LABEL, portalCallback, portalMessageText, portalTicketNo, portalTicketTurn,
-  PORTAL_TOPICS, portalTopic, portalQuestion, portalPaymentReport, portalPaymentText, portalOutcomes,
+  PORTAL_TOPICS, portalTopic, portalSingleHandover, portalHandoverSheetName, portalHandoverPdfName, PORTAL_HANDOVER_MAX_BYTES, portalQuestion, portalPaymentReport, portalPaymentText, portalOutcomes,
 } from '../../src/lib/clientPortal.ts'
 import { ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection } from '../../src/lib/disputeCategories.ts'
 
@@ -222,6 +222,34 @@ check('...groups by exactly what a position is read off', /group by book, ended_
 check('...with portal_book\'s money rules', /reversed_at is null and p\.rejected_at is null and not coalesce\(p\.is_demo, false\)/.test(sumFn), true)
 check('...service role only', /revoke all on function public\.portal_summary\(uuid\) from public, anon, authenticated/.test(sch)
   && /grant execute on function public\.portal_summary\(uuid\) to service_role/.test(sch), true)
+
+/* ---------- handing accounts over (S15, phase 2b) ---------- */
+check('a sheet is a csv, zip, xlsx or xlsm', ['a.xlsx', 'a.CSV', 'a.zip', 'a.xlsm', 'a.pdf', 'a.exe'].map(portalHandoverSheetName),
+  ['a.xlsx', 'a.CSV', 'a.zip', 'a.xlsm', null, null])
+check('...and a path in the name is flattened, never followed', portalHandoverSheetName('../../x/evil.xlsx'), '.. .. x evil.xlsx')
+check('only PDFs go beside it', [portalHandoverPdfName('a.pdf'), portalHandoverPdfName('a.docx')], ['a.pdf', null])
+check('the whole of it fits a request once it is base64 (4.5 MB)', PORTAL_HANDOVER_MAX_BYTES * 4 / 3 < 4.5e6, true)
+check('one account needs their reference, the name, the amount and the date of default',
+  ['client_reference', 'name', 'capital', 'default_date'].map((k) => {
+    const full = { client_reference: 'X1', name: 'Smit', capital: '100', default_date: '01/02/2026' }
+    delete full[k]; return portalSingleHandover(full).ok
+  }), [false, false, false, false])
+const one = portalSingleHandover({ client_reference: 'ALP-9', name: 'Smit & Seun, "Pty"', capital: 'R 12 500,50', default_date: '01/02/2026', debtor_kind: 'Business' })
+check('one account becomes a one-line sheet headed with the sheet\'s own labels', one.ok && one.csv.split('\r\n')[0], 'Your reference,Person or business,"Surname, or the business name",Handover amount,Date of default')
+check('...the amount a plain number, a comma or quote in a name kept whole', one.ok && one.csv.split('\r\n')[1], 'ALP-9,Business,"Smit & Seun, ""Pty""",12500.50,01/02/2026')
+check('...and a person-or-business that is neither is refused', portalSingleHandover({ client_reference: 'X', name: 'Y', capital: '1', default_date: '1/1/2026', debtor_kind: 'Trust' }).ok, false)
+const hs = server.slice(server.indexOf('async function receiveHandover'), server.indexOf('const handoverSingle: Handler') + 1200)
+check('a handover is kept under the client from the session, never one named by the browser', /const folder = `\$\{who\.companyId\}\//.test(hs) && /company_id: who\.companyId/.test(hs), true)
+check('...the files first, the row after (a row pointing at nothing is worse than none)', hs.indexOf('store.upload(sheetPath') > 0 && hs.indexOf('store.upload(sheetPath') < hs.indexOf("from('client_handover_submissions').insert"), true)
+check('...and nothing in the portal loads an account', /from\('debtor_accounts'\)\.insert|handover_drafts|approveDraft/.test(server), false)
+const decideAt = schemaSql.lastIndexOf('create or replace function public.decide_client_handover(')
+const decideFn = decideAt > 0 ? schemaSql.slice(decideAt, schemaSql.indexOf('end $$;', decideAt)) : ''
+check('deciding asks may_load_accounts, refuses a second decision, and a decline must say why',
+  /may_load_accounts\(v_s\.company_id\)/.test(decideFn) && /v_s\.status <> 'received'/.test(decideFn) && /p_status = 'declined' and length/.test(decideFn), true)
+check('the files are read under may_load_accounts on the client\'s folder', /portal_handovers_read on storage\.objects[\s\S]{0,200}may_load_accounts\(nullif\(\(storage\.foldername\(name\)\)\[1\]/.test(schemaSql), true)
+const importCard = fs.readFileSync('src/components/settings/HandoverImportCard.tsx', 'utf8')
+check('the import marks the portal handover loaded, with the batch, once accounts opened',
+  /if \(fromPortal && result\.created > 0\)[\s\S]{0,120}decideClientHandover\(fromPortal\.id, 'loaded', \{ handoverId: result\.handoverId \}\)/.test(importCard), true)
 
 if (failures.length) {
   console.log(`check-client-portal: ${pass} passed, ${failures.length} failed`)

@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { HandoverImportCard } from '../../components/settings/HandoverImportCard'
@@ -26,6 +26,9 @@ import { mayLoadAccountsFor } from '../../lib/handoverUpload'
  */
 export function ClientUpload() {
   const { id = '' } = useParams<{ id: string }>()
+  /* A HANDOVER THE CLIENT SENT FROM THE PORTAL (S15): its files go straight into the import. */
+  const [params] = useSearchParams()
+  const submission = params.get('submission')
   const { companies, users, dataLoading } = useAppStore()
   const { currentUser } = useAuth()
   const client = companies.find((c) => c.id === id)
@@ -50,7 +53,7 @@ export function ClientUpload() {
           </p>
         </Card>
       )}
-      {client && allowed && <HandoverImportCard forCompanyId={id} />}
+      {client && allowed && <HandoverImportCard forCompanyId={id} submissionId={submission} />}
     </div>
   )
 }

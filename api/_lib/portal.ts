@@ -10,7 +10,8 @@ import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_CODE_MINUTES, PORTAL_SESSION_DAYS, PORTAL_TOKEN_HEADER,
   isPortalToken, normalisePortalEmail, portalCallback, portalCodeCheck, portalCodeEmail, portalInviteEmail, portalLine,
-  portalMessageText, portalOutcomes, portalPaymentReport, portalPaymentText, portalQuestion, portalRands, portalTicketNo, portalTopic,
+  portalHandoverPdfName, portalHandoverSheetName, portalMessageText, portalOutcomes, portalSingleHandover,
+  PORTAL_HANDOVER_MAX_BYTES, portalPaymentReport, portalPaymentText, portalQuestion, portalRands, portalTicketNo, portalTopic,
   type PortalBookRow, type PortalSummaryGroup,
 } from '../../src/lib/clientPortal.js'
 
@@ -25,7 +26,7 @@ import {
  *   anonymous    request-code, verify               (the code is the authority)
  *   portal user  me, book, sign-out,                (x-portal-token)
  *                tickets, ticket, ticket-reply, ask, callback, payment-report,
- *                dashboard, reports, report-file
+ *                dashboard, reports, report-file, handovers, handover-sheet, handover-single
  *   staff        staff-list, staff-invite, staff-set-active   (a Raptor session + dispute.write_to_client)
  *
  * The staff tick is dispute.write_to_client because a portal login is a way of writing to a client about
@@ -519,6 +520,116 @@ const reportFile: Handler = async (req, res, admin) => {
   res.status(200).json({ url: link.signedUrl })
 }
 
+/* ------------------------------------------------------------------ a signed-in client: handing accounts over (S15) */
+
+/*
+ * PHASE 2b. Stephan: "go ahead with handover accounts". A client sends a sheet, or one account typed into a
+ * form; either is kept exactly as sent (bucket portal-handovers, under the client's id) and waits for the firm
+ * on the client's page. NOTHING IS LOADED HERE: somebody who may load this client's accounts opens it in the
+ * import -- the same reading, judging and approving every other batch goes through -- or declines it, saying
+ * why. See the portal_handovers migration.
+ */
+const handovers: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const { data, error } = await admin.from('client_handover_submissions')
+    .select('id, kind, file_name, accounts, pdf_names, status, submitted_by, created_at, decided_at, decline_reason')
+    .eq('company_id', who.companyId).order('created_at', { ascending: false }).limit(200)
+  if (error) { res.status(500).json({ error: 'Your handovers could not be read just now.' }); return }
+  res.status(200).json({
+    handovers: (data ?? []).map((h) => ({
+      id: h.id, kind: h.kind, fileName: h.file_name, accounts: h.accounts, pdfs: (h.pdf_names as string[] | null)?.length ?? 0,
+      status: h.status, submittedBy: h.submitted_by, createdAt: h.created_at, decidedAt: h.decided_at, declineReason: h.decline_reason,
+    })),
+  })
+}
+
+/** Base64 off the wire, refused rather than truncated when it is not what it says. */
+function decoded(b64: unknown): Buffer | null {
+  if (typeof b64 !== 'string' || !/^[A-Za-z0-9+/=\s]+$/.test(b64)) return null
+  const buf = Buffer.from(b64, 'base64')
+  return buf.length > 0 ? buf : null
+}
+
+const SHEET_TYPE: Record<string, string> = {
+  '.csv': 'text/csv', '.zip': 'application/zip',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+}
+
+/** Keep what was sent, write the row, ring the liaison. Files first: a row pointing at nothing is worse than none. */
+async function receiveHandover(admin: SupabaseClient, who: PortalCaller, h: {
+  kind: 'sheet' | 'single'; fileName: string; sheet: Buffer; pdfs: { name: string; bytes: Buffer }[]; accounts: number | null; note: string | null
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const id = crypto.randomUUID()
+  const folder = `${who.companyId}/${id}`
+  const store = admin.storage.from('portal-handovers')
+  const ext = h.fileName.slice(h.fileName.lastIndexOf('.')).toLowerCase()
+  const sheetPath = `${folder}/${h.fileName}`
+  const up = await store.upload(sheetPath, h.sheet, { contentType: SHEET_TYPE[ext] ?? 'application/octet-stream', upsert: false })
+  if (up.error) { console.error(`[portal] handover sheet not kept: ${up.error.message}`); return { ok: false, error: 'Your handover could not be saved just now. Try again.' } }
+  const pdfPaths: string[] = []
+  for (const p of h.pdfs) {
+    const path = `${folder}/pdf/${p.name}`
+    const r = await store.upload(path, p.bytes, { contentType: 'application/pdf', upsert: false })
+    if (r.error) { console.error(`[portal] handover pdf not kept: ${r.error.message}`); return { ok: false, error: `${p.name} could not be saved. Try again.` } }
+    pdfPaths.push(path)
+  }
+  const { error } = await admin.from('client_handover_submissions').insert({
+    id, company_id: who.companyId, portal_user_id: who.userId, submitted_by: who.name || who.email,
+    kind: h.kind, file_path: sheetPath, file_name: h.fileName, pdf_paths: pdfPaths, pdf_names: h.pdfs.map((p) => p.name),
+    accounts: h.accounts, note: h.note,
+  })
+  if (error) { console.error(`[portal] handover row not written: ${error.message}`); return { ok: false, error: 'Your handover could not be saved just now. Try again.' } }
+  const { tell } = await liaisonFor(admin, who.companyId)
+  await ring(admin, tell, 'portal.handover',
+    h.kind === 'single'
+      ? `${who.clientName} handed over one account from the client portal (${h.fileName.replace(/\.csv$/, '')}). Open it in the import from their page.`
+      : `${who.clientName} handed over a sheet from the client portal: ${h.fileName}${h.pdfs.length ? ` and ${h.pdfs.length} PDF${h.pdfs.length === 1 ? '' : 's'}` : ''}. Open it in the import from their page.`,
+    `/companies/${who.companyId}`)
+  return { ok: true, id }
+}
+
+const handoverSheet: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const fileName = portalHandoverSheetName(body.fileName)
+  if (!fileName) { res.status(400).json({ error: 'Send the handover sheet as an Excel file (.xlsx) or a CSV.' }); return }
+  const sheet = decoded(body.content)
+  if (!sheet) { res.status(400).json({ error: 'That file is empty.' }); return }
+  const pdfs: { name: string; bytes: Buffer }[] = []
+  for (const p of Array.isArray(body.pdfs) ? body.pdfs.slice(0, 200) : []) {
+    const name = portalHandoverPdfName(p?.name)
+    const bytes = decoded(p?.content)
+    if (!name || !bytes) { res.status(400).json({ error: 'Only PDF documents can go with a sheet.' }); return }
+    pdfs.push({ name, bytes })
+  }
+  if (sheet.length + pdfs.reduce((n, p) => n + p.bytes.length, 0) > PORTAL_HANDOVER_MAX_BYTES) {
+    res.status(413).json({ error: 'That is too large to send here. Send the sheet on its own, or email the documents to your liaison.' }); return
+  }
+  /* A CSV's lines, counted as a courtesy; an Excel file is counted by the import, where it is read properly. */
+  const accounts = fileName.toLowerCase().endsWith('.csv') ? Math.max(0, sheet.toString('utf8').split(/\r?\n/).filter((l) => l.trim()).length - 1) : null
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 1000) || null : null
+  const r = await receiveHandover(admin, who, { kind: 'sheet', fileName, sheet, pdfs, accounts, note })
+  if (!r.ok) { res.status(500).json({ error: r.error }); return }
+  res.status(200).json({ id: r.id })
+}
+
+const handoverSingle: Handler = async (req, res, admin) => {
+  const who = await requirePortalUser(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const single = portalSingleHandover(body.account && typeof body.account === 'object' ? body.account : {})
+  if (!single.ok) { res.status(400).json({ error: single.error }); return }
+  const fileName = `${single.reference.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'account'}.csv`
+  const r = await receiveHandover(admin, who, {
+    kind: 'single', fileName, sheet: Buffer.from(single.csv, 'utf8'), pdfs: [], accounts: 1, note: null,
+  })
+  if (!r.ok) { res.status(500).json({ error: r.error }); return }
+  res.status(200).json({ id: r.id })
+}
+
 /* ------------------------------------------------------------------ staff: who may sign in */
 
 async function requireStaff(req: VercelRequest, res: VercelResponse, admin: SupabaseClient) {
@@ -601,6 +712,9 @@ export const PORTAL_ROUTES: Record<string, Handler> = {
   dashboard,
   reports,
   'report-file': reportFile,
+  handovers,
+  'handover-sheet': handoverSheet,
+  'handover-single': handoverSingle,
   'staff-list': staffList,
   'staff-invite': staffInvite,
   'staff-set-active': staffSetActive,

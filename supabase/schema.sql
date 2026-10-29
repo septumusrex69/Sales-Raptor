@@ -53605,3 +53605,103 @@ $$;
 
 revoke all on function public.portal_summary(uuid) from public, anon, authenticated;
 grant execute on function public.portal_summary(uuid) to service_role;
+
+-- ============================================================================================
+-- portal_handovers (S15, Raptor · Handover 14, 29 Oct 2026) -- THE CLIENT PORTAL, PHASE 2b.
+--
+-- A CLIENT HANDS ACCOUNTS OVER FROM THE PORTAL, AND THE FIRM APPROVES. Stephan: "go ahead with handover
+-- accounts" -- the agreed shape since S14: "client handovers (upload a sheet or one account, with the firm's
+-- approval)".
+--
+-- NOTHING HERE LOADS AN ACCOUNT. A submission is what the client SENT: their sheet, or the one account they
+-- typed, written by the portal's server as a one-line sheet in the firm's own handover format -- so both
+-- roads end in the same file and go through the SAME import (HandoverImportCard: read, judged, corrected,
+-- held, approved) with every duplicate check and the client's commission scale, by somebody who may load
+-- that client's accounts. The client is never a Supabase user, so the portal's server writes these rows
+-- with the service role; staff read and decide them under may_load_accounts, the rule the import itself
+-- answers to.
+--
+-- received -> loaded (the batch that came of it is kept) or declined (with the reason the client is shown).
+-- ============================================================================================
+
+create table if not exists public.client_handover_submissions (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  portal_user_id uuid references public.client_portal_users (id) on delete set null,
+  submitted_by text not null,
+  kind text not null check (kind in ('sheet', 'single')),
+  file_path text not null,
+  file_name text not null,
+  pdf_paths text[] not null default '{}',
+  pdf_names text[] not null default '{}',
+  accounts integer,
+  note text,
+  status text not null default 'received' check (status in ('received', 'loaded', 'declined')),
+  handover_id uuid references public.handovers (id) on delete set null,
+  decided_by uuid references public.profiles (id) on delete set null,
+  decided_by_name text,
+  decided_at timestamptz,
+  decline_reason text,
+  created_at timestamptz not null default public.raptor_now(),
+  constraint client_handover_declined_says_why check (status <> 'declined' or length(btrim(coalesce(decline_reason, ''))) > 0)
+);
+create index if not exists client_handover_submissions_company_idx
+  on public.client_handover_submissions (company_id, created_at desc);
+
+alter table public.client_handover_submissions enable row level security;
+drop policy if exists client_handover_submissions_read on public.client_handover_submissions;
+create policy client_handover_submissions_read on public.client_handover_submissions
+  for select to authenticated using (public.may_load_accounts(company_id));
+-- NO insert, update or delete policy: the portal's server inserts (service role) and decide_client_handover
+-- below is the only way a decision is written.
+
+/*
+ * THE DECISION. Loaded names the batch the import made; declined says why, in words the client reads. Once
+ * decided it stays decided: a sheet loaded twice is two clocks on the same debts, so a second go is a new
+ * submission from the client, never this one reopened.
+ */
+create or replace function public.decide_client_handover(
+  p_submission uuid, p_status text, p_handover uuid default null, p_reason text default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.client_handover_submissions%rowtype;
+begin
+  select * into v_s from public.client_handover_submissions where id = p_submission;
+  if not found then raise exception 'That handover is no longer there.' using errcode = 'P0002'; end if;
+  if not public.may_load_accounts(v_s.company_id) then
+    raise exception 'Only somebody who may load this client''s accounts can decide its handovers.' using errcode = '42501';
+  end if;
+  if v_s.status <> 'received' then
+    raise exception 'That handover was already %.', v_s.status using errcode = '22023';
+  end if;
+  if p_status not in ('loaded', 'declined') then
+    raise exception 'A handover is loaded or declined.' using errcode = '22023';
+  end if;
+  if p_status = 'declined' and length(btrim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Say why, so the client knows what to send instead.' using errcode = '23502';
+  end if;
+  update public.client_handover_submissions
+     set status = p_status, handover_id = case when p_status = 'loaded' then p_handover end,
+         decline_reason = case when p_status = 'declined' then btrim(p_reason) end,
+         decided_by = auth.uid(), decided_by_name = (select name from public.profiles where id = auth.uid()),
+         decided_at = public.raptor_now()
+   where id = p_submission;
+end $$;
+revoke all on function public.decide_client_handover(uuid, text, uuid, text) from public, anon;
+grant execute on function public.decide_client_handover(uuid, text, uuid, text) to authenticated;
+
+-- THE FILES, PRIVATE. The portal's server writes them (service role); somebody who may load the client's
+-- accounts may read them -- the first folder of every path is the client's id. Nothing updates or removes
+-- one: what the client sent is what was sent.
+insert into storage.buckets (id, name, public)
+values ('portal-handovers', 'portal-handovers', false)
+on conflict (id) do nothing;
+
+drop policy if exists portal_handovers_read on storage.objects;
+create policy portal_handovers_read on storage.objects
+  for select to authenticated
+  using (bucket_id = 'portal-handovers'
+         and public.may_load_accounts(nullif((storage.foldername(name))[1], '')::uuid));

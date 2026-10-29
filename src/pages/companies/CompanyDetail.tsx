@@ -55,6 +55,7 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
 import { WelcomeCard } from '../../components/companies/WelcomeCard'
 import { PortalAccessCard } from '../../components/companies/PortalAccessCard'
+import { PortalHandoversCard } from '../../components/companies/PortalHandoversCard'
 import { ClientBookRings } from '../../components/companies/ClientBookRings'
 import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
 import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
@@ -1039,6 +1040,8 @@ export function CompanyDetail() {
               <WelcomeCard company={company} />
               {/* Who at the client may sign in to the client portal (S14). */}
               <PortalAccessCard company={company} />
+              {/* What the client sent from the portal, waiting to be loaded (S15, phase 2b). */}
+              <PortalHandoversCard clientId={company.parentCompanyId ?? company.id} />
               <HandoverBook company={company}
                 onUpload={mayLoad ? () => navigate(uploadPathFor(company.id)) : undefined} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's

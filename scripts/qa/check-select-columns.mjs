@@ -30,6 +30,7 @@
  *
  *   node scripts/qa/check-select-columns.mjs
  */
+import { stripSqlComments } from './sqlComments.mjs'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
@@ -67,12 +68,10 @@ function readSchema(rawSql) {
    * apostrophe in a comment therefore swallows every column after it. That cost the second run
    * of this script a false report on is_filed.
    */
-  const sql = rawSql
-    // Line comments FIRST. One of them mentions the path /api/email/*, and that `/*` opens a
-    // block comment that then runs to the next `*/` 1052 lines later, taking 16 table
-    // definitions with it. Removing line comments first removes the fake opener.
-    .replace(/--[^\n]*/g, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
+  /* IN ONE PASS, THE WAY POSTGRES READS THEM (S15) -- see sqlComments.mjs for the two ways the old
+     two-regex order lost whole stretches of the file: a line comment naming /api/email/*, and a block
+     comment whose prose said "if -- and only if --". */
+  const sql = stripSqlComments(rawSql)
 
   const createRe = /create table (?:if not exists )?(?:public\.)?(\w+)\s*\(([\s\S]*?)\n\);/gi
   for (const [, table, body] of sql.matchAll(createRe)) {

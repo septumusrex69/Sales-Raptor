@@ -14,9 +14,10 @@
  * position in the firm's words. No notes, no call history, and CAPITAL rather than the balance, because
  * interest and fees are the firm's side of the debt.
  *
- * PURE, AND IMPORTS ONLY clientPosition (which imports nothing): the server imports this file.
+ * PURE, AND IMPORTS ONLY clientPosition and handoverSheet (which import nothing): the server imports this file.
  */
 import { CLIENT_POSITIONS, clientPosition, type ClientPosition } from './clientPosition.js'
+import { HANDOVER_COLUMNS } from './handoverSheet.js'
 
 /** The same ten minutes and five tries as a staff sign-in code (loginCode.ts). */
 export const PORTAL_CODE_MINUTES = 10
@@ -373,4 +374,79 @@ export function portalOutcomes(groups: readonly PortalSummaryGroup[]): PortalOut
     by.set(outcome, line)
   }
   return [...by.values()].sort((a, b) => Number(a.finished) - Number(b.finished) || b.accounts - a.accounts)
+}
+
+/* ------------------------------------------------------------------ handing accounts over (S15, phase 2b) */
+
+/**
+ * WHAT A CLIENT MAY SEND (S15). Stephan: "go ahead with handover accounts". The same files the import reads
+ * (HandoverImportCard: csv, a zipped csv, xlsx, xlsm) and PDFs beside them, matched by filename there as
+ * everywhere. Capped so the whole of it, base64 and all, fits under the 4.5 MB a request to the portal's server
+ * may carry; a bigger book is a
+ * conversation with the liaison, and the screen says so.
+ */
+export const PORTAL_HANDOVER_SHEETS = ['.csv', '.zip', '.xlsx', '.xlsm'] as const
+export const PORTAL_HANDOVER_MAX_BYTES = 3_000_000
+
+export function portalHandoverSheetName(name: unknown): string | null {
+  if (typeof name !== 'string') return null
+  const clean = name.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
+  return PORTAL_HANDOVER_SHEETS.some((x) => clean.toLowerCase().endsWith(x)) ? clean : null
+}
+export function portalHandoverPdfName(name: unknown): string | null {
+  if (typeof name !== 'string') return null
+  const clean = name.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
+  return clean.toLowerCase().endsWith('.pdf') ? clean : null
+}
+
+/**
+ * ONE ACCOUNT, TYPED -- THE FIELDS THE PORTAL ASKS FOR. A short form, not the sheet's forty columns: the
+ * four the import cannot do without (their reference, the name, the handover amount, the date of default)
+ * and the handful that make the first call possible. The key is the sheet's own column key, so what is
+ * typed lands in exactly the column the import reads.
+ */
+export const PORTAL_SINGLE_FIELDS = [
+  'client_reference', 'account_number', 'debtor_kind', 'first_name', 'name', 'id_number', 'registration_number',
+  'capital', 'default_date', 'last_payment_date', 'cell_1', 'email_1', 'street_1', 'suburb', 'city', 'street_code',
+  'employer', 'notes',
+] as const
+export type PortalSingleField = typeof PORTAL_SINGLE_FIELDS[number]
+const SINGLE_REQUIRED: PortalSingleField[] = ['client_reference', 'name', 'capital', 'default_date']
+
+const csvCell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
+
+/**
+ * THE ONE ACCOUNT AS A ONE-LINE HANDOVER SHEET, headed with the sheet's own labels -- so it goes through the
+ * same import as a hundred-line sheet, and nothing about loading one account by hand has to be built twice.
+ * The required four are refused here, by name, before anything is stored: an import that cannot read the
+ * line would only send it back.
+ */
+export function portalSingleHandover(input: Record<string, unknown>):
+  { ok: true; csv: string; reference: string } | { ok: false; error: string } {
+  const value = (k: PortalSingleField) => (typeof input[k] === 'string' ? (input[k] as string).replace(/[\r\n]+/g, ' ').trim().slice(0, 300) : '')
+  const label = (k: PortalSingleField) => HANDOVER_COLUMNS.find((c) => c.key === k)?.label ?? k
+  for (const k of SINGLE_REQUIRED) {
+    if (!value(k)) return { ok: false, error: `Fill in ${label(k).toLowerCase()}.` }
+  }
+  const capital = Number(value('capital').replace(/[\sR\u00a0]/g, '').replace(/,(?=\d{1,2}$)/, '.').replace(/,/g, ''))
+  if (!Number.isFinite(capital) || capital <= 0) return { ok: false, error: 'The handover amount must be a number above nothing.' }
+  const kind = value('debtor_kind')
+  if (kind && kind !== 'Person' && kind !== 'Business') return { ok: false, error: 'Say whether it is a person or a business.' }
+  const keys = PORTAL_SINGLE_FIELDS.filter((k) => value(k))
+  const cells = keys.map((k) => (k === 'capital' ? capital.toFixed(2) : value(k)))
+  return { ok: true, reference: value('client_reference'), csv: `${keys.map((k) => csvCell(label(k))).join(',')}\r\n${cells.map(csvCell).join(',')}\r\n` }
+}
+
+/** One of the client's handovers as the portal lists it. */
+export interface PortalHandover {
+  id: string
+  kind: 'sheet' | 'single'
+  fileName: string
+  accounts: number | null
+  pdfs: number
+  status: 'received' | 'loaded' | 'declined'
+  submittedBy: string
+  createdAt: string
+  decidedAt: string | null
+  declineReason: string | null
 }

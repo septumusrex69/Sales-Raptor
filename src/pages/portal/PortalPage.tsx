@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronsLeft, ChevronsRight, FileText, LayoutDashboard, List, LogOut, Phone, Ticket } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, FileText, FolderUp, LayoutDashboard, List, LogOut, Phone, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
 import {
@@ -10,6 +10,7 @@ import { PortalTickets } from './PortalTickets'
 import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
 import { PortalDashboard } from './PortalDashboard'
 import { PortalReports } from './PortalReports'
+import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
 
 /**
@@ -117,12 +118,14 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
 
 /* ------------------------------------------------------------------ signed in */
 
-type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts'
+type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts' | 'handover'
 const SECTIONS: { id: Section; label: string; icon: typeof LayoutDashboard; title: string; blurb: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, title: 'Dashboard', blurb: 'How your book is doing.' },
   { id: 'reports', label: 'Reports', icon: FileText, title: 'Reports', blurb: 'Every remittance advice we have sent you.' },
   { id: 'tickets', label: 'Tickets', icon: Ticket, title: 'Tickets', blurb: 'Questions between you and us, and where each one is.' },
   { id: 'accounts', label: 'Accounts', icon: List, title: 'Accounts', blurb: 'One line for every debtor you have handed over.' },
+  /* S15, phase 2b: "go ahead with handover accounts". After Accounts, because it adds to them. */
+  { id: 'handover', label: 'Hand over', icon: FolderUp, title: 'Hand over accounts', blurb: 'Send us a sheet, or one account. We check it and load it.' },
 ]
 
 /* THE FOLD IS REMEMBERED in this browser, the way Raptor's own is -- and only as a convenience: a private
@@ -233,6 +236,7 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go} />}
           {section === 'reports' && <PortalReports token={token} onSignedOut={onExpired} />}
           {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh} />}
+          {section === 'handover' && <PortalHandovers token={token} onSignedOut={onExpired} />}
           {section === 'accounts' && (
             <Book token={token} onSignedOut={onExpired}
               onAsk={(about, mode) => { setDone(null); setAsking({ about, mode }) }} />

@@ -5,7 +5,7 @@
  * The session token lives in localStorage, read defensively: a private window or an iPad with site data
  * blocked throws on access, and the answer then is "sign in", not a blank page.
  */
-import { PORTAL_TOKEN_HEADER, type PortalLine, type PortalMessage, type PortalTicket } from './clientPortal'
+import { PORTAL_TOKEN_HEADER, type PortalHandover, type PortalLine, type PortalMessage, type PortalTicket } from './clientPortal'
 
 const KEY = 'raptor.portal.token'
 
@@ -74,3 +74,18 @@ export interface PortalReport {
 export const fetchPortalReports = (token: string) => call<{ reports: PortalReport[] }>('reports', {}, token)
 export const portalReportFile = (token: string, id: string, file: 'pdf' | 'xlsx') =>
   call<{ url: string }>('report-file', { id, file }, token)
+
+/* Phase 2b (S15): handing accounts over. */
+export const fetchPortalHandovers = (token: string) => call<{ handovers: PortalHandover[] }>('handovers', {}, token)
+export const sendPortalHandoverSheet = (token: string, req: { fileName: string; content: string; pdfs: { name: string; content: string }[]; note: string }) =>
+  call<{ id: string }>('handover-sheet', req, token)
+export const sendPortalHandoverSingle = (token: string, account: Record<string, string>) =>
+  call<{ id: string }>('handover-single', { account }, token)
+
+/** A file as base64, for the JSON body the portal's server takes. */
+export async function fileBase64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let s = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(s)
+}
