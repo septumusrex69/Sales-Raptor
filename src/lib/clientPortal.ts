@@ -158,3 +158,219 @@ export function portalLine(r: PortalBookRow): PortalLine {
     positionLabel: CLIENT_POSITIONS[position].label,
   }
 }
+
+/* ------------------------------------------------------------------ phase 2a: tickets, questions, callbacks */
+
+/**
+ * WHAT A CLIENT'S TICKET IS CALLED ON THE PORTAL (S15, Raptor · Handover 14). The client's words, not the
+ * board's: the board says "Client data" to a liaison; the client is told what the firm is asking them.
+ * Only the kinds portal_tickets returns are here -- 'help' and 'request' never reach a client.
+ */
+export type PortalTicketKind = 'dispute' | 'import' | 'litigation' | 'client'
+
+export const PORTAL_TICKET_LABEL: Record<PortalTicketKind, string> = {
+  dispute: 'The debtor disputes the account',
+  import: 'Your handover needs correcting',
+  litigation: 'We recommend legal action',
+  client: 'Your question',
+}
+
+/** One ticket as portal_tickets returns it. */
+export interface PortalTicket {
+  ticketNo: number
+  kind: PortalTicketKind
+  status: 'open' | 'closed'
+  stage: string
+  description: string
+  raisedAt: string
+  closedAt: string | null
+  caseNumber: string | null
+  accountNumber: string | null
+  clientReference: string | null
+  debtor: string | null
+  sheetReference: string | null
+  lastMessageAt: string | null
+  messages: number
+}
+
+export interface PortalMessage {
+  direction: 'in' | 'out'
+  subject: string | null
+  body: string
+  at: string
+  from: string | null
+  attachments: string[]
+}
+
+/**
+ * WHOSE TURN IT IS, in a word the client can act on. Stage 'client' is the firm waiting on them; every
+ * other open stage is the firm's side of the desk, which is all the client needs to know of it.
+ */
+export function portalTicketTurn(t: Pick<PortalTicket, 'status' | 'stage'>): 'yours' | 'ours' | 'closed' {
+  if (t.status === 'closed') return 'closed'
+  return t.stage === 'client' ? 'yours' : 'ours'
+}
+
+/** The longest message a client may send in one go. A page of text; a novel is a phone call. */
+export const PORTAL_MESSAGE_MAX = 4000
+
+/** A typed message as it is stored, or null when there is nothing in it. */
+export function portalMessageText(typed: unknown): string | null {
+  if (typeof typed !== 'string') return null
+  const t = typed.replace(/\r\n/g, '\n').trim()
+  return t ? t.slice(0, PORTAL_MESSAGE_MAX) : null
+}
+
+/** A ticket number typed or sent as "T-123", "123" or 123. */
+export function portalTicketNo(value: unknown): number | null {
+  const s = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim().replace(/^T-?/i, '') : ''
+  return /^\d{1,12}$/.test(s) ? Number(s) : null
+}
+
+/**
+ * WHEN A CLIENT ASKS TO BE CALLED. Free text for the time on purpose ("after two", "tomorrow morning"):
+ * a liaison reads it, and a time picker would make the client pick a slot nobody promised to keep.
+ * The number is checked only for being a number -- the liaison will ring it, not a machine.
+ */
+export function portalCallback(input: { phone?: unknown; when?: unknown; about?: unknown }):
+  { ok: true; phone: string; when: string; about: string } | { ok: false; error: string } {
+  const phone = typeof input.phone === 'string' ? input.phone.trim().slice(0, 40) : ''
+  if (phone.replace(/\D/g, '').length < 9) return { ok: false, error: 'Type the number we should call.' }
+  const when = typeof input.when === 'string' ? input.when.trim().slice(0, 120) : ''
+  const about = portalMessageText(input.about) ?? ''
+  return { ok: true, phone, when: when || 'Any time', about }
+}
+
+/**
+ * WHAT THE CLIENT WANTS, IN ONE PICK (S15). Stephan, on the first portal question ("Update"): "what does the
+ * client want? ... we shouldn't make it too complicated." So a short closed list above the box -- enough for
+ * the liaison to know what kind of answer is wanted before reading a word -- and the box for the rest.
+ * Carried as the first line of the ticket's description: no column, because nothing sorts on it yet.
+ */
+export const PORTAL_TOPICS = [
+  'An update on this account',
+  'New details for the debtor',
+  'Stop or withdraw this account',
+  'Something else',
+] as const
+export type PortalTopic = typeof PORTAL_TOPICS[number]
+
+export function portalTopic(value: unknown): PortalTopic {
+  return (PORTAL_TOPICS as readonly string[]).includes(value as string) ? value as PortalTopic : 'Something else'
+}
+
+/** The ticket's description: the topic on its own line, then the client's words. */
+export function portalQuestion(topic: PortalTopic, text: string): string {
+  return `${topic}\n\n${text}`
+}
+
+/**
+ * A PAYMENT THE DEBTOR MADE TO THE CLIENT, RECORDED BY THE CLIENT (S15). Stephan: "record a payment ...
+ * like a PTC, a payment made to you, on a specific account" -- then, of where it goes: "straight to the
+ * account ... it shows up in the trust thing for approval ... and it also notifies the liaison."
+ *
+ * So it is a real payment row, UNAPPROVED (portal_record_ptc): nothing is allocated, no fee raised and no
+ * payover touched until somebody approves it in Trust, exactly like every other receipt. The rules are the
+ * database's; this is the browser's and the server's first reading of what was typed.
+ */
+export interface PortalPaymentReport { amount: number; paidOn: string; reference: string; note: string }
+
+export function portalPaymentReport(input: { amount?: unknown; paidOn?: unknown; reference?: unknown; note?: unknown }, today: string):
+  { ok: true; report: PortalPaymentReport } | { ok: false; error: string } {
+  const amount = typeof input.amount === 'number' ? input.amount
+    : typeof input.amount === 'string' ? Number(input.amount.replace(/[\sR\u00a0]/g, '').replace(/,(?=\d{1,2}$)/, '.').replace(/,/g, '')) : NaN
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: 'Type the amount the debtor paid you.' }
+  if (amount > 100_000_000) return { ok: false, error: 'That amount looks wrong. Check it.' }
+  const paidOn = typeof input.paidOn === 'string' ? input.paidOn.trim() : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || Number.isNaN(Date.parse(paidOn))) return { ok: false, error: 'Say which day it was paid.' }
+  if (paidOn > today) return { ok: false, error: 'A payment cannot be in the future.' }
+  const reference = typeof input.reference === 'string' ? input.reference.trim().slice(0, 120) : ''
+  if (!reference) return { ok: false, error: 'Put your reference on it -- your receipt or bank reference.' }
+  const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''
+  return { ok: true, report: { amount: Math.round(amount * 100) / 100, paidOn, reference, note } }
+}
+
+/** A rand amount as the client typed it back to them: spaces for thousands, never a non-breaking one. */
+export function portalRands(v: number): string {
+  /* By hand, not toLocaleString: en-ZA's decimal mark is a comma in one runtime and a point in another,
+     and this text is stored on a ticket -- it has to read the same whoever wrote it. */
+  const [whole, cents] = Math.abs(v).toFixed(2).split('.')
+  return `${v < 0 ? '-' : ''}R ${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}.${cents}`
+}
+
+/** The ticket's words for it: what the client sees they said, and what the liaison reads. */
+export function portalPaymentText(r: PortalPaymentReport): string {
+  return `Payment made to us directly\n\nThe debtor paid us ${portalRands(r.amount)} on ${r.paidOn}. Our reference: ${r.reference}.`
+    + (r.note ? `\n\n${r.note}` : '')
+    + '\n\nRecorded on the account. It counts once Bredell Ferreira has approved it.'
+}
+
+/* ------------------------------------------------------------------ the dashboard by outcome (S15) */
+
+/**
+ * ONE GROUP OF ACCOUNTS AS portal_summary RETURNS IT: every account sharing the columns a position is
+ * read off, counted, with its capital.
+ */
+export interface PortalSummaryGroup {
+  book: string | null
+  ended_as: string | null
+  status: string | null
+  sub_status: string | null
+  bucket: string | null
+  paid_now: boolean
+  disputed: boolean
+  accounts: number
+  handed_over: number
+  outstanding: number
+  paid_to_date: number
+}
+
+/**
+ * WHERE THE CLIENT'S ACCOUNTS ARE, BY OUTCOME (S15). Stephan: "how many accounts have been paid up? How many
+ * accounts are kind of in progress, how many accounts are in dispute, how many accounts are in negotiation"
+ * -- "not open or closed". So a finished account is counted by HOW it finished (ended_as: paid up, settled,
+ * written off, withdrawn), and an open one by its position, decided by clientPosition exactly as portalLine
+ * decides it for the Accounts list. One rule, two screens.
+ */
+export type PortalOutcome = ClientPosition | 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
+
+export const PORTAL_ENDING_LABEL: Record<'paid_up' | 'settled' | 'written_off' | 'withdrawn', string> = {
+  paid_up: 'Paid up', settled: 'Settled', written_off: 'Written off', withdrawn: 'Withdrawn',
+}
+/** The finished outcomes' colours, beside CLIENT_POSITION_COLOUR for the open ones. */
+export const PORTAL_ENDING_COLOUR: Record<'paid_up' | 'settled' | 'written_off' | 'withdrawn', string> = {
+  paid_up: '#065f46', settled: '#0f766e', written_off: '#9f1239', withdrawn: '#94a3b8',
+}
+
+export interface PortalOutcomeLine {
+  outcome: PortalOutcome
+  label: string
+  finished: boolean
+  accounts: number
+  handedOver: number
+  outstanding: number
+  paidToDate: number
+}
+
+export function portalOutcomes(groups: readonly PortalSummaryGroup[]): PortalOutcomeLine[] {
+  const by = new Map<PortalOutcome, PortalOutcomeLine>()
+  for (const g of groups) {
+    const ending = g.ended_as && g.ended_as in PORTAL_ENDING_LABEL ? g.ended_as as keyof typeof PORTAL_ENDING_LABEL : null
+    const open = !ending && (g.book === 'active' || g.book === 'on_hold')
+    const outcome: PortalOutcome = ending ?? (open
+      ? clientPosition({ closed: false, status: g.status, subStatus: g.sub_status, bucket: g.bucket,
+        paidInPeriod: g.paid_now, disputed: g.disputed })
+      : 'closed')
+    const line = by.get(outcome) ?? {
+      outcome, label: ending ? PORTAL_ENDING_LABEL[ending] : CLIENT_POSITIONS[outcome as ClientPosition].label,
+      finished: !open, accounts: 0, handedOver: 0, outstanding: 0, paidToDate: 0,
+    }
+    line.accounts += Number(g.accounts) || 0
+    line.handedOver += Number(g.handed_over) || 0
+    /* A finished account owes the client nothing more from us: its outstanding is not "outstanding". */
+    if (open) line.outstanding += Number(g.outstanding) || 0
+    line.paidToDate += Number(g.paid_to_date) || 0
+    by.set(outcome, line)
+  }
+  return [...by.values()].sort((a, b) => Number(a.finished) - Number(b.finished) || b.accounts - a.accounts)
+}

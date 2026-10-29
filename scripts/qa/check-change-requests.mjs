@@ -255,6 +255,14 @@ check('only the person who asked answers, and only a question with choices',
     /if r\.status not in \('new', 'accepted'\) then/.test(fn),
     /values \(r\.id, 'edited', r\.description, auth\.uid\(\)\)/.test(fn),
   ].join(), 'true,true,true')
+  /* S15 (Stephan, of R-13): the sender is told when somebody else rewords their request, with the new words,
+     and the correction box can be dictated into. */
+  check('the sender is told, with the new words, when somebody else rewords it', [
+    /if r\.created_by is not null and r\.created_by is distinct from auth\.uid\(\) then/.test(fn),
+    /'change_request\.edited',[\s\S]{0,120}' reworded your request R-' \|\| r\.number \|\| '\. It now reads: '/.test(fn),
+  ].join(), 'true,true')
+  check('...and the correction box takes dictation',
+    /<DictateButton size="small" value=\{draft\} onChange=\{setDraft\} \/>/.test(read('src/components/requests/RequestPanel.tsx')), true)
 }
 
 /* S14: a count on the sidebar's Requests -- new suggestions for an Administrator, my releases to test. */

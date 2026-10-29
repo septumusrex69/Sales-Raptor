@@ -50,6 +50,7 @@ function code(src) {
 }
 
 const detail = read('src/pages/accounts/AccountDetail.tsx')
+const firmDesk = readFileSync(new URL('../../src/lib/firmDesk.ts', import.meta.url), 'utf8')
 const list = read('src/pages/accounts/AccountsList.tsx')
 const book = read('src/lib/accountBook.ts')
 
@@ -86,14 +87,19 @@ ok('the account screen asks the same one', /mayHandOutFor\(currentUser, client, 
  * that looked entirely reasonable.
  */
 ok('the band never shows the legacy Swordfish name', !/swordfishAssignedTo/.test(code(detail)))
-ok('...it resolves the clerk the account is actually on', /users\.find\(\(u\) => u\.id === account\.assignedTo\)/.test(detail))
+ok('...it resolves the clerk the account is actually on', /deskLabel\(account, /.test(detail) && /if \(account\.assignedTo\) return nameOf\(account\.assignedTo\)/.test(firmDesk))
 /*
  * AND SAYS SOMETHING WHEN THE CLERK IS GONE. A profile that no longer exists must not read as
  * "Unassigned" -- the account IS on somebody's desk, and a leader looking for accounts to
  * redistribute would never see it.
  */
 ok('...and an account held by somebody no longer here does not read as unassigned',
-  /Someone no longer here/.test(detail))
+  /Someone no longer here/.test(firmDesk))
+/* A CLOSED ACCOUNT IS ON NOBODY'S DESK AND READS AS THE FIRM'S (Stephan, S15) -- not as
+   "Unassigned", which on a live account means work waiting for a person. */
+ok('...and a closed one with nobody on it reads as the firm, Bredell Ferreira',
+  /export const FIRM_DESK = 'Bredell Ferreira'/.test(firmDesk) && /return account\.endedAs \? FIRM_DESK : null/.test(firmDesk))
+ok('...on the accounts list too', /deskLabel\(a, /.test(readFileSync(new URL('../../src/pages/accounts/AccountsList.tsx', import.meta.url), 'utf8')))
 ok('...while genuinely nobody still reads as Unassigned', /'Unassigned'/.test(detail))
 /* The field is still mapped off the row -- it is what was imported, and imported history is
    frozen. It simply is not what the band asks. */

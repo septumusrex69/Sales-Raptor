@@ -173,7 +173,8 @@ ok('...and says what would come next at a few hundred people',
  * it was last read.
  */
 const page = read('src/pages/mail/MailPage.tsx')
-ok('the header says when the mailbox was last read', /Checked \{agoLabel\(checkedAt\)\}/.test(page))
+/* S15: on the real clock, or staging's date reads as the age of the check. */
+ok('the header says when the mailbox was last read', /Checked \{agoLabel\(checkedAt, new Date\(\)\)\}/.test(page))
 ok('...off the mailbox status rather than a guess', /setCheckedAt\(b\.lastSyncedAt \?\? null\)/.test(page))
 ok('...and a press updates it', /setCheckedAt\(new Date\(\)\.toISOString\(\)\)/.test(page))
 /*

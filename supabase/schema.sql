@@ -52368,3 +52368,1240 @@ as $$
 $$;
 revoke all on function public.portal_book(uuid, text, boolean, integer, integer) from public, anon, authenticated;
 grant execute on function public.portal_book(uuid, text, boolean, integer, integer) to service_role;
+
+-- ============================================================================================
+-- close_account_admin_or_liaison (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- WHO MAY CLOSE AN ACCOUNT. Stephan: "only administrators or client liaison can close an account" --
+-- and, asked which: any Administrator, and the liaison of THAT account's client; refunding the
+-- debtor's payments out of trust stays with the people who see finances. It used to be the other way
+-- round: writing off and withdrawing needed finance.view (three people on staging) and paid up needed
+-- payment.record (anybody who captures payments), and no liaison could close their own client's file.
+--
+-- A CLOSED ACCOUNT IS ON NOBODY'S DESK. Stephan: "if an account is written off or withdrawn or
+-- anything, it doesn't stay on a person's name ... it goes to the company's name." The screen calls
+-- that Bredell Ferreira; the column says null. Done in the closing UPDATE itself rather than by a
+-- BEFORE trigger, because a column changed inside a trigger does not fire the `UPDATE OF assigned_to`
+-- triggers -- and those are what write the desk history and cancel a campaign call left open on it.
+-- ============================================================================================
+
+create or replace function public.may_close_account(p_account uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  -- SECURITY DEFINER for the same reason current_user_role is: it reads the caller's own profile
+  -- and the client's liaison, and must answer the same whatever the caller may read. The liaison
+  -- of a sub-account's main client counts too: the portal and the client page treat a client and
+  -- its sub-accounts as one relationship, looked after by one liaison.
+  select coalesce(public.current_user_role() = 'Administrator', false)
+      or exists (
+        select 1
+          from public.debtor_accounts a
+          join public.companies c on c.id = a.company_id
+          left join public.companies parent on parent.id = c.parent_company_id
+         where a.id = p_account
+           and auth.uid() is not null
+           and (c.account_owner_id = auth.uid() or parent.account_owner_id = auth.uid()))
+$$;
+revoke all on function public.may_close_account(uuid) from public, anon;
+grant execute on function public.may_close_account(uuid) to authenticated;
+comment on function public.may_close_account(uuid) is
+  'Whether the caller may close this account: any Administrator, or the liaison of its client (or of the main client of a sub-account). Stephan, 28 Oct (S15).';
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON, for every ending (S15; was finance.view for a write-off
+  -- and payment.record for paid up).
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may close an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held run is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  if p_as = 'written_off' then
+    -- THE LIAISON IS companies.account_owner_id. This read `companies.liaison`, a name column that is
+    -- empty on every client, so the "tell the client" task was never once created. And not when the
+    -- liaison is the one writing it off: they know.
+    select c.name, c.account_owner_id into v_client, v_liaison
+      from public.companies c
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null and v_liaison is distinct from auth.uid() then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, public.raptor_today() + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+create or replace function public.withdraw_account(
+  p_account uuid, p_reason text, p_fees boolean default true, p_interest boolean default false,
+  p_commission boolean default false, p_amount numeric default null, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_b record;
+  v_excl numeric := 0;
+  v_vatable numeric := 0;
+  v_vat numeric := 0;
+  v_charge uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+begin
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON (S15; was finance.view). The withdrawal charge it raises
+  -- goes to the client set off against their payover, exactly as before; who may press it changed,
+  -- not what it costs. Refunding the debtor's payments is withdraw_account_refunding, still finance.
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may withdraw an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why the client is withdrawing it.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  select * into v_b from public.withdrawal_basis(p_account);
+
+  if p_amount is not null then
+    if p_amount < 0 then
+      raise exception 'A withdrawal charge cannot be negative.' using errcode = '22023';
+    end if;
+    v_excl := round(p_amount, 2);
+    v_vatable := v_excl;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account') || ' - agreed amount';
+  else
+    if p_fees then v_excl := v_excl + v_b.fees; v_vatable := v_vatable + v_b.fees; end if;
+    if p_interest then v_excl := v_excl + v_b.interest; end if;
+    if p_commission then v_excl := v_excl + v_b.commission; v_vatable := v_vatable + v_b.commission; end if;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account')
+      || case when p_fees and p_interest and p_commission then ' - fees, interest and commission'
+              when p_fees and p_interest then ' - fees and interest'
+              when p_fees and p_commission then ' - fees and commission'
+              when p_fees then ' - fees'
+              when p_interest then ' - interest'
+              when p_commission then ' - commission'
+              else ' - no charge' end;
+  end if;
+
+  v_vat := round(v_vatable * coalesce(v_b.vat_rate, 0.15), 2);
+
+  /*
+   * THE CHARGE GOES TO THE CLIENT, NEVER ONTO THE ACCOUNT'S OWN LEDGER. A withdrawal fee that found
+   * its way into account_fees would be a charge the DEBTOR never incurred, on a file the client has
+   * taken back -- and it would ride in duplum and the Annexure B cap with it. The firm invoices its
+   * client; the tariff is between the firm and the debtor, and the two are not the same book.
+   */
+  if v_excl > 0 then
+    v_charge := public.raise_client_charge(
+      p_company => v_a.company_id, p_kind => 'withdrawal', p_description => v_desc,
+      p_amount => v_excl, p_vat => v_vat, p_settlement => 'set_off', p_account => p_account);
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = 'withdrawn', ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE, and a withdrawal above all: the client has taken the file back,
+  -- so a notice going out on it afterwards is the firm writing to a debtor on nobody's mandate.
+  perform public.stop_workflows_on_close(p_account, 'Withdrawn by the client - ' || v_why);
+  -- AND THE LISTING COMES OFF. The firm has no claim left on an account it has handed back, so an
+  -- adverse record still standing in its name is one nobody is entitled to keep there.
+  perform public.bureau_removal_task(p_account, 'withdrawn', v_why);
+
+  return v_charge;
+end $$;
+
+create or replace function public.withdraw_account_refunding(
+  p_account uuid, p_reason text, p_fees boolean, p_interest boolean, p_commission boolean,
+  p_amount numeric, p_note text, p_refund uuid[], p_payable_to text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_charge uuid;
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+  v_alloc uuid;
+  v_to text := nullif(btrim(coalesce(p_payable_to, '')), '');
+  v_why text := 'Withdrawn -- refunded to the debtor: ' || btrim(coalesce(p_reason, ''));
+  p uuid;
+begin
+  -- REFUNDING OUT OF TRUST IS FINANCE'S, whoever may withdraw (S15). reverse_payment below would
+  -- refuse a liaison anyway, but only after the account had been half closed -- say it first.
+  if coalesce(array_length(p_refund, 1), 0) > 0 and not public.has_capability('finance.view') then
+    raise exception 'Refunding a debtor''s payments is for somebody who sees finances. Withdraw it keeping the payments, or ask them.'
+      using errcode = '42501';
+  end if;
+  if coalesce(array_length(p_refund, 1), 0) > 0 and v_to is null then
+    raise exception 'Say who the refund is paid to.' using errcode = '22023';
+  end if;
+  foreach p in array coalesce(p_refund, '{}') loop
+    select * into v_pay from public.account_payments where id = p;
+    if not found or v_pay.account_id <> p_account then
+      raise exception 'That payment is not on this account.' using errcode = '22023';
+    end if;
+    if v_pay.reversed_at is not null or v_pay.rejected_at is not null or v_pay.approved_at is null then
+      raise exception 'Only a processed payment that stands can be refunded.' using errcode = '22023';
+    end if;
+    if v_pay.paid_to_client then
+      raise exception 'A payment made to the client directly never reached the trust account; the client refunds it.'
+        using errcode = '22023';
+    end if;
+  end loop;
+
+  v_charge := public.withdraw_account(p_account, p_reason, p_fees, p_interest, p_commission, p_amount, p_note);
+
+  foreach p in array coalesce(p_refund, '{}') loop
+    v_copy := public.reverse_payment(p, v_why);
+    if v_copy is null then
+      raise exception 'A payment could not be reversed for the refund.' using errcode = '22023';
+    end if;
+    /* Received before the close, so the closed-account rule would split it again: say it is held. */
+    update public.account_payments set hold_as_credit = true where id = v_copy;
+    perform public.approve_payment(v_copy);
+    select id into v_alloc from public.payment_allocations
+     where payment_id = v_copy and status <> 'reversed' and excess_credit > 0;
+    if v_alloc is null then
+      raise exception 'The refunded payment was not held as the debtor''s credit.' using errcode = '22023';
+    end if;
+    perform public.dispose_excess_credit(v_alloc, 'refund', v_why, v_to, null);
+  end loop;
+
+  return v_charge;
+end $$;
+
+-- THE ACCOUNTS ALREADY CLOSED come off their collectors too (Stephan chose it, S15). Through the
+-- table, so the desk history records each move to nobody like any other.
+update public.debtor_accounts set assigned_to = null
+ where ended_as is not null and assigned_to is not null;
+
+-- ============================================================================================
+-- withdrawal_basis_for_closers (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- THE FIGURES A WITHDRAWAL IS PRICED ON, for whoever may withdraw. close_account_admin_or_liaison
+-- let the client's liaison withdraw an account; this is what the box shows them first -- this
+-- account's own fees, interest and the commission it would have earned -- and it still asked for
+-- finance.view, so the liaison would have opened the box onto a refusal. One account's figures to
+-- the person closing it, not the firm's books.
+-- ============================================================================================
+create or replace function public.withdrawal_basis(p_account uuid)
+returns table(fees numeric, interest numeric, commission numeric, vat_rate numeric, capital numeric, commission_rate numeric)
+language plpgsql
+stable security definer
+set search_path to 'public'
+as $$
+declare
+  v_bal record;
+  v_rate numeric;
+  v_vat numeric;
+begin
+  if not (public.has_capability('finance.view') or public.may_close_account(p_account)) then
+    raise exception 'Withdrawal figures are not yours to see.' using errcode = '42501';
+  end if;
+
+  select * into v_bal from public.engine_balances(p_account, null);
+  select coalesce(a.commission_rate, a.commission_rate_expected, 0) into v_rate
+    from public.debtor_accounts a where a.id = p_account;
+  select coalesce(f.vat_rate, 0.15) into v_vat from public.firm_settings f limit 1;
+
+  fees := round(coalesce(v_bal.costs, 0), 2);
+  interest := round(coalesce(v_bal.interest, 0), 2);
+  capital := round(coalesce(v_bal.capital, 0), 2);
+  commission_rate := v_rate;
+  vat_rate := v_vat;
+  -- WHAT THE COMMISSION WOULD HAVE BEEN. The firm: "the commission should have come to us because
+  -- they made an arrangement due to the result of our work." The arrangement is for the balance
+  -- still outstanding, so that is what the commission is reckoned on.
+  commission := round(capital * v_rate, 2);
+  return next;
+end $$;
+
+-- ============================================================================================
+-- sheet_ticket_mail (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A HANDOVER-SHEET TICKET SENDS AND RECEIVES EMAIL, AND IT IS NOT CHARGED. Asked (S14's question 1),
+-- Stephan: yes, not charged. A ticket about a whole sheet is about the CLIENT's spreadsheet -- fifty
+-- rows with no reference, a column in the wrong place -- and the conversation is between the firm and
+-- the client. There is no debtor on it to bill under item 1(a) or item 6, so nothing raises a fee.
+--
+-- THE MAIL STAYS IN account_emails, with account_id null and query_id set. A second table would be a
+-- second reader for the Emails panel, the reply threading, the ticket-number filing and the read
+-- mirror, each written again and each able to drift. Every reader that lists an ACCOUNT's mail
+-- filters on account_id = X, so a row with none appears on no account; the ticket's own list reads
+-- by query_id and was already the shape a sheet ticket needs.
+--
+-- NO CHECK THAT ONE OF THE TWO IS SET. query_id is ON DELETE SET NULL, by the rule that a deleted
+-- ticket takes nothing with it; a check would make deleting a sheet ticket fail on its own mail.
+-- A row with neither is invisible and harmless, which is the lesser problem.
+-- ============================================================================================
+
+alter table public.account_emails alter column account_id drop not null;
+
+create or replace function public.ticket_belongs_to_the_same_account()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_ticket uuid;
+  v_ticket_account uuid;
+begin
+  /* ONE FUNCTION, TWO TABLES, because it is one rule: a ticket link may only point at a ticket on
+     the row's own account. Both tables call their account column `account_id`; only the name of
+     the link differs, and plpgsql resolves the field when the branch runs. */
+  if tg_table_name = 'account_documents' then
+    v_ticket := new.query_id;
+  else
+    v_ticket := new.query_id;
+  end if;
+  if v_ticket is null then return new; end if;
+
+  select account_id into v_ticket_account from public.account_queries where id = v_ticket;
+
+  /* A SHEET TICKET'S OWN MAIL (S15): no account on the ticket and none on the email -- both sides
+     agree there is no debtor, which is the one case the rule can answer for a sheet. Mail only:
+     a document still needs an account to be filed on. */
+  if tg_table_name = 'account_emails' and v_ticket_account is null and new.account_id is null
+     and exists (select 1 from public.account_queries where id = v_ticket) then
+    return new;
+  end if;
+
+  /* A SHEET-LEVEL TICKET HAS NO ACCOUNT. It may not be linked to an account's row: "belongs to the
+     same account" is unanswerable when one side has none, and unanswerable is not the same as yes. */
+  if v_ticket_account is null or new.account_id is null or v_ticket_account <> new.account_id then
+    raise exception 'That ticket belongs to a different account.' using errcode = '23503';
+  end if;
+  return new;
+end $$;
+
+create or replace function public.account_email_set_correspondent()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  /* MAIL ON A SHEET TICKET IS THE CLIENT'S, always: a sheet has no debtor to write to or hear from. */
+  if new.account_id is null then
+    new.correspondent := 'client';
+    return new;
+  end if;
+  new.correspondent := public.account_email_correspondent(new.account_id, new.debtor_address, new.in_reply_to);
+  return new;
+end $$;
+
+-- ============================================================================================
+-- big_boss (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A LEVEL ABOVE THE ADMINISTRATOR. Stephan: "I am the only person that can approve a suggestion for
+-- building Raptor", then "can we make another user? Big boss" -- asked, "above admin". Six people are
+-- Administrators on staging and every one of them could approve a build request.
+--
+-- A TICK, NOT A ROLE. A tenth role would be a rewrite of every list of role names in the app and the
+-- database, for one person; the firm's own pattern for "this person, by name" is a tick in no role's
+-- template (business.income, people.pay). `boss` is the third. The screen calls its holder Big Boss.
+--
+-- ONLY A BIG BOSS MAKES ANOTHER. Granted or revoked by anybody else -- an Administrator with finance
+-- included -- the profile guard RAISES, the same as it does for finance access, because a level that
+-- any Administrator could give themselves is not above them.
+--
+-- WHAT IT DECIDES: approving or declining a build request. A request moving new -> accepted or to
+-- declined needs it; "Not right yet" (a tester sending a released request back) does not, because
+-- testing is everybody's.
+-- ============================================================================================
+
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator') || array['business.income', 'people.pay', 'boss']
+$$;
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+    return new;
+  end if;
+
+  -- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS. Raised, not reverted, for the reason finance is:
+  -- a silent revert reads as "saved" to the person who tried.
+  if ('boss' = any(coalesce(new.grants, array[]::text[]))) is distinct from ('boss' = any(coalesce(old.grants, array[]::text[])))
+     or ('boss' = any(coalesce(new.revokes, array[]::text[]))) is distinct from ('boss' = any(coalesce(old.revokes, array[]::text[]))) then
+    if not public.has_capability('boss') then
+      raise exception 'Only the Big Boss can make somebody Big Boss, or stop them being one.' using errcode = '42501';
+    end if;
+  end if;
+
+  -- S14: AN ADMINISTRATOR WITHOUT FINANCE (see the top of this block).
+  if not public.has_capability('finance.view') then
+    if new.id = auth.uid() and (new.role is distinct from old.role or new.grants is distinct from old.grants
+        or new.revokes is distinct from old.revokes or new.department_id is distinct from old.department_id) then
+      raise exception 'An Administrator without finance access cannot change their own permissions.'
+        using errcode = '42501';
+    end if;
+    if public.finance_held(new.role, new.grants, new.revokes, new.department_id)
+       is distinct from public.finance_held(old.role, old.grants, old.revokes, old.department_id) then
+      raise exception 'Only an Administrator with finance access can give or take away finance access (Trust, Business, pay, approving payments).'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.change_request_boss_decides()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if coalesce(current_setting('role', true), '') = 'service_role' then return new; end if;
+  if new.status is distinct from old.status
+     and ((old.status = 'new' and new.status = 'accepted') or new.status = 'declined')
+     and not public.has_capability('boss') then
+    raise exception 'Only the Big Boss approves or declines what gets built in Raptor.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists change_request_boss_decides on public.change_requests;
+create trigger change_request_boss_decides before update of status on public.change_requests
+  for each row execute function public.change_request_boss_decides();
+
+-- STEPHAN IS THE BIG BOSS. By his address, which is the same on staging and production. Done as the
+-- server would do it: the guard above lets the service role through and nobody else.
+set local role service_role;
+update public.profiles set grants = array_append(coalesce(grants, array[]::text[]), 'boss')
+ where lower(email) = 'stephan@bredellferreira.co.za'
+   and not ('boss' = any(coalesce(grants, array[]::text[])));
+reset role;
+
+-- ============================================================================================
+-- big_boss_queue (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- TWO MORE DOORS TO THE SAME DECISION, AND THE TICK'S PROPER NAME.
+--
+-- big_boss locked new -> accepted and declining. Reopening a DECLINED request is approving it after
+-- all, and "Ask Claude to build it" (build_requested_at going from nothing to a time) is the go-ahead
+-- itself -- Stephan: "I am the only person that can approve a suggestion for building Raptor". Taking a
+-- request OFF the queue stays open to any Administrator: stopping work is never the dangerous
+-- direction. Reopening a RELEASED one ("Not right yet") stays everybody's, because testing is.
+--
+-- `boss` becomes `raptor.boss`: every other tick is area.thing, and check-capabilities holds that.
+-- Renamed everywhere it is read -- all_capabilities, the profile guard, the request trigger -- and on
+-- the one profile that holds it, in the same migration, so there is no moment it means nothing.
+-- ============================================================================================
+
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator') || array['business.income', 'people.pay', 'raptor.boss']
+$$;
+
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+    return new;
+  end if;
+
+  -- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS. Raised, not reverted, for the reason finance is:
+  -- a silent revert reads as "saved" to the person who tried.
+  if ('raptor.boss' = any(coalesce(new.grants, array[]::text[]))) is distinct from ('raptor.boss' = any(coalesce(old.grants, array[]::text[])))
+     or ('raptor.boss' = any(coalesce(new.revokes, array[]::text[]))) is distinct from ('raptor.boss' = any(coalesce(old.revokes, array[]::text[]))) then
+    if not public.has_capability('raptor.boss') then
+      raise exception 'Only the Big Boss can make somebody Big Boss, or stop them being one.' using errcode = '42501';
+    end if;
+  end if;
+
+  -- S14: AN ADMINISTRATOR WITHOUT FINANCE (see the top of this block).
+  if not public.has_capability('finance.view') then
+    if new.id = auth.uid() and (new.role is distinct from old.role or new.grants is distinct from old.grants
+        or new.revokes is distinct from old.revokes or new.department_id is distinct from old.department_id) then
+      raise exception 'An Administrator without finance access cannot change their own permissions.'
+        using errcode = '42501';
+    end if;
+    if public.finance_held(new.role, new.grants, new.revokes, new.department_id)
+       is distinct from public.finance_held(old.role, old.grants, old.revokes, old.department_id) then
+      raise exception 'Only an Administrator with finance access can give or take away finance access (Trust, Business, pay, approving payments).'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.change_request_boss_decides()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if coalesce(current_setting('role', true), '') = 'service_role' then return new; end if;
+  if not public.has_capability('raptor.boss') and (
+       (new.status is distinct from old.status
+        and ((old.status in ('new', 'declined') and new.status = 'accepted') or new.status = 'declined'))
+    or (old.build_requested_at is null and new.build_requested_at is not null)) then
+    raise exception 'Only the Big Boss approves or declines what gets built in Raptor.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists change_request_boss_decides on public.change_requests;
+create trigger change_request_boss_decides before update of status, build_requested_at on public.change_requests
+  for each row execute function public.change_request_boss_decides();
+
+set local role service_role;
+update public.profiles
+   set grants = array_replace(grants, 'boss', 'raptor.boss'),
+       revokes = array_replace(revokes, 'boss', 'raptor.boss')
+ where 'boss' = any(coalesce(grants, array[]::text[])) or 'boss' = any(coalesce(revokes, array[]::text[]));
+reset role;
+
+-- ============================================================================================
+-- paid_up_letter (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A PAID-UP ACCOUNT GETS A LETTER, BY EMAIL, AND NOTHING ELSE. Stephan: "I don't want to see an SMS go
+-- out. It's a waste of money. But we can send a letter to a guy who's paid up his account, even though
+-- if that is a small balance." Asked: automatically; a balance under R50 waived by Ready to close gets
+-- the same letter; no email address is noted on the account (the step holds there, "No email address
+-- on this account", which the account's workflow panel shows).
+--
+-- A WORKFLOW, because that is how Raptor sends anything on its own: the morning runner, the letter
+-- drawn to PDF and attached, the send recorded on the account. One step, day 0, email only -- the
+-- covering emails "Paid-up confirmation" (person and company), which post the letters seeded by
+-- scripts/letters/seed-paid-up.mjs. NOT CHARGED: planSend.paidUp quotes nothing on an account closed
+-- paid up or settled, because an R25 item 1(a) would put a balance back on the account the letter says
+-- owes nothing.
+--
+-- STARTED BY settle_account, AFTER stop_workflows_on_close -- so closing stops every other sequence and
+-- then starts this one. Paid up always; SETTLED only where no approved settlement was paid, which is
+-- the Ready-to-close small-balance close: a real settlement is the client accepting less, and a letter
+-- saying "paid up" would misstate it (that confirmation is its own question for the firm). Once per
+-- account and version, ever: re-opened and closed again, the debtor already has the letter.
+--
+-- AT GO-LIVE the letters must be seeded first (seed-paid-up.mjs); the node finds its two emails by
+-- seed_key, and an email without its letter attached would promise an attachment that is not there.
+-- ============================================================================================
+
+alter table public.workflow_versions drop constraint if exists workflow_versions_trigger_kind_check;
+alter table public.workflow_versions add constraint workflow_versions_trigger_kind_check
+  check (trigger_kind = any (array['handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
+    'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned', 'callback', 'by_hand',
+    'account_paid_up']));
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON, for every ending (S15; was finance.view for a write-off
+  -- and payment.record for paid up).
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may close an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held run is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  -- AND THEN THE ONE THAT BELONGS TO A CLOSE (S15): the paid-up letter. See the header for why a
+  -- settlement that was really agreed is left out.
+  if p_as = 'paid_up'
+     or (p_as = 'settled' and not exists (
+           select 1 from public.account_settlements s where s.account_id = p_account and s.status = 'paid')) then
+    insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+    select p_account, v.id, public.raptor_today(), auth.uid()
+      from public.workflow_versions v
+     where v.state = 'active' and v.trigger_kind = 'account_paid_up'
+       and not exists (select 1 from public.workflow_runs r where r.account_id = p_account and r.version_id = v.id);
+  end if;
+
+  if p_as = 'written_off' then
+    -- THE LIAISON IS companies.account_owner_id. This read `companies.liaison`, a name column that is
+    -- empty on every client, so the "tell the client" task was never once created. And not when the
+    -- liaison is the one writing it off: they know.
+    select c.name, c.account_owner_id into v_client, v_liaison
+      from public.companies c
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null and v_liaison is distinct from auth.uid() then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, public.raptor_today() + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+-- THE WORKFLOW ITSELF, once. Found again by its key, so running this twice adds nothing.
+do $$
+declare v_w uuid; v_v uuid; v_p uuid;
+begin
+  if exists (select 1 from public.workflows where key = 'paid-up-letter') then return; end if;
+  insert into public.workflows (key, name, description, domain)
+  values ('paid-up-letter', 'Paid-up letter',
+    'Emails the paid-up confirmation, with the letter attached, the morning after an account is closed as paid up '
+      || '(or settled on a small balance waived). Email only, never an SMS, and never charged.',
+    'collections')
+  returning id into v_w;
+  -- DRAFTED, FILLED, THEN PUBLISHED: refuse_frozen_workflow will not let a phase or a node onto a
+  -- version that is already published, which is the rule every other workflow lives under too.
+  insert into public.workflow_versions (workflow_id, version, state, trigger_kind, trigger_note, day_unit)
+  values (v_w, 1, 'draft', 'account_paid_up',
+    'Starts itself when an account is closed as paid up, or settled on a balance under R50 waived by Ready to close. '
+      || 'Not on a settlement the client approved. Not charged: nothing is quoted on an account closed paid.',
+    'calendar')
+  returning id into v_v;
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v_v, 1, 'Paid up', 'The letter the debtor keeps', 0, 0)
+  returning id into v_p;
+  insert into public.workflow_nodes (version_id, phase_id, key, kind, label, description, day, channel,
+    template_id, template_company_id, statutory, ordinal, needs_release, anchor)
+  values (v_v, v_p, 'paid-up-email', 'communication', 'Paid-up letter',
+    'The covering email with the paid-up confirmation attached. Email only: Stephan, "I don''t want to see an SMS go out".',
+    0, 'email',
+    (select id from public.message_templates where seed_key = 'email-paid-up-individual'),
+    (select id from public.message_templates where seed_key = 'email-paid-up-company'),
+    false, 0, false, 'run');
+  update public.workflow_versions set state = 'active', published_at = now() where id = v_v;
+end $$;
+
+-- ============================================================================================
+-- settlement_letter (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A SETTLEMENT THE CLIENT AGREED GETS ITS OWN LETTER. Stephan, told the paid-up letter would not go
+-- on one (it would call a debt settled for less "paid up"): "yes make settlement letter". The letters
+-- (letter-settlement-individual/company) were seeded with seed-paid-up.mjs and the firm's existing
+-- covering emails (email-settlement-confirmation-*) attach them, signed by the signatory.
+--
+-- THE SAME SHAPE AS paid_up_letter: trigger kind account_settled, one email step, no SMS, never
+-- charged (planSend.paidUp covers settled). settle_account now picks one of the two by whether an
+-- approved settlement was paid -- close_as_settled marks it paid before it calls settle_account, which
+-- is what makes that test true at the moment it is asked.
+-- ============================================================================================
+
+alter table public.workflow_versions drop constraint if exists workflow_versions_trigger_kind_check;
+alter table public.workflow_versions add constraint workflow_versions_trigger_kind_check
+  check (trigger_kind = any (array['handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
+    'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned', 'callback', 'by_hand',
+    'account_paid_up', 'account_settled']));
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  -- ADMINISTRATORS AND THE CLIENT'S LIAISON, for every ending (S15; was finance.view for a write-off
+  -- and payment.record for paid up).
+  if not public.may_close_account(p_account) then
+    raise exception 'Only an Administrator or this client''s liaison may close an account.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null,
+         -- AND ON NOBODY'S DESK: it is the firm's now, not the collector's (Stephan, S15).
+         assigned_to = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held run is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  -- AND THEN THE ONE THAT BELONGS TO A CLOSE (S15): the paid-up letter, or -- where the client agreed
+  -- a settlement and it was paid -- the settlement letter. One or the other, never both: a debt settled
+  -- for less is not "paid up", and the settlement letter is the one that says what was accepted.
+  if p_as in ('paid_up', 'settled') then
+    insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+    select p_account, v.id, public.raptor_today(), auth.uid()
+      from public.workflow_versions v
+     where v.state = 'active'
+       and v.trigger_kind = case
+             when p_as = 'settled' and exists (
+               select 1 from public.account_settlements s where s.account_id = p_account and s.status = 'paid')
+             then 'account_settled' else 'account_paid_up' end
+       and not exists (select 1 from public.workflow_runs r where r.account_id = p_account and r.version_id = v.id);
+  end if;
+
+  if p_as = 'written_off' then
+    -- THE LIAISON IS companies.account_owner_id. This read `companies.liaison`, a name column that is
+    -- empty on every client, so the "tell the client" task was never once created. And not when the
+    -- liaison is the one writing it off: they know.
+    select c.name, c.account_owner_id into v_client, v_liaison
+      from public.companies c
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null and v_liaison is distinct from auth.uid() then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, public.raptor_today() + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+do $$
+declare v_w uuid; v_v uuid; v_p uuid;
+begin
+  if exists (select 1 from public.workflows where key = 'settlement-letter') then return; end if;
+  insert into public.workflows (key, name, description, domain)
+  values ('settlement-letter', 'Settlement letter',
+    'Emails the settlement confirmation, with the letter attached, the morning after an account is closed on a '
+      || 'settlement the client agreed and the debtor paid. Email only, never an SMS, and never charged.',
+    'collections')
+  returning id into v_w;
+  insert into public.workflow_versions (workflow_id, version, state, trigger_kind, trigger_note, day_unit)
+  values (v_w, 1, 'draft', 'account_settled',
+    'Starts itself when an approved settlement is paid and the account is closed as settled. Not charged.',
+    'calendar')
+  returning id into v_v;
+  insert into public.workflow_phases (version_id, ordinal, name, subtitle, from_day, to_day)
+  values (v_v, 1, 'Settled', 'The letter the debtor keeps', 0, 0)
+  returning id into v_p;
+  insert into public.workflow_nodes (version_id, phase_id, key, kind, label, description, day, channel,
+    template_id, template_company_id, statutory, ordinal, needs_release, anchor)
+  values (v_v, v_p, 'settlement-email', 'communication', 'Settlement letter',
+    'The covering email with the settlement confirmation attached. Email only, like the paid-up letter.',
+    0, 'email',
+    (select id from public.message_templates where seed_key = 'email-settlement-confirmation-individual'),
+    (select id from public.message_templates where seed_key = 'email-settlement-confirmation-company'),
+    false, 0, false, 'run');
+  update public.workflow_versions set state = 'active', published_at = now() where id = v_v;
+end $$;
+
+-- ============================================================================================
+-- client_portal_tickets (S15, Raptor · Handover 14, 28 Oct 2026) -- THE CLIENT PORTAL, PHASE 2a.
+--
+-- Stephan's order (28 Oct): tickets in the portal (view and reply), questions about a debtor, callbacks,
+-- then client handovers with the firm's approval (phase 2b). "Then go ahead with the client portal."
+--
+-- WHAT A CLIENT SEES IS WHAT THE FIRM ALREADY SAID THEY SEE: clientSection() (disputeCategories.ts) puts a
+-- debtor's DISPUTE on the client's dispute list and an import correction or a litigation recommendation
+-- on their QUERY list; an agent asking a team leader for help is the firm supervising its own staff and
+-- is on neither. A question the client asks from the portal is a new kind, `client`, and a query.
+--
+-- AND OF A TICKET, ONLY THE CORRESPONDENCE WITH THE CLIENT: account_emails on the ticket whose
+-- correspondent is the client. Never the internal notes, never the debtor's own mail -- what the firm
+-- puts in front of the client it already does by writing to them, and that is what they see.
+--
+-- READ BY THE SERVICE ROLE ONLY, filtered by the session's client, as portal_book is. No browser role
+-- may call either function.
+-- ============================================================================================
+
+alter table public.account_queries drop constraint if exists account_queries_kind_check;
+alter table public.account_queries add constraint account_queries_kind_check
+  check (kind = any (array['dispute', 'request', 'help', 'litigation', 'import', 'client']));
+
+/*
+ * A PORTAL USER IS THE CLIENT. Their reply is filed with their own address, which is on no contact or
+ * company row, and the correspondent rule read it as the DEBTOR -- the client's words on the debtor's
+ * Emails tab, and a reply that never moved the ticket back to the liaison. Anyone allowed to sign in for
+ * the client (or its main client) now reads as the client, by address, like a contact does.
+ */
+create or replace function public.account_email_correspondent(p_account uuid, p_address text, p_in_reply_to text)
+returns text
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with a as (select lower(trim(coalesce(p_address, ''))) as addr),
+  co as (
+    select da.company_id, c.parent_company_id
+    from debtor_accounts da left join companies c on c.id = da.company_id
+    where da.id = p_account
+  )
+  select case
+    when exists (
+      select 1 from account_contacts ac, a
+      where ac.account_id = p_account and ac.kind = 'email' and lower(trim(ac.value)) = a.addr
+    ) then 'debtor'
+    when exists (
+      select 1 from companies k, co, a
+      where a.addr <> '' and k.id in (co.company_id, co.parent_company_id) and lower(trim(k.email)) = a.addr
+    ) or exists (
+      select 1 from contacts p, co, a
+      where a.addr <> '' and p.company_id in (co.company_id, co.parent_company_id) and lower(trim(p.email)) = a.addr
+    ) or exists (
+      select 1 from client_portal_users u, co, a
+      where a.addr <> '' and u.company_id in (co.company_id, co.parent_company_id) and lower(trim(u.email)) = a.addr
+    ) or exists (
+      select 1 from account_emails r
+      where p_in_reply_to is not null and r.message_id = p_in_reply_to
+        and r.account_id = p_account and r.correspondent = 'client'
+    ) then 'client'
+    else 'debtor'
+  end
+$$;
+
+/* The client's tickets: on their accounts (client or sub-account) or their handover batches. */
+create or replace function public.portal_tickets(p_client uuid)
+returns jsonb
+language sql
+stable
+set search_path to 'public'
+as $$
+  with mine as (
+    select q.id, q.ticket_no, q.kind, q.status, q.stage, q.description, q.request_for, q.category,
+           q.raised_at, q.closed_at, q.outcome, q.account_id, q.handover_id,
+           a.case_number, a.account_number, a.client_reference,
+           trim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)) as debtor,
+           h.reference as sheet_reference
+      from public.account_queries q
+      left join public.debtor_accounts a on a.id = q.account_id
+      left join public.companies ca on ca.id = a.company_id
+      left join public.handovers h on h.id = q.handover_id
+      left join public.companies ch on ch.id = h.company_id
+     where coalesce(ca.parent_company_id, ca.id, ch.parent_company_id, ch.id) = p_client
+       and q.kind in ('dispute', 'import', 'litigation', 'client')
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'ticketNo', m.ticket_no, 'kind', m.kind, 'status', m.status, 'stage', m.stage,
+           'description', m.description, 'requestFor', m.request_for, 'category', m.category,
+           'raisedAt', m.raised_at, 'closedAt', m.closed_at, 'outcome', m.outcome,
+           'caseNumber', m.case_number, 'accountNumber', m.account_number, 'clientReference', m.client_reference,
+           'debtor', nullif(m.debtor, ''), 'sheetReference', m.sheet_reference,
+           'lastMessageAt', (select max(e.occurred_at) from public.account_emails e where e.query_id = m.id and e.correspondent = 'client'),
+           'messages', (select count(*) from public.account_emails e where e.query_id = m.id and e.correspondent = 'client'))
+         order by (m.status = 'open') desc, m.raised_at desc), '[]'::jsonb)
+    from mine m
+$$;
+
+/* One ticket's correspondence with the client, if -- and only if -- the ticket is this client's. */
+create or replace function public.portal_ticket_thread(p_client uuid, p_ticket_no bigint)
+returns jsonb
+language sql
+stable
+set search_path to 'public'
+as $$
+  with t as (
+    select q.id
+      from public.account_queries q
+      left join public.debtor_accounts a on a.id = q.account_id
+      left join public.companies ca on ca.id = a.company_id
+      left join public.handovers h on h.id = q.handover_id
+      left join public.companies ch on ch.id = h.company_id
+     where q.ticket_no = p_ticket_no
+       and coalesce(ca.parent_company_id, ca.id, ch.parent_company_id, ch.id) = p_client
+       and q.kind in ('dispute', 'import', 'litigation', 'client')
+  )
+  select case when not exists (select 1 from t) then null else
+    coalesce((select jsonb_agg(jsonb_build_object(
+              'direction', e.direction, 'subject', e.subject, 'body', e.body, 'at', e.occurred_at,
+              'from', case when e.direction = 'out' then coalesce(e.sent_by_name, 'Bredell Ferreira') else e.sent_by_name end,
+              'attachments', coalesce(to_jsonb(e.attachment_names), '[]'::jsonb))
+            order by e.occurred_at)
+       from public.account_emails e where e.query_id = (select id from t) and e.correspondent = 'client'), '[]'::jsonb)
+  end
+$$;
+
+revoke all on function public.portal_tickets(uuid) from public, anon, authenticated;
+revoke all on function public.portal_ticket_thread(uuid, bigint) from public, anon, authenticated;
+grant execute on function public.portal_tickets(uuid) to service_role;
+grant execute on function public.portal_ticket_thread(uuid, bigint) to service_role;
+-- ============================================================================================
+-- change_request_edit_notify (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- THE PERSON WHO ASKED IS TOLD WHEN SOMEBODY ELSE CHANGES THEIR WORDS. Stephan, of R-13: "if you want to
+-- edit or make a correction ... edit it before you approve it. [Rinda] is notified that it's been edited.
+-- Shows the new prompt. And sends for testing." The correction already existed and kept the OLD words on
+-- the history; nothing told the sender, so a request could be approved and built as somebody else's
+-- reading of it without the person who asked ever seeing that reading. They are now notified, with the
+-- new words in the message, and the bell links to the request -- where it is they who test it when it is
+-- released, against the words as they now stand.
+-- ============================================================================================
+create or replace function public.change_request_edit(p_number integer, p_description text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r public.change_requests;
+  v_new text := btrim(coalesce(p_description, ''));
+  v_who text;
+begin
+  select * into r from public.change_requests where number = p_number;
+  if not found then raise exception 'There is no request R-%.', p_number using errcode = '22023'; end if;
+  if auth.uid() is distinct from r.created_by and coalesce(public.current_user_role(), '') <> 'Administrator' then
+    raise exception 'Only the person who sent R-%, or an Administrator, may correct it.', p_number using errcode = '42501';
+  end if;
+  if r.status not in ('new', 'accepted') then
+    raise exception 'Claude has started on R-% (or it is finished), so its words are the record now. Add a comment instead.', p_number using errcode = '22023';
+  end if;
+  if v_new = '' then raise exception 'A request needs words.' using errcode = '22023'; end if;
+  if v_new = btrim(r.description) then return; end if;
+  update public.change_requests set description = v_new, updated_at = public.raptor_now() where id = r.id;
+  insert into public.change_request_events (request_id, kind, body, by_id)
+  values (r.id, 'edited', r.description, auth.uid());
+
+  -- S15: AND THE SENDER HEARS OF IT, with the new words, when it was not they who changed them.
+  if r.created_by is not null and r.created_by is distinct from auth.uid() then
+    select coalesce(name, 'Somebody') into v_who from public.profiles where id = auth.uid();
+    insert into public.notifications (user_id, type, message, link)
+    values (r.created_by, 'change_request.edited',
+            coalesce(v_who, 'Somebody') || ' reworded your request R-' || r.number || '. It now reads: '
+              || left(v_new, 160) || case when length(v_new) > 160 then '…' else '' end,
+            '/requests?r=' || r.number);
+  end if;
+end $$;
+
+-- ============================================================================================
+-- account_queries_stage_on_record (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A NO-OP ON THE DATABASE, AND THE RECORD CATCHING UP. account_queries.stage has been live (with its
+-- check constraint and the stage log trigger) since tickets moved between desks, but the column itself
+-- never reached supabase/schema.sql -- so check-select-columns refused the portal's first select that
+-- named it. Written idempotently so it changes nothing where it already exists.
+-- ============================================================================================
+alter table public.account_queries add column if not exists stage text not null default 'agent';
+
+-- ============================================================================================
+-- portal_record_ptc (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- A CLIENT RECORDS A PAYMENT MADE TO THEM, FROM THE PORTAL. Stephan: "record a payment ... like a PTC, a
+-- payment made to you, on a specific account" -- and, asked whether it should only be reported: "the record
+-- payment can go straight to the account ... it shows up in the trust thing for approval ... and then it
+-- also notifies the liaison that there's been a payment."
+--
+-- SO IT IS A PAYMENT, UNAPPROVED. The same row record_manual_payment writes, paid_to_client, source
+-- 'portal', created_by null (no Raptor user pressed anything). Unapproved, it allocates nothing, raises no
+-- fee and is in no payover run: approve_payment is still the single moment a payment is processed, and the
+-- approval queue lists it beside every other receipt waiting -- with the client's name on it.
+--
+-- THE SAME RULES AS CAPTURE BY HAND, ONE EXCEPTION. Amount above nothing; not in the future; not before
+-- the handover; a reference (the client's own, which is how a commission query is checked against their
+-- books later). A duplicate on the same day is REFUSED rather than asked about: there is nobody at the
+-- firm in the room to confirm it is a second payment, so the client is told to ask their liaison.
+-- THE EXCEPTION IS THE PROOF. record_manual_payment insists on the client's confirmation attached to a PTC
+-- because a PTC captured by the firm is a CLAIM about money it never saw. Here the client is the one
+-- saying it, signed in as themselves: the confirmation is the record itself, and `details` says who made
+-- it and when.
+--
+-- AN OPEN ACCOUNT ON THE CLIENT'S OWN BOOK ONLY, decided here and not trusted from the caller.
+-- SERVICE ROLE ONLY: the portal's server calls it; no browser role may.
+-- ============================================================================================
+
+create or replace function public.portal_record_ptc(
+  p_client uuid, p_account uuid, p_amount numeric, p_received_on date, p_reference text,
+  p_reported_by text, p_note text default null)
+returns uuid
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_owner uuid;
+  v_reference text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_payment uuid;
+begin
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account is not on your book.' using errcode = 'P0002'; end if;
+  select coalesce(c.parent_company_id, c.id) into v_owner from public.companies c where c.id = v_a.company_id;
+  if v_owner is distinct from p_client then
+    raise exception 'That account is not on your book.' using errcode = 'P0002';
+  end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is closed. Tell your liaison about the payment instead.' using errcode = '22023';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Type the amount the debtor paid you.' using errcode = '22023';
+  end if;
+  if p_received_on is null or p_received_on > public.raptor_today() then
+    raise exception 'Say which day it was paid. It cannot be in the future.' using errcode = '22023';
+  end if;
+  if v_a.handover_date is not null and p_received_on < v_a.handover_date then
+    raise exception 'That day is before you handed the account to us on %. Tell your liaison about it instead.',
+      to_char(v_a.handover_date, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+  if v_reference is null then
+    raise exception 'Put your reference on it -- your receipt or bank reference.' using errcode = '23502';
+  end if;
+  if exists (
+    select 1 from public.account_payments
+     where account_id = p_account and amount = p_amount and reversed_at is null and rejected_at is null
+       and (received_at at time zone 'Africa/Johannesburg')::date = p_received_on) then
+    raise exception 'A payment of % on that day is already recorded on this account. If this is a second one, tell your liaison.',
+      to_char(p_amount, 'FM999999990.00') using errcode = '23505';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+  ) values (
+    p_account, (p_received_on::timestamp at time zone 'Africa/Johannesburg'), round(p_amount, 2), 'Paid to client',
+    v_reference,
+    'Recorded by the client in the client portal: ' || coalesce(nullif(btrim(p_reported_by), ''), 'the client')
+      || ', ' || to_char(public.raptor_now() at time zone 'Africa/Johannesburg', 'DD Mon YYYY HH24:MI')
+      || coalesce(' -- ' || nullif(btrim(p_note), ''), ''),
+    'portal', true, null
+  ) returning id into v_payment;
+  return v_payment;
+end $$;
+
+revoke all on function public.portal_record_ptc(uuid, uuid, numeric, date, text, text, text) from public, anon, authenticated;
+grant execute on function public.portal_record_ptc(uuid, uuid, numeric, date, text, text, text) to service_role;
+
+-- ============================================================================================
+-- portal_summary (S15, Raptor · Handover 14, 28 Oct 2026)
+--
+-- THE CLIENT'S DASHBOARD IN ONE READ. Stephan: "it's also very slow" -- the dashboard paged the whole book
+-- through portal_book 500 lines at a time to count positions in the server. This answers the same question
+-- in the database: every account of the client (and its sub-accounts), open AND closed, grouped by exactly
+-- the columns a client's position is read off (book, ended_as, status, sub_status, bucket, money this month,
+-- an open dispute), with the count and the capital of each group. The POSITION itself is still decided in
+-- one place, clientPosition (portalLine's rules), from the group's columns -- so the dashboard, the Accounts
+-- list and the firm's own client page cannot disagree about a debtor.
+--
+-- "How many accounts have been paid up?" is ended_as, which is why closed accounts are in it: a client
+-- reading their book wants the finished ones counted by how they finished.
+--
+-- The same money rules as portal_book: receipts not reversed, not rejected, not demo; this month on the
+-- firm's day. Capital, never balance. SERVICE ROLE ONLY, like portal_book.
+-- ============================================================================================
+
+create or replace function public.portal_summary(p_client uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with acct as (
+    select a.id, a.book, a.ended_as, a.status, a.sub_status, a.bucket,
+           coalesce(a.capital_handed_over, 0) as handed_over,
+           coalesce(a.capital_outstanding, 0) as outstanding
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+     where coalesce(c.parent_company_id, c.id) = p_client
+  ), paid as (
+    select p.account_id,
+           sum(p.amount) as to_date,
+           sum(p.amount) filter (where (p.received_at at time zone 'Africa/Johannesburg')::date
+                                       >= date_trunc('month', public.raptor_today())::date) as this_month
+      from public.account_payments p
+     where p.account_id in (select id from acct)
+       and p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+     group by p.account_id
+  ), disputed as (
+    select distinct q.account_id from public.account_queries q
+     where q.account_id in (select id from acct) and q.kind = 'dispute' and q.status <> 'closed'
+  ), lines as (
+    select a.*, coalesce(p.to_date, 0) as paid_to_date, coalesce(p.this_month, 0) as paid_this_month,
+           d.account_id is not null as is_disputed
+      from acct a left join paid p on p.account_id = a.id left join disputed d on d.account_id = a.id
+  )
+  select jsonb_build_object(
+    'totals', (select jsonb_build_object(
+                 'accounts', count(*),
+                 'open', count(*) filter (where book in ('active', 'on_hold') and ended_as is null),
+                 'capital_handed_over', coalesce(sum(handed_over), 0),
+                 'capital_outstanding', coalesce(sum(outstanding) filter (where book in ('active', 'on_hold') and ended_as is null), 0),
+                 'paid_to_date', coalesce(sum(paid_to_date), 0),
+                 'paid_this_month', coalesce(sum(paid_this_month), 0)) from lines),
+    'groups', coalesce((select jsonb_agg(to_jsonb(g)) from (
+                 select book, ended_as, status, sub_status, bucket,
+                        paid_this_month > 0 as paid_now, is_disputed as disputed,
+                        count(*) as accounts, sum(handed_over) as handed_over, sum(outstanding) as outstanding,
+                        sum(paid_to_date) as paid_to_date
+                   from lines
+                  group by book, ended_as, status, sub_status, bucket, paid_this_month > 0, is_disputed) g), '[]'::jsonb)
+  );
+$$;
+
+revoke all on function public.portal_summary(uuid) from public, anon, authenticated;
+grant execute on function public.portal_summary(uuid) to service_role;

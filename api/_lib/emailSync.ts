@@ -639,7 +639,12 @@ async function findAccount(
   admin: SupabaseClient,
   fromAddress: string,
   parsed: { inReplyTo?: string; references?: string | string[]; subject?: string },
-): Promise<{ accountId: string; queryId: string | null; via: 'thread' | 'ticket' | 'address' | 'reference' } | null> {
+): Promise<{
+  /** Null on a HANDOVER-SHEET ticket's mail (S15): it has a ticket and no account. */
+  accountId: string | null
+  queryId: string | null
+  via: 'thread' | 'ticket' | 'address' | 'reference'
+} | null> {
   for (const id of threadIds(parsed.inReplyTo, parsed.references)) {
     const { data } = await admin
       .from('account_emails')
@@ -647,9 +652,10 @@ async function findAccount(
       .eq('message_id', id)
       .limit(1)
       .maybeSingle()
-    if (data) {
+    /* A row with neither -- a sheet ticket's mail whose ticket was deleted -- leads nowhere. */
+    if (data && (data.account_id || data.query_id)) {
       return {
-        accountId: data.account_id as string,
+        accountId: (data.account_id as string | null) ?? null,
         queryId: (data.query_id as string | null) ?? null,
         via: 'thread',
       }
@@ -660,13 +666,16 @@ async function findAccount(
    * THE TICKET NUMBER IN THE SUBJECT, SECOND (S14). After the thread, which is a fact about the
    * message; before the sender's address, because a ticket number is an identifier WE wrote and asked
    * the client to quote, and it says which ticket as well as which account -- the address says only
-   * whose account. A ticket about a whole handover sheet has no account and cannot be filed this way.
+   * whose account. A ticket about a whole handover SHEET has no account and is filed on the ticket
+   * alone (S15: Stephan, "yes, not charged").
    */
   const ticketNo = ticketNumberIn(parsed.subject)
   if (ticketNo !== null) {
     const { data: ticket } = await admin
       .from('account_queries').select('id, account_id').eq('ticket_no', ticketNo).maybeSingle()
-    if (ticket?.account_id) return { accountId: ticket.account_id as string, queryId: ticket.id as string, via: 'ticket' }
+    if (ticket) {
+      return { accountId: (ticket.account_id as string | null) ?? null, queryId: ticket.id as string, via: 'ticket' }
+    }
   }
 
   const address = normaliseAddress(fromAddress)
@@ -692,6 +701,66 @@ async function findAccount(
   const byReference = await accountFromReference(admin, parsed.subject)
   if (byReference) return { accountId: byReference, queryId: null, via: 'reference' }
   return null
+}
+
+/**
+ * File a client's email on a HANDOVER-SHEET ticket (S15): the row and nothing else.
+ *
+ * fileAccountEmail without the account: no item 6 fee (a sheet has no debtor -- Stephan, "not
+ * charged"), no timeline note (a sheet has no timeline). Idempotent the same way, on message_id, so a
+ * resynced mailbox files it once. `correspondent` is set to 'client' by the database for a row with
+ * no account, so ticket_client_replied moves a ticket waiting on the client back to the liaison.
+ */
+async function fileSheetTicketEmail(
+  admin: SupabaseClient,
+  queryId: string,
+  message: {
+    fromAddress: string
+    fromName: string
+    subject: string
+    body: string
+    messageId: string
+    inReplyTo: string | null
+    attachmentNames: string[]
+    toRecipients: { name: string | null; address: string }[]
+    ccRecipients: { name: string | null; address: string }[]
+    folder: string
+    uid: number
+    at: string
+    mailbox: { userId: string; address: string }
+  },
+): Promise<boolean> {
+  const { data: inserted, error } = await admin
+    .from('account_emails')
+    .upsert(
+      {
+        account_id: null,
+        query_id: queryId,
+        direction: 'in',
+        debtor_address: normaliseAddress(message.fromAddress) ?? message.fromAddress,
+        subject: message.subject,
+        body: message.body,
+        our_address: message.mailbox.address,
+        received_by: message.mailbox.userId,
+        message_id: message.messageId,
+        in_reply_to: message.inReplyTo,
+        attachment_names: message.attachmentNames,
+        to_recipients: message.toRecipients,
+        cc_recipients: message.ccRecipients,
+        email_folder: message.folder,
+        email_uid: message.uid,
+        sent_by_name: message.fromName || message.fromAddress,
+        occurred_at: message.at,
+        charged_excl_vat: 0,
+      },
+      { onConflict: 'message_id', ignoreDuplicates: true },
+    )
+    .select('id')
+  if (error) {
+    console.error(`[emailSync] sheet ticket ${queryId}: filing inbound email failed: ${error.message}`)
+    return false
+  }
+  return !!inserted && inserted.length > 0
 }
 
 /**
@@ -1092,8 +1161,12 @@ export async function releaseSync(admin: any, userId: string): Promise<void> {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export interface SentAppender {
-  /** File the message. A mailbox with no Sent folder does nothing and says so by returning false. */
-  append(rawMessage: string | Buffer): Promise<boolean>
+  /**
+   * File the message. A mailbox with no Sent folder does nothing and says so by returning null.
+   * WHERE IT WENT (S15): the folder and, where the server says (UIDPLUS), the uid -- the two things the
+   * sync keys a mailbox row on, so the sender's Sent list can show it NOW rather than at the next sync.
+   */
+  append(rawMessage: string | Buffer): Promise<{ folder: string; uid: number | null } | null>
   close(): Promise<void>
 }
 
@@ -1125,9 +1198,10 @@ export async function openSentAppender(
   const sentPath = findFolder(mailboxes, '\\Sent', ['sent', 'sent items', 'sent messages', 'inbox.sent', 'inbox/sent'])
   return {
     async append(rawMessage) {
-      if (!sentPath) return false
-      await client.append(sentPath, rawMessage, ['\\Seen'])
-      return true
+      if (!sentPath) return null
+      const r = await client.append(sentPath, rawMessage, ['\\Seen'])
+      const uid = r && typeof r === 'object' && typeof (r as { uid?: unknown }).uid === 'number' ? (r as { uid: number }).uid : null
+      return { folder: sentPath, uid }
     },
     async close() {
       await client.logout().catch(() => {})
@@ -1515,7 +1589,38 @@ async function syncMailbox(
        * sales contact — and when it happens, an email from someone who is on a debtor's file is
        * far more likely to be about the debt than about a deal.
        */
-      const accountMatch = await findAccount(admin, fromAddress, parsed)
+      const found = await findAccount(admin, fromAddress, parsed)
+
+      /*
+       * A HANDOVER-SHEET TICKET'S MAIL (S15). Stephan: a sheet ticket sends and receives email, NOT
+       * charged -- it is between the firm and the client about the client's spreadsheet, and there is
+       * no debtor to bill item 6 to or account timeline to note it on. Filed on the ticket and nothing
+       * else. An automated message (a bounce, an out-of-office) is not the client writing, and with no
+       * account there is nowhere to note it: it simply stays in the mailbox.
+       */
+      if (found && found.accountId === null && found.queryId) {
+        if (!automatedMailKind(headerFields(parsed))) {
+          const filedOnTicket = await fileSheetTicketEmail(admin, found.queryId, {
+            fromAddress,
+            fromName: displayName ?? fromAddress,
+            subject: parsed.subject || '(no subject)',
+            body: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
+            messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
+            inReplyTo: parsed.inReplyTo ?? null,
+            attachmentNames: await realAttachmentNames(parsed.attachments),
+            toRecipients,
+            ccRecipients,
+            folder: path,
+            uid: msg.uid,
+            at: (parsed.date ?? new Date()).toISOString(),
+            mailbox: { userId: conn.user_id, address: conn.email },
+          })
+          console.log(`[emailSync] ${path} UID ${uid}: sheet ticket ${found.queryId} via ${found.via}${filedOnTicket ? ', filed' : ', already filed'}`)
+          if (filedOnTicket) logged += 1
+        }
+        continue
+      }
+      const accountMatch = found?.accountId ? { ...found, accountId: found.accountId } : null
 
       /*
        * OUR OWN MAIL SYSTEM IS NOT THE DEBTOR.

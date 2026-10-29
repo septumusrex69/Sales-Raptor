@@ -7,7 +7,8 @@ import { formatDate } from '../../data/mockData'
 import { rand } from '../../lib/money'
 import { fetchReadyToClose, type ReadyToClose as Row } from '../../lib/readyToClose'
 import { useAuth } from '../../store/AuthContext'
-import { canRecordPayment } from '../../lib/permissions'
+import { useAppStore } from '../../store/AppStore'
+import { canCloseAccount } from '../../lib/firmDesk'
 
 /**
  * READY TO CLOSE: EVERY ACCOUNT WHOSE MONEY IS IN AND NOBODY CLOSED IT (the firm, 12 Oct, on
@@ -20,7 +21,13 @@ import { canRecordPayment } from '../../lib/permissions'
  */
 export function ReadyToClose() {
   const { currentUser } = useAuth()
-  const mayClose = canRecordPayment(currentUser)
+  const { companies } = useAppStore()
+  /* ADMINISTRATORS, AND EACH CLIENT'S LIAISON FOR THAT CLIENT'S ACCOUNTS (Stephan, S15) -- so it is
+     asked per row: a liaison sees every account ready to close and may close their own. */
+  const mayCloseRow = (r: Row) => {
+    const client = companies.find((c) => c.id === r.companyId)
+    return canCloseAccount(currentUser, client, companies.find((c) => c.id === client?.parentCompanyId))
+  }
   const [rows, setRows] = useState<Row[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
@@ -32,6 +39,7 @@ export function ReadyToClose() {
   }, [])
   useEffect(() => { void load() }, [load])
 
+  const mayClose = (rows ?? []).some(mayCloseRow)
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   return (
@@ -87,8 +95,8 @@ export function ReadyToClose() {
                     <tr key={r.accountId} className="border-b border-slate-50 last:border-0" data-testid="ready-row">
                       {mayClose && (
                         <td className="px-3 py-1.5">
-                          <input type="checkbox" checked={picked.has(r.accountId)} onChange={() => toggle(r.accountId)}
-                            aria-label={`Pick ${r.accountNumber ?? r.caseNumber}`} />
+                          {mayCloseRow(r) && <input type="checkbox" checked={picked.has(r.accountId)} onChange={() => toggle(r.accountId)}
+                            aria-label={`Pick ${r.accountNumber ?? r.caseNumber}`} />}
                         </td>
                       )}
                       <td className="px-3 py-1.5">
@@ -109,10 +117,12 @@ export function ReadyToClose() {
                       <td className="px-2 py-1.5 text-slate-500">{r.lastPaidOn ? formatDate(r.lastPaidOn) : '—'}</td>
                       {mayClose && (
                         <td className="px-3 py-1.5 text-right">
-                          <button type="button" onClick={() => setClosing([r])} data-testid="ready-close-one"
-                            className="rounded-md border border-slate-200 px-2 py-0.5 text-[11.5px] font-medium text-slate-600 hover:bg-slate-100">
-                            Close
-                          </button>
+                          {mayCloseRow(r) && (
+                            <button type="button" onClick={() => setClosing([r])} data-testid="ready-close-one"
+                              className="rounded-md border border-slate-200 px-2 py-0.5 text-[11.5px] font-medium text-slate-600 hover:bg-slate-100">
+                              Close
+                            </button>
+                          )}
                         </td>
                       )}
                     </tr>

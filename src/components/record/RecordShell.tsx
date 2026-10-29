@@ -425,8 +425,14 @@ export const RECORD_LAYOUTS: { id: RecordLayoutId; label: string; icon: LucideIc
  * The KEY is per page type, not per record: it is a preference about eyes, not about a debtor or
  * a client. Separate keys per page because the right arrangement genuinely differs — an account
  * has a long timeline to give width to, a lead has not.
+ *
+ * WIDE UNTIL SOMEBODY CHOOSES OTHERWISE. Stephan, 28 Oct (Raptor · Handover 14): "Always keep
+ * views in this viewing pane. It's the best type of view by default. Mails, accounts, clients,
+ * all of that stuff. They can change it if they want, but this is by default." So the fallback is
+ * the side panel on every record page and every dashboard, and a saved choice still wins — which
+ * is why this is a default and not a migration of anybody's stored layout.
  */
-export function useRecordLayout(key: string, fallback: RecordLayoutId = 'columns'): [RecordLayoutId, (next: RecordLayoutId) => void] {
+export function useRecordLayout(key: string, fallback: RecordLayoutId = 'wide'): [RecordLayoutId, (next: RecordLayoutId) => void] {
   const [layout, setLayout] = useState<RecordLayoutId>(() => {
     try {
       const saved = localStorage.getItem(key)

@@ -1,7 +1,212 @@
-# Raptor · Handoff 14 — where Raptor stands
+# Raptor · Handover 15 — where Raptor stands
 
-> **Every session, commit, handoff, brief and reply says "Raptor · Handoff N"** (CLAUDE.md, top). This file is
-> **Raptor Handoff 14**, written by S14, which started from Raptor Handoff 13. The next session is S15 and writes Handoff 15.
+> **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
+> **Raptor Handover 15**, written by S15, which started from Raptor Handover 14. The next session is S16 and writes
+> Handover 16. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
+> and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
+
+## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
+
+**S15 · Side Panel** -- branch `claude/s15-side-panel`, from the preview `claude/sales-raptor-review-p1pzx2` at
+`ba34728`; every commit fast-forwarded onto the preview once the suite was green. Commits `Raptor H14: S15 -- ...`.
+
+**Shipped in S15:**
+- **The side panel is everybody's default** (Stephan, given in a Remus session by mistake: "Always keep views in
+  this viewing pane ... They can change it if they want, but this is by default."). `useRecordLayout` falls back to
+  `wide` on every record page (account, client, contact, lead, deal) and every dashboard; a saved choice still wins.
+  Mail already opened in the reading pane. `check-dashboard-panes` (+8, seen failing); the sales dashboard e2e asks
+  for three columns before measuring its side-by-side pair.
+- **Closing an account is a button you can see.** Stephan found the withdrawal ("Close it", 11px under Ending) and
+  said "it's so hidden, it's so small". Stop work / Restart, Put on hold / Back to active / Re-open, and **Close
+  account** (paid up, written off or withdrawn; in red) are full-size buttons at the top of the Position card
+  (`data-testid="position-controls"`), each with a line saying what it does. The fields below only report.
+- **Only an Administrator or the client's liaison closes an account** (Stephan; asked, chose: any Administrator, the
+  liaison of THAT account's client or of its main client, refunds out of trust still finance's). Staging migrations
+  **`close_account_admin_or_liaison`** (md5 `bd207426...`) and **`withdrawal_basis_for_closers`** (`1b71c7dc...`):
+  `may_close_account()`; `settle_account` (so `close_as_settled` too) and `withdraw_account` ask it for every ending
+  (was finance.view for write-off/withdraw, payment.record for paid up); `withdraw_account_refunding` asks finance
+  before any refund; `withdrawal_basis` answers the closer too. Probed as four people: own liaison yes, another
+  liaison no, collector no, Administrator yes. Screens follow: the button, Ready to close (per row), the settlement
+  panel; the withdraw box offers every ending and says a refund is for finance. A liaison cannot read payover runs,
+  so a receipt on one now says "On a payover run" rather than "Not on a run yet".
+- **A closed account is the firm's: "Bredell Ferreira".** Stephan: closed accounts must not stay on a person's name;
+  asked, the firm's own name (not "company account" -- company means a client here). Closing clears `assigned_to`
+  in the closing UPDATE (so the desk history records it and an open campaign call is cancelled); the 2 closed
+  accounts on staging were moved off. `deskLabel`/`FIRM_DESK` (`src/lib/firmDesk.ts`); a LIVE account with nobody
+  on it still reads Unallocated. Re-opening leaves it unallocated, for handing out.
+- **Found on the way:** the write-off's "tell the client" task joined on `companies.liaison`, a name column empty
+  on every client, so it was never created; now `account_owner_id`, and not when the liaison wrote it off.
+- **Ryno's brief, section 0, rewritten** (on the preview): his session told him a campaign workflow had to wait for
+  Stephan to add tables and a timer -- both were built on staging on 28 Oct and his sessions may change staging.
+  The brief still said "never write to any database" under the two notes that widened it.
+- Checks: check-account-ending (+7: one rule, refunds finance, off the desk), check-account-desk (+2),
+  check-books (slices widened), e2e settlement (+3: own liaison / other liaison / collector), all seen failing.
+
+- **BIG BOSS: only Stephan decides what gets built** ("I am the only person that can approve a suggestion for
+  building Raptor"; asked what "Big boss" meant: "above admin"). A tick in no role, `raptor.boss`, granted to him
+  (migrations **`big_boss`** md5 `b8708671...` and **`big_boss_queue`** `ac79221c...`, the second renaming `boss` to
+  area.thing). `change_request_boss_decides` refuses approving, declining, reopening a declined request and "Ask
+  Claude to build it" without it; the profile guard RAISES when anybody who is not already Big Boss gives or takes
+  it (finance or not). Probed as Camille: refused both. Screen: the request panel's decide buttons are the Big
+  Boss's (others: "Only the Big Boss approves what gets built."); Settings -> Users shows **Big Boss** above General
+  Manager; the permissions box greys the tick. e2e change-requests +3, checks updated.
+- **THE PAID-UP LETTER** (Stephan: "I don't want to see an SMS go out ... we can send a letter to a guy who's paid
+  up his account, even though if that is a small balance"; asked: automatic, small balances too, no email = noted).
+  Two letters `letter-paid-up-individual/company` (build.mjs, `seed-paid-up.mjs`, md5 `b2b4dff8...`/`5d3ea0fa...`
+  on staging) quote no figure ("Amount still owing: Nothing") and say "Sent by email."; the two covering emails now
+  attach them and are signed `{{signatory_name}}` (a closed account has no collector, and `{{collector_name}}`
+  would hold the send). Migration **`paid_up_letter`** (`9caf435b...`): trigger kind `account_paid_up`;
+  `settle_account` starts the "Paid-up letter" workflow (one email step, day 0, no SMS) AFTER stopping every other
+  sequence -- on paid up, and on settled only where no approved settlement was paid (Ready to close's small
+  balance). `planSend.paidUp`: nothing is charged on an account closed paid up or settled. It goes with the 08:00
+  morning run. No email address: the step holds "No email address on this account" on the account's workflow
+  panel. `check-paid-up-letter` (16, seen failing). A SETTLEMENT the client agreed gets the **settlement letter**
+  instead (Stephan: "yes make settlement letter"): `letter-settlement-*` (seed-paid-up.mjs, md5 `c0fbc9a2...`/
+  `907d4df8...`), quoting `{{settlement_amount}}` (a PAID settlement now answers it, accountMergeValues), migration
+  **`settlement_letter`** (`6581553f...`, trigger `account_settled`; settle_account starts one letter or the other).
+- **The Position card is Stephan's mockup**: "Account position" title with the book as a pill, Stop work / Put on
+  hold tiles, the fee ceiling in its own box, ACCOUNT DETAILS / KEY DATES / CONTACT & ADMIN, "This month" chip on
+  Handed over, Close account in red at the foot (`position-close`). check-account-standing names the title as the
+  second stated exception to the house text scale.
+- **Mail's "Checked 14 days ago" on staging**: the sync is stamped on the real clock and was measured from the
+  staging date; now on the real clock (`check-mail-checked-clock`; check-staging-clock's count 53 -> 54).
+- **Two new skins, Africa and Forest** (Stephan's photographs and sayings: "Africa is our roots." / "The closer
+  you look, the more you see."). `src/styles/africa.css`, `forest.css`: ocean.css's rules with every colour
+  hue-shifted into the photographs' family, lightness kept (so the ocean's contrasts hold); its comments are not
+  copied (they describe a sea) -- ocean.css carries the reasoning. Images `public/brand/{africa,forest}-{band,hero,
+  sidebar}.webp`, made from the originals with an sRGB profile (VP8X, which check-themes reads); the bands were
+  2000x667 and are enlarged 5% to the 700px the check asks.
+
+- **A handover-SHEET ticket sends and receives email, not charged** (S14's question 1; Stephan: "yes, not
+  charged"). Staging migration **`sheet_ticket_mail`** (md5 `a95a7767...`): `account_emails.account_id` may be null;
+  `ticket_belongs_to_the_same_account` lets mail with no account onto a ticket with none (mail only, not documents);
+  `account_email_set_correspondent` calls such mail the client's (so a reply moves a ticket waiting on the client
+  back to the liaison). No check that one of the two is set: `query_id` is ON DELETE SET NULL and a check would
+  make deleting a sheet ticket fail. Sending: `recordSheetTicketEmail` (no chargeItem, no account note, R0).
+  Receiving (`emailSync`): a reply threading to a sheet ticket's mail, or a subject quoting its T-number, is filed
+  by `fileSheetTicketEmail` (no item 6, no note; idempotent on message_id); a bounce on one stays in the mailbox,
+  and the mailbox copy is not marked linked (there is no account to link it to). Page: the tab strip on every
+  ticket (a sheet ticket has Overview | Emails, no Notes); Write/Reply/Forward open the same box with "Your
+  handover sheet -- <ref> -- ticket T-n" and say "Not charged". `check-sheet-ticket-mail` (24), e2e
+  `sheet-ticket-emails` (9), both seen failing; `check-ticket-work` updated.
+  **Noticed, not changed:** a sheet ticket's page does not show its T-number in the header (only account tickets
+  have `ticket-number` there); the subject carries it, which is what a client quotes.
+
+- **The account band reads over the photographs** (Stephan: "Make this look better", Africa screenshot). The BF ring
+  watermark shows only on the plain Original skin (it crossed the agent's name); Africa and Forest anchor their band
+  photograph right and wash the left darker; the line under the name is brighter; the pre-legal agent sits on a small
+  pane (`hero-agent`). No check: it is a look, seen in screenshots of all three photographed skins.
+- **CLIENT PORTAL, PHASE 2a: TICKETS, QUESTIONS, CALLBACKS** (Stephan: "go ahead with the client portal"). Staging
+  migration **`client_portal_tickets`** (md5 `9dddf856...`): kind `client` on `account_queries`; a portal user's
+  address reads as the CLIENT in `account_email_correspondent`; `portal_tickets(client)` and
+  `portal_ticket_thread(client, ticket_no)` (service_role only) return dispute/import/litigation/client tickets and,
+  of each, only the mail whose correspondent is the client -- never notes, never the debtor's mail. Server
+  (`api/_lib/portal.ts`): `tickets`, `ticket`, `ticket-reply` (open tickets only; filed as an inbound
+  `account_emails` row on the ticket; a ticket waiting on the client goes back to `liaison`), `ask` (by OUR
+  reference, inside the client's group: a `client` ticket on the liaison's stage), `callback` (a High "Call" task
+  due today on the liaison's list, about one account or the client). Every one rings the liaison's bell -- or every
+  active Administrator's where the client has no liaison. Portal page: tabs **Your accounts | Tickets**, an **Ask**
+  button on every line (question or "Call me"), **Ask us to call you** in the header. Staff side: `client` is an
+  `ESCALATION_KINDS` entry ("Client asked"), on the client's QUERY list, never item 3, not on the Escalate menu.
+  `check-client-portal` (+34) and e2e `client-portal` (+12), both seen failing.
+  **NOT CHARGED, AND ASKED:** nothing typed in the portal raises item 6 yet (`charged_excl_vat: 0`). CLAUDE.md charges
+  R13 on a client's EMAIL about an account; whether a portal message is the same thing is put to Stephan. If yes,
+  raise it in `fileClientMessage` the way `emailSync.fileAccountEmail` does, and change the check that holds it.
+  Staging migration **`account_queries_stage_on_record`** (md5 `27ca0bef...`) is a no-op: `stage` was live but never
+  in `schema.sql`, and check-select-columns refused the portal's select.
+
+- **THE PORTAL, REBUILT TO STEPHAN'S DIRECTION (later on 28 Oct).** In the remittance advice's style (its navy
+  #111E2D, gold #C69F54, coastline cover photo, tracked labels; `portalStyle.tsx`): a split sign-in on the cover
+  photo; a navy sidebar like Raptor's -- **Dashboard, Reports, Tickets, Accounts** in his order, gold for where you
+  are, folds to icons (remembered per browser), a row across the top on a phone; a photo band per section.
+  **Dashboard** by OUTCOME ("how many paid up, in progress, in dispute, negotiating"): money tiles (collected to
+  date on the inverted navy tile), open accounts by position with a ring, finished accounts by how they ended
+  (paid up / settled / written off / withdrawn). One read: staging migration **`portal_summary`** (md5
+  `903c80d0...`) groups the book in the database; `portalOutcomes` (clientPortal.ts) turns groups into outcomes
+  with clientPosition's rules, so it cannot disagree with the Accounts list. **Reports**: every remittance advice
+  sent to the client, the PDF and spreadsheet AS SENT (`payover_run_sends`, signed 2-minute links through
+  `report-file`; FileActions for the iPad). **Ask** has three choices: a question (with a short "what is it about"
+  list), **Paid to you**, and Call me.
+- **PAID TO YOU: A CLIENT RECORDS A PTC.** Stephan: "it shows up in the trust thing for approval ... and it also
+  notifies the liaison". Staging migration **`portal_record_ptc`** (md5 `bdaac3cd...`), service role only: an
+  UNAPPROVED account_payments row, paid_to_client, source `portal`, on an open account of the client's own book;
+  not in the future, not before the handover, a reference required, a same-day duplicate refused. Unapproved it
+  allocates nothing (probed: no allocation, balance unchanged). Trust's approval list marks it "From the client
+  portal". A ticket records what was said; the liaison's bell rings. The client's confirmation rule for a PTC is
+  met by the client's own login (details names who and when).
+- **THE TICKET PAGE.** One **Reply on this ticket** (to whoever at the client last wrote, threaded; the email ends
+  with the portal link when somebody at the client can sign in); **Forward to the client** only on the debtor's own
+  messages; a portal message reads CLIENT (`correspondent` from the database); the conversation card to Stephan's
+  design with a filter. The header's case number links to the account. **Refer it**, with a reason, to the agent
+  on the account or their team leader (`referTargets`); they **give feedback** back to the liaison. A portal
+  question is also filed as the client's first message, so Reply works; every portal message, payment and callback
+  is a line on the account's activity. The **disputes board** names each ticket's client and filters by client.
+  Checks: `check-ticket-refer` (26, new), `check-client-portal` (142), e2e `client-portal` (50), all seen failing.
+
+- **29 Oct.** The company dashboard's **department cards lost their photographs** (Stephan: "this is too much.
+  remove the pictures"); the hero is the page's one picture again; `public/brand/departments/` removed.
+- **EMAIL (29 Oct).** Stephan: forwarding slow to open; selecting text and pressing Backspace "takes me out of that
+  email draft"; "add a drafts section"; a forward reported sent never reached Sent Items, not even after a refresh.
+  - A forward **opens at once** and the original fills in when fetched (`startForward`, `quotedLoading`); the
+    original is now **shown and editable** (it went out underneath unseen, so a selection was never in a field and
+    Backspace meant Back); what is sent is what that box holds.
+  - **Backspace never leaves a dialog** (`Modal`): outside an input/textarea/select/contenteditable it is
+    prevented.
+  - **Drafts**: every compose box saves as it is typed (`mailDrafts.ts`, this browser only, said so), offers it
+    back when the same box opens, and Mail has a **Drafts** list; sending removes it.
+  - **The Sent copy**: `openSentAppender.append` returns the folder and uid; `sendAsUser` logs a failure with its
+    reason (it was a bare catch); `api/email/send` puts the copy on the Sent list at once, keyed (user_id,
+    message_id) as the sync keys it, and returns `filedInSent`, which the Mail page says when false. **Not yet
+    diagnosed: why Stephan's forward was not filed** -- the next failure now writes `[sendAsUser] ... the Sent copy
+    was not filed: <reason>` to the Vercel logs. His mailbox has both `INBOX.Sent` (\Sent, used) and
+    `INBOX.Sent Items` (what Outlook shows) -- check which he looks at before blaming the append.
+  - `check-mail-drafts` (23, new, seen failing); five older checks re-pointed. e2e mail/compose/record/ticket green.
+- **CLIENT HANDOVERS FROM THE PORTAL -- BUILT, COMMITTED, NOT PUSHED, MIGRATION NOT APPLIED.** Commit `ae765007` on
+  `claude/s15-side-panel` only (the preview has the email fixes cherry-picked as `b8f4023b`, without it). The
+  staging migration **`portal_handovers`** timed out waiting for Stephan's approval in the Supabase tool; its SQL
+  is the last block of `supabase/schema.sql` (md5 of that block `c8874adb...` before two later edits -- re-check
+  after applying). **To finish: apply it, verify the md5, merge the preview into the branch, push.**
+  What it is: a portal **Hand over** section -- a sheet (+ PDFs, ≤ 3 MB so base64 fits Vercel's 4.5 MB) or one
+  account in a short form, which the server writes as a ONE-LINE SHEET in the firm's own handover format
+  (`portalSingleHandover`) -- kept as sent in bucket `portal-handovers/{client}/{id}/`; table
+  `client_handover_submissions` (received -> loaded | declined with a reason); read under `may_load_accounts`;
+  `decide_client_handover` the only writer. On the client page, **Handed over in the portal**: *Open in the
+  import* (`/companies/:id/upload?submission=`) puts the files into the ordinary HandoverImportCard, and approving
+  marks it loaded with the batch; *Decline* asks why. The liaison's bell rings on arrival. check-client-portal
+  +14 (156).
+- **The schema checks now read SQL comments in one pass** (`scripts/qa/sqlComments.mjs`, used by
+  check-select-columns): a block comment saying "if -- and only if --" lost its `*/` to the line-comment pass and
+  swallowed the file to the next `*/` -- the day one was appended, a live column read as missing. Ten other checks
+  still use the two-regex strip; move them over if one ever reports something impossible.
+
+**S16 starts here -- Stephan's list for the portal (29 Oct), after finishing the handovers above:**
+1. **Password after the first sign-in.** "Should I get a code every time? ... Maybe the first time, but ... if you
+   have a password, then that's fine." Code once to prove the address, then set a password; code stays as the
+   reset. (Portal users are not Supabase users -- keep it in `client_portal_users`, hashed with `keyedHash`-style
+   scrypt, never in the browser.)
+2. **The top band like Raptor's** (DashboardHero, not the photo band) and **the full Bredell Ferreira logo with
+   the BF circle** (`/brand/bf-lockup.jpg` is the ringed lockup; the portal shows only the wordmark).
+3. **The dashboard as the place you act:** the **liaison's details** (name, number, WhatsApp, email -- clickable),
+   and buttons to **raise a ticket**, **tell us about a payment**, **update a debtor's details**, **request a
+   withdrawal** -- "with a brief overview of what's happening"; **Reports** the in-depth half.
+4. **Raise a ticket from the Tickets section** too, not only from an account.
+5. **"Paid to you" not beside "Ask"** on the account line ("it takes you to the same tab"): separate actions, each
+   its own form; the dashboard buttons in 3 are the main way in.
+6. **Fill Stephan's Test Client** (staging, `07574f60-...`) with more: payments, a paid-up and a settled account,
+   tickets in every stage, a remittance advice -- so every portal screen has something on it.
+7. Still asked and unanswered: should a portal message cost the debtor R13 like an emailed reply? (Not charged now.)
+8. Then S14's order: **Monthly progress report** (into Reports), **debtor pay page**, **early collections**.
+
+**AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
+`withdrawal_basis_for_closers`, `sheet_ticket_mail`, `big_boss`, `big_boss_queue`, then RUN
+`scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter`, `settlement_letter`, `client_portal_tickets`, `change_request_edit_notify`,
+`account_queries_stage_on_record`, `portal_record_ptc`, `portal_summary`, `portal_handovers` (once applied on
+staging) -- after S14's list below. The backfill in the first moves every closed account off
+its collector; on production that is the whole closed book, run out of hours.
+
+---
+
+- **R-9 sent back after testing, built again (Raptor · Handover 15, builder run).** "Send back" was only offered at the team leader's stage; the asker wanted it for the Call Centre Manager and client liaisons too. `canSendBack` (`ticketThread.ts`) now also allows the `liaison` stage and an `agent`-stage ticket handed to the actor by name (a Call Centre Manager is not a team leader, so `stageForAssignee` leaves it at `agent`). Never the raiser, never `client`, never closed. `check-send-back` holds it.
 
 ## S13 · CAMPAIGNS -- RYNO'S SESSION (28 Oct, branch `claude/s13-reino-campaigns`)
 
@@ -113,7 +318,7 @@ also reach production -- Stephan was told.
 > **Previous: S10 · Clients and Credits** — branch `claude/s10-clients-and-credits`, from `claude/sales-raptor-review-p1pzx2` at `925b6fc` (S9's last commit).
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`) · S13 Campaigns (Reino, `claude/s13-reino-campaigns`, see docs/briefs).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`) · S10 Clients and Credits (`claude/s10-clients-and-credits`) · S11 Lean Mail (`claude/s11-lean-mail`) and S11 Loaders and Handers (`claude/new-session-8jcj9a`), in parallel · S12 No News (`claude/s12-no-news`) · S13 Campaigns (Reino, `claude/s13-reino-campaigns`, see docs/briefs) · S14 Loose Ends (`claude/s14-loose-ends`) · S15 Side Panel (`claude/s15-side-panel`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not

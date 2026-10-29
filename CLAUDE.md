@@ -7,12 +7,19 @@ one app.
 Read this before changing anything. Most of it is here because getting it wrong once cost real
 time, and a few items are here because getting them wrong would cost the firm money or a client.
 
-**SAY WHICH PROJECT AND WHICH HANDOFF, ON EVERYTHING.** The firm's administrator runs more than one
+**SAY WHICH PROJECT AND WHICH HANDOVER, ON EVERYTHING.** The firm's administrator runs more than one
 project (Raptor, Remus) and asked, 26 Oct: *"for every little thing, just make sure that ... Remus or
 Raptor is mentioned clearly, and then the handoff number. Remus handoff 5 or ... Raptor handoff 6."*
-So every session, commit subject, handoff file, brief, pull request, scheduled task and reply to him
-carries **"Raptor · Handoff N"**, where N is the handoff the session started from (the session that
-started from Handoff 12 is S12 and writes Handoff 13). Commit subjects start `Raptor H12: ...`.
+So every session, commit subject, handover file, brief, pull request, scheduled task and reply to him
+carries **"Raptor · Handover N"**, where N is the handover the session started from (the session that
+started from Handover 12 is S12 and writes Handover 13). Commit subjects start `Raptor H12: ...`.
+
+**"HANDOVER", NOT "HANDOFF" (Stephan, 28 Oct).** He asked for the word to change on every reply, commit
+and section from Handover 14 on. Handovers before that say "Handoff" and stay as written. **The file
+keeps its name, `HANDOFF.md`**: two checks and Ryno's brief open it by that name, and a renamed file is
+one every running session would look for and not find. What is inside it says handover. (Not to be
+confused with a handover in the FIRM's sense -- one account a client hands over; see below. The context
+always tells them apart: "Raptor · Handover 14" is never an account.)
 
 **Then read `HANDOFF.md`.** This file is the law and moves slowly; HANDOFF.md is where the work
 stands today — what shipped last, what the firm has asked for and nobody has started, what they
@@ -427,6 +434,18 @@ used on more than one account, so 21% of the book cannot be identified by it.** 
 still means what it always meant (the reference the *debtor* knows); `{{case_number}}` is ours.
 The SMSs quote ours only, and that swap was free **because the two are the same width** — a
 longer case number is a price rise on every SMS, paid by the debtor, under item 1(c).
+
+**ONLY THE BIG BOSS DECIDES WHAT GETS BUILT.** Stephan: *"I am the only person that can approve a suggestion for
+building Raptor"* -- and, asked what Big Boss meant, *"above admin"*. It is a tick in no role, `raptor.boss`, held by
+him; the database refuses approving, declining, reopening a declined request or asking Claude to build without it,
+and refuses giving or taking it to anybody who is not already Big Boss. Do not fold it into the Administrator's
+template: six Administrators could then approve their own requests, which is what it exists to stop.
+
+**A PAID-UP ACCOUNT GETS ONE LETTER, BY EMAIL, FREE.** *"I don't want to see an SMS go out. It's a waste of money."*
+Closing as paid up (or Ready to close's small-balance settle) starts the "Paid-up letter" workflow from
+`settle_account`, after every other sequence is stopped. Nothing sent to an account closed paid up or settled is
+charged (`planSend.paidUp`): an item 1(a) fee on it would put a balance back on the account the letter says owes
+nothing.
 
 **Things that bite:**
 - `protect_closed_diary_entries` **silently reverts** edits to `done`/`moved` entries. It does

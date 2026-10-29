@@ -213,7 +213,8 @@ ok('...and the panel says so where the decision is made',
  * handlers, and the one nobody was watching would be the one that forgot the ticket.
  */
 ok('a fresh message, a forward and a reply share one compose box',
-  /\(forwarding \|\| writing \|\| replyTo\) && q\.accountId/.test(page))
+  /* S15: on every ticket now -- a sheet ticket sends mail too, through the same box. */
+  /\{\(forwarding \|\| writing \|\| replyTo\) && \(/.test(page))
 /* S14: A REPLY IS THREADED -- in the header the client's mail reads, and on the record that files it. */
 ok('a reply is threaded under the message it answers', /inReplyTo=\{replyTo\?\.messageId \?\? null\}/.test(page))
 ok('...and filed as the answer to it', /recordSentEmail\(\{[\s\S]{0,400}inReplyTo: answering\?\.messageId \?\? null/.test(page))
@@ -292,7 +293,10 @@ ok('sending to the client moves the ticket to them',
 ok('...and only when it went to the client', /const toClient = !answering\s*\|\| clientAddresses\.some/.test(page))
 /* ONLY ON THE WAY UP: a second email is a chase, not a fresh escalation, and nothing here moves a
    ticket back -- that is the liaison's decision when the client answers. */
-ok('...and only on the way up', !/stage: 'liaison'/.test(page))
+/* S15: the agent's feedback DOES send a ticket back to the liaison -- by the agent's own press, not by
+   an email going out. So the rule is held where it applies: nothing in onSent moves it back. */
+const onSent = page.slice(page.indexOf('onSent={(rawSubject'), page.indexOf('onSent={(rawSubject') + 6000)
+ok('...and only on the way up', onSent.length > 100 && !/stage: 'liaison'/.test(onSent))
 
 /*
  * AND "VIEW DISPUTE" OPENS THE DISPUTE.

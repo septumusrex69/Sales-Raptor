@@ -5,7 +5,7 @@
  * The session token lives in localStorage, read defensively: a private window or an iPad with site data
  * blocked throws on access, and the answer then is "sign in", not a blank page.
  */
-import { PORTAL_TOKEN_HEADER, type PortalLine } from './clientPortal'
+import { PORTAL_TOKEN_HEADER, type PortalLine, type PortalMessage, type PortalTicket } from './clientPortal'
 
 const KEY = 'raptor.portal.token'
 
@@ -45,3 +45,32 @@ export const fetchPortalBook = (token: string, q: { search: string; includeClose
   call<PortalBook>('book', q, token)
 
 export const portalSignOut = (token: string) => call<{ ok: boolean }>('sign-out', {}, token)
+
+/* Phase 2a (S15): tickets, questions and callbacks. */
+export const fetchPortalTickets = (token: string) => call<{ tickets: PortalTicket[] }>('tickets', {}, token)
+export const fetchPortalTicket = (token: string, ticketNo: number) => call<{ messages: PortalMessage[] }>('ticket', { ticketNo }, token)
+export const replyPortalTicket = (token: string, ticketNo: number, message: string) =>
+  call<{ ok: boolean }>('ticket-reply', { ticketNo, message }, token)
+export const askPortalQuestion = (token: string, caseNumber: string, topic: string, question: string) =>
+  call<{ ticketNo: number }>('ask', { caseNumber, topic, question }, token)
+export const requestPortalCallback = (token: string, req: { caseNumber?: string; phone: string; when: string; about: string }) =>
+  call<{ ok: boolean }>('callback', req, token)
+export const recordPortalPayment = (token: string, req: { caseNumber: string; amount: string; paidOn: string; reference: string; note: string }) =>
+  call<{ ticketNo: number | null }>('payment-report', req, token)
+
+export interface PortalDashboard {
+  accounts: number
+  open: number
+  figures: { capitalHandedOver: number; collectedToDate: number; collectedThisMonth: number; capitalOutstanding: number }
+  outcomes: import('./clientPortal').PortalOutcomeLine[]
+  tickets: { waitingOnYou: number; open: number }
+}
+export const fetchPortalDashboard = (token: string) => call<PortalDashboard>('dashboard', {}, token)
+
+export interface PortalReport {
+  id: string; kind: 'remittance'; version: number; sentAt: string; title: string; client: string; amount: number
+  periodStart: string | null; periodEnd: string | null; hasPdf: boolean; hasSheet: boolean
+}
+export const fetchPortalReports = (token: string) => call<{ reports: PortalReport[] }>('reports', {}, token)
+export const portalReportFile = (token: string, id: string, file: 'pdf' | 'xlsx') =>
+  call<{ url: string }>('report-file', { id, file }, token)

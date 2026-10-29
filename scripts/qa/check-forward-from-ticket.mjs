@@ -187,7 +187,7 @@ ok('the page asks for it that way', /forwarding\.body \?\? '',\s*\n\s*false,\s*\
  */
 ok('the ticket knows the client’s address', /clientEmail: string \| null/.test(queries))
 ok('...read on the same round trip as the name',
-  /\.select\('name, email, contact_person'\)/.test(queries))
+  /\.select\('name, email, contact_person[,']/.test(queries))
 ok('the forward opens addressed to them',
   /* A REPLY (S14) goes back to whoever wrote; everything else, the forward included, to the client. */
   /to=\{replyTo \? replyTo\.debtorAddress : \(data\.clientEmail \?\? data\.clientPeople\[0\]\?\.email \?\? ''\)\}/.test(page))
@@ -199,7 +199,9 @@ ok('the forward opens addressed to them',
  * The box has taken a list all along and was handed one address. A client is an organisation with
  * people in it, and which of them a dispute goes to is a decision made per ticket.
  */
-ok('...and offers everybody at the client', /recipients=\{data\.clientPeople\}/.test(page))
+/* S15: the client's people AND whoever may sign in to their portal, the company's own address first. */
+ok('...and offers everybody at the client', /recipients=\{recipients\}/.test(page)
+  && /const recipients = \[\s*\.\.\.data\.clientPeople,\s*\.\.\.activePortal/.test(page))
 ok('...gathered where the client is read', /clientPeople: \{ email: string; label: string \}\[\]/.test(queries))
 /* THE COMPANY'S OWN ADDRESS FIRST. It is the address the firm was given to use, and a picker that
    opened on whichever person happened to be added first would quietly change where client mail

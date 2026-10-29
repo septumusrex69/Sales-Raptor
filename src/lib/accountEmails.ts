@@ -433,6 +433,43 @@ export async function recordSentEmail(input: {
   return charge
 }
 
+/**
+ * A message has gone from a HANDOVER-SHEET ticket: record it on the ticket, and charge NOTHING.
+ *
+ * Stephan, asked whether a sheet ticket should send and receive email (S15): yes, not charged. A
+ * sheet ticket is about the client's spreadsheet and has no debtor to bill under item 1(a) -- so
+ * this is recordSentEmail without its first and last steps: no chargeItem, and no timeline note,
+ * because there is no account timeline to write it on. `account_id` is null; `query_id` is what
+ * files it, and `sheet_ticket_mail` lets exactly that shape in. The ticket's thread reads it back.
+ */
+export async function recordSheetTicketEmail(input: {
+  queryId: string
+  to: string
+  from: string | null
+  subject: string
+  body: string
+  messageId: string | null
+  inReplyTo?: string | null
+  actor: Actor
+}): Promise<void> {
+  const { error } = await supabase.from('account_emails').insert({
+    account_id: null,
+    query_id: input.queryId,
+    direction: 'out',
+    debtor_address: input.to,
+    our_address: input.from,
+    subject: input.subject,
+    body: input.body,
+    message_id: input.messageId,
+    in_reply_to: input.inReplyTo ?? null,
+    sent_by: input.actor.id,
+    sent_by_name: input.actor.name,
+    /* Nothing raised, and said in the row rather than left blank: a sheet has no debtor to charge. */
+    charged_excl_vat: 0,
+  })
+  if (error) console.error('[accountEmails] the message went but was not filed on the ticket:', error.message)
+}
+
 /*
  * The inbound half lives on the server.
  *

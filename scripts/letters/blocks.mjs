@@ -56,16 +56,17 @@ const howToPay = () => ([
     ] },
 ])
 
-/** Yours faithfully, and who is behind it. Kept with what follows so it is never orphaned. */
-const signOff = (closing) => ([
+/** Yours faithfully, and who is behind it. Kept with what follows so it is never orphaned.
+ *  `delivery` is the note's own sentence: every notice so far went by email WITH an SMS; the paid-up
+ *  letter goes by email alone (Stephan, S15: "I don't want to see an SMS go out"). */
+const signOff = (closing, delivery = 'Sent by email, with notification by SMS.') => ([
   p(closing),
   p([t('Yours faithfully')], { keepWithNext: true }),
   { kind: 'signature', spans: [
     t('{{signatory_name}}\n{{signatory_title}}\nfor and on behalf of {{firm_name}}\n'
       + 'duly authorised agent of {{client_name}}'),
   ] },
-  p([t('Note on delivery. Sent by email, with notification by SMS. Proof of sending is retained '
-    + 'on our file.', { size: 8.5 })]),
+  p([t(`Note on delivery. ${delivery} Proof of sending is retained on our file.`, { size: 8.5 })]),
 ])
 
 /** Where the account stands: the three dates the notices show as a timeline. */

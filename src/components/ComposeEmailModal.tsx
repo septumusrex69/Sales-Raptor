@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
+import { draftKeyFor, dropDraft, findDraft, saveDraft, type MailDraft } from '../lib/mailDrafts'
 import { AttachLetter } from './letters/AttachLetter'
 import { UseTemplate } from './library/UseTemplate'
 import { buildLetterAttachment } from '../lib/letterAttachment.ts'
@@ -61,6 +62,9 @@ export function ComposeEmailModal({
   quoted,
   onClose,
   onSent,
+  quotedLoading = false,
+  draftKey: draftKeyProp,
+  forwardOf,
 }: {
   /** Pre-filled recipient. Optional: a deal often has no contact of its own to default to. */
   to?: string
@@ -210,7 +214,13 @@ export function ComposeEmailModal({
    * `emailMessageId` is the sent message's own Message-ID, so a reply can be threaded back.
    * `from` is the mailbox it actually left by, which decides where that reply will land.
    */
-  onSent: (subject: string, bodyText: string, emailMessageId?: string, from?: string) => void
+  onSent: (subject: string, bodyText: string, emailMessageId?: string, from?: string, filedInSent?: boolean) => void
+  /** The forwarded original is still being fetched (S15): the box opens at once and says so. */
+  quotedLoading?: boolean
+  /** Which draft this box is (mailDrafts.ts). Derived from what the box is when not given. */
+  draftKey?: string
+  /** The message a forward is of, so its draft is told apart from a forward of another. */
+  forwardOf?: string
 }) {
   const { session } = useAuth()
   const [address, setAddress] = useState(to ?? recipients?.[0]?.email ?? '')
@@ -284,6 +294,44 @@ export function ComposeEmailModal({
    */
   const [lang] = useState(storedLanguage)
   const fileInput = useRef<HTMLInputElement>(null)
+  /*
+   * THE FORWARDED ORIGINAL, EDITABLE (S15). Stephan selected part of a forwarded message to delete it and
+   * the draft vanished: the original was not on the screen at all -- it went out underneath, unseen -- so
+   * there was nothing to edit and Backspace meant Back. It is shown now, as itself, in a box that can be
+   * typed in, and what is SENT is what the box holds when Send is pressed. Filled by hand rather than by
+   * React so that typing in it is never undone by a re-render.
+   */
+  const quoteRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (quoteRef.current && quotedHtml != null) quoteRef.current.innerHTML = quotedHtml
+  }, [quotedHtml])
+
+  /*
+   * THE DRAFT (S15, mailDrafts.ts): saved as it is typed, offered back when the same box opens again, and
+   * removed when it is sent. Only once something has been written -- a box opened and closed untouched
+   * leaves nothing behind -- and a pause after typing, so a sentence is one save, not forty.
+   */
+  const draftKey = draftKeyProp ?? draftKeyFor({ title, to, subject: initialSubject, inReplyTo, forwardOf })
+  const [waiting, setWaiting] = useState<MailDraft | null>(() => findDraft(draftKey))
+  const touched = useRef(false)
+  const [quoteTick, setQuoteTick] = useState(0)
+  useEffect(() => {
+    if (!touched.current) return
+    const t = setTimeout(() => {
+      if (!body.trim() && subject.trim() === (initialSubject ?? '').trim()) { dropDraft(draftKey); return }
+      saveDraft({ key: draftKey, title: title ?? (forwardOf ? 'Forward' : inReplyTo ? `Reply to ${address}` : 'New Email'),
+        to: address, cc, subject, body, inReplyTo: inReplyTo ?? null, quotedHtml: quotedHtml ? (quoteRef.current?.innerHTML ?? quotedHtml) : null })
+    }, 700)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, cc, subject, body, quoteTick])
+  const touch = () => { touched.current = true }
+  function restore(d: MailDraft) {
+    touched.current = true
+    setAddress(d.to); setCc(d.cc); if (d.cc) setShowCc(true); setSubject(d.subject); setBody(d.body)
+    if (d.quotedHtml && quoteRef.current) quoteRef.current.innerHTML = d.quotedHtml
+    setWaiting(null)
+  }
 
   /*
    * Read in the browser and sent as base64 in the same JSON body as the message.
@@ -446,7 +494,7 @@ export function ComposeEmailModal({
           /* The typed prose, then whatever Raptor added (a signing button), then the original on
              a forward. In that order because the button is about the message above it and the
              quoted history is underneath everything. */
-          bodyHtml: emailBodyHtml(body) + (appendHtml ?? '') + (quotedHtml ?? ''),
+          bodyHtml: emailBodyHtml(body) + (appendHtml ?? '') + (quotedHtml ? (quoteRef.current?.innerHTML ?? quotedHtml) : ''),
           ...(files.length > 0
             ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
             : {}),
@@ -489,7 +537,9 @@ export function ComposeEmailModal({
         setSubmitting(false)
         return
       }
-      onSent(`Email sent: ${subject.trim()}`, body.trim(), responseBody.messageId ?? undefined, responseBody.from ?? undefined)
+      dropDraft(draftKey)
+      onSent(`Email sent: ${subject.trim()}`, body.trim(), responseBody.messageId ?? undefined, responseBody.from ?? undefined,
+        responseBody.filedInSent === false ? false : undefined)
       onClose()
     } catch {
       setError('Could not reach the server. Please try again.')
@@ -526,6 +576,15 @@ export function ComposeEmailModal({
           also cannot show a name beside an address, matches however the browser feels like it, and
           has no way to take an entry back out; RecipientField does all three.
         */}
+        {waiting && (waiting.body.trim() || waiting.subject.trim()) && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2 text-sm text-slate-700" data-testid="draft-waiting">
+            <span>You have an unsent draft of this from {new Date(waiting.savedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.</span>
+            <span className="flex gap-2">
+              <button type="button" onClick={() => restore(waiting)} className="font-semibold text-brand-700 hover:underline" data-testid="draft-restore">Carry on with it</button>
+              <button type="button" onClick={() => { dropDraft(draftKey); setWaiting(null) }} className="text-slate-500 hover:underline">Discard it</button>
+            </span>
+          </div>
+        )}
         <FormField label="To" required>
           <RecipientField value={address} onChange={setAddress}
             contextual={recipients} taken={[cc]} required autoFocus={!address} />
@@ -574,7 +633,7 @@ export function ComposeEmailModal({
               where it's on the top ... to type the person's name, not the subject"). To and Subject
               both asked for focus on a new email and the later one won; Subject now takes it only
               when the address is already filled in. */}
-          <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required
+          <input className={inputClass} value={subject} onChange={(e) => { touch(); setSubject(e.target.value) }} required
             autoFocus={!initialSubject && !!address} />
         </FormField>
         {/* Required on everything except a forward, where the original IS the message -- and the
@@ -590,7 +649,7 @@ export function ComposeEmailModal({
           */}
           <textarea className={inputClass} rows={quotedHtml ? 7 : 12} value={body} lang={lang}
             style={emailBodyCss(firm) as CSSProperties}
-            spellCheck onChange={(e) => setBody(e.target.value)} required={!quotedHtml}
+            spellCheck onChange={(e) => { touch(); setBody(e.target.value) }} required={!quotedHtml}
             placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
             /* ONLY ONCE SOMEBODY IS ADDRESSED (the firm, 23 Oct: a forward "starts typing with
                message. It doesn't say who do I want to send it to"). A forward has a subject and no
@@ -604,10 +663,15 @@ export function ComposeEmailModal({
           here would need a second sandboxed frame inside a dialog to say something one line
           covers. What matters is that nobody wonders whether it is being included.
         */}
-        {quotedHtml && (
-          <p className="-mt-2 mb-3 text-xs text-slate-500">
-            The original message is included below, exactly as it was written.
-          </p>
+        {(quotedHtml || quotedLoading) && (
+          <div className="-mt-1 mb-3">
+            <p className="mb-1 text-xs text-slate-500">
+              {quotedLoading ? 'Fetching the original message…' : 'The original message, as it goes out underneath. You can edit it.'}
+            </p>
+            <div ref={quoteRef} contentEditable={!quotedLoading} suppressContentEditableWarning data-testid="forward-original"
+              onInput={() => { touch(); setQuoteTick((n) => n + 1) }}
+              className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50/50 p-3 text-sm text-slate-700 [overflow-wrap:anywhere] focus:outline-none focus:ring-2 focus:ring-brand-200" />
+          </div>
         )}
         {/* SAID FOR THE SAME REASON the quoted original is said: something is going out under
             what they typed, and nobody should have to send one to find out what. */}
@@ -725,7 +789,7 @@ export function ComposeEmailModal({
           <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
             Cancel
           </button>
-          <button type="submit" disabled={submitting || fetchingForward} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <button type="submit" disabled={submitting || fetchingForward || quotedLoading} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             {submitting ? 'Sending…' : 'Send'}
           </button>
         </div>

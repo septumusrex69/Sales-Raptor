@@ -40,7 +40,7 @@ export function SettlementPanel({
   open: boolean
   /** settlement.approve: record the client's yes, decline, extend. */
   canApprove: boolean
-  /** payment.record, which is what settle_account asks. */
+  /** Administrator or this client's liaison -- what settle_account asks since S15 (may_close_account). */
   canClose: boolean
   userId: string | null
   nameOf: (id: string | null) => string | null

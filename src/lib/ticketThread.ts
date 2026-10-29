@@ -98,6 +98,13 @@ export interface ThreadEmail {
   attachmentNames: string[]
   sentByName: string | null
   occurredAt: string
+  /**
+   * THE DATABASE'S OWN ANSWER, where the row carries it (account_email_correspondent). It knows what
+   * this page cannot: that an address is a CLIENT PORTAL login (S15). Stephan's first portal question
+   * was drawn "DEBTOR" -- the portal user's address is on no contact or company row, so the address
+   * test below fell through to "inbound is the debtor's side".
+   */
+  correspondent?: 'debtor' | 'client'
 }
 
 const sameAddress = (a: string | null | undefined, b: string | null | undefined): boolean =>
@@ -128,6 +135,7 @@ export function noteVoice(note: ThreadNote): ThreadVoice {
  * wrote to them" on a ticket where the question is WHICH them.
  */
 export function emailVoice(email: ThreadEmail, clientAddresses: readonly string[]): ThreadVoice {
+  if (email.correspondent === 'client') return 'client'
   if (clientAddresses.some((a) => sameAddress(a, email.debtorAddress))) return 'client'
   /*
    * ANYTHING ELSE ON AN ACCOUNT'S CORRESPONDENCE IS THE DEBTOR'S SIDE, and that is the table's own
@@ -237,21 +245,86 @@ export function nextAction(input: { stage: string; status: string }): string | n
  * leader has a question or needs clarity, there must be a button that refers it back to the clerk
  * and takes it off the team leader's desk -- "currently the clerk is not notified once there is a
  * question from the team leader ... so he will then not be aware and the query will not be
- * resolved."
+ * resolved." Tested, then widened: "can we have it on the call centre manager as well as client
+ * liaisons as well."
  *
- * ONLY WHILE IT IS AWAITING THE TEAM LEADER, and only to somebody who is not the clerk themselves.
+ * WHILE IT IS ON SOMEBODY ELSE'S DESK, and only to somebody who is not the clerk themselves. That is
+ * the team leader's stage, the liaison's stage, and -- for the Call Centre Manager, who is not a team
+ * leader and so holds a ticket at the `agent` stage (`stageForAssignee`) -- a ticket handed to the
+ * actor by name. Reading "mine" off `ownerId` rather than off the role keeps the rule to what is true
+ * of the ticket: whoever it was handed to may hand it back. The `client` stage is not anybody's desk.
  * Back is the `agent` stage with the raiser as owner -- the same two fields a hand-over writes, so
  * the board, the badge and the bell need nothing new to know about it. A closed ticket is finished.
  */
 export function canSendBack(
-  q: { stage: string; status: string; raisedBy: string | null },
+  q: { stage: string; status: string; raisedBy: string | null; ownerId?: string | null },
   actorId: string | null | undefined,
 ): boolean {
-  if (q.status === 'closed' || q.stage !== 'team_leader') return false
-  return !!q.raisedBy && q.raisedBy !== actorId
+  if (q.status === 'closed' || !q.raisedBy || q.raisedBy === actorId) return false
+  if (q.stage === 'team_leader' || q.stage === 'liaison') return true
+  return q.stage === 'agent' && !!actorId && q.ownerId === actorId
 }
 
 /** The question, as it is filed on the ticket's thread where the clerk will read it. */
 export function sendBackNote(toName: string | null, question: string): string {
   return `Sent back to ${toName?.trim() || 'the clerk'}: ${question.trim()}`
+}
+
+/**
+ * REFERRING A TICKET TO THE AGENT ON THE ACCOUNT (S15). Stephan, on a client's question from the portal:
+ * "refer an account to the clerk, to the agent, and give it a referral reason and have it understand the
+ * client query. And have them give feedback then."
+ *
+ * The liaison answers the client; the agent knows the debtor. So from the liaison's desk the ticket can be
+ * handed to whoever holds the account, with the reason required -- it is what the agent reads to know what
+ * the client wants -- and it comes back with the agent's answer (giveFeedback below). Send Back (R-9)
+ * already returns a ticket to the clerk who RAISED it; a client's question was raised by nobody inside the
+ * firm, so it needs the agent on the account instead. Offered from the liaison's or team leader's stage, on
+ * a ticket about an account (QueryDetail); who to is referTargets below.
+ */
+
+/** The referral, as it is filed on the ticket's thread where the agent will read it. */
+export function referNote(agentName: string | null, reason: string): string {
+  return `Referred to ${agentName?.trim() || 'the agent'}: ${reason.trim()}`
+}
+
+/**
+ * OR TO THE AGENT'S TEAM LEADER (S15). Stephan, a moment later: "you should also be able to refer it to a
+ * team leader." The leader of the agent's own team, at the team_leader stage -- the rung the board already
+ * draws. Where the agent has no team (or no leader), every active pre-legal team leader is offered.
+ * Never the person referring, never twice.
+ */
+export function referTargets(input: {
+  agentId: string | null
+  actorId: string | null | undefined
+  users: readonly { id: string; name: string; role?: string; teamId?: string | null; status?: string }[]
+}): { id: string; name: string; stage: 'agent' | 'team_leader'; rung: string }[] {
+  const agent = input.agentId ? input.users.find((u) => u.id === input.agentId) : undefined
+  const leaders = input.users.filter((u) => u.role === 'Pre-legal Team Leader' && u.status !== 'Inactive')
+  const own = agent?.teamId ? leaders.filter((u) => u.teamId === agent.teamId) : []
+  const out = [
+    ...(agent ? [{ id: agent.id, name: agent.name, stage: 'agent' as const, rung: 'Agent on the account' }] : []),
+    ...(own.length ? own : leaders).map((u) => ({ id: u.id, name: u.name, stage: 'team_leader' as const,
+      rung: own.length ? 'Their team leader' : 'Team leader' })),
+  ]
+  return out.filter((t, i) => t.id !== input.actorId && out.findIndex((x) => x.id === t.id) === i)
+}
+
+/**
+ * THE AGENT'S FEEDBACK, AND THE WAY BACK. The agent the ticket was referred to answers and it goes back to
+ * the liaison's stage and desk in one press -- an answer that leaves the ticket on the agent's desk is an
+ * answer nobody upstairs knows arrived. Only the person holding it, at the agent's or the team leader's
+ * stage, with a liaison to return it to.
+ */
+export function canGiveFeedback(
+  q: { stage: string; status: string; ownerId?: string | null },
+  actorId: string | null | undefined,
+  liaisonId: string | null | undefined,
+): boolean {
+  if (q.status === 'closed' || !actorId || !liaisonId || liaisonId === actorId) return false
+  return (q.stage === 'agent' || q.stage === 'team_leader') && q.ownerId === actorId
+}
+
+export function feedbackNote(agentName: string | null, feedback: string): string {
+  return `Feedback from ${agentName?.trim() || 'the agent'}: ${feedback.trim()}`
 }

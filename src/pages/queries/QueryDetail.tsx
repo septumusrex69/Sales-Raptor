@@ -14,7 +14,10 @@ import {
 /* The kind's own words, from the file that OWNS the dispute vocabulary rather than through the
    module that re-exports the queries half of it. */
 import { ESCALATION_KINDS, escalationCard } from '../../lib/disputeCategories'
-import { canSendBack, nextAction, sendBackNote, ticketThread } from '../../lib/ticketThread.ts'
+import {
+  canGiveFeedback, canSendBack, feedbackNote, nextAction, referNote, referTargets, sendBackNote, ticketThread,
+} from '../../lib/ticketThread.ts'
+import { fetchPortalContacts, type PortalContact } from '../../lib/portalStaffApi'
 import { TicketThread } from '../../components/queries/TicketThread'
 import {
   acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft,
@@ -35,14 +38,14 @@ import { clockNow } from '../../lib/clock'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import {
-  fetchQueryEmails, markRepliesRead, markRepliesUnread, recordSentEmail, type AccountEmail,
+  fetchQueryEmails, markRepliesRead, markRepliesUnread, recordSentEmail, recordSheetTicketEmail, type AccountEmail,
 } from '../../lib/accountEmails'
 import {
   EMAIL_IN_KIND, EMAIL_OUT_KIND, forwardBody, forwardSubject, recipientLine, replyAllTo, replySubject,
 } from '../../lib/emailRules.ts'
 import { RecordTabs } from '../../components/record/RecordShell'
 import { EmailsPanel } from '../accounts/EmailsPanel'
-import { ticketBody, ticketSubject } from '../../lib/ticketEmail.ts'
+import { sheetTicketBody, sheetTicketSubject, ticketBody, ticketSubject } from '../../lib/ticketEmail.ts'
 import { canSendToClient } from '../../lib/disputeCategories.ts'
 import { canViewClients } from '../../lib/permissions.ts'
 import { fetchAccounts } from '../../lib/accountBook'
@@ -149,6 +152,14 @@ export function QueryDetail() {
   /* Whether the signed-in person has a mailbox at all. Mail goes out through their OWN, so the
      button says why it is disabled rather than failing on Send. Null while we are asking. */
   const [mailbox, setMailbox] = useState<string | null>(null)
+  /*
+   * WHO AT THE CLIENT MAY SIGN IN TO THE PORTAL (S15). Their addresses are the client's -- a reply goes to
+   * them like to any person at the client -- and whether there are any decides whether the reply carries
+   * the portal link. Read through the portal's staff route: the table has no policies.
+   */
+  const [portalPeople, setPortalPeople] = useState<PortalContact[]>([])
+  /* Who a referral goes to, when there is more than one to choose from (S15). */
+  const [referTo, setReferTo] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -156,6 +167,10 @@ export function QueryDetail() {
     try {
       const found = await fetchQuery(id)
       setData(found)
+      /* Never fatal, and only for somebody who may write to the client -- the route refuses everybody else. */
+      if (found?.mainClientId && canSendToClient(currentUser?.role)) {
+        fetchPortalContacts(found.mainClientId).then(setPortalPeople).catch(() => setPortalPeople([]))
+      }
       /*
        * NEVER FATAL. A ticket whose correspondence cannot be read is still a ticket somebody has
        * to work — the description, the owner and the chase date are all on the row itself. An
@@ -340,8 +355,45 @@ export function QueryDetail() {
     : 'Only a liaison or a manager deals with the client on a ticket.'
   const forwardWhy = clientWhy
     ?? (!mailbox ? 'Connect your mailbox in Settings before you can send anything.' : null)
-  const clientAddresses = [data.clientEmail, ...data.clientPeople.map((person) => person.email)]
+  const activePortal = portalPeople.filter((p) => p.active)
+  /* The portal's people join the client's list for the picker, after the company's own people. */
+  const recipients = [
+    ...data.clientPeople,
+    ...activePortal.filter((p) => !data.clientPeople.some((c) => c.email === p.email.toLowerCase()))
+      .map((p) => ({ email: p.email.toLowerCase(), label: `${p.name || p.email} \u00b7 client portal` })),
+  ]
+  const clientAddresses = [data.clientEmail, ...recipients.map((person) => person.email)]
     .filter((a): a is string => !!a)
+  /*
+   * THE PORTAL LINE ON A REPLY (S15). Stephan: "respond on a ticket and it can notify the client via email
+   * and say there's been a response, click here to view ... If they want to work inside the app, it lives
+   * inside the app. If they want to work on emails, it goes to the emails." So the reply is the email --
+   * whole, for the client who works in email -- and it ends with the way into the portal for the one who
+   * works there. Only where somebody at the client can sign in: a link to a door they have no key to is noise.
+   */
+  const portalLine = activePortal.length > 0 && q.accountId
+    ? `\n\nYou can also read this and answer it in your client portal: ${window.location.origin}/portal (ticket ${ticketLabel(q)}).`
+    : ''
+  /* THE ONE REPLY: to whoever at the client last wrote on this ticket, threaded under their message;
+     to the client's own address where nobody has. */
+  function replyOnTicket() {
+    const lastFromClient = emails
+      .filter((e) => e.direction === 'in' && (e.correspondent === 'client'
+        || clientAddresses.some((a) => a.trim().toLowerCase() === e.debtorAddress.trim().toLowerCase())))
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0]
+    if (lastFromClient) startReply(lastFromClient, false)
+    else { setReplyTo(null); setForwarding(null); setWriting(true) }
+  }
+  function replyHintTo(): string {
+    const last = emails.filter((e) => e.direction === 'in' && e.correspondent === 'client')
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0]
+    return last?.sentByName ?? last?.debtorAddress ?? data?.clientContact ?? data?.clientName ?? 'the client'
+  }
+  const agentId = data.account?.assignedTo ?? null
+  const targets = q.status !== 'closed' && q.accountId && (q.stage === 'liaison' || q.stage === 'team_leader')
+    ? referTargets({ agentId, actorId: currentUser?.id, users }) : []
+  const target = targets.find((t) => t.id === referTo) ?? targets[0] ?? null
+  const liaisonName = data.liaisonId ? (users.find((u) => u.id === data.liaisonId)?.name ?? null) : null
   const personNotes = notes.filter(isPersonNote)
   function startReply(email: AccountEmail, all: boolean) {
     setForwarding(null); setWriting(false)
@@ -429,8 +481,16 @@ export function QueryDetail() {
               <h1 className="text-lg sm:text-xl font-semibold mt-0.5 wrap-anywhere">
                 {q.category || q.requestFor || ESCALATION_KINDS[q.kind ?? 'dispute'].label}
               </h1>
+              {/* THE ACCOUNT, ONE PRESS AWAY (S15). Stephan: "click on the reference number and it goes to the
+                  account." Our case number first -- the one every notice quotes -- then theirs. */}
               <p className="text-sm text-white/70 mt-0.5 wrap-anywhere">
-                {data.account?.debtorName ?? 'An account'}
+                {data.account ? (
+                  <Link to={`/accounts/${data.account.id}`} data-testid="ticket-account-link"
+                    className="text-white hover:underline underline-offset-4 decoration-white/40">
+                    {data.account.caseNumber && <span className="font-mono text-gold-400 mr-1.5">{data.account.caseNumber}</span>}
+                    {data.account.debtorName}
+                  </Link>
+                ) : 'An account'}
                 {data.account?.accountNumber ? ` · ${data.account.accountNumber}` : ''}
               </p>
             </div>
@@ -542,20 +602,23 @@ export function QueryDetail() {
         running to hundreds, and two thirds of the width is where a reference and seven columns
         stop fitting. A batch keeps the full measure it has always had.
       */}
-      {q.accountId && (
-        <RecordTabs<TicketTab>
-          tabs={[
-            { id: 'Overview', label: 'Overview' },
-            /* The dot: a message in from the client or the debtor that nobody has opened yet. */
-            { id: 'Emails', label: 'Emails', count: emails.length, alert: emails.some((e) => e.direction === 'in' && !e.readAt) },
-            { id: 'Notes', label: 'Notes', count: personNotes.length },
-          ]}
-          active={tab}
-          onChange={setTab}
-        />
-      )}
+      {/*
+        A SHEET TICKET HAS EMAILS TOO (S15). Stephan: a handover-sheet ticket sends and receives email,
+        not charged. So the strip is on every ticket; a sheet ticket has no Notes tab because a note is
+        filed on an account's timeline and a sheet has none.
+      */}
+      <RecordTabs<TicketTab>
+        tabs={[
+          { id: 'Overview', label: 'Overview' },
+          /* The dot: a message in from the client or the debtor that nobody has opened yet. */
+          { id: 'Emails', label: 'Emails', count: emails.length, alert: emails.some((e) => e.direction === 'in' && !e.readAt) },
+          ...(q.accountId ? [{ id: 'Notes' as TicketTab, label: 'Notes', count: personNotes.length }] : []),
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
-      {(!q.accountId || tab === 'Overview') && (
+      {tab === 'Overview' && (
       <div className={q.accountId ? 'grid gap-4 items-start lg:grid-cols-3' : 'contents'}>
       <div className={q.accountId ? 'space-y-4 lg:col-span-2' : 'contents'}>
 
@@ -660,10 +723,8 @@ export function QueryDetail() {
           const found = emails.find((e) => e.id === emailId)
           if (found) { setReplyTo(null); setForwarding(found) }
         }}
-        onReply={(emailId) => {
-          const found = emails.find((e) => e.id === emailId)
-          if (found) startReply(found, false)
-        }}
+        onReply={replyOnTicket}
+        replyHint={`Goes to ${replyHintTo()} by email${portalLine ? ', and shows in their client portal' : ''}.`}
       />
       </div>
 
@@ -673,6 +734,58 @@ export function QueryDetail() {
         caption on the sentence above them; standing beside it they read as the state of the
         ticket, which is what somebody opening it at nine in the morning is actually asking.
       */}
+      {target && (
+        <SendBack testId="refer-agent" toName={target.name} busy={busy}
+          choices={targets} choice={target.id} onChoice={setReferTo}
+          title="Refer it"
+          subtitle={`To ${target.name} (${target.rung.toLowerCase()}). Say what the client wants to know -- it goes to their desk, they are told, and their answer comes back to you.`}
+          placeholder="The client asks whether the debtor has made an arrangement. What is the latest?"
+          button={`Refer to ${target.name}`}
+          onSend={async (reason) => {
+            setError(null)
+            try {
+              await updateQuery(q.id, { ownerId: target.id, stage: target.stage }, {
+                accountId: q.accountId,
+                actorId: currentUser?.id ?? null,
+                actorName: currentUser?.name ?? null,
+                note: referNote(target.name, reason),
+                debtorName: data.account?.debtorName ?? null,
+                bell: `${currentUser?.name ?? 'The liaison'} referred${data.account?.debtorName ? ` ${data.account.debtorName}` : ' a ticket'} to you: ${reason.trim().slice(0, 120)}`,
+              })
+              await load()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            }
+          }}
+        />
+      )}
+      {/* NOT WHERE SEND BACK ALREADY IS: a ticket a clerk raised goes back to the clerk; feedback is for one
+          nobody inside raised -- the client's, from the portal -- or one referred down from the liaison. */}
+      {canGiveFeedback(q, currentUser?.id, data.liaisonId) && !canSendBack(q, currentUser?.id) && (
+        <SendBack testId="agent-feedback" toName={liaisonName} busy={busy}
+          title="Give your feedback"
+          subtitle={`What you know about this one. It goes back to ${liaisonName ?? 'the liaison'}, who answers the client.`}
+          placeholder="Spoke to the debtor today. Promised R500 on the 25th; arrangement captured."
+          button={`Send to ${liaisonName ?? 'the liaison'}`}
+          onSend={async (feedback) => {
+            setError(null)
+            try {
+              await updateQuery(q.id, { ownerId: data.liaisonId, stage: 'liaison' }, {
+                accountId: q.accountId,
+                actorId: currentUser?.id ?? null,
+                actorName: currentUser?.name ?? null,
+                note: feedbackNote(currentUser?.name ?? null, feedback),
+                debtorName: data.account?.debtorName ?? null,
+                bell: `${currentUser?.name ?? 'The agent'} answered on${data.account?.debtorName ? ` ${data.account.debtorName}` : ' a ticket'}: ${feedback.trim().slice(0, 120)}`,
+              })
+              await load()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            }
+          }}
+        />
+      )}
+
       {q.accountId && (
         <Card>
           <CardHeader title="Where it stands" />
@@ -724,7 +837,7 @@ export function QueryDetail() {
       </div>
       )}
 
-      {q.accountId && tab === 'Emails' && (
+      {tab === 'Emails' && (
         <div data-testid="ticket-emails">
           <EmailsPanel
             emails={[...emails].reverse()}
@@ -918,7 +1031,7 @@ export function QueryDetail() {
         Two modals would be two `onSent` handlers, and the one nobody was watching would be the one
         that forgot to file it against the ticket.
       */}
-      {(forwarding || writing || replyTo) && q.accountId && (
+      {(forwarding || writing || replyTo) && (
         <ComposeEmailModal
           /* A REPLY GOES BACK TO WHOEVER WROTE IT (S14) -- the client's person, or the debtor whose words
              were filed here -- and is threaded under their message. Everything else starts with the client. */
@@ -939,7 +1052,7 @@ export function QueryDetail() {
             per ticket -- the accounts clerk for a reconciliation, the manager for a complaint. Cc
             is already on the box behind "Add Cc", and it takes the same list.
           */
-          recipients={data.clientPeople}
+          recipients={recipients}
           forwardAttachments={forwarding
             ? { accountEmailId: forwarding.id, names: forwarding.attachmentNames }
             : undefined}
@@ -947,6 +1060,8 @@ export function QueryDetail() {
             ? replySubject(replyTo.subject)
             : forwarding
             ? forwardSubject(forwarding.subject)
+            : !q.accountId
+            ? sheetTicketSubject({ sheetReference: data.batch?.reference ?? null, ticketNo: q.ticketNo })
             : ticketSubject({
               kind: q.kind,
               requestFor: q.requestFor,
@@ -958,7 +1073,7 @@ export function QueryDetail() {
             })}
           /* A reply starts empty, as on the account: the original is quoted below the box. */
           initialBody={replyTo
-            ? ''
+            ? portalLine
             : forwarding
             ? forwardBody(
               {
@@ -976,6 +1091,14 @@ export function QueryDetail() {
                  a forward that silently ends mid-sentence reads to the client as all there was. */
               false,
             )
+            : !q.accountId
+            ? sheetTicketBody({
+              sheetReference: data.batch?.reference ?? null,
+              description: q.description,
+              contact: data.clientContact,
+              from: currentUser?.name ?? null,
+              ticketNo: q.ticketNo,
+            })
             : ticketBody({
               kind: q.kind,
               requestFor: q.requestFor,
@@ -987,8 +1110,12 @@ export function QueryDetail() {
               from: currentUser?.name ?? null,
               ticketNo: q.ticketNo,
             })}
-          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
-            + 'item 1(a). It is filed against this dispute as well as the account.'}
+          contextNote={q.accountId
+            ? `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
+              + 'item 1(a). It is filed against this dispute as well as the account.'
+            /* NOT CHARGED (Stephan, S15): a sheet has no debtor to charge. Said, so nobody wonders. */
+            : `Goes out from ${mailbox ?? 'your mailbox'} and is filed on this ticket. `
+              + 'Not charged: it is about the client\'s handover sheet, not a debtor\'s account.'}
           onClose={() => { setForwarding(null); setWriting(false); setReplyTo(null) }}
           onSent={(rawSubject, bodyText, messageId, from) => {
             const answering = replyTo
@@ -1008,8 +1135,20 @@ export function QueryDetail() {
              * activity convention and means nothing on an account. Stripped so what is filed is
              * the subject that actually went out.
              */
-            void recordSentEmail({
-              accountId: q.accountId as string,
+            const recorded = !q.accountId
+              /* A SHEET TICKET (S15): filed on the ticket alone, no fee, no account timeline. */
+              ? recordSheetTicketEmail({
+                queryId: q.id,
+                to: sentTo,
+                from: from ?? null,
+                subject: rawSubject.replace(/^Email sent:\s*/i, ''),
+                body: bodyText,
+                messageId: messageId ?? null,
+                inReplyTo: answering?.messageId ?? null,
+                actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+              })
+              : recordSentEmail({
+              accountId: q.accountId,
               to: sentTo,
               /* The modal leaves both undefined where it could not learn them; the ledger wants
                  a null. Passing undefined through PostgREST omits the column instead of clearing
@@ -1022,6 +1161,7 @@ export function QueryDetail() {
               queryId: q.id,
               actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
             })
+            void recorded
               /* The card has to show it went. Re-read rather than pushed, so what is drawn is what
                  was actually filed -- including the charge, which is computed server-side. */
               .then(() => fetchQueryEmails(q.id))

@@ -556,7 +556,11 @@ ok('...and the total says it is a floor when one has no amount',
    */
   const TOP_BAR_NAME = /<span className="text-lg font-semibold text-slate-800 truncate">\{heroName\}<\/span>/
   ok('the debtor\u2019s name really is the one in the top bar', TOP_BAR_NAME.test(detail))
-  for (const [name, source] of [['the account screen', detail.replace(TOP_BAR_NAME, '')],
+  /* AND A SECOND, ALSO THE FIRM'S OWN (S15): Stephan drew the Position card with "Account position" as a
+     real title over it, and that drawing is the instruction. One title, named here, not a loosened rule. */
+  const POSITION_TITLE = /<h3 className="text-xl font-bold text-slate-900">Account position<\/h3>/
+  ok('the Position card\u2019s title really is the one Stephan drew', POSITION_TITLE.test(detail))
+  for (const [name, source] of [['the account screen', detail.replace(TOP_BAR_NAME, '').replace(POSITION_TITLE, '')],
     ['the workspace panels', panels]]) {
     const big = (source.match(/text-(lg|xl|2xl|3xl)\b/g) ?? [])
     ok(`${name} has nothing set larger than the house scale`, big.length === 0)

@@ -200,7 +200,7 @@ export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
  * the firm supervising its own staff. A recommendation to sue is the firm deciding how to run
  * its business. A debtor pays for the first and must never pay for the other two.
  */
-export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import'
+export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import' | 'client'
 
 /**
  * WHAT A REQUEST IS ASKING FOR.
@@ -391,6 +391,29 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     submitLabel: 'Raise it',
     freeNote: 'A client\u2019s data being wrong is not something a debtor pays for.',
   },
+  /*
+   * ASKED BY THE CLIENT, FROM THE PORTAL (S15, Raptor · Handover 14). Stephan's order for the
+   * portal: "questions about a debtor". Like `import` it is raised by something other than a person
+   * at the firm, so it is not in ESCALATION_KIND_ORDER -- an agent does not raise a question on the
+   * client's behalf; they write to the client.
+   *
+   * NEVER ITEM 3. The question is the client's, not the debtor's objection. What the CLIENT writes
+   * on it is correspondence about the account, and that is item 6 under the firm's own ruling --
+   * raised on the reply, never on the asking (see api/_lib/portal.ts).
+   */
+  client: {
+    label: 'The client asked a question',
+    blurb: 'Asked from the client portal about one of their accounts.',
+    chargeable: false,
+    needsCategory: false,
+    prompt: 'What does the client want to know?',
+    placeholder: 'Has the debtor made any arrangement yet?',
+    goesTo: 'liaison',
+    cardLabel: 'Client asked',
+    cardTint: 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]',
+    submitLabel: 'Raise it',
+    freeNote: 'A client asking about their own account is not something the debtor caused.',
+  },
 }
 
 /**
@@ -421,6 +444,8 @@ export function clientSection(kind: EscalationKind | null | undefined): ClientSe
     case 'dispute': return 'dispute'
     case 'import': return 'query'
     case 'litigation': return 'query'
+    /* The client's own question is on their query list -- they asked it. */
+    case 'client': return 'query'
     /* Everything raised before the kind column existed reads as a dispute, which is what it was. */
     case null: case undefined: return 'dispute'
     default: return null

@@ -1,0 +1,270 @@
+/*
+ * FOREST -- a visual skin (S15, Raptor · Handover 14).
+ *
+ * Stephan: "forest", with two photographs -- a dark wing over a misty pine valley, and the valley
+ * itself from a mossy slope with the sun breaking through -- and its saying: "The closer you look,
+ * the more you see."
+ *
+ * BUILT ON ocean.css, AND SAID SO: the same tokens and rules, every colour moved into the forest's
+ * family by a hue shift -- the cool structure into pine and shadow, the champagne into the pale sunlight
+ * through the mist, the good-news green kept a forest green. Lightness is kept colour by colour, so
+ * the ocean skin's contrasts hold here too.
+ *
+ * THE WING IS THE BAND AND THE VALLEY IS THE HERO, as in every skin with a wing (the band enlarged 5%
+ * to 700px).
+ *
+ * THE REASONING FOR EVERY RULE BELOW IS WRITTEN ONCE, IN ocean.css (where each token is, what the
+ * wash is for, why one plain url()). It is not copied here: comments describing a sea under a
+ * forest's colours would be worse than none.
+ */
+html[data-theme='forest'] {
+      --color-surface: #f3f7f5;
+  --color-card: #fbfdfc;
+    --color-card-solid: #fbfdfc;
+
+    --color-slate-50: #f6faf8;
+  --color-slate-100: #ecf3ef;
+  --color-slate-200: #dde8e2;
+  --color-slate-300: #c8d7cf;
+  --color-slate-400: #92aa9d;
+  --color-slate-500: #70897c;
+  --color-slate-600: #5a7366;
+  --color-slate-700: #3b5647;
+  --color-slate-800: #253f31;
+  --color-slate-900: #172c21;
+
+    --color-navy-950: #091b11;
+  --color-navy-900: #0e2418;
+  --color-navy-800: #153323;
+  --color-navy-700: #1e4530;
+  --color-navy-600: #2b5840;
+
+    --color-gold-600: #988547;
+  --color-gold-500: #d0bc7c;
+  --color-gold-400: #dfce97;
+  --color-gold-300: #eee3be;
+
+  --color-brand-50: #f3f9f6;
+  --color-brand-100: #e3f0e9;
+  --color-brand-500: #2b5840;
+  --color-brand-600: #153323;
+  --color-brand-700: #091b11;
+
+  --color-positive: #2f7f57;
+  --color-negative: #c45a3f;
+
+  --color-red-50: #fbeeeb;
+  --color-red-100: #f5dbd5;
+  --color-red-200: #ebc1b7;
+  --color-red-500: #c45a3f;
+  --color-red-600: #ae4e36;
+  --color-red-700: #8f402c;
+
+      --c-navy-deep: #091b11;
+  --c-navy: #153323;
+  --c-navy-mid: #214934;
+  --c-navy-slate: #2f4b3c;
+  --c-navy-ink: #193627;
+  --c-navy-steel: #3a5d4a;
+    --c-steel: #488665;
+  --c-steel-soft: #5b9677;
+  --c-steel-bright: #73ab8d;
+  --c-steel-deep: #386d51;
+  --c-steel-light: #95bfa9;
+  --c-steel-pale: #c7ded2;
+  --c-gold: #d0bc7c;
+  --c-gold-brand: #d0bc7c;
+  --c-gold-bright: #dfce97;
+  --c-gold-light: #e8dbb0;
+  --c-gold-deep: #988547;
+  --c-gold-dark: #7a6b38;
+  --c-gold-bronze: #988547;
+  --c-gold-deep-hover: #7a6b38;
+  --c-green: #2f7f57;
+  --c-green-bright: #3a9266;
+  --c-green-muted: #6a9881;
+  --c-rust: #c45a3f;
+  --c-rust-deep: #a8472f;
+  --c-rust-hover: #a8472f;
+  --c-rust-deep-hover: #8c3b27;
+  --c-grey: #70897c;
+  --c-grey-warm: #82958b;
+  --c-grey-light: #92aa9d;
+  --c-grey-blue: #8fab9c;
+  --c-grey-pale: #cfded6;
+  --c-ink: #091b11;
+
+  --tint-steel: #ecf5f0;
+  --tint-steel-soft: #e6f3ec;
+  --tint-steel-alt: #eef6f2;
+  --tint-gold: #faf5e6;
+  --tint-gold-deep: #f5efdc;
+  --tint-gold-dark: #f1e9d0;
+  --tint-gold-pale: #e8dbb3;
+  --tint-green: #e8f3ee;
+  --tint-green-bright: #e1efe8;
+  --tint-rust: #fbebe7;
+  --tint-rust-deep: #f7dfd9;
+  --tint-neutral: #ecf3ef;
+  --tint-neutral-soft: #f6faf8;
+
+  --stage-new-deal: #488665;
+  --stage-quotation-sent: #d0bc7c;
+  --stage-mandate-sent: #b19d5a;
+  --stage-won: #2f7f57;
+  --stage-rejected: #c45a3f;
+
+    --outcome-won: #d0bc7c;
+  --outcome-open: #73ab8d;
+  --outcome-rejected: #4e6458;
+  --outcome-value: #153323;
+
+    --skin-card-radius: 14px;
+  --skin-card-border: #e3ede8;
+    --skin-card-shadow: 0 1px 2px rgba(10, 34, 21, 0.05), 0 6px 18px rgba(10, 34, 21, 0.05);
+  --skin-card-shadow-hover: 0 1px 2px rgba(10, 34, 21, 0.06), 0 12px 30px rgba(10, 34, 21, 0.1);
+  --skin-body-text: #182e22;
+  --skin-scrollbar: #c8d7cf;
+
+      --skin-hero-background:
+    linear-gradient(100deg, rgba(8, 18, 12, 0.94) 0%, rgba(10, 22, 15, 0.86) 34%, rgba(12, 26, 18, 0.5) 62%, rgba(12, 26, 18, 0.12) 100%);
+  --skin-hero-image: url('/brand/forest-band.webp');
+  --skin-hero-radius: 18px;
+
+    --skin-collections-hero-image: url('/brand/forest-hero.webp');
+    --skin-collections-hero-ground: #122e1f;
+    --skin-collections-scrim:
+    linear-gradient(
+      90deg,
+      rgba(7, 22, 14, 0.5) 0%,
+      rgba(7, 22, 14, 0.24) 38%,
+      rgba(7, 22, 14, 0.06) 62%,
+      rgba(7, 22, 14, 0.42) 100%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(7, 22, 14, 0.12) 0%,
+      rgba(7, 22, 14, 0) 30%,
+      rgba(7, 22, 14, 0) 58%,
+      rgba(7, 22, 14, 0.14) 78%,
+      rgba(7, 22, 14, 0.28) 100%
+    );
+
+    --skin-sidebar-art: url('/brand/forest-sidebar.webp');
+  --skin-sidebar-art-opacity: 0.22;
+
+  --forest-light-metal: linear-gradient(
+    135deg,
+    #7a6b38 0%,
+    #c7b370 34%,
+    #eee3be 54%,
+    #b6a15c 78%,
+    #6d6033 100%
+  );
+
+    --skin-gold-gradient: var(--forest-light-metal);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #988547 0%, #d0bc7c 100%);
+}
+
+/* THE SUBJECT ON THE RIGHT, THE WORDS ON THE LEFT (S15, "Make this look better"). Centred, the
+   band showed the wing's feathers behind the debtor's name and cut the trees in half; anchored right,
+   the trees sit beside the agent and the wash darkens the half the name is written on. */
+html[data-theme='forest'] .app-hero {
+  background:
+    var(--skin-hero-background),
+    var(--skin-hero-image) right 40% / cover no-repeat;
+}
+
+html[data-theme='forest'] .collections-hero {
+  background-position: 50% 55%;
+}
+
+html[data-theme='forest'] .collections-hero {
+  --ch-glass: rgba(9, 25, 16, 0.6);
+  --ch-edge: rgba(255, 255, 255, 0.12);
+  --ch-gold: #d0bc7c;
+  --ch-champagne: #eee3be;
+  --ch-muted: #b7ccc1;
+}
+
+html[data-theme='forest'] .login-photo {
+  background-image: url('/brand/forest-hero.webp');
+  background-position: 72% 50%;
+}
+@media (min-resolution: 2dppx) {
+  html[data-theme='forest'] .login-photo {
+    background-image: url('/brand/forest-hero.webp');
+  }
+}
+
+html[data-theme='forest'] h1,
+html[data-theme='forest'] h2,
+html[data-theme='forest'] h3 {
+  letter-spacing: -0.012em;
+}
+
+html[data-theme='forest'] table,
+html[data-theme='forest'] .app-hero {
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-theme='forest'] .card {
+  transition: box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html[data-theme='forest'] .app-sidebar {
+  position: relative;
+  isolation: isolate;
+}
+
+html[data-theme='forest'] .app-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, #091b11 0%, rgba(9, 27, 17, 0.7) 38%, rgba(9, 27, 17, 0.9) 100%),
+    var(--skin-sidebar-art) center bottom / cover no-repeat;
+  opacity: var(--skin-sidebar-art-opacity);
+  pointer-events: none;
+}
+
+html[data-theme='forest'] .app-sidebar nav a[aria-current='page'] {
+  background: linear-gradient(180deg, #dfce97 0%, #d0bc7c 100%);
+  color: #0e2217;
+}
+
+html[data-theme='forest'] tbody tr:hover {
+  background-color: #f6faf8;
+}
+
+html[data-theme='forest'] input:not([type='checkbox']):not([type='radio']),
+html[data-theme='forest'] select,
+html[data-theme='forest'] textarea {
+  border-radius: 10px;
+}
+
+html[data-theme='forest'] input:focus-visible,
+html[data-theme='forest'] select:focus-visible,
+html[data-theme='forest'] textarea:focus-visible,
+html[data-theme='forest'] button:focus-visible,
+html[data-theme='forest'] a:focus-visible {
+  outline: 2px solid rgba(72, 134, 101, 0.6);
+  outline-offset: 1px;
+}
+
+html[data-theme='forest'] button,
+html[data-theme='forest'] a {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='forest'] *,
+  html[data-theme='forest'] *::before,
+  html[data-theme='forest'] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

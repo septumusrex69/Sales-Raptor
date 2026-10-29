@@ -1,5 +1,6 @@
-import { Forward, Mail, MessageSquare, Paperclip, Phone, Reply, Settings2, User } from 'lucide-react'
-import { Card, CardHeader } from '../ui/Card'
+import { useState } from 'react'
+import { ChevronDown, Forward, HelpCircle, Info, Mail, MessageSquare, Paperclip, Phone, Reply, Settings2, User } from 'lucide-react'
+import { Card } from '../ui/Card'
 import { formatDate } from '../../data/mockData'
 import { VOICE_LABEL, type ThreadEntry, type ThreadVoice } from '../../lib/ticketThread.ts'
 
@@ -43,7 +44,18 @@ const VOICE_ICON: Record<ThreadVoice, typeof Mail> = {
   system: Settings2,
 }
 
-export function TicketThread({ entries, canForward, why, onForward, onReply }: {
+/* WHICH VOICES THE FILTER OFFERS. The firm's design carried "All messages" above the list: on a ticket
+   with forty entries the client's own words are what a liaison is looking for. */
+const FILTERS: { id: 'all' | 'client' | 'debtor' | 'firm'; label: string; voices: ThreadVoice[] | null }[] = [
+  { id: 'all', label: 'All messages', voices: null },
+  { id: 'client', label: 'The client', voices: ['client'] },
+  { id: 'debtor', label: 'The debtor', voices: ['debtor'] },
+  { id: 'firm', label: 'Inside the firm', voices: ['internal', 'call', 'system', 'sent'] },
+]
+
+const time = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Johannesburg' })
+
+export function TicketThread({ entries, canForward, why, onForward, onReply, replyHint }: {
   entries: ThreadEntry[]
   /** Whether this person may put a message in front of the client. */
   canForward: boolean
@@ -52,90 +64,112 @@ export function TicketThread({ entries, canForward, why, onForward, onReply }: {
   why: string | null
   onForward: (emailId: string) => void
   /**
-   * ANSWER THIS MESSAGE (S14). The firm: "you should be able to send an email or respond to a specific
-   * email from a client." Threaded (In-Reply-To), so the answer sits under the client's own message in
-   * their mail -- the forward above starts a fresh conversation, which is the wrong thing for a reply.
-   * The same gate as Forward: it is a message leaving the building.
+   * REPLY ON THE TICKET, NOT ON ONE EMAIL (S15). Stephan: "This reply currently is a reply on an email ...
+   * I think rather a reply to the ticket." One button at the head of the conversation: it answers the
+   * client, is filed on the ticket (so the portal shows it) and goes to them by email with a link to the
+   * portal -- a client who works in email reads it there, one who works in the portal answers there.
    */
-  onReply?: (emailId: string) => void
+  onReply?: () => void
+  /** Who the reply goes to, said under the button. */
+  replyHint?: string | null
 }) {
-  if (entries.length === 0) {
-    return (
-      <Card>
-        <CardHeader title="The conversation" />
-        <p className="text-sm text-slate-400 mt-1">
-          Nothing has been said on this ticket yet. What you write above lands here.
-        </p>
-      </Card>
-    )
-  }
+  const [filter, setFilter] = useState<typeof FILTERS[number]['id']>('all')
+  const shown = FILTERS.find((f) => f.id === filter)?.voices
+  const visible = shown ? entries.filter((e) => shown.includes(e.voice)) : entries
 
   return (
     <Card>
-      <CardHeader
-        title="The conversation"
-        subtitle="Everything said on this ticket, newest first — inside the firm, to the client and from the debtor." />
-      <ol className="mt-3 space-y-3">
-        {entries.map((e) => {
-          const Icon = VOICE_ICON[e.voice]
-          return (
-            <li key={e.key} className="flex gap-2.5">
-              <span className="mt-0.5 shrink-0 w-6 h-6 rounded-full bg-slate-50 border border-slate-200
-                inline-flex items-center justify-center text-slate-400">
-                <Icon size={12} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className={`text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5
-                    rounded border ${VOICE_CHIP[e.voice]}`}>
-                    {VOICE_LABEL[e.voice]}
-                  </span>
-                  <span className="text-xs font-medium text-slate-700 wrap-anywhere">{e.who}</span>
-                  <span className="text-[11px] text-slate-400">{formatDate(e.at)}</span>
+      {/* THE HEAD, as the firm drew it: a dark tile, the title and what the list is, the filter -- and the
+          one reply, because answering is what this card is for. */}
+      <div className="flex flex-wrap items-start gap-4 pb-4 border-b border-slate-100">
+        <span className="shrink-0 w-11 h-11 rounded-xl bg-navy-900 text-white inline-flex items-center justify-center">
+          <MessageSquare size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-bold text-slate-900">The conversation</h3>
+          <p className="text-sm text-slate-500">Everything said on this ticket, newest first — inside the firm, with the client and from the debtor.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {entries.length > 0 && (
+            <label className="relative">
+              <span className="sr-only">Show</span>
+              <select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} data-testid="thread-filter"
+                className="appearance-none rounded-lg border border-slate-200 bg-white pl-3 pr-8 py-2 text-sm text-slate-700">
+                {FILTERS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            </label>
+          )}
+          {onReply && (
+            <button type="button" onClick={onReply} disabled={!canForward} title={why ?? undefined} data-testid="thread-reply"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-40">
+              <Reply size={15} /> Reply on this ticket
+            </button>
+          )}
+        </div>
+      </div>
+      {onReply && replyHint && canForward && <p className="mt-2 text-xs text-slate-500" data-testid="thread-reply-hint">{replyHint}</p>}
+
+      {visible.length === 0 ? (
+        <p className="text-sm text-slate-400 mt-4">
+          {entries.length === 0 ? 'Nothing has been said on this ticket yet. What you write lands here.' : 'Nothing from them on this ticket.'}
+        </p>
+      ) : (
+        <ol className="divide-y divide-slate-100">
+          {visible.map((e) => {
+            const Icon = VOICE_ICON[e.voice]
+            return (
+              <li key={e.key} className="flex gap-3.5 py-4" data-testid="thread-entry">
+                <span className="shrink-0 w-10 h-10 rounded-full bg-slate-100 inline-flex items-center justify-center text-slate-500">
+                  <Icon size={18} />
                 </span>
-                {/* THE SUBJECT ON AN EMAIL AND NOWHERE ELSE. A note has none, and a bold blank line
-                    above every internal entry is furniture. */}
-                {e.subject && (
-                  <p className="text-xs font-medium text-slate-600 mt-1 wrap-anywhere">{e.subject}</p>
-                )}
-                <p className="text-sm text-slate-700 whitespace-pre-wrap wrap-anywhere mt-0.5">{e.body}</p>
-                {(e.attachmentNames?.length ?? 0) > 0 && (
-                  <p className="text-[11px] text-slate-500 mt-1 inline-flex items-start gap-1">
-                    <Paperclip size={11} className="mt-0.5 shrink-0" />
-                    <span className="wrap-anywhere">{e.attachmentNames!.join(', ')}</span>
-                  </p>
-                )}
-                {/*
-                  FORWARD, ON A MESSAGE AND ONLY ON A MESSAGE.
-                  
-                  An internal note is not a thing to put in front of a client -- it was written for
-                  the next collector, which is exactly what the firm's own objection to putting
-                  notes in client reporting was about.
-                */}
-                {e.emailId && e.inbound && onReply && (
-                  <button type="button" onClick={() => onReply(e.emailId!)} disabled={!canForward}
-                    title={why ?? undefined} data-testid="thread-reply"
-                    className="mt-1 mr-3 inline-flex items-center gap-1 text-[11px] font-medium
-                      text-[var(--c-steel)] hover:underline disabled:opacity-40 disabled:no-underline">
-                    <Reply size={11} /> Reply
-                  </button>
-                )}
-                {e.emailId && (
-                  <button type="button" onClick={() => onForward(e.emailId!)} disabled={!canForward}
-                    title={why ?? undefined}
-                    className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium
-                      text-[var(--c-steel)] hover:underline disabled:opacity-40 disabled:no-underline">
-                    <Forward size={11} /> Forward to the client
-                  </button>
-                )}
-              </div>
-            </li>
-          )
-        })}
-      </ol>
+                <div className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border ${VOICE_CHIP[e.voice]}`}>
+                      {VOICE_LABEL[e.voice]}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-800 wrap-anywhere">{e.who}</span>
+                    <span className="text-slate-200" aria-hidden="true">|</span>
+                    <span className="text-xs text-slate-500">{formatDate(e.at)}</span>
+                    <span className="text-xs text-slate-600 bg-slate-100 rounded-md px-1.5 py-0.5 tabular-nums">{time(e.at)}</span>
+                  </span>
+                  {/* THE SUBJECT ON AN EMAIL AND NOWHERE ELSE. A note has none, and a bold blank line
+                      above every internal entry is furniture. */}
+                  {e.subject && (
+                    <p className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--tint-steel)] px-3 py-1.5 text-sm font-medium text-slate-700 wrap-anywhere">
+                      <HelpCircle size={15} className="shrink-0 text-slate-500" /> {e.subject}
+                    </p>
+                  )}
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap wrap-anywhere mt-2">{e.body}</p>
+                  {(e.attachmentNames?.length ?? 0) > 0 && (
+                    <p className="text-[11px] text-slate-500 mt-1 inline-flex items-start gap-1">
+                      <Paperclip size={11} className="mt-0.5 shrink-0" />
+                      <span className="wrap-anywhere">{e.attachmentNames!.join(', ')}</span>
+                    </p>
+                  )}
+                  {/*
+                    FORWARD, ON THE DEBTOR'S OWN MESSAGES AND NOWHERE ELSE (S15). Stephan: "forward to the
+                    client doesn't really make sense" -- on the client's own message it does not; on a
+                    debtor's dispute it is the whole point, the liaison putting the debtor's words in front
+                    of the creditor. An internal note never: it was written for the next collector.
+                  */}
+                  {e.emailId && e.voice === 'debtor' && (
+                    <button type="button" onClick={() => onForward(e.emailId!)} disabled={!canForward}
+                      title={why ?? undefined} data-testid="thread-forward"
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium
+                        text-[var(--c-steel)] hover:bg-slate-50 disabled:opacity-40">
+                      <Forward size={14} /> Forward to the client
+                    </button>
+                  )}
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+      )}
       {why && <p className="mt-3 text-[11px] text-slate-500">{why}</p>}
       {/*
-        WHAT A FORWARD COSTS, SAID BEFORE THE PRESS AND NOT AFTER.
+        WHAT A REPLY OR A FORWARD COSTS, SAID BEFORE THE PRESS AND NOT AFTER.
 
         THE FIRM OVERRULED THE RECOMMENDATION PUT TO THEM AND THIS IS THE RECORD OF IT. The argument
         against charging was that item 3 on the dispute already covered the work; their answer was
@@ -147,7 +181,8 @@ export function TicketThread({ entries, canForward, why, onForward, onReply }: {
         thread -- the old card's own check is what caught it.
       */}
       {canForward && (
-        <p className="mt-3 text-[11px] text-slate-400">
+        <p className="mt-3 flex items-start gap-2.5 rounded-lg bg-[var(--tint-steel)] px-3 py-2.5 text-xs text-slate-600">
+          <Info size={15} className="shrink-0 text-[var(--c-navy-mid)]" />
           Replying to or forwarding a message is charged to the debtor at R25 under Annexure B
           item 1(a), the same as any other email that leaves.
         </p>

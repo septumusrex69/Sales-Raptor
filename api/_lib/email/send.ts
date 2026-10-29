@@ -104,5 +104,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: result.error })
     return
   }
-  res.status(200).json({ ok: true, messageId: result.messageId, from: result.from })
+  /*
+   * ON THE SENDER'S SENT LIST NOW, NOT AT THE NEXT SYNC (S15). Stephan: forwarded, told it went, and it was
+   * not in Sent -- "probably when I refresh it's going to be there ... I refreshed. It's not even there."
+   * The mailbox sync is what fills the Sent tab, and it runs on its own schedule. Where the server told us
+   * which folder and uid the copy went to, the row the sync would write is written here: the same key
+   * (user_id, message_id), so when the sync reaches it the upsert sees it already there and adds nothing.
+   * Without a uid nothing is written -- a row the reading pane cannot fetch the body for is worse than a
+   * wait -- and the screen is told the copy is not filed, so it can say so.
+   */
+  const copy = result.sentCopy ?? null
+  if (copy?.uid && result.messageId) {
+    const now = new Date().toISOString()
+    const text = (result.html ?? bodyHtml).replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+    const { error: rowErr } = await admin.from('user_emails').upsert({
+      user_id: caller.id, folder: copy.folder, uid: copy.uid, message_id: result.messageId,
+      from_address: result.from, subject, snippet: text.slice(0, 240) || null,
+      to_address: to.split(',')[0]?.trim() || null, occurred_at: now,
+      is_sent: true, read_at: now, no_record_at: now,
+    }, { onConflict: 'user_id,message_id', ignoreDuplicates: true })
+    if (rowErr) console.error(`[email/send] sent copy not put on the Sent list: ${rowErr.message}`)
+  }
+  res.status(200).json({ ok: true, messageId: result.messageId, from: result.from, filedInSent: !!copy })
 }

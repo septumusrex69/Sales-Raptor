@@ -169,7 +169,8 @@ ok('...and never hands the raw markup to the composer',
    server, and it is not a reason to strip the pictures out of a message being passed on. */
 ok('...with the pictures kept', /showPictures: true/.test(mailPage))
 /* A message with no HTML at all still forwards the way it always did. */
-ok('a text-only message still quotes its text', /initialBody: forwardBody\(/.test(mailPage))
+/* S15: quoted as escaped lines under the box, in the same editable original as an HTML one. */
+ok('a text-only message still quotes its text', /forwardTextHtml\(forwarding\.body, forwarding\.complete\)/.test(mailPage))
 
 /* The composer joins the two halves, and only at the moment of sending. */
 const box = readFileSync(new URL('../../src/components/ComposeEmailModal.tsx', import.meta.url), 'utf8')
@@ -181,7 +182,7 @@ const box = readFileSync(new URL('../../src/components/ComposeEmailModal.tsx', i
  * that is what it asks now.
  */
 ok('the typed note and the original are joined on send',
-  /bodyHtml: [^\n]*\(quotedHtml \?\? ''\)/.test(box))
+  /bodyHtml: [^\n]*\(quotedHtml \? \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(box))
 ok('...and the note is rendered rather than concatenated raw',
   /bodyHtml: emailBodyHtml\(body\)/.test(box))
 /* A forward may go out with nothing typed above it -- the original IS the message. Before this,

@@ -4,11 +4,12 @@ import {
   Check, ChevronLeft, ChevronRight, FileText, HelpCircle, Loader2, MessageSquare, Moon, Paperclip, X,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { DictateButton } from '../ui/Dictate'
 import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayDecide, mayEdit, mayTest, mayWithdraw,
+  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw,
   parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
@@ -43,6 +44,9 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   const userOf = (id: string | null) => (id ? users.find((u) => u.id === id) : undefined)
   const asker = userOf(r.created_by)
   const admin = mayDecide(me)
+  /* BIG BOSS (S15): only Stephan decides what gets built. An Administrator still assigns, asks, notes
+     and sets priority; the approve, decline and build buttons are the Big Boss's alone. */
+  const boss = mayApproveBuild(me)
   const isAsker = me?.id === r.created_by
   const test = testState(r)
   const [events, setEvents] = useState<RequestEvent[] | null>(null)
@@ -151,9 +155,15 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
             </>
           ) : (
             <div className="space-y-2">
+              {/* SAY IT AS WELL AS TYPE IT (Stephan, S15, of R-13: "if you want to edit or make a correction, then you
+                  should be able to dictate as well"). The same microphone the request was sent with. */}
+              <div className="flex justify-end"><DictateButton size="small" value={draft} onChange={setDraft} /></div>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={5} data-testid="request-edit-words"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              <p className="text-xs text-slate-500">For spelling and slips. The old wording stays on the history. Once Claude starts building it, it can no longer be changed.</p>
+              <p className="text-xs text-slate-500">
+                The old wording stays on the history. Once Claude starts building it, it can no longer be changed.
+                {!isAsker && ` ${asker?.name ?? 'Whoever asked'} is told it was reworded, with the new words, and tests it against them when it is released.`}
+              </p>
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" disabled={busy || !draft.trim() || draft.trim() === r.description.trim()} data-testid="request-edit-save"
                   onClick={() => void act(async () => { await editRequest(r.number, draft); setDraft(null) })}>Save the correction</Button>
@@ -257,10 +267,13 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
             released that nobody built.
           */}
           {r.status === 'new' && <>
-            <Button variant="primary" disabled={busy} onClick={() => void approveAndBuild()} data-testid="request-approve-build">Approve &amp; ask Claude</Button>
-            <Button variant="secondary" disabled={busy} onClick={() => void move('accepted')} data-testid="request-approve">Approve only</Button>
+            {boss && <>
+              <Button variant="primary" disabled={busy} onClick={() => void approveAndBuild()} data-testid="request-approve-build">Approve &amp; ask Claude</Button>
+              <Button variant="secondary" disabled={busy} onClick={() => void move('accepted')} data-testid="request-approve">Approve only</Button>
+            </>}
             <Button variant="secondary" disabled={busy} onClick={() => setComposing('question')} icon={<HelpCircle size={14} />} data-testid="request-ask">Request info</Button>
-            <Button variant="danger" disabled={busy} onClick={() => setComposing('decline')} data-testid="request-decline">Decline</Button>
+            {boss && <Button variant="danger" disabled={busy} onClick={() => setComposing('decline')} data-testid="request-decline">Decline</Button>}
+            {!boss && <span className="text-xs text-slate-500" data-testid="request-boss-only">Only the Big Boss approves what gets built.</span>}
           </>}
           {r.status === 'accepted' && <>
             {r.build_requested_at ? (
@@ -268,17 +281,18 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
                 <span className="text-xs text-violet-800" data-testid="request-queued">Queued for Claude since {formatDateTime(r.build_requested_at)}</span>
                 <Button variant="ghost" disabled={busy} onClick={() => void act(() => askClaude(r, me, false))} data-testid="request-unqueue">Take it off the queue</Button>
               </>
-            ) : (
+            ) : boss ? (
               <Button variant="primary" disabled={busy} onClick={() => void act(() => askClaude(r, me, true))} data-testid="request-build">Ask Claude to build it</Button>
-            )}
+            ) : null}
             <Button variant="secondary" disabled={busy} onClick={() => setComposing('question')} icon={<HelpCircle size={14} />} data-testid="request-ask">Request info</Button>
-            <Button variant="danger" disabled={busy} onClick={() => setComposing('decline')} data-testid="request-decline">Decline</Button>
+            {boss && <Button variant="danger" disabled={busy} onClick={() => setComposing('decline')} data-testid="request-decline">Decline</Button>}
           </>}
           {r.status === 'building' && <>
             <span className="text-xs text-amber-800" data-testid="request-building">Claude is building it. It is released here, with how to test, when it is on the preview.</span>
             <Button variant="secondary" disabled={busy} onClick={() => setComposing('question')} icon={<HelpCircle size={14} />} data-testid="request-ask">Request info</Button>
           </>}
-          {(r.status === 'done' || r.status === 'declined') && (
+          {/* Reopening a DECLINED request is approving it after all -- the Big Boss's (S15). */}
+          {(r.status === 'done' || (r.status === 'declined' && boss)) && (
             <Button variant="secondary" disabled={busy} onClick={() => void move('accepted')} data-testid="request-reopen">Reopen</Button>
           )}
           <select value={r.priority} disabled={busy} aria-label="Priority" className="ml-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"

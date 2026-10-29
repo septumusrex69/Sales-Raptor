@@ -8,7 +8,10 @@
 import fs from 'node:fs'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, isPortalToken, normalisePortalEmail, portalCodeCheck, portalLine,
+  PORTAL_MESSAGE_MAX, PORTAL_TICKET_LABEL, portalCallback, portalMessageText, portalTicketNo, portalTicketTurn,
+  PORTAL_TOPICS, portalTopic, portalQuestion, portalPaymentReport, portalPaymentText, portalOutcomes,
 } from '../../src/lib/clientPortal.ts'
+import { ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection } from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
 const failures = []
@@ -67,7 +70,10 @@ for (const r of ['staffList', 'staffInvite', 'staffSetActive']) check(`${r} asks
 check('the staff tick is dispute.write_to_client', /'dispute\.write_to_client'/.test(code), true)
 const req = body('requestCode')
 check('an address that may not sign in gets the same answer as one that may',
-  /if \(!user \|\| !user\.active\) \{ res\.status\(200\)\.json\(\{ message: CODE_SENT_MESSAGE \}\)/.test(req), true)
+  /if \(!user \|\| !user\.active\) \{\s*(console\.log\([^\n]*\)\s*)?res\.status\(200\)\.json\(\{ message: CODE_SENT_MESSAGE \}\); return\s*\}/.test(req), true)
+/* S15 logs which it was, for the firm -- on the server only. The browser must still get one answer. */
+check('...the log may say which, the response may not', /console\.log\([^\n]*\)\s*res\.status\(200\)\.json\(\{ message: CODE_SENT_MESSAGE \}\)/.test(req)
+  && !/res\.status\(\d+\)\.json\(\{ message: (?!CODE_SENT_MESSAGE)/.test(req.slice(0, req.indexOf('resendDecision'))), true)
 check('...and that answer does not say whether the address is known', /not|unknown|no such/i.test(CODE_SENT_MESSAGE.replace('If that address may sign in', '')), false)
 check('a wrong code and no code read the same', /PORTAL_CODE_MESSAGE\.none/.test(body('verify')) && /not right/.test(PORTAL_CODE_MESSAGE.none), true)
 check('a code is spent the moment it matches', /client_portal_codes'\)\.delete\(\)/.test(body('verify')), true)
@@ -105,6 +111,117 @@ const portalRoute = app.indexOf('path="/portal"')
 const requireAuth = app.indexOf('<RequireAuth>')
 check('/portal is a route', portalRoute > 0, true)
 check('/portal sits outside RequireAuth and the firm\'s navigation', requireAuth > 0 && portalRoute < requireAuth, true)
+
+/* ---------- phase 2a (S15): tickets, questions, callbacks ---------- */
+check('a ticket number reads as T-123, 123 or a number', [portalTicketNo('T-123'), portalTicketNo('123'), portalTicketNo(123), portalTicketNo('t123')], [123, 123, 123, 123])
+check('...and nothing else is a ticket number', [portalTicketNo('1; drop'), portalTicketNo(''), portalTicketNo(null), portalTicketNo(-4)], [null, null, null, null])
+check('an empty message is no message', [portalMessageText('   '), portalMessageText(undefined)], [null, null])
+check('a message is trimmed and capped', portalMessageText(' hi\r\nthere ') === 'hi\nthere' && portalMessageText('x'.repeat(9000)).length === PORTAL_MESSAGE_MAX, true)
+check('a callback needs a real number', portalCallback({ phone: '123' }).ok, false)
+check('...a number and nothing else is fine, any time', portalCallback({ phone: '082 123 4567' }), { ok: true, phone: '082 123 4567', when: 'Any time', about: '' })
+check('waiting on the client is theirs; any other open stage is ours', [portalTicketTurn({ status: 'open', stage: 'client' }), portalTicketTurn({ status: 'open', stage: 'liaison' }), portalTicketTurn({ status: 'closed', stage: 'client' })], ['yours', 'ours', 'closed'])
+check('the client is told about exactly the kinds portal_tickets returns', Object.keys(PORTAL_TICKET_LABEL).sort(), ['client', 'dispute', 'import', 'litigation'])
+check('a client\'s question is on their QUERY list', clientSection('client'), 'query')
+check('...never raises item 3', ESCALATION_KINDS.client.chargeable, false)
+check('...and is not offered on the staff Escalate menu (the client raises it, not an agent)', ESCALATION_KIND_ORDER.includes('client'), false)
+
+const server = strip(fs.readFileSync('api/_lib/portal.ts', 'utf8'))
+for (const route of ['tickets', 'ticket', 'ticketReply', 'ask', 'callback', 'paymentReport', 'dashboard', 'reports', 'reportFile']) {
+  const at = server.indexOf(`const ${route}: Handler`)
+  const end = server.indexOf('\n}\n', at)
+  const body = at >= 0 ? server.slice(at, end) : ''
+  check(`${route} is a route`, at >= 0, true)
+  check(`${route} asks who is signed in before anything else`, body.length > 0 && /requirePortalUser\(req, admin\)/.test(body.slice(0, 200)), true)
+  check(`${route} never takes the client from the request`, /body\.(companyId|client|company)\b/.test(body), false)
+}
+const ownTicket = server.slice(server.indexOf('async function clientTicket'), server.indexOf('const tickets: Handler'))
+check('a ticket is only found inside the client\'s own group', /clientGroup\(admin, who\.companyId\)/.test(ownTicket), true)
+check('...and only of a kind the client may see', /\['dispute', 'import', 'litigation', 'client'\]/.test(ownTicket), true)
+const replyBody = server.slice(server.indexOf('const ticketReply: Handler'), server.indexOf('async function clientAccount'))
+check('a closed ticket takes no reply', /t\.status !== 'open'/.test(replyBody), true)
+check('a reply hands the ticket back to the liaison', /stage: 'liaison'/.test(replyBody), true)
+const ownAccount = server.slice(server.indexOf('async function clientAccount'), server.indexOf('const ask: Handler'))
+check('an account is found by our reference inside the client\'s own group', /eq\('case_number'/.test(ownAccount) && /clientGroup\(admin, who\.companyId\)/.test(ownAccount), true)
+check('a question is a client ticket on the liaison\'s stage', /kind: 'client', stage: 'liaison'/.test(server), true)
+/* NOT CHARGED until the firm says a portal message is the same as an email (asked, S15). If they say
+   yes, this check changes with the code -- deliberately, so the decision cannot happen by accident. */
+check('nothing the client types is charged to the debtor yet', /chargeItemWith|chargeItem\(/.test(server), false)
+check('...and the filed message says so in the row', /charged_excl_vat: 0/.test(server), true)
+
+/* ---------- S15: what the client wants, a payment made to them, reports ---------- */
+check('a topic off the list is kept', portalTopic('New details for the debtor'), 'New details for the debtor')
+check('...anything else is Something else', portalTopic('<script>'), 'Something else')
+check('the topic leads the ticket, on its own line', portalQuestion('An update on this account', 'Any news?'), 'An update on this account\n\nAny news?')
+check('the list is short (Stephan: "we shouldn\'t make it too complicated")', PORTAL_TOPICS.length <= 6, true)
+const T = '2026-10-28'
+check('a payment needs an amount', portalPaymentReport({ amount: '0', paidOn: T, reference: 'x' }, T).ok, false)
+check('...a day not in the future', portalPaymentReport({ amount: '10', paidOn: '2026-10-29', reference: 'x' }, T).ok, false)
+check('...and a reference', portalPaymentReport({ amount: '10', paidOn: T, reference: ' ' }, T).ok, false)
+check('R 1 500,50 reads as 1500.50', portalPaymentReport({ amount: 'R 1 500,50', paidOn: T, reference: 'x' }, T), { ok: true, report: { amount: 1500.5, paidOn: T, reference: 'x', note: '' } })
+check('1,500.50 reads as 1500.50', portalPaymentReport({ amount: '1,500.50', paidOn: T, reference: 'x' }, T).report?.amount, 1500.5)
+const ptcText = portalPaymentText({ amount: 1500.5, paidOn: T, reference: 'RCPT-9', note: '' })
+check('the ticket says the amount, the day, the reference -- and that it waits for approval',
+  /R 1 500\.50/.test(ptcText) && /2026-10-28/.test(ptcText) && /RCPT-9/.test(ptcText) && /approved/.test(ptcText) && !/\u00a0/.test(ptcText), true)
+
+const pay = server.slice(server.indexOf('const paymentReport: Handler'), server.indexOf('const callback: Handler'))
+check('a payment is recorded by portal_record_ptc, with the client from the SESSION', /rpc\('portal_record_ptc'/.test(pay) && /p_client: who\.companyId/.test(pay), true)
+check('...BEFORE the ticket is made (a ticket about a refused payment is about nothing)', pay.indexOf("rpc('portal_record_ptc'") > 0 && pay.indexOf("rpc('portal_record_ptc'") < pay.indexOf("from('account_queries')"), true)
+check('...and never written to the ledger from the server directly', /from\('account_payments'\)/.test(server), false)
+const schemaSql = fs.readFileSync('supabase/schema.sql', 'utf8')
+const ptcAt = schemaSql.lastIndexOf('create or replace function public.portal_record_ptc(')
+const ptcFn = ptcAt >= 0 ? schemaSql.slice(ptcAt, schemaSql.indexOf('end $$;', ptcAt)) : ''
+check('portal_record_ptc is in the schema', ptcAt > 0, true)
+check('...checks the account is on the client\'s own book', /v_owner is distinct from p_client/.test(ptcFn), true)
+check('...refuses a closed account, the future, before the handover, no reference, a same-day duplicate',
+  /ended_as is not null/.test(ptcFn) && /> public\.raptor_today\(\)/.test(ptcFn) && /< v_a\.handover_date/.test(ptcFn)
+  && /v_reference is null/.test(ptcFn) && /errcode = '23505'/.test(ptcFn), true)
+check('...writes a PTC, from the portal, UNAPPROVED (approval stays in Trust)',
+  /'portal', true, null/.test(ptcFn) && !/approved_at/.test(ptcFn.slice(ptcFn.indexOf('insert into'))), true)
+const ptcGrants = schemaSql.slice(schemaSql.indexOf('end $$;', ptcAt), schemaSql.indexOf('end $$;', ptcAt) + 400)
+check('...and only the service role may call it', /revoke all on function public\.portal_record_ptc[^;]*from public, anon, authenticated/.test(ptcGrants)
+  && /grant execute on function public\.portal_record_ptc[^;]*to service_role/.test(ptcGrants), true)
+const approve = fs.readFileSync('src/pages/finance/AwaitingApproval.tsx', 'utf8')
+check('Trust\'s approval list marks a payment the client recorded', /source === 'portal'/.test(approve) && /From the client portal/.test(approve), true)
+
+const rf = server.slice(server.indexOf('const reportFile: Handler'), server.indexOf('/* ------------------------------------------------------------------ staff'))
+check('a report file is only given for the client\'s own group', /clientGroup\(admin, who\.companyId\)/.test(rf), true)
+check('...as a short-lived link to the kept copy (never rebuilt)', /createSignedUrl\(path, 120/.test(rf) && /payover_run_sends/.test(rf), true)
+const rp = server.slice(server.indexOf('const reports: Handler'), server.indexOf('const reportFile: Handler'))
+check('the report list never hands the browser a storage path', /pdf_path:|xlsx_path:/.test(rp.slice(rp.indexOf('res.status(200)'))), false)
+const dash = server.slice(server.indexOf('const dashboard: Handler'), server.indexOf('const reports: Handler'))
+check('the dashboard is ONE read of the book (portal_summary), not a page-by-page walk', /rpc\('portal_summary'/.test(dash) && !/portal_book/.test(dash), true)
+check('...turned into outcomes by portalOutcomes', /portalOutcomes\(d\.groups\)/.test(dash), true)
+check('...and carries no fee, commission or interest', /commission|annexure|fee|interest/i.test(dash.replace(/\/\*[\s\S]*?\*\//g, '')), false)
+
+/* ---------- outcomes: finished by how they finished, open by where they stand ---------- */
+const G = (o) => ({ book: 'active', ended_as: null, status: 'Active: Activated', sub_status: null, bucket: null,
+  paid_now: false, disputed: false, accounts: 1, handed_over: 100, outstanding: 80, paid_to_date: 20, ...o })
+const out = portalOutcomes([
+  G({ ended_as: 'paid_up', book: 'closed', accounts: 3, outstanding: 0 }),
+  G({ ended_as: 'withdrawn', book: 'withdrawn', accounts: 1 }),
+  G({ paid_now: true, accounts: 2 }),
+  G({ disputed: true, accounts: 1 }),
+  G({ accounts: 4 }),
+  G({ book: 'closed', accounts: 1 }),
+])
+const of = (k) => out.find((o) => o.outcome === k)
+check('paid up is counted by how it ended', of('paid_up')?.accounts, 3)
+check('...withdrawn too', of('withdrawn')?.accounts, 1)
+check('money this month on an open account is Paying', of('paying')?.accounts, 2)
+check('an open dispute is Disputed', of('disputed')?.accounts, 1)
+check('the rest sit where clientPosition puts them (In progress)', of('in_progress')?.accounts, 4)
+check('a closed account with no ending is Closed', of('closed')?.accounts, 1)
+check('open outcomes come first, finished after', out.findIndex((o) => o.finished) > out.findIndex((o) => !o.finished)
+  && out.slice(out.findIndex((o) => o.finished)).every((o) => o.finished), true)
+check('a finished account carries no outstanding', of('withdrawn')?.outstanding, 0)
+const sch = fs.readFileSync('supabase/schema.sql', 'utf8')
+const sumAt = sch.lastIndexOf('create or replace function public.portal_summary(')
+const sumFn = sumAt > 0 ? sch.slice(sumAt, sch.indexOf('$$;', sch.indexOf('$$', sumAt) + 2)) : ''
+check('portal_summary reads the client AND its sub-accounts, open and closed', /coalesce\(c\.parent_company_id, c\.id\) = p_client/.test(sumFn) && !/book in \('active', 'on_hold'\)\)\s*\n\s*\), paid/.test(sumFn), true)
+check('...groups by exactly what a position is read off', /group by book, ended_as, status, sub_status, bucket, paid_this_month > 0, is_disputed/.test(sumFn), true)
+check('...with portal_book\'s money rules', /reversed_at is null and p\.rejected_at is null and not coalesce\(p\.is_demo, false\)/.test(sumFn), true)
+check('...service role only', /revoke all on function public\.portal_summary\(uuid\) from public, anon, authenticated/.test(sch)
+  && /grant execute on function public\.portal_summary\(uuid\) to service_role/.test(sch), true)
 
 if (failures.length) {
   console.log(`check-client-portal: ${pass} passed, ${failures.length} failed`)

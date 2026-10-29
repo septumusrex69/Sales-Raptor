@@ -1,7 +1,7 @@
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBlocker, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Archive, Banknote, Building2, CalendarClock, Check, CheckCircle2, Clock, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, PauseCircle, Phone, PhoneForwarded, PlayCircle, Plus, Printer, RotateCcw, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle, type LucideIcon } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -153,6 +153,7 @@ import { AccountWhatsApp } from './AccountWhatsApp'
 import { whatsAppOpening } from '../../lib/whatsapp'
 import { recordWhatsApp } from '../../lib/accountWhatsApp'
 import { mayHandOutFor } from '../../lib/handoverUpload'
+import { canCloseAccount, deskLabel } from '../../lib/firmDesk'
 
 type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'SMS' | 'Documents'
 
@@ -1113,9 +1114,7 @@ function AccountPage() {
    * the diary, the workflow and every desk list already turn on. `users` is the profiles AppStore
    * already holds, so this costs no query.
    */
-  const assignedName = account.assignedTo
-    ? (users.find((u) => u.id === account.assignedTo)?.name ?? 'Someone no longer here')
-    : null
+  const assignedName = deskLabel(account, (id) => users.find((u) => u.id === id)?.name)
   /* The same authority as handing out from the accounts list, and now literally the same test --
      the book-wide tick, or (S11) may load this account's client, which is a liaison's own batch. */
   const mayHandOut = mayHandOutFor(currentUser, client, users)
@@ -1536,7 +1535,7 @@ function AccountPage() {
       balance={b?.balance}
       open={!account.endedAs}
       canApprove={canApproveSettlement(currentUser)}
-      canClose={canRecordPayment(currentUser)}
+      canClose={canCloseAccount(currentUser, client, companies.find((c) => c.id === client?.parentCompanyId))}
       userId={currentUser?.id ?? null}
       nameOf={(uid) => users.find((u) => u.id === uid)?.name ?? null}
       onChange={reload}
@@ -1615,7 +1614,8 @@ function AccountPage() {
       onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null}
       /* Closing an account is not freezing it: a freeze is reversible and an ending is not. Both
          live beside the status because that is where work is stopped, not in the action row. */
-      onEnd={canRecordPayment(currentUser) ? () => setEnding(true) : null}
+      /* ADMINISTRATORS AND THE CLIENT'S LIAISON (Stephan, S15) -- may_close_account's copy. */
+      onEnd={canCloseAccount(currentUser, client, companies.find((c) => c.id === client?.parentCompanyId)) ? () => setEnding(true) : null}
       /* THE SAME TICK THE DATABASE ASKS FOR -- `book.freeze` -- so the button is not offered to
          somebody the function would refuse. The function is still the guard; this is the courtesy. */
       onHold={canFreezeAccounts(currentUser) ? () => setHolding(true) : null}
@@ -1661,7 +1661,7 @@ function AccountPage() {
         }
         subtitle={
           <span className="inline-flex flex-wrap items-center gap-x-1.5">
-            <span className="text-white/50">Client</span>
+            <span className="text-white/60">Client</span>
             {client
               ? canViewClients(currentUser)
                 ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
@@ -1679,7 +1679,7 @@ function AccountPage() {
                 back down the phone has to know which they are reading. */}
             {account.accountNumber && (
               <>
-                <span className="text-white/30">·</span>
+                <span className="text-white/45">·</span>
                 <span title="The account number on the agreement, as the client gave it">
                   account no. {account.accountNumber}
                 </span>
@@ -1687,13 +1687,13 @@ function AccountPage() {
             )}
             {account.clientReference && (
               <>
-                <span className="text-white/30">·</span>
+                <span className="text-white/45">·</span>
                 <span title="The client's own reference for this account">
                   client ref {account.clientReference}
                 </span>
               </>
             )}
-            {account.handoverDate && <><span className="text-white/30">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
+            {account.handoverDate && <><span className="text-white/45">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
           </span>
         }
       >
@@ -1740,7 +1740,9 @@ function AccountPage() {
           SAME assign-and-refer screen the accounts list and the client screen use, because
           commitHandOut is the only thing that allocates and it always diarises with it.
         */}
-        <div className="mt-2.5 text-right leading-tight ml-2">
+        {/* ON A SMALL PANE OF ITS OWN (S15): over a photograph the name floated on whatever part of the
+            picture happened to be behind it, and on the Africa band that was a tree trunk. */}
+        <div data-testid="hero-agent" className="text-right leading-tight ml-1 rounded-xl bg-black/30 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm">
           <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
           {mayHandOut ? (
             <button type="button" onClick={() => setHandOut(true)}
@@ -2207,7 +2209,7 @@ function AccountPage() {
              balance ... inclusive of fees, interest, capital" (the firm, 12 Oct). The capital
              alone read nil on accounts that still owed their fees. */
           balance={statement?.breakdown.balance ?? account.capitalOutstanding ?? 0}
-          canWriteOff={canViewFinance(currentUser)}
+          canRefund={canViewFinance(currentUser)}
           onClose={() => setEnding(false)}
           onDone={() => { setEnding(false); reload() }}
         />
@@ -2961,6 +2963,8 @@ function PanelTitle({ children, action }: { children: React.ReactNode; action?: 
     </div>
   )
 }
+
+type PositionControl = { label: string; hint: string; icon: LucideIcon; onClick: () => void }
 
 function Field({ label, value, note, action }: {
   label: string
@@ -4764,115 +4768,173 @@ function PositionPanel({
   onHold: (() => void) | null
   onRelease: (() => void) | null
 }) {
-  const handedOver = account.handoverDate
-    ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
-    : null
+  /*
+   * WHAT CAN BE DONE WITH THE ACCOUNT, AS BUTTONS ONE CAN SEE (S15, Raptor · Handover 14). Stephan,
+   * having found the withdrawal: "it's so hidden, it's so small, you can barely see what's going on
+   * there. Make it better." The three were 11px links under the Status, Book and Ending values --
+   * still the right place (the firm: work is stopped beside the status, not in the nine-button
+   * action row), but drawn as the thing they are. So they sit together at the top of this card,
+   * full size, each saying in one line what it does, and the fields below only report.
+   */
+  const frozen = !!account.frozenBy || /^frozen/i.test(account.status)
+  const controls: PositionControl[] = []
+  if (onFreeze) controls.push(frozen
+    ? { label: 'Restart', hint: 'Work on it again', icon: PlayCircle, onClick: onFreeze }
+    : { label: 'Stop work', hint: 'Freeze it; nobody works it', icon: PauseCircle, onClick: onFreeze })
+  if (account.book === 'active' && onHold) controls.push({ label: 'Put on hold', hint: 'Park it with a reason and a date', icon: Clock, onClick: onHold })
+  if (account.book !== 'active' && onRelease) controls.push(account.book === 'closed'
+    ? { label: 'Re-open', hint: 'Bring it back onto the active book', icon: RotateCcw, onClick: onRelease }
+    : { label: 'Back to active', hint: 'Take it off hold', icon: RotateCcw, onClick: onRelease })
+  /* CLOSING IS DRAWN APART, at the foot (Stephan's mockup, S15): the two above are reversible; this is
+     the one that ends the account, so it is not a tile beside them. */
+  const closeOn = !account.endedAs && onEnd ? onEnd : null
 
+  /* "25% — set on this account" read as a value and a note under it, which is how the mockup draws it. */
+  const [commissionValue, ...commissionRest] = commission.split(' — ')
+  const commissionNote = commissionRest.join(' — ')
+  const age = account.handoverDate ? timeOnDesk(account.handoverDate) : ''
+  /* THE BOOK, AS A PILL BESIDE THE TITLE: what anybody wants off this card first. */
+  const pill = account.book === 'active'
+    ? { label: 'Active', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' }
+    : account.book === 'on_hold'
+      ? { label: 'On hold', tone: 'bg-amber-50 text-amber-800 border-amber-200', dot: 'bg-amber-500' }
+      : { label: 'Closed', tone: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' }
+
+  /*
+   * THE CARD, AS STEPHAN DREW IT (S15, Raptor · Handover 14): a real title with the book beside it, the
+   * two reversible controls as tiles, the fee ceiling in a box of its own, the facts in three headed
+   * groups -- the account, its dates, and who deals with it -- and Close account last, under a rule.
+   * The fields only REPORT; every control is one of the four buttons.
+   */
   return (
     <Card>
-      <PanelTitle>Position</PanelTitle>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h3 className="text-xl font-bold text-slate-900">Account position</h3>
+        <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${pill.tone}`}
+          data-testid="position-book">
+          <span className={`h-2 w-2 rounded-full ${pill.dot}`} />{pill.label}
+        </span>
+      </div>
+      {controls.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pb-4" data-testid="position-controls">
+          {controls.map((c) => (
+            <button key={c.label} type="button" onClick={c.onClick} aria-label={c.label}
+              className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-left transition-colors hover:border-slate-300 hover:bg-slate-50">
+              <c.icon size={22} className="mt-0.5 shrink-0 text-[var(--c-steel)]" />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-slate-900">{c.label}</span>
+                <span className="block text-xs text-slate-500">{c.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       {ceiling && (
-        <div className="pb-3">
-          <div className="flex items-baseline justify-between text-xs mb-1">
-            <span className="text-slate-500">Annexure B fee ceiling</span>
-            <span className={`tabular-nums ${chargedExclVat > ceiling.limit ? 'text-negative font-medium' : 'text-slate-400'}`}>
-              {formatMoney(chargedExclVat)} of {formatMoney(ceiling.limit)}
+        <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3" data-testid="position-ceiling">
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <span className="text-sm font-bold text-slate-900">Annexure B fee ceiling</span>
+            <span className={`text-sm tabular-nums ${chargedExclVat > ceiling.limit ? 'text-negative font-semibold' : 'text-slate-800'}`}>
+              {formatMoney(chargedExclVat)} / {formatMoney(ceiling.limit)}
             </span>
           </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div className="h-2.5 bg-white/80 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full ${chargedExclVat > ceiling.limit ? 'bg-negative' : chargedExclVat / ceiling.limit > 0.9 ? 'bg-gold-500' : 'bg-brand-500'}`}
               style={{ width: `${Math.min(100, ceiling.limit ? (100 * chargedExclVat) / ceiling.limit : 0)}%` }}
             />
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 mt-2">
             {chargedExclVat >= ceiling.limit - 0.01
               ? 'At the ceiling. Further work on this account cannot be charged to the debtor.'
               : `${formatMoney(ceiling.limit - chargedExclVat)} of chargeable work left.`}
           </p>
         </div>
       )}
-      <div className="space-y-1.5">
-        <Field label="Commission" value={commission} />
-        {/*
-          THE STATUS IS WHERE WORK IS STOPPED, not the action row.
 
-          The row is already nine buttons and the firm has said so. More to the point, a freeze
-          IS the status — changing it anywhere else would be a control that acts on a field
-          somewhere else on the page, which is how people end up unsure whether it worked.
-        */}
-        <Field
-          label="Status"
-          value={[account.status, account.subStatus].filter(Boolean).join(' · ')}
+      <PositionSection title="Account details">
+        <PositionRow label="Commission" value={commissionValue}
+          note={commissionNote ? commissionNote.charAt(0).toUpperCase() + commissionNote.slice(1) : undefined} />
+        {/* THE STATUS IS WHERE WORK IS STOPPED -- the Stop work tile above acts on it, not the action row. */}
+        <PositionRow label="Status" value={[account.status, account.subStatus].filter(Boolean).join(' · ')}
           note={account.frozenBy || account.frozenReason
             ? [frozenByLabel(account.frozenBy), account.frozenReason].filter(Boolean).join(' — ')
-            : undefined}
-          action={onFreeze
-            ? { label: account.frozenBy || /^frozen/i.test(account.status) ? 'Restart' : 'Stop work',
-                onClick: onFreeze }
-            : undefined}
-        />
-        {/*
-          HOW IT ENDED, OR THE WAY TO END IT. One field rather than a button that appears and
-          disappears: an account that is finished has to SAY so wherever somebody looks at it, and
-          "Closed as written off — Uncontactable" is the answer to the question they came with.
-        */}
-        {/*
-          WHICH BOOK IT IS IN, which is the first thing anybody wants off this panel and the one
-          thing the screen could not say. Read off the database's own generated column, never
-          computed here: a screen that worked it out again would be the second source of truth the
-          firm said not to build.
-        */}
-        <Field
-          label="Book"
-          value={bookLabel(account.book)}
+            : undefined} />
+        {/* WHICH BOOK, off the database's own generated column, never computed here. */}
+        <PositionRow label="Book" value={bookLabel(account.book)}
           note={account.book === 'on_hold'
             ? [holdLabel(account.holdReason), account.holdNote,
                account.holdReviewOn ? `look again ${formatDate(account.holdReviewOn)}` : null]
               .filter(Boolean).join(' \u2014 ')
-            : undefined}
-          action={account.book === 'active'
-            ? (onHold ? { label: 'Put on hold', onClick: onHold } : undefined)
-            : (onRelease
-              ? { label: account.book === 'closed' ? 'Re-open' : 'Back to active', onClick: onRelease }
-              : undefined)}
-        />
-        <Field
-          label="Ending"
-          value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
+            : undefined} />
+        {/* HOW IT ENDED: an account that is finished has to SAY so wherever somebody looks at it. */}
+        <PositionRow label="Ending" value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
           note={account.endedAs
             ? [account.endedReason, account.endedOn ? formatDate(account.endedOn) : null]
               .filter(Boolean).join(' \u2014 ')
-            : undefined}
-          action={!account.endedAs && onEnd
-            ? { label: 'Close it', onClick: onEnd }
-            : undefined}
-        />
-        <Field label="Bucket" value={account.bucket} />
-        {/*
-          HANDED OVER, and it belongs above the other dates because it is the one they are all
-          measured from — prescription runs from it, and how long an account has sat on the desk
-          is judged against it.
+            : undefined} />
+        <PositionRow label="Bucket" value={account.bucket} />
+      </PositionSection>
 
-          It was only in the hero band, which is the first thing off the top of the screen: the
-          moment somebody scrolls to the figures they are working from, the date the clock
-          started is gone. Shown with its age because that is the question actually being asked
-          — "how long have we had this one" — and nobody counts months off a date in their head
-          while a debtor is on the phone.
-        */}
-        {/* BOTH DATES, AND NAMED APART (prompt 11): interest runs from the handover, never from the
-            default, which is the client's record of when the debt fell due. */}
-        <Field label="Date of default" value={account.defaultDate ? formatDate(account.defaultDate) : null}
+      {/* BOTH DATES, AND NAMED APART (prompt 11): interest runs from the handover, never from the
+          default. Handed over carries its age, because "how long have we had this one" is the question. */}
+      <PositionSection title="Key dates">
+        <PositionRow label="Date of default" value={account.defaultDate ? formatDate(account.defaultDate) : null}
           note={account.defaultDate ? 'A record — nothing accrues from it' : undefined} />
-        <Field label="Handed over" value={handedOver} />
-        <Field label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
-        <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
-        <Field label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
-        <Field label="Last contact by" value={account.lastContactMethod} />
-        <Field label="Client liaison" value={clientLiaisonName} />
-        <Field label="Written off" value={account.writeOffReason} />
-      </div>
+        <PositionRow label="Handed over" value={account.handoverDate ? formatDate(account.handoverDate) : null}
+          chip={age ? age.charAt(0).toUpperCase() + age.slice(1) : undefined} />
+        <PositionRow label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
+        <PositionRow label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />
+        <PositionRow label="Last action" value={account.lastActionAt ? formatDate(account.lastActionAt) : null} />
+      </PositionSection>
+
+      <PositionSection title="Contact & admin">
+        <PositionRow label="Last contact by" value={account.lastContactMethod} />
+        <PositionRow label="Client liaison" value={clientLiaisonName} />
+        <PositionRow label="Written off" value={account.writeOffReason} />
+      </PositionSection>
+
+      {closeOn && (
+        <div className="mt-2 border-t border-slate-200 pt-3">
+          <button type="button" onClick={closeOn} aria-label="Close account" data-testid="position-close"
+            className="flex w-full items-start gap-3 rounded-lg px-1 py-1.5 text-left hover:bg-negative/5">
+            <Archive size={22} className="mt-0.5 shrink-0 text-negative" />
+            <span>
+              <span className="block text-sm font-bold text-negative">Close account</span>
+              <span className="block text-xs text-slate-500">Paid up, written off or withdrawn</span>
+            </span>
+          </button>
+        </div>
+      )}
     </Card>
+  )
+}
+
+/** A heading with a hairline running to the edge, as the mockup draws ACCOUNT DETAILS. */
+function PositionSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mb-3">
+      <div className="flex items-center gap-3 mb-1">
+        <h4 className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{title}</h4>
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+      <dl className="divide-y divide-slate-100">{children}</dl>
+    </section>
+  )
+}
+
+/** One fact: label left, value right, a note under it, and an optional chip ("This month"). */
+function PositionRow({ label, value, note, chip }: { label: string; value?: string | null; note?: string; chip?: string }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-3 py-2 text-sm">
+      <dt className="text-slate-500 shrink-0">{label}</dt>
+      <dd className="ml-auto min-w-0 text-right text-slate-900 break-words">
+        <span className="inline-flex items-center gap-2">
+          {value || '\u2014'}
+          {chip && <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">{chip}</span>}
+        </span>
+        {note && <span className="block text-xs text-slate-400">{note}</span>}
+      </dd>
+    </div>
   )
 }
 

@@ -181,8 +181,11 @@ if (lookups) {
  * trip in series -- which is exactly what this section of the file exists to prevent, and the
  * only way the assertion above can be satisfied while the send is still slow.
  */
+/* BEFORE THE SEND. S15 writes the Sent copy onto the Sent list AFTER the message has gone -- that is
+   not a lookup the person waits on before it leaves, and it is the one awaited write allowed. */
+const beforeSend = send.slice(0, send.indexOf('sendAsUser(admin'))
 check('no lookup is awaited on its own line',
-  (send.match(/await\s+admin\s*\n?\s*\.from\(|await admin\.from\(/g) ?? []).length, 0)
+  beforeSend.length > 0 ? (beforeSend.match(/await\s+admin\s*\n?\s*\.from\(|await admin\.from\(/g) ?? []).length : -1, 0)
 
 /*
  * THE SENT FOLDER IS OPENED WHILE THE MESSAGE IS GOING OUT. Connecting, negotiating TLS, logging

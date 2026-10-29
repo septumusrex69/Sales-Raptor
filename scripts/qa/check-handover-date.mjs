@@ -52,8 +52,9 @@ check('...and so is one in the future', problems({ defaultDate: '2026-12-01' }).
 /* ---------------- what the account shows ---------------- */
 
 const page = code('src/pages/accounts/AccountDetail.tsx')
-ok('the account page shows the date of default', /<Field label="Date of default"/.test(page))
-ok('...beside "Handed over"', /<Field label="Handed over" value=\{handedOver\}/.test(page))
+/* S15: the Position card draws its facts as PositionRow, in Stephan's "Key dates" section. */
+ok('the account page shows the date of default', /<PositionRow label="Date of default"/.test(page))
+ok('...beside "Handed over"', /<PositionRow label="Handed over" value=\{account\.handoverDate \? formatDate\(account\.handoverDate\) : null\}/.test(page))
 ok('...and hands it to the timeline', /defaultDate: account\.defaultDate,/.test(page))
 const timeline = code('src/lib/accountTimeline.ts')
 ok('the timeline says interest runs from the handover', /Handed over on \$\{displayDay\(opening\.handoverDate\)\}; interest runs from that day\./.test(timeline))

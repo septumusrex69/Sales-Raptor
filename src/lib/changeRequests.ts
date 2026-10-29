@@ -1,4 +1,5 @@
 import type { User } from '../types.js'
+import { can } from './capabilities.js'
 
 /**
  * "REQUEST A CHANGE" FROM INSIDE RAPTOR (S12, 26 Oct).
@@ -293,9 +294,19 @@ export function isOpen(s: RequestStatus): boolean {
   return s === 'new' || s === 'accepted' || s === 'building'
 }
 
-/** The firm decides what gets built: the role, as the database's policy writes it. */
+/** The firm runs the requests: the role, as the database's policy writes it -- assigning, priority,
+ *  questions, notes. Deciding WHETHER something is built is narrower: see mayApproveBuild. */
 export function mayDecide(user: Pick<User, 'role'> | null | undefined): boolean {
   return user?.role === 'Administrator'
+}
+
+/**
+ * WHO DECIDES WHAT GETS BUILT: the Big Boss, and nobody else (Stephan, S15: "I am the only person that
+ * can approve a suggestion for building Raptor"). Approve, decline, reopen a declined one, ask Claude
+ * to build. The browser's copy of change_request_boss_decides, for drawing the buttons.
+ */
+export function mayApproveBuild(user: Parameters<typeof can>[0]): boolean {
+  return can(user, 'raptor.boss')
 }
 
 /** The person who sent it may take it back while nobody has looked at it. */

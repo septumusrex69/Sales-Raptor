@@ -391,47 +391,37 @@ function DepartmentCard({ id, label, blurb, people, ours, headline }: {
   ours: boolean
   headline: { value: string; label: string } | null
 }) {
-  const photo = DEPARTMENT_PHOTO[id]
   /*
-   * A PHOTOGRAPH A DEPARTMENT (the firm, 18 Oct, sending the four pictures and the mock-up: "do
-   * this"). The desk for administration, the summit for sales, the open sea for communications, the
-   * headset for the call centre. The words sit on a dark wash from the left so they read on any part
-   * of the picture, in light and dark skins alike. Yours wears the gold edge.
+   * PLAIN CARDS, NO PHOTOGRAPHS (S15). The firm sent four pictures on 18 Oct and asked for them; Stephan,
+   * looking at the row under the hero: "this is too much. remove the pictures." The company dashboard keeps
+   * exactly one photograph -- the hero's -- which is what "only one very special page" meant in the first
+   * place. Yours still wears the gold edge and the gold button.
    */
   return (
     <div data-testid={`department-${id}`}
-      className={clsx('relative isolate overflow-hidden rounded-2xl bg-navy-950 text-white min-h-[150px]',
-        ours ? 'ring-2 ring-gold-400' : 'ring-1 ring-black/5')}>
-      {photo && <img src={photo} alt="" loading="lazy" className="absolute inset-0 -z-10 h-full w-full object-cover" />}
-      <div className="absolute inset-0 -z-10 bg-gradient-to-r from-navy-950/90 via-navy-950/65 to-navy-950/10" />
-      <div className="flex h-full flex-col gap-1.5 p-4">
+      className={clsx('rounded-2xl bg-white border p-4 min-h-[150px]',
+        ours ? 'border-gold-400 ring-1 ring-gold-400' : 'border-slate-200')}>
+      <div className="flex h-full flex-col gap-1.5">
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="text-base font-bold leading-tight">{label}</h3>
-          <span className="shrink-0 text-xs tabular-nums text-white/75">
+          <h3 className="text-base font-bold leading-tight text-navy-950">{label}</h3>
+          <span className="shrink-0 text-xs tabular-nums text-slate-500">
             {people === 1 ? '1 person' : `${people} people`}
           </span>
         </div>
-        <p className="max-w-[17rem] text-[12.5px] leading-snug text-white/85">{blurb}</p>
+        <p className="max-w-[17rem] text-[12.5px] leading-snug text-slate-600">{blurb}</p>
         {headline && (
-          <p className="text-xs text-white/80" data-testid={`headline-${id}`}>
-            <span className="font-bold tabular-nums text-gold-300">{headline.value}</span> {headline.label}
+          <p className="text-xs text-slate-600" data-testid={`headline-${id}`}>
+            <span className="font-bold tabular-nums text-navy-950">{headline.value}</span> {headline.label}
           </p>
         )}
         <Link to={dashboardPathFor(id)}
-          className={clsx('mt-auto inline-flex w-fit items-center gap-1.5 rounded-lg border px-4 py-1.5 text-xs font-semibold backdrop-blur-sm',
-            ours ? 'border-gold-400 bg-gold-400 text-navy-950 hover:bg-gold-300' : 'border-white/40 bg-navy-950/40 hover:bg-navy-950/70')}>
+          className={clsx('mt-auto inline-flex w-fit items-center gap-1.5 rounded-lg border px-4 py-1.5 text-xs font-semibold',
+            ours ? 'border-gold-400 bg-gold-400 text-navy-950 hover:bg-gold-300' : 'border-slate-300 text-slate-700 hover:bg-slate-50')}>
           {ours ? 'Yours' : 'Open'} <ArrowRight size={13} />
         </Link>
       </div>
     </div>
   )
-}
-
-const DEPARTMENT_PHOTO: Partial<Record<Department, string>> = {
-  'Administration': '/brand/departments/administration.webp',
-  'Sales': '/brand/departments/sales.webp',
-  'Communications': '/brand/departments/communications.webp',
-  'Call centre': '/brand/departments/call-centre.webp',
 }
 
 

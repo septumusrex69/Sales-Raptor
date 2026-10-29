@@ -50,7 +50,7 @@ async function openWithdraw(page) {
     try { await page.goto(`http://localhost:${PORT}/accounts/${ACCOUNT.id}`, { timeout: 2000 }); break }
     catch { await new Promise((r) => setTimeout(r, 500)) }
   }
-  await page.getByRole('button', { name: 'Close it' }).first().click({ timeout: 20000 })
+  await page.getByRole('button', { name: 'Close account' }).first().click({ timeout: 20000 })
     .catch(async (e) => { await page.screenshot({ path: `${OUT}/withdraw-payments-fail.png`, fullPage: true }); throw e })
   await page.getByRole('button', { name: /^Withdrawn/ }).click()
   await page.getByTestId('withdraw-payments').waitFor({ timeout: 10000 })

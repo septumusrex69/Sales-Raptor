@@ -275,10 +275,12 @@ check('no other file reads the machine\'s clock', offenders, [])
 /* The allowed files' remaining reads are the real-world ones, counted so a new one is looked at.
    51 since 22 Oct: AccountDetail's visit start, compared with a diary entry's created_at -- both
    wall time, so a jumped staging clock must not make every booking look older than the visit.
-   52 since 23 Oct: staleChunk.ts's reload guard. 53 since 27 Oct (S14): the bell's "Today 07:39". */
+   52 since 23 Oct: staleChunk.ts's reload guard. 53 since 27 Oct (S14): the bell's "Today 07:39".
+   54 since 28 Oct (S15): the mail page's "Checked ... ago" -- a sync is stamped on the real clock, so on
+   staging it read "14 days ago" a minute after a check. */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 53)
+check('...and the allowed files keep exactly their real-world reads', realReads, 54)
 
 /* ---------- 7. the arithmetic ---------- */
 

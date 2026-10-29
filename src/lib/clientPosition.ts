@@ -248,6 +248,16 @@ export const CLIENT_POSITION_ORDER: ClientPosition[] = [
   'tracing', 'disputed', 'legal', 'under_administration', 'frozen', 'closed',
 ]
 
+/**
+ * One colour a rung, in the order the firm reports them, so a rung is the same colour on every client --
+ * and, since S15, on both sides of the glass: the client page's rings in Raptor and the client's own
+ * dashboard in the portal read from here, so "Paying" is never green on one and blue on the other.
+ */
+export const CLIENT_POSITION_COLOUR: Record<ClientPosition, string> = Object.fromEntries(CLIENT_POSITION_ORDER.map((p, i) => [p, [
+  '#047857', '#10b981', '#f59e0b', '#b91c1c', '#9ca3af', '#0ea5e9', '#1e3a5f',
+  '#8b5cf6', '#e11d48', '#334155', '#a16207', '#64748b', '#cbd5e1',
+][i]])) as Record<ClientPosition, string>
+
 export interface PositionInput {
   /** debtor_accounts.status, as inherited. 'Active: Activated', 'Frozen', 'Written-off', ... */
   status?: string | null

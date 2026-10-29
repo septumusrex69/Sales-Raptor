@@ -243,10 +243,10 @@ ok('...and leaves the run', /set state = 'left'/.test(stopFn))
  * next notice wrong, and its event list is held against the database's own by check-workflow-send
  * in BOTH directions -- adding a fourth would have broken that pairing on correct code.
  */
-const settleFn = sql.slice(sql.lastIndexOf('create or replace function public.settle_account(')).slice(0, 3600)
+const settleFn = sql.slice(sql.lastIndexOf('create or replace function public.settle_account(')).slice(0, 4400)
 ok('settling stops every sequence', /perform public\.stop_workflows_on_close/.test(settleFn))
 no('...without joining the debtor’s three exits', /workflow_exit_account/.test(settleFn))
-const withdrawFn = sql.slice(sql.lastIndexOf('create or replace function public.withdraw_account(')).slice(0, 4200)
+const withdrawFn = sql.slice(sql.lastIndexOf('create or replace function public.withdraw_account(')).slice(0, 5600)
 ok('withdrawing stops every sequence too', /perform public\.stop_workflows_on_close/.test(withdrawFn))
 /* THE FIRM ASKED FOR THIS BY NAME: "Withdrawal must still raise the credit bureau removal task." */
 ok('withdrawing raises the bureau removal task',

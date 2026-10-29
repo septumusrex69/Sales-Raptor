@@ -1,3 +1,4 @@
+import { dropDraft, listDrafts, type MailDraft } from '../../lib/mailDrafts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -28,7 +29,7 @@ import { agoLabel, relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
-  bumpUnread, companyFromDomain, forwardBody, forwardQuoteHtml, forwardSubject, recipientLine,
+  bumpUnread, companyFromDomain, forwardQuoteHtml, forwardSubject, forwardTextHtml, recipientLine,
   recipientSummary,
   replyAllTo, splitPersonName,
 } from '../../lib/emailRules'
@@ -338,8 +339,15 @@ export function MailPage() {
     mail: MailItem; body: string; complete: boolean
     /** The original as markup, already cleaned, where it was written in HTML. */
     html: string | null
+    /** Still being fetched from the mailbox: the box is open and says so (S15). */
+    loading?: boolean
   } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  /* UNSENT EMAIL, KEPT IN THIS BROWSER (S15, mailDrafts.ts): the list, and the one being carried on with. */
+  const [showDrafts, setShowDrafts] = useState(false)
+  const [drafts, setDrafts] = useState<MailDraft[]>(() => listDrafts())
+  const [draftOpen, setDraftOpen] = useState<MailDraft | null>(null)
+  const refreshDrafts = () => setDrafts(listDrafts())
   const [open, setOpen] = useState<string | null>(null)
   /*
    * ONE MESSAGE, ASKED FOR BY THE PAGE THAT SENT YOU HERE.
@@ -1074,6 +1082,10 @@ export function MailPage() {
   async function startForward(mail: MailItem) {
     const token = session?.access_token
     if (!token) { setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null }); return }
+    /* THE BOX OPENS NOW (S15). Stephan: forwarding "takes very long for it to load" -- the whole message
+       was fetched from the mailbox before anything appeared. The box opens at once to be addressed and
+       written in, and the original fills in underneath when it arrives. */
+    setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null, loading: true })
     try {
       const full = await fetchMailBody(mail.id, token)
       /*
@@ -1092,11 +1104,12 @@ export function MailPage() {
       const safe = full.html?.trim()
         ? sanitizeEmailFragment(full.html, { images: full.images, showPictures: true }).html
         : null
-      setForwarding({
+      /* Only onto the forward that asked: closed, or another one opened, it is not this one's to fill. */
+      setForwarding((f) => (f?.mail.id === mail.id ? {
         mail, body: full.text || mail.snippet || '', complete: !!full.text, html: safe,
-      })
+      } : f))
     } catch {
-      setForwarding({ mail, body: mail.snippet ?? '', complete: false, html: null })
+      setForwarding((f) => (f?.mail.id === mail.id ? { mail, body: mail.snippet ?? '', complete: false, html: null } : f))
     }
   }
 
@@ -1235,7 +1248,11 @@ export function MailPage() {
             */}
             {checkedAt && (
               <span className="hidden sm:inline shrink-0 text-xs text-slate-400">
-                Checked {agoLabel(checkedAt)}
+                {/* ON THE REAL CLOCK (S15). Stephan: "my thing says checked 14 days ago". The sync is stamped
+                    on the real clock and agoLabel measures from the firm's (staging) day by default, so on
+                    staging set to 11 Nov a check made a minute ago read as fourteen days -- the bell's old
+                    fault (notificationGroups). Mail arrives in real time; how long ago it was read is too. */}
+                Checked {agoLabel(checkedAt, new Date())}
               </span>
             )}
             <button onClick={() => void syncMine()} disabled={syncing}
@@ -1301,6 +1318,14 @@ export function MailPage() {
                 })()}
               </button>
             ))}
+            {/* DRAFTS (S15): unsent email kept in this browser -- see mailDrafts.ts. */}
+            <button type="button" onClick={() => { refreshDrafts(); setShowDrafts((v) => !v) }} aria-pressed={showDrafts}
+              data-testid="mail-drafts-tab"
+              className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
+                showDrafts ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              Drafts
+              {drafts.length > 0 && <span className="min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 inline-flex items-center justify-center">{drafts.length}</span>}
+            </button>
           </div>
 
           {/*
@@ -1406,6 +1431,27 @@ export function MailPage() {
         )}
 
         {status && <p className="px-5 py-2 text-[13px] text-[var(--c-green)] border-b border-slate-100">{status}</p>}
+        {showDrafts && (
+          <div className="border-b border-slate-100 bg-slate-50/60" data-testid="mail-drafts">
+            <p className="px-5 pt-3 text-xs text-slate-500">Email you started and did not send, kept in this browser. Sending one removes it.</p>
+            {drafts.length === 0 ? <p className="px-5 py-3 text-sm text-slate-500">No drafts.</p> : (
+              <ul className="divide-y divide-slate-100">
+                {drafts.map((d) => (
+                  <li key={d.key} className="px-5 py-2.5 flex items-center gap-3" data-testid="mail-draft">
+                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setDraftOpen(d)}>
+                      <span className="block text-sm font-medium text-slate-800 truncate">{d.subject.trim() || '(no subject)'}</span>
+                      <span className="block text-xs text-slate-500 truncate">
+                        {d.title}{d.to ? ` · to ${d.to}` : ''} · {new Date(d.savedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        {d.body.trim() ? ` · ${d.body.trim().slice(0, 80)}` : ''}
+                      </span>
+                    </button>
+                    <button type="button" onClick={() => { dropDraft(d.key); refreshDrafts() }} className="text-xs text-slate-500 hover:text-red-600">Discard</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {error && <p className="px-5 py-2 text-[13px] text-negative-700 border-b border-slate-100">{error}</p>}
 
         {/*
@@ -1822,13 +1868,34 @@ export function MailPage() {
           contextNote={'This goes out from your mailbox and lands on no record. To put a message on '
             + 'a debtor\u2019s file, send it from the account instead — that is what charges item 1(a) '
             + 'and files the copy.'}
-          onClose={() => setComposing(false)}
+          onClose={() => { setComposing(false); refreshDrafts() }}
           onSent={() => { setComposing(false); setStatus('Sent.'); void load(page) }}
+        />
+      )}
+
+      {draftOpen && (
+        <ComposeEmailModal
+          draftKey={draftOpen.key}
+          title={draftOpen.title}
+          to={draftOpen.to}
+          initialCc={draftOpen.cc || undefined}
+          initialSubject={draftOpen.subject}
+          initialBody={draftOpen.body}
+          quotedHtml={draftOpen.quotedHtml ?? undefined}
+          inReplyTo={draftOpen.inReplyTo ?? undefined}
+          contextNote="Carrying on with a draft kept in this browser. It goes out from your mailbox."
+          onClose={() => { setDraftOpen(null); refreshDrafts() }}
+          onSent={(_s, _b, _id, _from, filedInSent) => {
+            setDraftOpen(null); refreshDrafts()
+            setStatus(filedInSent === false ? 'Sent -- but your mailbox would not take a copy for Sent Items.' : 'Sent.')
+            void load(page)
+          }}
         />
       )}
 
       {forwarding && (
         <ComposeEmailModal
+          forwardOf={forwarding.mail.id}
           title="Forward"
           initialSubject={forwardSubject(forwarding.mail.subject)}
           forwardAttachments={{ mailId: forwarding.mail.id, names: forwarding.mail.attachmentNames }}
@@ -1837,9 +1904,13 @@ export function MailPage() {
             tables and all -- and the box above starts empty for a covering note. Without it,
             nothing changes: the plain text is quoted into the box the way it always was.
           */
-          {...(forwarding.html
-            ? { quotedHtml: forwardQuoteHtml(forwarding.mail, forwarding.html) }
-            : { initialBody: forwardBody(forwarding.mail, forwarding.body, forwarding.complete) })}
+          /*
+            THE ORIGINAL ALWAYS RIDES UNDERNEATH, IN AN EDITABLE BOX (S15): the markup where there is any,
+            the text as escaped lines where there is not -- and the box above is the covering note.
+          */
+          quotedHtml={forwarding.loading ? undefined : forwardQuoteHtml(forwarding.mail, forwarding.html
+            ?? forwardTextHtml(forwarding.body, forwarding.complete))}
+          quotedLoading={!!forwarding.loading}
           /*
             NOT inReplyTo. A forward starts a new conversation with somebody who was not in the
             old one; threading it onto the original would file the recipient's reply against the
@@ -1847,8 +1918,14 @@ export function MailPage() {
           */
           contextNote={'Forwarded from your mailbox. It lands on no record and nothing is charged '
             + '\u2014 a forward is not correspondence with the debtor.'}
-          onClose={() => setForwarding(null)}
-          onSent={() => { setForwarding(null); setStatus('Forwarded.'); void load(page) }}
+          onClose={() => { setForwarding(null); refreshDrafts() }}
+          onSent={(_s, _b, _id, _from, filedInSent) => {
+            setForwarding(null)
+            setStatus(filedInSent === false
+              ? 'Forwarded -- but your mailbox would not take a copy for Sent Items, so it will not show there.'
+              : 'Forwarded.')
+            void load(page)
+          }}
         />
       )}
 

@@ -6,7 +6,7 @@
  * in the stylesheet — no component changes, which is the whole point of the arrangement.
  */
 
-export type ThemeId = 'original' | 'raptor' | 'desert' | 'glass-mountain' | 'ocean'
+export type ThemeId = 'original' | 'raptor' | 'desert' | 'glass-mountain' | 'ocean' | 'africa' | 'forest'
 
 export interface ThemeDefinition {
   id: ThemeId
@@ -114,6 +114,29 @@ export const THEMES: ThemeDefinition[] = [
      * The break falls after "changes", so the champagne half is the word the line turns on.
      */
     heroLine: { first: 'Depth changes', second: 'perspective.' },
+  },
+  {
+    id: 'africa',
+    name: 'Africa',
+    description: 'Baobabs under a storm sky, and the sun going down over the bushveld.',
+    /* The same product name, for the desert's reason: a skin is the same brand in another light. */
+    productName: 'Raptor',
+    lockupLight: '/brand/raptor-lockup-light.png',
+    /* Read off africa.css's own --color-navy-950, --color-surface and --c-gold. */
+    swatch: { ground: '#19110b', surface: '#f7f5f3', accent: '#dda66f' },
+    /* Stephan, with the photographs (S15): "Africa is our roots." The break puts "our roots" in champagne. */
+    heroLine: { first: 'Africa is', second: 'our roots.' },
+  },
+  {
+    id: 'forest',
+    name: 'Forest',
+    description: 'A misty pine valley at first light, seen from the moss.',
+    productName: 'Raptor',
+    lockupLight: '/brand/raptor-lockup-light.png',
+    /* Read off forest.css's own --color-navy-950, --color-surface and --c-gold. */
+    swatch: { ground: '#091b11', surface: '#f3f7f5', accent: '#d0bc7c' },
+    /* Stephan, with the photographs (S15): "The closer you look, the more you see." */
+    heroLine: { first: 'The closer you look,', second: 'the more you see.' },
   },
 ]
 

@@ -33,7 +33,13 @@ export interface OutgoingEmail {
 }
 
 export type SendResult =
-  | { ok: true; messageId: string | null; from: string }
+  | {
+      ok: true; messageId: string | null; from: string
+      /** Where the Sent copy was filed, or null when it was not (S15) -- see the append below. */
+      sentCopy?: { folder: string; uid: number | null } | null
+      /** The message as it went, signature and all, for a caller that records it. */
+      html?: string
+    }
   | { ok: false; error: string }
 
 export async function sendAsUser(
@@ -161,18 +167,27 @@ export async function sendAsUser(
 
   /* Best-effort: file a copy in the connected mailbox's Sent folder so it shows up in the
      person's own mail client too, not just the CRM timeline. A failure here does not undo the
-     send above -- the message already went out -- so it is never surfaced as a send error. */
+     send above -- the message already went out -- so it is never a send error.
+     BUT IT IS SAID (S15). Stephan forwarded a message, was told "Forwarded", and found nothing in
+     Sent Items even after a refresh: this was a bare catch, so a copy that was never filed looked
+     exactly like one that was. Now it is logged with its reason, and the caller is told, so the
+     screen can say "sent, but not in your Sent Items" instead of letting somebody send it twice. */
+  let sentCopy: { folder: string; uid: number | null } | null = null
   try {
     const raw = await new MailComposer(envelope).compile().build()
     const appender = await appenderSoon
-    if (appender) {
-      try { await appender.append(raw) } finally { await appender.close() }
+    if (!appender) console.error(`[sendAsUser] ${conn.email}: the mailbox would not open, so no Sent copy was filed`)
+    else {
+      try {
+        sentCopy = await appender.append(raw)
+        if (!sentCopy) console.error(`[sendAsUser] ${conn.email}: no Sent folder found, so no Sent copy was filed`)
+      } finally { await appender.close() }
     }
-  } catch {
-    // ignore -- the send itself already succeeded
+  } catch (err) {
+    console.error(`[sendAsUser] ${conn.email}: the Sent copy was not filed: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   /* `from` is returned so the caller can record WHICH mailbox the message left by. That decides
      where the reply will land, which is the thing that matters when an agent leaves the firm. */
-  return { ok: true, messageId: sentMessageId, from: conn.email as string }
+  return { ok: true, messageId: sentMessageId, from: conn.email as string, sentCopy, html: fullHtml }
 }

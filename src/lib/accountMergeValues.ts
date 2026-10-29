@@ -213,9 +213,14 @@ export function accountMergeValues(input: {
       arrangement: input.arrangement ?? null,
       paymentReceived: input.paymentReceived ?? null,
       dispute: input.dispute ?? null,
+      /* AND A PAID ONE (S15): the settlement letter confirms the very settlement the client accepted and
+         the debtor paid -- after close_as_settled its state is 'paid', and only that state may quote it
+         beside the approved, unlapsed one. A proposal, a decline or a lapse still answers nothing. */
       settlement: isQuotable(input.settlement)
         ? { amount: input.settlement.amount, expiresOn: input.settlement.expiresOn, saving: input.settlement.saving }
-        : null,
+        : input.settlement?.state === 'paid' && input.settlement.expiresOn
+          ? { amount: input.settlement.amount, expiresOn: input.settlement.expiresOn, saving: input.settlement.saving }
+          : null,
       breakdown: input.breakdown ?? null,
       interestRateAnnual: input.interestRateAnnual ?? null,
       interestFrom: input.interestFrom ?? null,

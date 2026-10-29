@@ -497,6 +497,8 @@ export async function runOneStep(
     },
     values,
     dueOn: step.due_on,
+    /* NO FEE ON A PAID ACCOUNT (S15) -- see planSend.paidUp. */
+    paidUp: account.ended_as === 'paid_up' || account.ended_as === 'settled',
     /* Lifts the wait-for-a-person refusal and nothing else. Every other guard still applies to
        whoever pressed the button -- a release cannot supply a missing listing reference. */
     released: Boolean(releasedBy),

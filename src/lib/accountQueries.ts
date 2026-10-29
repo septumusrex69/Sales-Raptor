@@ -299,10 +299,10 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
 export async function fetchAllQueries(closedLimit = 40): Promise<QueueRow[]> {
   const [open, closed] = await Promise.all([
     supabase.from('account_queries')
-      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to)')
+      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to), handovers(company_id)')
       .eq('status', 'open').order('raised_at', { ascending: true }),
     supabase.from('account_queries')
-      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to)')
+      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to), handovers(company_id)')
       .eq('status', 'closed').order('closed_at', { ascending: false }).limit(closedLimit),
   ])
   for (const r of [open, closed]) if (r.error) throw new Error(r.error.message)
@@ -316,7 +316,9 @@ function toQueueRow(r: any): QueueRow {
     ...toQuery(r),
     accountNumber: a.account_number ?? null,
     debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
-    companyId: a.company_id ?? null,
+    /* A SHEET TICKET'S CLIENT TOO (S15), off its batch: the board names and filters every ticket by client,
+       and a handover-sheet query is the most client-shaped ticket there is. */
+    companyId: a.company_id ?? r.handovers?.company_id ?? null,
     accountOwnerId: a.assigned_to ?? null,
   }
 }
@@ -408,7 +410,20 @@ export async function fetchQueriesForClient(companyId: string): Promise<QueueRow
 export async function fetchQuery(id: string): Promise<{
   query: AccountQuery
   /** The account it is about, where it is about one. */
-  account: { id: string; accountNumber: string | null; clientReference: string | null; debtorName: string; companyId: string } | null
+  account: {
+    id: string; accountNumber: string | null; clientReference: string | null; debtorName: string; companyId: string
+    /** Raptor's own reference, the one the header links to the account by (S15). */
+    caseNumber: string | null
+    /** The agent holding the account: who a ticket is referred to (S15, referTargets). */
+    assignedTo: string | null
+  } | null
+  /**
+   * THE CLIENT'S LIAISON -- the main client's account owner, since the portal and the client page treat a
+   * client and its sub-accounts as one relationship. Where an agent's feedback goes back to (S15).
+   */
+  liaisonId: string | null
+  /** The main client: the company portal logins hang off (S15). */
+  mainClientId: string | null
   /** The batch it is about, where it is about a sheet. */
   batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null
   clientName: string | null
@@ -451,12 +466,15 @@ export async function fetchQuery(id: string): Promise<{
   const q = toQuery(data)
 
   let companyId: string | null = null
-  let acc: { id: string; accountNumber: string | null; clientReference: string | null; debtorName: string; companyId: string } | null = null
+  let acc: {
+    id: string; accountNumber: string | null; clientReference: string | null; debtorName: string; companyId: string
+    caseNumber: string | null; assignedTo: string | null
+  } | null = null
   let batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null = null
 
   if (q.accountId) {
     const { data: a } = await supabase.from('debtor_accounts')
-      .select('id, account_number, client_reference, debtor_first_name, debtor_surname, company_id')
+      .select('id, account_number, client_reference, debtor_first_name, debtor_surname, company_id, case_number, assigned_to')
       .eq('id', q.accountId).maybeSingle()
     if (a) {
       acc = {
@@ -465,6 +483,8 @@ export async function fetchQuery(id: string): Promise<{
         clientReference: (a.client_reference as string | null) ?? null,
         debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
         companyId: a.company_id as string,
+        caseNumber: (a.case_number as string | null) ?? null,
+        assignedTo: (a.assigned_to as string | null) ?? null,
       }
       companyId = acc.companyId
     }
@@ -485,9 +505,17 @@ export async function fetchQuery(id: string): Promise<{
   /* ONE ROUND TRIP FOR ALL THREE. It was already fetching the name; the address and the contact
      come off the same row, and a second query for them would be a second chance to be null. */
   const client = companyId
-    ? (await supabase.from('companies').select('name, email, contact_person')
+    ? (await supabase.from('companies').select('name, email, contact_person, account_owner_id, parent_company_id')
       .eq('id', companyId).maybeSingle()).data
     : null
+  /* THE LIAISON IS THE MAIN CLIENT'S, as may_close_account reads it: a sub-account's own owner first,
+     then its main client's. One more read only where the ticket is on a sub-account with no owner. */
+  const mainClientId = (client?.parent_company_id as string | null) ?? companyId
+  let liaisonId = (client?.account_owner_id as string | null) ?? null
+  if (!liaisonId && client?.parent_company_id) {
+    liaisonId = ((await supabase.from('companies').select('account_owner_id')
+      .eq('id', client.parent_company_id as string).maybeSingle()).data?.account_owner_id as string | null) ?? null
+  }
 
   /*
    * AND THE PEOPLE AT IT. A second query because they are a second table, and it is asked only
@@ -524,6 +552,8 @@ export async function fetchQuery(id: string): Promise<{
   return {
     query: q,
     account: acc,
+    liaisonId,
+    mainClientId,
     batch,
     clientName: (client?.name as string | null) ?? null,
     clientEmail: (client?.email as string | null) ?? null,

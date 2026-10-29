@@ -46,7 +46,7 @@ check('the server routes hold the same line', [
 ].join(), 'true,true,true')
 const apiSet = /export const FINANCE_CAPABILITIES = \['finance\.view', 'business\.view', 'business\.income', 'people\.pay',\s*'payment\.approve', 'payment\.reverse', 'payment\.move'\]/.test(read('api/_lib/auth.ts'))
 check('...with the same finance set', apiSet, true)
-check('the Users list names the Administrators with finance General Manager', /u\.role === 'Administrator' && hasFinanceAccess\(u\) && \([\s\S]{0,300}General Manager/.test(read('src/pages/settings/SettingsPage.tsx')), true)
+check('the Users list names the Administrators with finance General Manager (the Big Boss above them, S15)', /u\.role === 'Administrator' && hasFinanceAccess\(u\) && !can\(u, 'raptor\.boss'\) && \([\s\S]{0,300}General Manager/.test(read('src/pages/settings/SettingsPage.tsx')), true)
 
 if (failures.length) {
   console.log(`check-admin-finance: ${pass} passed, ${failures.length} failed`)

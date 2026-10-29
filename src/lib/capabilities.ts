@@ -94,6 +94,8 @@ export type Capability =
   /* ---- the library ---- */
   | 'library.view'
   | 'library.edit'
+  /* ---- Raptor itself ---- */
+  | 'raptor.boss'
 
 export interface CapabilityMeta {
   /** What it is called on the settings screen. The firm's words, not the code's. */
@@ -101,7 +103,7 @@ export interface CapabilityMeta {
   /** The one line under it that says what it lets somebody do, and what it costs if it is wrong. */
   blurb: string
   /** Which block it is drawn in. */
-  group: 'Money' | 'The book' | 'Clients and disputes' | 'The library'
+  group: 'Money' | 'The book' | 'Clients and disputes' | 'The library' | 'Raptor itself'
   /**
    * TRUE WHERE THE DATABASE ENFORCES IT AS WELL, and it matters on the screen: these are the ones
    * where taking somebody's tick away actually stops them, rather than only hiding the button.
@@ -381,6 +383,22 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     group: 'The library',
     inDatabase: true,
   },
+  /*
+   * BIG BOSS (S15, Raptor · Handover 14). Stephan: "I am the only person that can approve a suggestion
+   * for building Raptor", then "can we make another user? Big boss" -- asked, "above admin". A tick in
+   * no role, like business.income and people.pay, granted to him by migration big_boss (renamed from `boss` by big_boss_queue). The database
+   * holds both halves: change_request_boss_decides refuses approving, declining, reopening a declined
+   * request and asking Claude to build without it, and the profile guard refuses giving or taking it
+   * by anybody who is not a Big Boss already -- so a level any Administrator could give themselves is
+   * not what this is.
+   */
+  'raptor.boss': {
+    label: 'Big Boss',
+    blurb: 'Decides what gets built in Raptor: approves, declines and asks Claude to build. Only a '
+      + 'Big Boss can make somebody else one.',
+    group: 'Raptor itself',
+    inDatabase: true,
+  },
 }
 
 /** Every capability there is, in the order the screen draws them. */
@@ -392,7 +410,7 @@ export const CAPABILITY_ORDER = Object.keys(CAPABILITIES) as Capability[]
  * against it by check-capabilities -- because a tick outside all_capabilities is unknown to
  * has_capability and therefore ungrantable to anybody, silently.
  */
-export const NO_ROLE_CAPABILITIES: Capability[] = ['business.income', 'people.pay']
+export const NO_ROLE_CAPABILITIES: Capability[] = ['business.income', 'people.pay', 'raptor.boss']
 
 /**
  * WHAT EACH ROLE GETS BEFORE ANYBODY CHANGES ANYTHING -- Swordfish's "template", written out.
@@ -513,6 +531,9 @@ export function hasFinanceAccess(user: CapabilityHolder | null | undefined): boo
 /** May this person change this capability on that one? */
 export function mayChangeCapability(actor: (CapabilityHolder & { id?: string }) | null | undefined,
   target: { id?: string }, capability: Capability): boolean {
+  /* BIG BOSS (S15): only a Big Boss gives or takes it -- the profile guard raises for anybody else,
+     finance or not, so the box is greyed rather than offered and refused. */
+  if (capability === 'raptor.boss') return can(actor, 'raptor.boss')
   if (hasFinanceAccess(actor)) return true
   if (actor?.id && actor.id === target.id) return false
   return !FINANCE_CAPABILITIES.includes(capability)
