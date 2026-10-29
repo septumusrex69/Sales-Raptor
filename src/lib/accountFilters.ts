@@ -62,11 +62,23 @@ export const FILTER_PARAMS = [
   'review',
   'status', 'sub', 'bucket', 'who', 'team', 'from', 'to',
   'adrift', 'never', 'quiet', 'presc', 'duplum', 'waiting', 'min', 'drift',
+  /* The floor's "new accounts not yet worked" warning (Stephan, 29 Oct). See queryFromParams. */
+  'carried',
   /* The batch clears with the rest: somebody who came in from an approved handover and then
      pressed "Clear filters" is asking for the whole book, not for the batch again. */
   'handover',
 ] as const
 export type FilterParam = (typeof FILTER_PARAMS)[number]
+
+/**
+ * WHERE THE COLLECTIONS FLOOR'S "NEW ACCOUNTS NOT YET WORKED" WARNING SENDS A LEADER.
+ *
+ * THE WHOLE BOOK, not the Active one the list opens on: the warning counts every new account past
+ * its day whatever book it has since moved to, and a link that quietly narrowed to Active would
+ * show fewer rows than the number it was clicked from. Here, as a constant, so check-account-
+ * filters can read it back through queryFromParams.
+ */
+export const LATE_NEW_ACCOUNTS_PATH = '/accounts?book=whole&carried=1'
 
 /**
  * A date N days from `today`, as an ISO date.
@@ -98,6 +110,12 @@ const num = (v: string | null): number | undefined => {
 export interface QueryContext {
   /** Team id → the ids of its members. Supplied by the app, which already holds the people. */
   teamMembers?: (teamId: string) => string[]
+  /**
+   * The accounts behind the floor's "new accounts not yet worked" warning, for `?carried=1` --
+   * fetchLateNewAccountIds, read by the screen before it asks for the list. Absent reads as none
+   * (an empty list matches nothing), never as the whole book.
+   */
+  lateNewAccountIds?: () => string[]
 }
 
 export function queryFromParams(
@@ -177,6 +195,13 @@ export function queryFromParams(
 
   if (params.get('adrift') === '1') q.adrift = true
   if (params.get('never') === '1') q.neverWorked = true
+  /*
+   * NEW ACCOUNTS NOT YET WORKED -- where the collections floor's warning sends a team leader
+   * (Stephan, 29 Oct: "show a warning ... Click on them and it's filtered in the account section").
+   * The ids are worked out by the same function that counted them (newAccounts.ts lateAccountIds),
+   * so the number on the warning and the rows here are one set rather than two answers that agree.
+   */
+  if (params.get('carried') === '1') q.accountIds = ctx.lateNewAccountIds?.() ?? []
   if (params.get('duplum') === '1') q.inDuplum = true
   if (params.get('waiting') === '1') q.waitingOnClient = true
   if (params.get('drift') === '1') q.commissionDriftOnly = true
@@ -204,7 +229,7 @@ export function queryFromParams(
  */
 export function hasAccountFilters(q: AccountQuery): boolean {
   return !!(q.search?.trim() || q.status || q.statusGroup || q.subStatus || q.bucket
-    || q.assignedTo || q.assignedToAny
+    || q.assignedTo || q.assignedToAny || q.accountIds
     || q.handedOverFrom || q.handedOverTo || q.adrift || q.neverWorked || q.quietSince
     || q.prescribingBefore || q.inDuplum || q.waitingOnClient || q.minOutstanding
     || q.commissionDriftOnly)
@@ -275,6 +300,7 @@ export function filterChips(params: URLSearchParams, names: ChipNames = {}): Fil
 
   if (params.get('adrift') === '1') out.push({ param: 'adrift', label: 'No diary date' })
   if (params.get('never') === '1') out.push({ param: 'never', label: 'Never worked' })
+  if (params.get('carried') === '1') out.push({ param: 'carried', label: 'New accounts not yet worked' })
 
   const quiet = num(params.get('quiet'))
   if (quiet !== undefined && quiet > 0) {

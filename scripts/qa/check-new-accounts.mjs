@@ -18,7 +18,8 @@
 import { readFileSync } from 'node:fs'
 import { myDashboardPath } from '../../src/lib/departments.ts'
 import {
-  carriedLine, dayWeight, daysCarried, isCarried, lateForLeaders, splitCarried, stillInTime,
+  carriedLine, dayWeight, daysCarried, isCarried, isLateForLeader, lateAccountIds, lateForLeaders,
+  lateSummary, splitCarried, stillInTime,
 } from '../../src/lib/newAccounts.ts'
 import { DEFAULT_DIARY_CAPACITY } from '../../src/lib/diaryPriority.ts'
 import { canLeadCollections } from '../../src/lib/permissions.ts'
@@ -164,6 +165,37 @@ check('somebody whose only new account was worked is not on the list',
 check('unallocated work is not reported against a person',
   leaders.some((l) => l.ownerId === null), false)
 
+/* ------------------------------------------------------------------ one warning, one list */
+
+/*
+ * THE LEADER'S WARNING AND THE LIST IT OPENS ARE ONE SET (Stephan, 29 Oct: "show a warning and
+ * say, okay, you know, these accounts are not being worked. Click on them and it's filtered in
+ * the account section"). The count is lateSummary's; the list is lateAccountIds'; both ask
+ * isLateForLeader. Held here against the same floor as the per-person list above, so a rule that
+ * drifted in one of the three shows up as a disagreement rather than as a plausible number.
+ */
+const withIds = floor.map((e, i) => ({ ...e, accountId: `acc-${i}` }))
+const ids = lateAccountIds(withIds, '2026-09-25')
+check('the list behind the warning is the late accounts, by id', ids, ['acc-0', 'acc-1', 'acc-2', 'acc-3'])
+const summary = lateSummary(withIds, '2026-09-25')
+check('the warning counts exactly the accounts its link opens', summary?.accounts, ids.length)
+check('...which is what the per-person list adds up to',
+  summary?.accounts, leaders.reduce((t, l) => t + l.carried, 0))
+check('...across the people on that list', summary?.collectors, leaders.length)
+check('...and the oldest is the per-person list’s worst', summary?.worst, leaders[0]?.worst)
+check('an account nobody holds is not in the leader’s list either',
+  isLateForLeader({ ...entry('2026-09-14'), ownerId: null }, '2026-09-25'), false)
+/* The grace a shut office gives: dated to Saturday 26 September, not late on Monday the 28th. */
+check('nor one still inside the grace a closed office gives it',
+  lateAccountIds([{ ...entry('2026-09-26'), ownerId: 'rinda', accountId: 'sat' }], '2026-09-28'), [])
+check('one account with two late entries is counted once',
+  lateSummary([{ ...entry('2026-09-14'), ownerId: 'rinda', accountId: 'x' },
+    { ...entry('2026-09-15'), ownerId: 'rinda', accountId: 'x' }], '2026-09-25')?.accounts, 1)
+/* ABSENT, NOT EMPTY: nothing late is no warning at all. */
+check('nothing late is no warning at all', lateSummary([], '2026-09-25'), null)
+check('...nor when everything is still in time',
+  lateSummary([{ ...entry('2026-09-25'), ownerId: 'rinda', accountId: 'y' }], '2026-09-25'), null)
+
 /* ------------------------------------------------------------------ nothing here writes */
 
 /*
@@ -237,10 +269,40 @@ ok('...and it does not read the whole diary to count them',
  */
 const board = readFileSync('src/pages/CollectorDashboard.tsx', 'utf8')
 ok('the collections dashboard flags the collector\'s own carried accounts', /mineLate/.test(board))
-ok('...and lists the floor\'s for whoever leads it', /othersLate/.test(board))
+/*
+ * THE FLOOR'S AS ONE WARNING, not a list of names (Stephan, 29 Oct: "making a long ... list like
+ * that is stupid"). Comments stripped, so the paragraph saying why the list went cannot satisfy
+ * the absence.
+ */
+const boardCode = board.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\s*\}/g, '')
+ok('...and tells whoever leads it about the floor\'s, as one count',
+  /lateSummary\(carried, todayIso\(\)\)/.test(boardCode))
+ok('...only for whoever leads collections', /mayLeadHere && carried \? lateSummary/.test(boardCode))
+ok('...with a link to exactly those accounts', /to=\{LATE_NEW_ACCOUNTS_PATH\}/.test(boardCode))
+ok('...and no list of collectors any more',
+  !/New accounts not yet worked, by collector/.test(boardCode) && !/othersLate/.test(boardCode))
+/*
+ * THE LIST BEHIND THE LINK IS WORKED OUT THE SAME WAY, against the same day: the accounts page
+ * asks fetchLateNewAccountIds(todayIso()), which is fetchCarriedNewAccounts then lateAccountIds --
+ * the read the dashboard makes, then the function lateSummary counts with.
+ */
+const lateAt = diaryLib.indexOf('export async function fetchLateNewAccountIds')
+const lateFetch = lateAt === -1 ? '' : diaryLib.slice(lateAt, diaryLib.indexOf('\n}\n', lateAt))
+ok('the accounts behind the link are the same read', /fetchCarriedNewAccounts\(date\)/.test(lateFetch))
+ok('...through the same rule', /lateAccountIds\(/.test(lateFetch))
+ok('the dashboard reads it on the same day', /fetchCarriedNewAccounts\(todayIso\(\)\)/.test(board))
+const accountsList = readFileSync('src/pages/accounts/AccountsList.tsx', 'utf8')
+ok('...and so does the accounts list', /fetchLateNewAccountIds\(todayIso\(\)\)/.test(accountsList))
+ok('...which waits for the ids before asking for the list',
+  /if \(wantsLate && lateIds === null\) return/.test(accountsList))
 ok('...to a role that actually leads collections', /canLeadCollections/.test(board))
-ok('...and never shows a leader their own row twice',
-  /ownerId !== currentUser\?\.id/.test(board))
+/*
+ * THE LEADER'S OWN ACCOUNTS STAY IN THE FLOOR'S COUNT. The list used to drop their row so they
+ * were not named twice; a count names nobody, and one that left their accounts out would read
+ * fewer than the list its link opens -- the disagreement this whole arrangement exists to rule out.
+ */
+ok('...and the floor\'s count is not thinned of the leader\'s own before it is counted',
+  !/carried\.filter\(/.test(boardCode) && !/late\.filter\(\(l\) => l\.ownerId !== currentUser/.test(boardCode))
 
 const permissions = readFileSync('src/lib/permissions.ts', 'utf8')
 /*

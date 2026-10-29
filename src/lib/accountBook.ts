@@ -440,6 +440,19 @@ export interface AccountQuery {
   ending?: 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
   /** Today, in the firm's zone, for `review`. Passed in: this file has no clock. */
   today?: string
+  /**
+   * EXACTLY THESE ACCOUNTS. What `?carried=1` becomes: the new accounts the collections floor's
+   * warning counted (Stephan, 29 Oct: "Click on them and it's filtered in the account section").
+   *
+   * Resolved in the browser, like a team, because the rule that picks them -- a new account past
+   * its day and past the grace a closed office gives it (newAccounts.ts) -- reads the DIARY and the
+   * firm's working days, neither of which is a column on this table. The ids come from the same
+   * function the warning counts with, so the list and the number are one set by construction.
+   *
+   * AN EMPTY ARRAY MATCHES NOTHING, as assignedToAny does: "none of these" must never be read as
+   * "no filter", which would answer "which new accounts are late" with the whole book.
+   */
+  accountIds?: string[]
   /** Active, with no diary date: nobody is booked to ring it. */
   adrift?: boolean
   /** Handed over, and not one action logged since. */
@@ -520,6 +533,11 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
   else if (q.assignedTo) out = out.eq('assigned_to', q.assignedTo)
   // See assignedToAny: an empty list narrows to nothing rather than to everything.
   if (q.assignedToAny) out = out.in('assigned_to', q.assignedToAny)
+  /* See accountIds: an empty list narrows to nothing. PostgREST carries an `in` in the query
+     string, so a very long list is URL length (see ID_CHUNK in accountAllocation.ts) -- fine for
+     the dozens a day's late new accounts are; past a few hundred the read would be refused loudly,
+     not answered short. */
+  if (q.accountIds) out = out.in('id', q.accountIds)
 
   if (q.handedOverFrom) out = out.gte('handover_date', q.handedOverFrom)
   if (q.handedOverTo) out = out.lte('handover_date', q.handedOverTo)

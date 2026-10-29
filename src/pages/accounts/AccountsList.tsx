@@ -22,6 +22,8 @@ import { recordBalances, storedAgrees, storedRow, type StoredBalanceRow } from '
 import { supabase } from '../../lib/supabase'
 import { accountEnded, isWrittenOff } from '../../lib/accountStatus.ts'
 import { firmToday } from '../../lib/dateLabels.ts'
+import { fetchLateNewAccountIds } from '../../lib/diary.ts'
+import { todayIso } from '../../lib/diaryPriority.ts'
 import { clearedFilters, filterChips, queryFromParams, type AccountSort } from '../../lib/accountFilters'
 import {
   QUIET_VIEW_DAYS, activeView, landingParams, viewParams, viewsFor, type ViewCounts,
@@ -217,9 +219,32 @@ export function AccountsList() {
     (id: string) => teams.find((t) => t.id === id)?.memberIds ?? [],
     [teams],
   )
+  /*
+   * ?carried=1 -- THE NEW ACCOUNTS THE COLLECTIONS FLOOR'S WARNING COUNTED (Stephan, 29 Oct: "show a
+   * warning ... Click on them and it's filtered in the account section").
+   *
+   * Read the way the warning reads them -- fetchLateNewAccountIds against todayIso(), the same
+   * day the dashboard counts on -- and only THEN is the list asked for. Asking first would draw
+   * "no accounts" for a moment, which is the one thing a team leader sent here to find unworked
+   * accounts must not be shown.
+   */
+  const wantsLate = new URLSearchParams(key).get('carried') === '1'
+  const [lateIds, setLateIds] = useState<string[] | null>(null)
+  const [lateError, setLateError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!wantsLate) { setLateIds(null); setLateError(null); return }
+    let cancelled = false
+    fetchLateNewAccountIds(todayIso())
+      .then((ids) => { if (!cancelled) { setLateIds(ids); setLateError(null) } })
+      /* An empty list matches nothing, and the reason is said above it rather than leaving a
+         short list to look like good news. */
+      .catch((e) => { if (!cancelled) { setLateIds([]); setLateError(e instanceof Error ? e.message : String(e)) } })
+    return () => { cancelled = true }
+  }, [wantsLate])
+  const lateNewAccountIds = useCallback(() => lateIds ?? [], [lateIds])
   const query = useMemo(
-    () => queryFromParams(new URLSearchParams(key), clockNow(), { teamMembers }),
-    [key, teamMembers],
+    () => queryFromParams(new URLSearchParams(key), clockNow(), { teamMembers, lateNewAccountIds }),
+    [key, teamMembers, lateNewAccountIds],
   )
   /*
    * A HEADER THAT SORTS (the firm, 18 Oct: "sort ... highest number to lowest number"). In the address
@@ -280,6 +305,8 @@ export function AccountsList() {
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null); setPage(0)
+    /* Waiting on the ids ?carried=1 narrows to -- see wantsLate. */
+    if (wantsLate && lateIds === null) return
     void (async () => {
       try {
         /*
@@ -307,7 +334,7 @@ export function AccountsList() {
       }
     })()
     return () => { cancelled = true }
-  }, [query, pageSize])
+  }, [query, pageSize, wantsLate, lateIds])
 
   /*
    * AND WHAT EVERY VISIBLE ROW OWES.
@@ -774,6 +801,12 @@ export function AccountsList() {
           </div>
         )}
 
+        {lateError && (
+          <div className="p-4 text-sm text-rose-700 bg-rose-50/50 flex items-start gap-2">
+            <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+            <span>Could not work out which new accounts are late, so none are shown: {lateError}</span>
+          </div>
+        )}
         {error && (
           <div className="p-4 text-sm text-rose-700 bg-rose-50/50 flex items-start gap-2">
             <AlertTriangle size={15} className="shrink-0 mt-0.5" />

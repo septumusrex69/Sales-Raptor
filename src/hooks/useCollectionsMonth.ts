@@ -60,6 +60,8 @@ export interface CollectionsMonth {
   priorScore: CollectorScore | null
   /** The signed-in person's own row, unfiltered — their month is theirs whatever the filter says. */
   mine: CollectorStats | null
+  /** The same person's row for the day being read, unfiltered -- "today" on their own Actions card. */
+  mineToday: CollectorStats | null
 
   /* ---- the month, as the firm reads it ---- */
   pace: MonthPace
@@ -210,6 +212,7 @@ export function useCollectionsMonth(): CollectionsMonth {
   )
 
   const mine = rows?.find((r) => r.userId === currentUser?.id) ?? null
+  const mineToday = todayRows?.find((r) => r.userId === currentUser?.id) ?? null
 
   /*
    * MONEY NO DESK HELD IS THE FIRM'S, AND ONLY THE FIRM'S. The firm, 8 Oct: money that arrives
@@ -284,7 +287,7 @@ export function useCollectionsMonth(): CollectionsMonth {
 
   return {
     period, setPeriod, asAt, asAtKey, setAsAtKey, teamId, setTeamId, teamOptions,
-    rows, error, shownRows, shownToday, score, priorScore, mine,
+    rows, error, shownRows, shownToday, score, priorScore, mine, mineToday,
     pace, floor, line, myLine, collectedToday, targetFor, teamOf, measured: targetMonths !== null,
     figures, asAtLabel,
     /** Of the period's total, what no desk held -- shown where the firm's total is. */

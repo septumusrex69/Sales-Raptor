@@ -48,7 +48,7 @@ const LOOSE = {
  * like a working pair of tiles and is a stub counting the same rows twice. The stub reads the
  * range off the request and answers accordingly — see the handler below.
  */
-const perfRow = (id, collected) => ({
+const perfRow = (id, collected, over = {}) => ({
   user_id: id,
   in_play_accounts: 400,
   in_play_value: 2_000_000,
@@ -63,6 +63,7 @@ const perfRow = (id, collected) => ({
   promises_kept: 5,
   promises_broken: 2,
   accounts_touched: 120,
+  ...over,
 })
 
 /*
@@ -79,11 +80,19 @@ const PERIOD = [
   perfRow(LOOSE.id, 7_000),
   UNHELD(2_500),
 ]
-/** The day being read: R28 000 for the firm, and nothing like the period total. */
+/*
+ * The day being read: R28 000 for the firm, and nothing like the period total.
+ *
+ * THE DAY'S ACTIONS ARE NOT THE PERIOD'S EITHER, for the same reason: the Actions card heads a
+ * column "Today" beside "This period", and a stub answering both with forty calls a head would
+ * pass a card drawing one figure twice. Three people: 9 calls, 6 emails, 3 SMS, 12 notes, 30 in all
+ * today, against 120 / 27 / 18 / 60, 225 in all, over the period.
+ */
+const DAY_WORK = { calls: 3, calls_answered: 1, emails_sent: 2, sms_sent: 1, notes_written: 4 }
 const DAY = [
-  perfRow(USER_ID, 20_000),
-  perfRow(COLLEAGUE.id, 0),
-  perfRow(LOOSE.id, 7_000),
+  perfRow(USER_ID, 20_000, DAY_WORK),
+  perfRow(COLLEAGUE.id, 0, DAY_WORK),
+  perfRow(LOOSE.id, 7_000, DAY_WORK),
   UNHELD(1_000),
 ]
 /** Last period, for the comparisons on the secondary tiles. */
@@ -260,18 +269,76 @@ try {
    * fixtures.mjs. "It flags them and it flags the team leader as well in the team leader's
    * dashboard" is two audiences on one panel, and this is the half an agent must not see.
    */
-  t.ok('a team leader is also shown the floor',
-    await page.getByText('New accounts not yet worked, by collector').first().isVisible())
-  t.ok('...naming the collector who is behind',
-    await page.getByRole('link', { name: COLLEAGUE.name }).first().isVisible())
   /*
-   * ONCE, NOT TWICE. A leader carrying accounts of their own gets the flag above; their name
-   * appearing again in the list underneath would have them chasing themselves.
+   * THE FLOOR'S AS ONE WARNING, NOT A LIST OF NAMES. Stephan, 29 Oct: "making a long ... list like
+   * that is stupid. Maybe you can just show a warning and say, okay, you know, these accounts are
+   * not being worked. Click on them and it's filtered in the account section." The stub has three
+   * late new accounts on two desks -- the leader's own one and the colleague's two -- so the count
+   * is 3 across 2, and the leader's own is in it (a count names nobody twice).
    */
-  const floorList = page.getByText('New accounts not yet worked, by collector')
-    .locator('xpath=following-sibling::ul')
-  t.check('...and the leader is not in their own list',
-    await floorList.getByText(PROFILE.name, { exact: false }).count(), 0)
+  const warning = page.getByTestId('late-new-accounts')
+  t.ok('a team leader is shown the floor\u2019s as one warning', await warning.isVisible())
+  const warningText = (await warning.innerText()).replace(/\s+/g, ' ')
+  t.ok(`...counting the accounts (${warningText})`, /3 new accounts not yet worked/.test(warningText))
+  t.ok('...and the collectors they are on', /across 2 collectors/.test(warningText))
+  t.ok('...and how long the oldest has waited', /the oldest \d+ working days/.test(warningText))
+  const showThem = page.getByTestId('late-new-accounts-link')
+  t.check('...with a link that carries the filter',
+    await showThem.getAttribute('href'), '/accounts?book=whole&carried=1')
+  t.check('the list of collectors is gone',
+    await page.getByText('New accounts not yet worked, by collector').count(), 0)
+  t.check('...and nobody is named in the warning',
+    await warning.getByRole('link', { name: COLLEAGUE.name }).count()
+      + await warning.getByText(COLLEAGUE.name).count(), 0)
+
+  /*
+   * AND THE CLICK OPENS EXACTLY THOSE ACCOUNTS. The accounts list works the ids out from the same
+   * read and the same rule the warning counted with; what reaches the database must be those three
+   * ids and no others -- a count of three over a list of the whole book is the failure that would
+   * matter. Read off the request itself, because the stub answers every account query with nothing.
+   */
+  seen.length = 0
+  await showThem.click()
+  await page.getByText('New accounts not yet worked').first().waitFor({ timeout: 20000 })
+  await page.waitForTimeout(800)
+  const accountReads = seen.map((r) => decodeURIComponent(r))
+    .filter((r) => r.startsWith('GET') && r.includes('/rest/v1/debtor_accounts') && r.includes('id=in.'))
+  const asked = accountReads.map((r) => (/[?&]id=in\.\(([^)&]*)\)/.exec(r)?.[1] ?? '').replace(/"/g, ''))
+  t.ok(`the accounts list asks for the late accounts by id (${accountReads.length} reads)`, accountReads.length > 0)
+  t.ok(`...exactly the three the warning counted (${asked[0] ?? 'none'})`,
+    asked.length > 0 && asked.every((a) => a.split(',').sort().join(',') === 'acc-1,acc-2,acc-3'))
+  t.ok('...and it says so in a chip', await page.getByText('New accounts not yet worked').first().isVisible())
+  await page.goBack()
+  await page.getByRole('heading', { name: 'Collections', exact: true }).first().waitFor({ timeout: 20000 })
+  await page.locator('[data-qa="collections-figures"]').waitFor({ timeout: 20000 })
+  await page.waitForTimeout(500)
+
+  /* ---------- actions, one card ---------- */
+
+  /*
+   * Stephan, 29 Oct, of the eight squeezed tiles beside "How the work is going": "that just looks
+   * weird there ... actions, you can put actions there or something like that ... how many actions
+   * we make in a day, in a month". One card, the day beside the period, the total under them.
+   */
+  const actions = page.getByTestId('floor-actions')
+  t.ok('the floor\u2019s actions are one card', await actions.isVisible())
+  const actionRow = async (label) => (await actions.locator('tr', { hasText: label }).first().innerText())
+    .replace(/\s+/g, ' ').trim()
+  t.check('...calls, today and this period', await actionRow('Calls'), 'Calls 9 120')
+  t.check('...emails', await actionRow('Emails'), 'Emails 6 27')
+  t.check('...SMS', await actionRow('SMS'), 'SMS 3 18')
+  t.check('...notes written', await actionRow('Notes written'), 'Notes written 12 60')
+  t.check('...and all of them', await actionRow('All actions'), 'All actions 30 225')
+  t.check('...headed by the day being read', (await actions.locator('th').nth(1).textContent()).trim(), 'Today')
+  /* The tiles it replaced, and the comparison that wrapped down four lines, are gone. */
+  t.check('the squeezed tiles are gone',
+    await page.locator('[data-pane="floor-counts"]').count() + await page.locator('[data-pane="floor-activity"]').count(), 0)
+  t.check('...and the payments comparison that wrapped with them',
+    await page.getByText(/vs (January|February|March|April|May|June|July|August|September|October|November|December) \d{4}/).count(), 0)
+  t.ok('the average payment and the book\u2019s value are kept, under the measures',
+    /Average payment/i.test(await page.locator('[data-pane="floor-measures"]').innerText())
+      && /Book value/i.test(await page.locator('[data-pane="floor-measures"]').innerText()))
+  t.ok('the person\u2019s own actions are the same card', await page.getByTestId('you-actions').isVisible())
 
   /* ---------- the same figures, repeated on the floor ---------- */
 
@@ -697,10 +764,28 @@ try {
   const headers = async () => (await page.locator('th').allInnerTexts()).map((h) => h.trim().toUpperCase())
   const shown = await headers()
   t.ok('the tables have header cells at all', shown.length > 8)
-  t.ok('the clerk sheet carries the target', shown.includes('TARGET'))
+  t.ok('the collectors table carries the target', shown.includes('TARGET'))
   t.ok('...and what is achieved of it', shown.includes('ACHIEVED'))
-  t.ok('...and what is needed a day', shown.includes('NEEDED / DAY'))
   t.ok('the teams sheet carries the weekly figure', shown.includes('NEEDED A WEEK'))
+
+  /*
+   * ONE PEOPLE TABLE (Stephan, 29 Oct: "it's the same information ... we can have like one there").
+   * The clerk sheet and "How people compare" were two tables over the same people.
+   */
+  const collectorTable = page.getByTestId('collector-table')
+  t.check('there is one collectors table', await collectorTable.count(), 1)
+  t.check('...and no second comparison table under it',
+    await page.getByText('How people compare').count() + await page.getByText('Clerk performance').count(), 0)
+  /*
+   * WITHOUT A SIDEWAYS SCROLL AT 1440. The firm reads this on a laptop; a column behind a scrollbar
+   * is a column nobody reads. Measured on the table's own scroller, in the default arrangement.
+   */
+  const scroller = await collectorTable.evaluate((el) => {
+    const box = el.parentElement
+    return { scroll: box.scrollWidth, client: box.clientWidth, cols: [...el.querySelectorAll('th')].map((th) => Math.round(th.getBoundingClientRect().width)).join(',') }
+  })
+  t.ok(`...which fits at 1440 without scrolling sideways (${scroller.scroll} in ${scroller.client}; ${scroller.cols})`,
+    scroller.scroll <= scroller.client + 1)
 
   /*
    * ONE TABLE, NO TABS. "Remove the ranking page, remove the needs attention page and put
@@ -708,8 +793,6 @@ try {
    * also what the status pill says on a row -- a page-wide check for "Target reached" would fail
    * on correct code and the obvious "fix" would be to delete the check.
    */
-  const clerkCard = page.locator('table').nth(1).locator('xpath=ancestor::div[contains(@class,"rounded")][1]')
-  void clerkCard
   t.check('there is no tab strip on the clerk sheet any more',
     await page.getByRole('button', { name: 'All clerks' }).count()
       + await page.getByRole('button', { name: 'Needs attention' }).count()
@@ -726,11 +809,11 @@ try {
    * day status." Source-reading checks the JSX beside this; only a browser says what order the
    * columns actually came out in.
    */
-  const clerkHeaders = await page.locator('table').nth(1).locator('thead th').allInnerTexts()
-  t.check('the clerk sheet\u2019s columns are in the order the firm asked for',
+  const clerkHeaders = await collectorTable.locator('thead th').allInnerTexts()
+  t.check('the collectors table\u2019s columns: who, the rand, the payments, the fair figures',
     clerkHeaders.map((h) => h.trim().toUpperCase()).join(' | '),
-    '# | CLERK | TEAM | TARGET | TODAY | PERIOD TO DATE | ACCOUNTS | PAYMENTS '
-    + '| AVERAGE PAYMENT | ACHIEVED | GAP VS PACE | NEEDED / DAY | STATUS')
+    '# | COLLECTOR | TEAM | COLLECTED | TARGET | ACHIEVED | STATUS | PAYMENTS '
+    + '| AVERAGE | BOOK | PER 100 | KEPT | ACTIONS')
 
   /*
    * AND THE ROSTER IS RANKED ON RAND, which is the reversal the firm asked for: "I think the
@@ -741,7 +824,7 @@ try {
    * alphabetically -- so "the biggest is on top" alone would have gone on passing over an
    * alphabetical list. The two orders differ at the second and third rows.
    */
-  const clerkRows = page.locator('table').nth(1).locator('tbody tr')
+  const clerkRows = collectorTable.locator('tbody tr')
   /*
    * The name cell carries three things besides the name: the avatar's initials on their own line,
    * the grade on a line under it, and "(you)" on your own row -- which sits INSIDE the name's own
@@ -832,7 +915,7 @@ try {
    */
   /* Scrolled to, because this page's own column scrolls rather than the window -- a full-page
      screenshot of it is the top of the page and not the table the shot is for. */
-  await page.locator('table').nth(1).scrollIntoViewIfNeeded()
+  await collectorTable.scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
   await t.shot(page, '41-clerk-ranking')
   t.ok('the sheet still says how many are behind their pace',
@@ -848,6 +931,10 @@ try {
   t.ok('the fair comparison is still on the page', (await headers()).includes('PER 100'))
   t.ok('...and still says what it is for',
     await page.getByText(/should decide who is promoted/).first().isVisible())
+  /* On the RANKED row now, so the top collector's per 100 is read beside their rand. 12 payments
+     from 400 accounts is 3.0; the actions are 40 + 9 + 6 + 20. */
+  const topRow = (await clerkRows.first().innerText()).replace(/\s+/g, ' ')
+  t.ok(`...on the same row as the rand (${topRow.slice(0, 120)})`, /\b3\.0\b/.test(topRow) && /\b75\b/.test(topRow))
 
   /* ---------- the condition the ranking exists under ---------- */
 
@@ -859,7 +946,7 @@ try {
    * Checked in the browser, because it is a claim about what somebody reading the row sees.
    */
   t.ok('the grade is on the row, under the name',
-    await page.locator('table').nth(1).locator('tbody tr').first()
+    await clerkRows.first()
       .getByText(/Elite|Senior|Skilled|Junior|Ungraded/).first().isVisible())
   t.ok('...and the sheet says in words why rand and book are read together',
     await page.getByText(/part of their rand is the book they were handed/).first().isVisible())

@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  FILTER_PARAMS, PRESCRIBING_CHOICES, QUIET_CHOICES, STATUS_GROUPS,
+  FILTER_PARAMS, LATE_NEW_ACCOUNTS_PATH, PRESCRIBING_CHOICES, QUIET_CHOICES, STATUS_GROUPS,
   clearedFilters, filterChips, hasAccountFilters, queryFromParams, shiftDays,
 } from '../../src/lib/accountFilters.ts'
 
@@ -161,7 +161,7 @@ ok('...while the filters do not', clearedFilters(new URLSearchParams('client=abc
 const everyFilterSet = 'status=active&sub=Tracing&bucket=Diary&who=nobody&team=t1'
   + '&from=2026-01-01&to=2026-06-30'
   + '&adrift=1&never=1&quiet=30&presc=90&duplum=1&waiting=1&min=1000&drift=1'
-  + '&handover=h1&review=due'
+  + '&handover=h1&review=due&carried=1'
 const allChips = filterChips(new URLSearchParams(everyFilterSet))
 /*
  * `book` IS THE EXCEPTION AND IS NAMED AS ONE. It is in FILTER_PARAMS because a URL carries it and
@@ -270,6 +270,32 @@ ok('nothing is filtered after fetching', !/accounts\.filter\(hasCommissionDrift\
  */
 ok('the clauses live in one function', /export function applyAccountFilters/.test(book))
 ok('the list goes through it', /const query = applyAccountFilters\(/.test(book))
+
+/* ---------- new accounts not yet worked (the floor's warning, 29 Oct) ---------- */
+
+/*
+ * Stephan: "show a warning ... Click on them and it's filtered in the account section." The link
+ * carries ?carried=1 and the ids are worked out by the function that counted them; what is held
+ * here is that the URL turns into exactly those ids and nothing wider.
+ */
+{
+  const late = () => ['acc-1', 'acc-2', 'acc-3']
+  const fromLink = queryFromParams(new URLSearchParams(LATE_NEW_ACCOUNTS_PATH.split('?')[1]), TODAY,
+    { lateNewAccountIds: late })
+  check('the warning\u2019s link narrows to exactly the accounts it counted',
+    JSON.stringify(fromLink.accountIds), JSON.stringify(late()))
+  /* The WHOLE book: a late new account that has since been frozen is still one the warning counted. */
+  check('...across the whole book, not only Active', fromLink.book, 'whole')
+  ok('...and that counts as a narrowing', hasAccountFilters(fromLink))
+  /* An unresolved list is NOTHING, never the whole book -- the failure that would matter. */
+  check('with no ids to hand it narrows to nothing rather than to everything',
+    JSON.stringify(q('carried=1').accountIds), '[]')
+  check('without the parameter there is no id clause at all', q('book=whole').accountIds, undefined)
+  check('it reads back in the firm\u2019s words',
+    filterChips(new URLSearchParams('carried=1')).map((c) => c.label).join(), 'New accounts not yet worked')
+  check('...and Clear filters takes it off', clearedFilters(new URLSearchParams('carried=1&book=whole')).get('carried'), null)
+  ok('the clause is in the one builder, on the id', /if \(q\.accountIds\) out = out\.in\('id', q\.accountIds\)/.test(book))
+}
 
 /* ---------- the mapper carries the columns the filters rely on ---------- */
 

@@ -217,10 +217,12 @@ ok('...without duplicating a row', /seen = new Set\(prev\.map\(\(a\) => a\.id\)\
  * while nothing was ever added between them, and the balances effect now is. What matters is
  * unchanged: `pageSize` belongs in that list and `page` does not.
  */
-ok('loading more does not reset the list', /\}, \[query, pageSize\]\)/.test(list))
+/* `wantsLate, lateIds` may follow (S16, 29 Oct): the list waits for the ids ?carried=1 narrows to
+   before asking for the first page. Neither is the page number, which is what this guards. */
+ok('loading more does not reset the list', /\}, \[query, pageSize(, wantsLate, lateIds)?\]\)/.test(list))
 ok('...because the first page does not watch the page number',
   !/\}, \[query, pageSize, page\]\)/.test(list) && !/\}, \[page, query, pageSize\]\)/.test(list))
-ok('...but changing the page size does', /\[query, pageSize\]/.test(list))
+ok('...but changing the page size does', /\[query, pageSize[\],]/.test(list))
 ok('...and the effect never depends on the page number', !/\}, \[query[^\]]*\bpage\b[^S]/.test(list))
 ok('the selection survives loading more',
   /setTicked\(new Set\(\)\); setAllMatching\(false\) \}, \[key\]\)/.test(list))
