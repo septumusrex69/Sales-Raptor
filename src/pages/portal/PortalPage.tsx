@@ -464,7 +464,7 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
           {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go}
             onAsk={(mode, topic) => { setDone(null); setAsking({ about: null, mode, topic }) }} />}
-          {section === 'reports' && <PortalReports token={token} onSignedOut={onExpired} />}
+          {section === 'reports' && <PortalReports token={token} onSignedOut={onExpired} clientName={me.client} />}
           {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh}
             onRaise={() => { setDone(null); setAsking({ about: null, mode: 'question' }) }} />}
           {section === 'handover' && <PortalHandovers token={token} onSignedOut={onExpired} />}

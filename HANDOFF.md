@@ -108,6 +108,14 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   `book` read) and then carries on as from the account's line; update details and withdraw are questions with
   their topic chosen (`initialTopic`; the topics already existed). Tickets has **+ Raise a ticket**. No server
   change: a ticket and a payment are still about one account. e2e client-portal 82 (topic preset break-tested).
+- **THE MONTHLY PROGRESS REPORT, IN THE PORTAL** (S14's agreed shape: "one line per debtor (both references, capital
+  handed over, paid this month and to date, capital outstanding, position). No notes, no activity."). Top of
+  Reports: **Monthly progress report, <month>**, PDF or spreadsheet, drawn up when pressed from the portal's own
+  `book` read (open and finished, every page), as at today -- `src/lib/progressReport.ts` (pure; A4 landscape in
+  the advice's navy and gold, totals tiles, zebra table, page numbers; amounts as numbers in the sheet).
+  `check-progress-report` (14, break-tested), e2e client-portal 83. **NOT BUILT, PUT TO STEPHAN: the monthly
+  EMAIL** (totals + a link into the portal, every month even with no remittance, kept as sent like the advices) --
+  it writes to real client addresses on a timer, so it waits for his yes and for which mailbox sends it.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

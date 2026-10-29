@@ -224,6 +224,9 @@ try {
   await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
 
   await page.getByTestId('portal-nav-reports').click()
+  await page.getByTestId('portal-progress-report').waitFor({ timeout: 5000 })
+  t.ok('Reports opens with the monthly progress report, as PDF and spreadsheet', /Monthly progress report/.test(await page.getByTestId('portal-progress-report').innerText())
+    && /PDF/.test(await page.getByTestId('portal-progress-report').innerText()) && /Spreadsheet/.test(await page.getByTestId('portal-progress-report').innerText()))
   await page.getByTestId('portal-reports').waitFor({ timeout: 5000 })
   t.check('Reports lists what was sent', await page.getByTestId('portal-report').count(), 1)
   t.ok('...by period, with the PDF and the spreadsheet', /Remittance advice, 11 Sept 2026 – 10 Oct 2026/.test(await page.getByTestId('portal-report').innerText().then((x) => x.replace(/\u00a0/g, ' ')))
