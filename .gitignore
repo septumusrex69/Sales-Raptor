@@ -30,3 +30,6 @@ dist-ssr
 # bundle and the PNGs it shoots are not.
 .qa-harness/bundle.js
 .qa-harness/*.png
+
+# Agent worktrees (Claude Code) -- never committed.
+.claude/worktrees/
