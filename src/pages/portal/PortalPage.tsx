@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, Headphones, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
-import { PORTAL_PASSWORD_MIN, portalPasswordProblem } from '../../lib/clientPortal'
+import { PORTAL_PASSWORD_MIN, portalPasswordProblem, type PortalTopic } from '../../lib/clientPortal'
 import {
   PortalSignedOut, fetchPortalBook, fetchPortalMe, fetchPortalTickets, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
   savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
@@ -295,7 +295,7 @@ function useFold(): [boolean, () => void] {
 
 function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: PortalMe; onSignedOut: () => void; onExpired: () => void }) {
   const [section, setSection] = useState<Section>('dashboard')
-  const [asking, setAsking] = useState<{ about: AskAbout | null; mode?: AskMode } | null>(null)
+  const [asking, setAsking] = useState<{ about: AskAbout | null; mode?: AskMode; topic?: PortalTopic } | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [folded, toggleFold] = useFold()
@@ -463,9 +463,10 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
         <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-5 sm:py-6 space-y-5">
           {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
           {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go}
-            onAsk={(mode) => { setDone(null); setAsking({ about: null, mode }) }} />}
+            onAsk={(mode, topic) => { setDone(null); setAsking({ about: null, mode, topic }) }} />}
           {section === 'reports' && <PortalReports token={token} onSignedOut={onExpired} />}
-          {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh} />}
+          {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh}
+            onRaise={() => { setDone(null); setAsking({ about: null, mode: 'question' }) }} />}
           {section === 'handover' && <PortalHandovers token={token} onSignedOut={onExpired} />}
           {section === 'accounts' && (
             <Book key={lookFor} token={token} onSignedOut={onExpired} initialSearch={lookFor}
@@ -475,7 +476,7 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
       </main>
 
       {asking && (
-        <PortalAsk token={token} about={asking.about} initialMode={asking.mode} onClose={() => setAsking(null)} onSignedOut={onExpired}
+        <PortalAsk token={token} about={asking.about} initialMode={asking.mode} initialTopic={asking.topic} onClose={() => setAsking(null)} onSignedOut={onExpired}
           onAsked={(what, ticketNo) => {
             setAsking(null); setRefresh((n) => n + 1)
             setDone(what === 'question'

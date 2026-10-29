@@ -23,7 +23,7 @@ const TURN: Record<'yours' | 'ours' | 'closed', { label: string; tint: string }>
   closed: { label: 'Closed', tint: 'bg-slate-100 text-slate-600' },
 }
 
-export function PortalTickets({ token, onSignedOut, refreshKey }: { token: string; onSignedOut: () => void; refreshKey: number }) {
+export function PortalTickets({ token, onSignedOut, refreshKey, onRaise }: { token: string; onSignedOut: () => void; refreshKey: number; onRaise: () => void }) {
   const [tickets, setTickets] = useState<PortalTicket[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<number | null>(null)
@@ -37,19 +37,28 @@ export function PortalTickets({ token, onSignedOut, refreshKey }: { token: strin
     return () => { live = false }
   }, [token, onSignedOut, refreshKey, reload])
 
+  /* S16, Stephan's list: "raise a ticket from the Tickets section too, not only from an account." */
+  const raise = (
+    <div className="flex justify-end">
+      <button type="button" onClick={onRaise} data-testid="portal-raise-ticket"
+        className="inline-flex items-center gap-2 rounded-xl bg-[#111E2D] text-white px-4 py-2.5 text-sm font-semibold hover:brightness-125">+ Raise a ticket</button>
+    </div>
+  )
   if (error) return <p className="text-sm text-red-700">{error}</p>
   if (!tickets) return <p className="text-sm text-slate-400">Reading your tickets…</p>
   if (tickets.length === 0) {
     return (
+      <div className="space-y-3">{raise}
       <div className="bg-white rounded-2xl border border-[#D5DBE3] p-8 text-center" data-testid="portal-no-tickets">
         <p className="text-slate-700">No tickets yet.</p>
-        <p className="text-sm text-slate-500 mt-1">To ask about a debtor, press <b>Ask</b> beside the account under Your accounts.</p>
-      </div>
+        <p className="text-sm text-slate-500 mt-1">Press <b>Raise a ticket</b>, or <b>Ask</b> beside the account under Accounts.</p>
+      </div></div>
     )
   }
 
   return (
     <div className="space-y-3" data-testid="portal-tickets">
+      {raise}
       {tickets.map((t) => {
         const turn = TURN[portalTicketTurn(t)]
         const isOpen = open === t.ticketNo

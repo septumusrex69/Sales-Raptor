@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowRight, BarChart3, CalendarDays, ChevronRight, Clock3, FileText, FolderUp, Landmark, List, Mail, MessageCircle, Phone, ReceiptText, Ticket } from 'lucide-react'
+import { ArrowRight, BarChart3, CalendarDays, ChevronRight, CircleSlash, Clock3, FileText, UserPen, FolderUp, Landmark, List, Mail, MessageCircle, Phone, ReceiptText, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { clockNow } from '../../lib/clock.ts'
 import { getCurrentSalesMonth } from '../../lib/salesMonth.ts'
@@ -12,6 +12,8 @@ import { DashboardPanes } from '../../components/dashboard/DashboardPanes'
 import { PortalSignedOut, fetchPortalDashboard, type PortalDashboard as Dash } from '../../lib/portalApi'
 import { PortalHeading, PortalLabel } from './portalStyle'
 import type { Section } from './PortalPage'
+import type { AskMode } from './PortalAsk'
+import type { PortalTopic } from '../../lib/clientPortal'
 
 /**
  * THE CLIENT'S DASHBOARD (S15, Raptor · Handover 14), drawn the way the firm's remittance advice is drawn --
@@ -41,8 +43,8 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
   token: string
   onSignedOut: () => void
   onOpen: (section: Section) => void
-  /** Only a call can be asked for here; a question or a payment is about one account, asked from its line. */
-  onAsk: (mode: 'callback') => void
+  /** Opens the ask window; without an account it asks which one first (PortalAsk). */
+  onAsk: (mode: AskMode, topic?: PortalTopic) => void
 }) {
   const [d, setD] = useState<Dash | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -162,8 +164,10 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
             <PortalHeading title="What would you like to do?" />
             <div className="mt-3 space-y-2">
               <Action icon={<FolderUp size={19} />} label="Hand over accounts" hint="Send us new accounts" onClick={() => onOpen('handover')} testId="handover" />
-              <Action icon={<Ticket size={19} />} label="Raise a ticket" hint="From the account's line" onClick={() => onOpen('accounts')} testId="ticket" />
-              <Action icon={<ReceiptText size={19} />} label="Tell us about a payment" hint="From the account's line" onClick={() => onOpen('accounts')} testId="payment" />
+              <Action icon={<Ticket size={19} />} label="Raise a ticket" hint="A question about one of your accounts" onClick={() => onAsk('question')} testId="ticket" />
+              <Action icon={<ReceiptText size={19} />} label="Tell us about a payment" hint="The debtor paid you directly" onClick={() => onAsk('payment')} testId="payment" />
+              <Action icon={<UserPen size={19} />} label="Update a debtor's details" hint="A new number, address or employer" onClick={() => onAsk('question', 'New details for the debtor')} testId="details" />
+              <Action icon={<CircleSlash size={19} />} label="Request a withdrawal" hint="Stop collecting on an account" onClick={() => onAsk('question', 'Stop or withdraw this account')} testId="withdraw" />
               <Action icon={<FileText size={19} />} label="Your reports" hint="Download your remittance advices" onClick={() => onOpen('reports')} testId="reports" />
               <Action icon={<List size={19} />} label="Every account" hint="View all open and finished accounts" onClick={() => onOpen('accounts')} testId="accounts" />
               <Action icon={<MessageCircle size={19} />} label="Your tickets" hint={d.tickets.open ? `${d.tickets.open} open ticket${d.tickets.open === 1 ? '' : 's'}` : 'Questions between you and us'} onClick={() => onOpen('tickets')} testId="tickets" />

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { clockToday } from '../../lib/clock'
 import { PORTAL_MESSAGE_MAX, PORTAL_TOPICS, type PortalTopic } from '../../lib/clientPortal'
-import { PortalSignedOut, askPortalQuestion, recordPortalPayment, requestPortalCallback } from '../../lib/portalApi'
+import { PortalSignedOut, askPortalQuestion, fetchPortalBook, recordPortalPayment, requestPortalCallback } from '../../lib/portalApi'
+import type { PortalLine } from '../../lib/clientPortal'
 
 /**
  * ONE WINDOW FOR EVERYTHING A CLIENT WANTS FROM US ABOUT A DEBTOR (S15, Raptor · Handover 14). Stephan's
@@ -27,16 +28,28 @@ const MODES: { mode: AskMode; label: string; hint: string }[] = [
    staging clock is loaded, and never a second idea of "today" written here. */
 const today = () => clockToday()
 
-export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onAsked }: {
+/*
+ * OPENED WITHOUT AN ACCOUNT, IT ASKS WHICH ONE (S16, Raptor · Handover 15). Stephan's list for the portal: the
+ * dashboard is "the place you act", with buttons "to raise a ticket, tell us about a payment, update a debtor's
+ * details, request a withdrawal", and "raise a ticket from the Tickets section too, not only from an account".
+ * A ticket and a payment are still about ONE account -- the server refuses either without one, and a ticket is
+ * filed on the account's own list -- so the window searches the client's book first and then carries on exactly
+ * as it does from an account's line. Update details and withdraw are questions with their topic already chosen.
+ */
+export function PortalAsk({ token, about, initialMode, initialTopic, onClose, onSignedOut, onAsked }: {
   token: string
   about: AskAbout | null
   initialMode?: AskMode
+  initialTopic?: PortalTopic
   onClose: () => void
   onSignedOut: () => void
   onAsked: (what: AskMode, ticketNo?: number | null) => void
 }) {
-  const [mode, setMode] = useState<AskMode>(about ? (initialMode ?? 'question') : 'callback')
-  const [topic, setTopic] = useState<PortalTopic | null>(null)
+  const [mode, setMode] = useState<AskMode>(initialMode ?? (about ? 'question' : 'callback'))
+  const [topic, setTopic] = useState<PortalTopic | null>(initialTopic ?? null)
+  /* The account it is about: given by the line it was opened from, or picked here. */
+  const [chosen, setChosen] = useState<AskAbout | null>(about)
+  const picking = !chosen && mode !== 'callback'
   const [text, setText] = useState('')
   const [phone, setPhone] = useState('')
   const [when, setWhen] = useState('')
@@ -50,14 +63,14 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
     e.preventDefault()
     setBusy(true); setError(null)
     try {
-      if (mode === 'question' && about) {
-        const r = await askPortalQuestion(token, about.caseNumber, topic ?? 'Something else', text)
+      if (mode === 'question' && chosen) {
+        const r = await askPortalQuestion(token, chosen.caseNumber, topic ?? 'Something else', text)
         onAsked('question', r.ticketNo)
-      } else if (mode === 'payment' && about) {
-        const r = await recordPortalPayment(token, { caseNumber: about.caseNumber, amount, paidOn, reference, note: text })
+      } else if (mode === 'payment' && chosen) {
+        const r = await recordPortalPayment(token, { caseNumber: chosen.caseNumber, amount, paidOn, reference, note: text })
         onAsked('payment', r.ticketNo)
       } else {
-        await requestPortalCallback(token, { caseNumber: about?.caseNumber, phone, when, about: text })
+        await requestPortalCallback(token, { caseNumber: chosen?.caseNumber, phone, when, about: text })
         onAsked('callback')
       }
     } catch (x) {
@@ -65,7 +78,7 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
     } finally { setBusy(false) }
   }
 
-  const ready = mode === 'question' ? !!topic && !!text.trim()
+  const ready = picking ? false : mode === 'question' ? !!topic && !!text.trim()
     : mode === 'payment' ? Number(amount.replace(/[\sR,]/g, '')) > 0 && !!paidOn && !!reference.trim()
       : phone.replace(/\D/g, '').length >= 9
   const input = 'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2'
@@ -75,11 +88,23 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
       <form onSubmit={submit} onClick={(e) => e.stopPropagation()} data-testid="portal-ask"
         className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 space-y-4 max-h-[92vh] overflow-y-auto">
         <div>
-          <h2 className="text-lg text-slate-900">{about ? `About ${about.debtor}` : 'Ask us to call you'}</h2>
-          {about && <p className="text-sm text-slate-500">Our reference {about.caseNumber}</p>}
+          <h2 className="text-lg text-slate-900">
+            {chosen ? `About ${chosen.debtor}`
+              : mode === 'payment' ? 'Tell us about a payment'
+                : mode === 'question' ? (topic === 'New details for the debtor' ? "Update a debtor's details"
+                  : topic === 'Stop or withdraw this account' ? 'Request a withdrawal' : 'Raise a ticket')
+                  : 'Ask us to call you'}
+          </h2>
+          {chosen && (
+            <p className="text-sm text-slate-500">Our reference {chosen.caseNumber}
+              {!about && <> · <button type="button" className="underline" onClick={() => setChosen(null)} data-testid="portal-ask-change">Another account</button></>}
+            </p>
+          )}
         </div>
 
-        {about && (
+        {picking && <AccountPicker token={token} onPick={setChosen} onSignedOut={onSignedOut} />}
+
+        {chosen && (
           <div className="grid grid-cols-3 gap-2" role="radiogroup">
             {MODES.map((m) => (
               <button key={m.mode} type="button" role="radio" aria-checked={mode === m.mode} onClick={() => setMode(m.mode)}
@@ -93,7 +118,7 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
           </div>
         )}
 
-        {mode === 'callback' && (
+        {!picking && mode === 'callback' && (
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="text-sm text-slate-700">Number to call
               <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel"
@@ -106,7 +131,7 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
           </div>
         )}
 
-        {mode === 'payment' && (
+        {!picking && mode === 'payment' && (
           <>
             <div className="grid sm:grid-cols-3 gap-3">
               <label className="text-sm text-slate-700">Amount
@@ -130,7 +155,7 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
           </>
         )}
 
-        {mode === 'question' && (
+        {!picking && mode === 'question' && (
           <fieldset>
             <legend className="text-sm text-slate-700 mb-1.5">What is it about?</legend>
             <div className="flex flex-wrap gap-1.5" data-testid="portal-ask-topics">
@@ -145,14 +170,14 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
           </fieldset>
         )}
 
-        <label className="block text-sm text-slate-700">
+        {!picking && <label className="block text-sm text-slate-700">
           {mode === 'question' ? 'Your question' : mode === 'payment' ? 'Anything we should know (optional)' : 'What it is about (optional)'}
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={mode === 'question' ? 4 : 2} maxLength={PORTAL_MESSAGE_MAX}
             required={mode === 'question'} data-testid="portal-ask-text"
             placeholder={mode === 'question' ? 'Has the debtor made an arrangement yet?'
               : mode === 'payment' ? 'Paid in cash at our Pretoria branch.' : 'The new address we have for the debtor.'}
             className={input} />
-        </label>
+        </label>}
 
         {error && <p className="text-sm text-red-700" data-testid="portal-ask-error">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -163,6 +188,48 @@ export function PortalAsk({ token, about, initialMode, onClose, onSignedOut, onA
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+/**
+ * WHICH ACCOUNT? The client's own book, searched as they type -- the same read as Accounts (portal `book`), so a
+ * debtor the client cannot see there cannot be picked here. Open accounts only: a ticket or a payment on a
+ * finished one is not something the firm can act on.
+ */
+function AccountPicker({ token, onPick, onSignedOut }: { token: string; onPick: (a: AskAbout) => void; onSignedOut: () => void }) {
+  const [search, setSearch] = useState('')
+  const [lines, setLines] = useState<PortalLine[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    const t = setTimeout(() => {
+      fetchPortalBook(token, { search, includeClosed: false, offset: 0 })
+        .then((b) => { if (live) { setLines(b.lines.slice(0, 8)); setError(null) } })
+        .catch((e) => { if (!live) return; if (e instanceof PortalSignedOut) onSignedOut(); else setError(e.message) })
+    }, 250)
+    return () => { live = false; clearTimeout(t) }
+  }, [token, search, onSignedOut])
+  return (
+    <div className="space-y-2" data-testid="portal-ask-picker">
+      <label className="block text-sm text-slate-700">Which account?
+        <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="The debtor's name, or a reference"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" data-testid="portal-ask-search" />
+      </label>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      <ul className="max-h-64 overflow-y-auto divide-y divide-slate-100 rounded-lg border border-slate-200">
+        {lines === null && <li className="px-3 py-2 text-sm text-slate-400">Reading your accounts…</li>}
+        {lines?.length === 0 && <li className="px-3 py-2 text-sm text-slate-500">No open account matches that.</li>}
+        {lines?.map((l) => (
+          <li key={l.ourReference}>
+            <button type="button" onClick={() => onPick({ caseNumber: l.ourReference, debtor: l.debtor })} data-testid="portal-ask-pick"
+              className="w-full text-left px-3 py-2 hover:bg-slate-50">
+              <span className="block text-sm font-medium text-slate-900">{l.debtor}</span>
+              <span className="block text-xs text-slate-500">Our reference {l.ourReference}{l.yourReference ? ` · yours ${l.yourReference}` : ''}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

@@ -102,6 +102,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   share of the capital as a bar, because it has no honest monthly series; the open and finished rings side by
   side under the chart (the navy "Paid up in full" tile went); what-to-do as a list with chevrons, the liaison
   under it. GapRing's caption now wraps. e2e client-portal 77.
+- **THE DASHBOARD'S BUTTONS OPEN THEIR OWN FORMS** (Stephan's list, items 3-5: "raise a ticket, tell us about a
+  payment, update a debtor's details, request a withdrawal"; "raise a ticket from the Tickets section too").
+  `PortalAsk` opened without an account asks **Which account?** (searches the client's own open book, the same
+  `book` read) and then carries on as from the account's line; update details and withdraw are questions with
+  their topic chosen (`initialTopic`; the topics already existed). Tickets has **+ Raise a ticket**. No server
+  change: a ticket and a payment are still about one account. e2e client-portal 82 (topic preset break-tested).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
@@ -281,7 +287,7 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   swallowed the file to the next `*/` -- the day one was appended, a live column read as missing. Ten other checks
   still use the two-regex strip; move them over if one ever reports something impossible.
 
-**S16 starts here -- Stephan's list for the portal (29 Oct), after finishing the handovers above:**
+**Stephan's list for the portal (29 Oct) -- S16 did 1-6 (see the S16 section above); 7 and 8 remain:**
 1. **Password after the first sign-in.** "Should I get a code every time? ... Maybe the first time, but ... if you
    have a password, then that's fine." Code once to prove the address, then set a password; code stays as the
    reset. (Portal users are not Supabase users -- keep it in `client_portal_users`, hashed with `keyedHash`-style
