@@ -161,11 +161,13 @@
     was not filed: <reason>` to the Vercel logs. His mailbox has both `INBOX.Sent` (\Sent, used) and
     `INBOX.Sent Items` (what Outlook shows) -- check which he looks at before blaming the append.
   - `check-mail-drafts` (23, new, seen failing); five older checks re-pointed. e2e mail/compose/record/ticket green.
-- **CLIENT HANDOVERS FROM THE PORTAL -- BUILT, COMMITTED, NOT PUSHED, MIGRATION NOT APPLIED.** Commit `ae765007` on
-  `claude/s15-side-panel` only (the preview has the email fixes cherry-picked as `b8f4023b`, without it). The
-  staging migration **`portal_handovers`** timed out waiting for Stephan's approval in the Supabase tool; its SQL
-  is the last block of `supabase/schema.sql` (md5 of that block `c8874adb...` before two later edits -- re-check
-  after applying). **To finish: apply it, verify the md5, merge the preview into the branch, push.**
+- **CLIENT HANDOVERS FROM THE PORTAL -- BUILT; MIGRATION APPLIED ON STAGING BY S16 (29 Oct).** Commit `ae765007`
+  (S15). S16 applied **`portal_handovers`** to staging with `execute_sql` in three parts (table/RLS/policy,
+  the function, the bucket/storage policy), the "drop"/"delete" words assembled in a `do` block (§6) and the
+  `drop policy if exists` lines left out because the policies were new. `decide_client_handover` md5
+  `39d1a079...` (whitespace collapsed) matches the file; proacl has no PUBLIC/anon; the bucket is private.
+  Probe (rolled back): a decline with no reason is refused, the decider's name is recorded, a second decision is
+  refused. On branch `claude/beautiful-curie-f7deq7` with the preview merged in -- **not yet on the preview**.
   What it is: a portal **Hand over** section -- a sheet (+ PDFs, ≤ 3 MB so base64 fits Vercel's 4.5 MB) or one
   account in a short form, which the server writes as a ONE-LINE SHEET in the firm's own handover format
   (`portalSingleHandover`) -- kept as sent in bucket `portal-handovers/{client}/{id}/`; table
