@@ -32,7 +32,7 @@ export function AuthShell({ title, subtitle, children, footer }: {
   footer?: ReactNode
 }) {
   /*
-   * THE DOOR IS ALWAYS RAPTOR'S (23 Oct). The firm, at Alianna's first sign-in on an office laptop:
+   * THE DOOR ALWAYS WEARS THE FIRM'S DEFAULT (23 Oct; the default is Africa since 29 Oct, see DEFAULT_THEME). The firm, at Alianna's first sign-in on an office laptop:
    * "it doesn't show the picture from Raptor for the initial sign-in ... Nicole got that one though,
    * but Aliana didn't." A skin is remembered PER BROWSER, not per person -- so this page wore
    * whatever skin the last person on that machine chose (glass mountain draws no photograph here

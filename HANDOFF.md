@@ -147,6 +147,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   handovers chart gold bars and a navy line (`MonthTrackCard colours`); actions a compact list; sidebar in #101F2C
   with a thin gold edge. Kept against the brief's "six actions": update details and withdraw, which Stephan asked
   for earlier the same day. e2e client-portal 89 (every ring slice must be a brand colour -- seen failing with green).
+- **AFRICA IS THE DEFAULT SKIN, AND SO THE SIGN-IN PAGE'S** (Stephan: "make the default one there. Africa one. So I
+  have the same for the login page ... because when you log in, it chooses another skin"). Why he saw two: the door
+  always wears the firm's default (AuthShell, 23 Oct, so nobody meets the last person's skin) and the default was
+  Raptor, while his own remembered skin is Africa. `DEFAULT_THEME = 'africa'` and index.html's pre-paint default with
+  it (check-themes holds the pair); a browser's own choice is still remembered and returns after sign-in. e2e
+  login-reset 30 (every remembered skin -> Africa at the door, the choice kept; a new browser -> Africa).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
