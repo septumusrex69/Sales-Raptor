@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { GitBranch, Pause, Play, Plus, Trash2 } from 'lucide-react'
+import { FileSpreadsheet, GitBranch, Pause, Play, Plus, Trash2 } from 'lucide-react'
+import { Modal } from '../../components/ui/Modal'
+import { campaignBodyEmpty } from '../../lib/campaignHtml'
+import { XLSX_MIME, buildXlsx, downloadBytes, type Cell } from '../../lib/xlsxWrite'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
-import { WORKFLOW_AUDIENCE_LABELS, followUpDueOn, resultRates, type CampaignResults, type WorkflowAudience } from '../../lib/marketing.ts'
+import { WORKFLOW_AUDIENCE_LABELS, followUpDueOn, resultRates, workflowSheet, type CampaignResults, type SheetRow, type WorkflowAudience } from '../../lib/marketing.ts'
 import {
-  addWorkflowStep, createWorkflow, listCampaigns, listWorkflows, removeWorkflowStep, updateWorkflow, updateWorkflowStep,
+  sendsOf, addWorkflowStep, createWorkflow, listCampaigns, listWorkflows, removeWorkflowStep, updateWorkflow, updateWorkflowStep,
   type CampaignRow, type WorkflowRow, type WorkflowStepRow,
 } from '../../lib/marketingApi'
 import { Field, INPUT, StatusPill, errorText } from './shared'
@@ -110,7 +113,8 @@ function WorkflowCard({ workflow: w, steps, campaigns, counts, act }: {
   act: (fn: () => Promise<void>) => Promise<void>
 }) {
   const firstCampaign = campaigns.get(w.first_campaign_id) ?? null
-  const unwritten = steps.filter((s) => { const c = campaigns.get(s.campaign_id); return !c || !c.subject.trim() || !c.body.trim() })
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const unwritten = steps.filter((s) => { const c = campaigns.get(s.campaign_id); return !c || !c.subject.trim() || campaignBodyEmpty(c.body) })
   const canStart = steps.length > 0 && unwritten.length === 0
   const status = WF_STATUS[w.status]
   /* Each email's due day reads off the one before it -- the database's own rule (marketing_workflow_steps_due). */
@@ -124,6 +128,7 @@ function WorkflowCard({ workflow: w, steps, campaigns, counts, act }: {
           <span className={`inline-block mt-1 rounded-full px-2 py-0.5 text-xs font-medium ${status.tone}`} data-testid="news-workflow-status">{status.label}</span>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button size="sm" icon={<FileSpreadsheet size={13} />} onClick={() => setSheetOpen(true)} data-testid="news-workflow-sheet">The sheet</Button>
           {(w.status === 'draft' || w.status === 'paused') && (
             <Button size="sm" variant="primary" icon={<Play size={13} />} disabled={!canStart} data-testid="news-workflow-start"
               title={canStart ? undefined : steps.length ? 'Every follow-up needs a subject and a body first' : 'Add a follow-up first'}
@@ -183,7 +188,67 @@ function WorkflowCard({ workflow: w, steps, campaigns, counts, act }: {
         </div>
       )}
       </div>
+      {sheetOpen && <SheetModal name={w.name} campaignIds={[w.first_campaign_id, ...steps.map((s) => s.campaign_id)]} onClose={() => setSheetOpen(false)} />}
     </Card>
+  )
+}
+
+const MARK_TONE: Record<string, string> = {
+  Clicked: 'text-emerald-700', Opened: 'text-emerald-700', Delivered: 'text-slate-700', Sent: 'text-slate-500',
+  'Didn’t arrive': 'text-red-700', 'Marked as spam': 'text-red-700', Unsubscribed: 'text-gold-800', 'Not sent': 'text-slate-400', Waiting: 'text-slate-400',
+}
+
+/**
+ * RYNO'S SHEET (29 Oct): email in column one, then "Sent 1", "Sent 2", ... -- filled in as each email of the
+ * workflow goes, from the sends Raptor keeps (workflowSheet), and downloadable as Excel. Nobody types it, so it
+ * cannot drift from what happened.
+ */
+function SheetModal({ name, campaignIds, onClose }: { name: string; campaignIds: string[]; onClose: () => void }) {
+  const [rows, setRows] = useState<SheetRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  /* Keyed on the ids' text, not the array: a new array each render would read every send again and again. */
+  const key = campaignIds.join(',')
+  useEffect(() => {
+    const ids = key.split(',')
+    sendsOf(ids).then((s) => setRows(workflowSheet(ids, s))).catch((e: unknown) => setError(errorText(e)))
+  }, [key])
+  const heads = campaignIds.map((_, i) => `Sent ${i + 1}`)
+  const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) : '')
+  const download = () => {
+    if (!rows) return
+    const sheet: Cell[][] = [
+      [{ v: 'Email', style: 'head' }, { v: 'Name', style: 'head' }, { v: 'Company', style: 'head' }, ...heads.map((h) => ({ v: h, style: 'head' as const }))],
+      ...rows.map((r) => [r.email, r.name, r.company, ...r.cells.map((c) => (c.mark ? `${c.mark}${c.at ? ` ${day(c.at)}` : ''}` : ''))]),
+    ]
+    downloadBytes(`${name.replace(/[^\w -]+/g, '').trim() || 'workflow'}.xlsx`, buildXlsx('Sent', sheet), XLSX_MIME)
+  }
+  return (
+    <Modal title={`The sheet · ${name}`} subtitle="One row per address, a column per email. Filled in as each one goes." onClose={onClose} width={980}
+      headerRight={<Button size="sm" icon={<FileSpreadsheet size={13} />} disabled={!rows?.length} onClick={download} data-testid="news-sheet-download">Download Excel</Button>}>
+      {error ? <p className="text-sm text-red-600">{error}</p> : rows === null ? <p className="text-sm text-slate-400">Loading…</p> : (
+        <div className="overflow-auto max-h-[65vh]" data-testid="news-sheet">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-white">
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                <th className="px-2 py-1.5 font-medium">Email</th>
+                {heads.map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.email} className="border-b border-slate-50">
+                  <td className="px-2 py-1.5"><div className="text-slate-800">{r.email}</div><div className="text-xs text-slate-400">{[r.name, r.company].filter(Boolean).join(' · ')}</div></td>
+                  {r.cells.map((c, i) => (
+                    <td key={i} className={`px-2 py-1.5 text-xs ${MARK_TONE[c.mark] ?? ''}`}>{c.mark}{c.at && <span className="text-slate-400"> {day(c.at)}</span>}</td>
+                  ))}
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={heads.length + 1} className="px-2 py-4 text-center text-slate-500">Nothing has gone yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
   )
 }
 

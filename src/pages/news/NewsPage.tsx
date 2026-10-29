@@ -5,6 +5,7 @@ import { Card } from '../../components/ui/Card'
 import { CampaignEditor } from './CampaignEditor'
 import { CampaignList } from './CampaignList'
 import { SendersPanel } from './SendersPanel'
+import { TemplatesPanel } from './TemplatesPanel'
 import { WorkflowsPanel } from './WorkflowsPanel'
 import { SenderSetup, useSenderConfig } from './shared'
 
@@ -16,16 +17,16 @@ import { SenderSetup, useSenderConfig } from './shared'
  * leads that are dormant". Lists are rules over Raptor's own records, never typed; the count and a
  * sample are shown before anything goes; and an address that has said stop is never sent to.
  *
- * THREE PLACES (S13): the campaigns and their history, the workflows that send follow-ups on their
- * own, and who campaigns come from and who hears the results. One address each (?tab=) so a link to a
+ * FOUR PLACES (S13): the campaigns and their history, the templates they start from, the workflows that
+ * send follow-ups on their own, and who campaigns come from and who hears the results. One address each (?tab=) so a link to a
  * workflow from a campaign lands on the workflows.
  *
  * NOTHING HERE IS A DEBTOR. This page reads companies, contacts and leads; it never touches an
  * account and raises no Annexure B fee.
  */
-type Tab = 'campaigns' | 'workflows' | 'senders'
+type Tab = 'campaigns' | 'templates' | 'workflows' | 'senders'
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'campaigns', label: 'Campaigns' }, { key: 'workflows', label: 'Workflows' }, { key: 'senders', label: 'Senders & results' },
+  { key: 'campaigns', label: 'Campaigns' }, { key: 'templates', label: 'Templates' }, { key: 'workflows', label: 'Workflows' }, { key: 'senders', label: 'Senders & results' },
 ]
 
 export function NewsPage() {
@@ -45,11 +46,11 @@ function NewsHome() {
   const [params, setParams] = useSearchParams()
   const { config, error } = useSenderConfig()
   const raw = params.get('tab')
-  const tab: Tab = raw === 'workflows' || raw === 'senders' ? raw : 'campaigns'
+  const tab: Tab = raw === 'workflows' || raw === 'senders' || raw === 'templates' ? raw : 'campaigns'
   return (
     <div className="space-y-4">
       <SenderSetup config={config} error={error} />
-      <nav className="flex gap-1 border-b border-slate-200" aria-label="News & campaigns">
+      <nav className="flex gap-1 border-b border-slate-200 overflow-x-auto" aria-label="News & campaigns">
         {TABS.map((t) => (
           <button key={t.key} type="button" data-testid={`news-tab-${t.key}`} aria-current={tab === t.key ? 'page' : undefined}
             onClick={() => setParams(t.key === 'campaigns' ? {} : { tab: t.key })}
@@ -60,6 +61,7 @@ function NewsHome() {
         ))}
       </nav>
       {tab === 'campaigns' && <CampaignList />}
+      {tab === 'templates' && <TemplatesPanel schemaReady={!!config?.schemaReady} />}
       {tab === 'workflows' && <WorkflowsPanel />}
       {tab === 'senders' && <SendersPanel />}
     </div>

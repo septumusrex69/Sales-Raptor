@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Check, GitBranch, Send } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, GitBranch, LayoutTemplate, Send } from 'lucide-react'
 import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { Card, CardHeader } from '../../components/ui/Card'
@@ -8,16 +8,21 @@ import { Button } from '../../components/ui/Button'
 import { fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
 import {
   CAMPAIGN_KIND_LABELS, FIRM_REPORTS_ADDRESS, FIRM_SENDER_ENV, FIRM_SENDER_NAME, LEAD_AUDIENCES, MERGE_FIELDS, SEND_FROM_LABELS,
-  WORKFLOW_AUDIENCE_LABELS, describeSplit, fromHeader, isFirmMainDomain, isProspectKind, prospectSender, renderCampaignEmail,
+  WORKFLOW_AUDIENCE_LABELS, describeAudience, describeSplit, domainReady, fromHeader, isFirmMainDomain, isProspectKind, prospectAddressSender, prospectSender,
+  renderCampaignEmail, splitFrom,
   unknownMergeFields, type CampaignKind, type SendFrom,
 } from '../../lib/marketing.ts'
+import { EMAIL_HTML_MARKER, campaignBodyEmpty, isHtmlBody, storeHtmlBody, textToEmailHtml } from '../../lib/campaignHtml'
 import {
-  cancelCampaign, drainCampaign, getCampaign, listSenders, previewAudience, queueCampaign, saveCampaign, sendTest, stepOfCampaign,
+  cancelCampaign, drainCampaign, getCampaign, listSenders, previewAudience, queueCampaign, saveAsTemplate, saveCampaign, sendTest, stepOfCampaign,
+  uploadEmailPicture,
   type Allowance, type AudiencePreview, type CampaignDraft, type CampaignRow, type ExtraSender, type WorkflowRow, type WorkflowStepRow,
 } from '../../lib/marketingApi'
 import { AudiencePicker } from './AudiencePicker'
 import { InboxPreview } from './InboxPreview'
 import { ResultsPanel } from './ResultsPanel'
+import { RichEditor } from './RichEditor'
+import { SendModal, type SendPlan } from './SendModal'
 import { Choices, Field, INPUT, SenderSetup, StatusPill, errorText, kindReady, useSenderConfig } from './shared'
 
 /**
@@ -69,8 +74,9 @@ export function CampaignEditor({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState<{
-    sent: number; remaining: number; stoppedFor: string | null; waitingForTomorrow?: number; allowance?: Allowance | null
+    sent: number; remaining: number; stoppedFor: string | null; waitingForTomorrow?: number; allowance?: Allowance | null; nextBatchAt?: string | null
   } | null>(null)
+  const [sendOpen, setSendOpen] = useState(false)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const sending = useRef(false)
   const opened = useRef(false)
@@ -83,6 +89,7 @@ export function CampaignEditor({ id }: { id: string }) {
         name: c.name, subject: c.subject, preheader: c.preheader, body: c.body, image_url: c.image_url, audience: c.audience,
         first_approach: c.kind === 'introduction', kind: c.kind ?? 'news', sender_id: c.sender_id ?? c.created_by,
         send_from: c.send_from ?? 'news', sender_address_id: c.sender_address_id,
+        batch_size: c.batch_size, batch_every_minutes: c.batch_every_minutes,
       })
       /* A campaign that has gone opens on what happened to it; a draft on its first step. */
       if (!opened.current) { opened.current = true; setStep(c.status === 'draft' ? 'who' : 'results') }
@@ -142,9 +149,11 @@ export function CampaignEditor({ id }: { id: string }) {
         const r = await drainCampaign(id)
         setProgress((p) => ({
           sent: (p?.sent ?? 0) + r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor,
-          waitingForTomorrow: r.waitingForTomorrow, allowance: r.allowance,
+          waitingForTomorrow: r.waitingForTomorrow, allowance: r.allowance, nextBatchAt: r.nextBatchAt,
         }))
         if (r.remaining === 0) break
+        /* Between batches: the five-minute sweep sends the next one on its own. Nothing to wait for here. */
+        if (r.nextBatchAt && r.sent === 0) break
         /* A sender at today's allowance: the rest go tomorrow from the sweep. Nothing to wait for here. */
         if ((r.waitingForTomorrow ?? 0) > 0 && r.sent === 0) break
         if (r.stoppedFor) await new Promise((res) => setTimeout(res, 20_000))
@@ -155,34 +164,62 @@ export function CampaignEditor({ id }: { id: string }) {
     }
   }, [id, load])
 
-  const send = () => run('send', async () => {
+  /*
+   * SEND OPENS THE POP-UP (Ryno, 29 Oct: "an additional pop-up ... how many emails at a time, the frequency,
+   * which emails you send when"). It says once more who and from whom, and takes the batches and the follow-ups;
+   * pressing Send there is the one press that cannot be called back.
+   */
+  const send = (plan: SendPlan) => run('send', async () => {
     if (!draft || !preview) return
-    if (!(await save())) return
-    const what = draft.kind === 'introduction'
-      ? `${preview.count} people, each for the first and only time`
-      : preview.firstApproaches
-        ? `${preview.count} people, ${preview.firstApproaches} of them leads being approached for the first and only time`
-        : `${preview.count} people`
-    const split = preview.senders && preview.senders.length > 1 ? ` ${describeSplit(preview.senders)}.` : ''
-    if (!window.confirm(`Send “${draft.subject}” to ${what}?${split} This cannot be called back once it has gone.`)) return
+    const withBatches = { ...draft, ...(row?.batch_size !== undefined ? { batch_size: plan.batchSize, batch_every_minutes: plan.everyMinutes } : {}) }
+    setDraft(withBatches)
+    try { await saveCampaign(id, withBatches) } catch (e) { setError(errorText(e)); return }
+    setDirty(false)
     const r = await queueCampaign(id)
-    setProgress({ sent: r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor, waitingForTomorrow: r.waitingForTomorrow, allowance: r.allowance })
+    setSendOpen(false)
+    setProgress({ sent: r.sent, remaining: r.remaining, stoppedFor: r.stoppedFor, waitingForTomorrow: r.waitingForTomorrow, allowance: r.allowance, nextBatchAt: r.nextBatchAt })
+    if (plan.afterSend) { try { await plan.afterSend() } catch (e) { setError(`It has gone. The follow-ups could not be set up: ${errorText(e)}`) } }
     await load()
     setStep('results')
     void drainLoop()
   })
 
+  const saveTemplate = () => run('template', async () => {
+    if (!draft) return
+    const name = window.prompt('Name the template (for example “Nicole’s client newsletter”)', draft.name)
+    if (!name?.trim()) return
+    await saveAsTemplate(name, draft)
+    setMessage(`Saved as the template “${name.trim()}”. Start a campaign from it with “From a template”.`)
+  })
+
   /* A campaign already sending when the page opens: carry on driving it. */
-  const ready = !!draft && kindReady(config, draft.kind)
+  /*
+   * A COLD CAMPAIGN FROM A CHOSEN ADDRESS (29 Oct) needs no prospect domain -- only the first key and its own
+   * domain set up; the domain is judged with the From below.
+   */
+  const ready = !!draft && (isProspectKind(draft.kind) && draft.sender_address_id
+    ? !!config && !config.missing.includes('RESEND_API_KEY')
+    : kindReady(config, draft.kind))
   useEffect(() => {
     if (row?.status === 'sending' && ready) void drainLoop()
   }, [row?.status, ready, drainLoop])
 
   const marketer = users.find((u) => u.id === draft?.sender_id) ?? null
-  /* The From a prospect campaign will carry, worked out by the very function the server sends with. */
-  const prospectFrom = draft && isProspectKind(draft.kind) && config?.prospect?.domain
-    ? prospectSender(config.prospect.domain, marketer ? { name: marketer.name, email: marketer.email ?? null } : null)
+  const chosenAddress = senders.find((s) => s.id === draft?.sender_address_id) ?? null
+  /* The From a prospect campaign will carry, worked out by the very functions the server sends with. */
+  const prospectFrom = draft && isProspectKind(draft.kind)
+    ? draft.sender_address_id
+      ? (chosenAddress ? prospectAddressSender(chosenAddress.display_name, chosenAddress.address) : { error: 'Choose which address it goes from.' })
+      : config?.prospect?.domain
+        ? prospectSender(config.prospect.domain, marketer ? { name: marketer.name, email: marketer.email ?? null } : null)
+        : null
     : null
+
+  /* The bare address whose signature {{signature}} stands for, in the preview. */
+  const signatureAddress = !draft ? '' : isProspectKind(draft.kind) ? (chosenAddress?.address ?? '')
+    : draft.send_from === 'reports' ? FIRM_REPORTS_ADDRESS
+      : draft.send_from === 'address' ? (chosenAddress?.address ?? '')
+        : draft.send_from === 'news' ? splitFrom(config?.from).address : ''
 
   const myFirstName = currentUser?.name?.split(' ')[0] ?? null
   const sampleRecipient = useMemo(
@@ -200,9 +237,16 @@ export function CampaignEditor({ id }: { id: string }) {
         firmAddress: firm?.postalAddress ?? firm?.physicalAddress ?? null,
         basis: draft.kind === 'introduction' ? 'introduction' : LEAD_AUDIENCES.includes(draft.audience.kind) && draft.audience.kind !== 'manual' ? 'lead' : 'client',
         optInUrl: draft.kind === 'introduction' ? `${window.location.origin}/opt-in/preview` : null,
+        /*
+         * {{signature}} in the preview is the signature of the address shown as the From. A liaison's is on her
+         * profile and differs per client, so the preview says whose it will be instead of guessing one.
+         */
+        signatureHtml: draft.kind === 'news' && draft.send_from === 'liaison'
+          ? '<p><i>[the liaison’s own signature, from her profile]</i></p>'
+          : senders.find((s) => s.address === signatureAddress)?.signature_html ?? '',
       },
     )
-  }, [draft, firm, sampleRecipient])
+  }, [draft, firm, sampleRecipient, senders, signatureAddress])
 
   if (error && !row) return <Card><p className="text-sm text-red-600">{error}</p></Card>
   if (!row || !draft) return <p className="text-sm text-slate-400">Loading…</p>
@@ -210,7 +254,7 @@ export function CampaignEditor({ id }: { id: string }) {
   const isNews = draft.kind === 'news'
   const isFollowUp = !!wfStep
   const firmReady = !!config?.firm?.ready
-  /* Undefined, not null: the database has not had migration campaign_sender_address yet. */
+  /* Undefined, not null: the database has not had migration campaign_compose yet. */
   const canPickAddress = row.sender_address_id !== undefined
   const activeSenders = senders.filter((s) => s.active || s.id === draft.sender_address_id)
   const extra = senders.find((s) => s.id === draft.sender_address_id) ?? null
@@ -219,7 +263,9 @@ export function CampaignEditor({ id }: { id: string }) {
   const sendFromProblem = !isNews ? null
     : needsFirmKey && !firmReady ? `Sending from ${draft.send_from === 'liaison' ? 'the liaisons' : draft.send_from === 'reports' ? 'reports@' : extra?.address} is not set up yet: ${FIRM_SENDER_ENV} must be set in Vercel.`
       : draft.send_from === 'address' && !extra ? 'Choose which address it goes from.'
-        : null
+        : draft.send_from === 'address' && extra && !domainReady(extra.address, config?.readyDomains ?? [])
+          ? `${extra.address.split('@')[1]} is not set up for sending yet. Follow the steps under Email addresses on the campaigns page.`
+          : null
 
   /* What the inbox shows as the From. In liaison mode it differs per client, so the first one counted. */
   const shownFrom = isProspectKind(draft.kind)
@@ -232,6 +278,8 @@ export function CampaignEditor({ id }: { id: string }) {
   const fromNote = isNews && draft.send_from === 'liaison' ? 'From each client’s own liaison; reports@ for clients without one.' : null
 
   const unknown = unknownMergeFields(`${draft.subject} ${draft.preheader} ${draft.body}`)
+  /* A new email is written in the full editor; one written as plain text before 29 Oct stays text until switched. */
+  const htmlMode = isHtmlBody(draft.body) || (!locked && !draft.body.trim())
   const insertField = (f: string) => {
     const el = bodyRef.current
     const token = `{{${f}}}`
@@ -242,7 +290,7 @@ export function CampaignEditor({ id }: { id: string }) {
   const senderProblem = prospectFrom && 'error' in prospectFrom ? prospectFrom.error : null
   const blockers = [
     !draft.subject.trim() && 'It has no subject yet (Write).',
-    !draft.body.trim() && 'It has no body yet (Write).',
+    campaignBodyEmpty(draft.body) && 'It has no body yet (Write).',
     unknown.length > 0 && `Raptor does not know ${unknown.map((u) => `{{${u}}}`).join(', ')} (Write).`,
     !ready && 'Sending is not set up yet.',
     senderProblem, sendFromProblem,
@@ -251,7 +299,7 @@ export function CampaignEditor({ id }: { id: string }) {
   ].filter((x): x is string => !!x)
   const canSend = !locked && !isFollowUp && blockers.length === 0
   const done: Record<Step, boolean> = {
-    who: locked, write: locked || (!!draft.subject.trim() && !!draft.body.trim() && unknown.length === 0), check: locked || !!preview, send: locked, results: false,
+    who: locked, write: locked || (!!draft.subject.trim() && !campaignBodyEmpty(draft.body) && unknown.length === 0), check: locked || !!preview, send: locked, results: false,
   }
   const at = STEPS.findIndex((s) => s.key === step)
   const go = (s: Step) => { void save(); setStep(s) }
@@ -361,7 +409,21 @@ export function CampaignEditor({ id }: { id: string }) {
               </div>
             )}
 
-            {isProspectKind(draft.kind) && (
+            {isProspectKind(draft.kind) && canPickAddress && (
+              <Field label="Send from">
+                {/* 29 Oct: a cold campaign may go from one of the added addresses -- any but the firm's own domain. */}
+                <select className={INPUT} value={draft.sender_address_id ?? ''} data-testid="news-prospect-address"
+                  onChange={(e) => edit({ sender_address_id: e.target.value || null })}>
+                  <option value="">The marketer, on the prospect domain</option>
+                  {activeSenders.filter((x) => !isFirmMainDomain(x.address)).map((x) => <option key={x.id} value={x.id}>{x.display_name} · {x.address}</option>)}
+                </select>
+                {chosenAddress && !domainReady(chosenAddress.address, config?.readyDomains ?? []) && (
+                  <p className="text-xs text-gold-800 mt-1">{chosenAddress.address.split('@')[1]} is not set up for sending yet: see Email addresses on the campaigns page.</p>
+                )}
+              </Field>
+            )}
+
+            {isProspectKind(draft.kind) && !draft.sender_address_id && (
               <Field label="From (the marketer who runs it — replies go to their own inbox)">
                 <select className={INPUT} value={draft.sender_id ?? ''} onChange={(e) => edit({ sender_id: e.target.value || null })} data-testid="news-sender">
                   {users.filter((u) => u.status === 'Active' || u.id === draft.sender_id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -393,9 +455,57 @@ export function CampaignEditor({ id }: { id: string }) {
       )}
 
       {/* ------------------------------------------ WRITE ------------------------------------------ */}
-      {step === 'write' && (
+      {step === 'write' && (htmlMode ? (
+        /*
+         * OUTLOOK'S LAYOUT, AS RYNO ASKED (29 Oct): the ribbon across the top, then From, To and Subject, then the
+         * message. From and To are chosen on Who; here they are shown, as Outlook shows them above the words.
+         */
+        <RichEditor value={draft.body.replace(EMAIL_HTML_MARKER, '')} disabled={locked} testid="news-rich"
+          onChange={(html) => edit({ body: storeHtmlBody(html) })}
+          onPicture={currentUser ? (f) => uploadEmailPicture(currentUser.id, f) : undefined}
+          fields={[{ token: 'first_name', label: 'First name' }, { token: 'company', label: 'Company' }, { token: 'signature', label: 'Signature' }]}
+          ribbonRight={!locked && config?.schemaReady ? (
+            <Button size="sm" icon={<LayoutTemplate size={13} />} onClick={() => void saveTemplate()} data-testid="news-save-template">Save as template</Button>
+          ) : undefined}
+          header={(
+            <div className="divide-y divide-slate-100 border-b border-slate-200 text-sm" data-testid="news-compose-header">
+              <ComposeRow label="From">
+                <span className="text-slate-800" data-testid="news-compose-from">{shownFrom ?? (isNews ? SEND_FROM_LABELS[draft.send_from] : '—')}</span>
+                {fromNote && <span className="text-xs text-slate-400 ml-2">{fromNote}</span>}
+                {!locked && <button type="button" className="ml-auto text-xs text-brand-700 hover:underline" onClick={() => go('who')}>Change</button>}
+              </ComposeRow>
+              <ComposeRow label="To">
+                <span className="text-slate-800">{isFollowUp && wfStep ? WORKFLOW_AUDIENCE_LABELS[wfStep.audience] : describeAudience(draft.audience)}</span>
+                {preview && <span className="text-xs text-slate-400 ml-2">{preview.count} addresses</span>}
+                {!locked && !isFollowUp && <button type="button" className="ml-auto text-xs text-brand-700 hover:underline" onClick={() => go('who')}>Change</button>}
+              </ComposeRow>
+              <ComposeRow label="Subject">
+                <input className="flex-1 bg-transparent outline-none text-slate-900" value={draft.subject} disabled={locked}
+                  onChange={(e) => edit({ subject: e.target.value })} data-testid="news-subject" placeholder="What it is about" />
+              </ComposeRow>
+              <ComposeRow label="Preview line">
+                <input className="flex-1 bg-transparent outline-none text-slate-700" value={draft.preheader} disabled={locked}
+                  onChange={(e) => edit({ preheader: e.target.value })} data-testid="news-preheader" placeholder="The line an inbox shows after the subject" />
+              </ComposeRow>
+              <ComposeRow label="Name">
+                <input className="flex-1 bg-transparent outline-none text-slate-500 text-xs" value={draft.name} disabled={locked}
+                  onChange={(e) => edit({ name: e.target.value })} data-testid="news-name" />
+                <span className="text-[11px] text-slate-400">for us, never shown</span>
+              </ComposeRow>
+              {unknown.length > 0 && (
+                <p className="px-4 py-1.5 text-xs text-red-600">Raptor does not know {unknown.map((u) => `{{${u}}}`).join(', ')}. Only {MERGE_FIELDS.map((f) => `{{${f}}}`).join(', ')} are filled in.</p>
+              )}
+            </div>
+          )} />
+      ) : (
         <Card>
-          <CardHeader title="Write it" subtitle="A blank line starts a new paragraph. **Two asterisks** make bold. [Words](https://…) or a bare https:// address make a link." />
+          <CardHeader title="Write it" subtitle="This email was written as plain text. A blank line starts a new paragraph; **two asterisks** make bold." />
+          {!locked && (
+            <div className="mb-3 rounded-lg bg-brand-50/60 border border-brand-100 px-3 py-2 text-sm text-slate-700 flex flex-wrap items-center gap-2">
+              <span className="flex-1 min-w-[12rem]">Use the full editor, with fonts, colours, pictures and signatures, as in Outlook.</span>
+              <Button size="sm" variant="primary" data-testid="news-to-rich" onClick={() => edit({ body: storeHtmlBody(textToEmailHtml(draft.body)) })}>Switch to the full editor</Button>
+            </div>
+          )}
           <fieldset disabled={locked} className="space-y-3">
             <Field label="Campaign name (for us, never shown)">
               <input className={INPUT} value={draft.name} onChange={(e) => edit({ name: e.target.value })} data-testid="news-name" />
@@ -425,11 +535,14 @@ export function CampaignEditor({ id }: { id: string }) {
                 placeholder={'Dear {{first_name}},\n\nWhat we want to tell you…\n\nKind regards'} />
             </Field>
             {unknown.length > 0 && (
-              <p className="text-xs text-red-600">Raptor does not know {unknown.map((u) => `{{${u}}}`).join(', ')}. Only {MERGE_FIELDS.map((f) => `{{${f}}}`).join(' and ')} are filled in.</p>
+              <p className="text-xs text-red-600">Raptor does not know {unknown.map((u) => `{{${u}}}`).join(', ')}. Only {MERGE_FIELDS.map((f) => `{{${f}}}`).join(', ')} are filled in.</p>
             )}
           </fieldset>
+          {!locked && config?.schemaReady && (
+            <Button className="mt-3" icon={<LayoutTemplate size={14} />} onClick={() => void saveTemplate()} data-testid="news-save-template">Save as template</Button>
+          )}
         </Card>
-      )}
+      ))}
 
       {/* ------------------------------------------ CHECK ------------------------------------------ */}
       {step === 'check' && (
@@ -484,7 +597,7 @@ export function CampaignEditor({ id }: { id: string }) {
               )}
               <div className="flex flex-wrap gap-2">
                 {!preview && <Button onClick={() => void checkList()} disabled={!!busy} data-testid="news-check">{busy === 'preview' ? 'Counting…' : 'Count who gets it'}</Button>}
-                <Button variant="primary" icon={<Send size={14} />} disabled={!canSend || !!busy} onClick={() => void send()} data-testid="news-send">
+                <Button variant="primary" icon={<Send size={14} />} disabled={!canSend || !!busy} onClick={() => setSendOpen(true)} data-testid="news-send">
                   {preview ? `Send to ${preview.count} ${preview.count === 1 ? 'person' : 'people'}` : 'Count first, then send'}
                 </Button>
               </div>
@@ -504,6 +617,12 @@ export function CampaignEditor({ id }: { id: string }) {
                 {progress && `${progress.sent} sent so far${progress.remaining ? `, ${progress.remaining} still to go` : ''}.`}
                 {progress?.stoppedFor && !progress.waitingForTomorrow && ` Paused: ${progress.stoppedFor}`}
               </p>
+              {(progress?.nextBatchAt || row.next_batch_at) && row.status === 'sending' && (
+                <p className="text-sm text-slate-600 mt-1" data-testid="news-next-batch">
+                  Sending in batches of {row.batch_size}{row.batch_every_minutes ? `, every ${everyWords(row.batch_every_minutes)}` : ''}. The next batch goes at{' '}
+                  {new Date((progress?.nextBatchAt ?? row.next_batch_at) as string).toLocaleString('en-ZA', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, whether or not this page is open.
+                </p>
+              )}
               {progress?.allowance && (
                 <p className="text-sm text-slate-600 mt-1" data-testid="news-allowance">
                   {progress.allowance.sender} is in week {progress.allowance.week} of its warm-up: {progress.allowance.used} of {progress.allowance.cap} sent today.
@@ -519,6 +638,11 @@ export function CampaignEditor({ id }: { id: string }) {
           )}
           <ResultsPanel campaignId={id} kind={draft.kind} live={row.status === 'sending'} />
         </>
+      )}
+
+      {sendOpen && preview && (
+        <SendModal campaign={row} draft={draft} preview={preview} shownFrom={shownFrom} schemaReady={!!config?.schemaReady && row.batch_size !== undefined}
+          busy={busy === 'send'} error={busy === null ? error : null} onClose={() => setSendOpen(false)} onSend={(plan) => void send(plan)} />
       )}
 
       {/* Back, Save, Next -- on every step but the record of a campaign that has gone. */}
@@ -588,6 +712,23 @@ function PreviewList({ preview, kind }: { preview: AudiencePreview; kind: Campai
           {preview.count > preview.sample.length && <li className="px-3 py-1.5 text-xs text-slate-400">and {preview.count - preview.sample.length} more</li>}
         </ul>
       )}
+    </div>
+  )
+}
+
+/** "an hour", "4 hours", "a day" -- how often a batch goes. */
+export function everyWords(minutes: number): string {
+  if (minutes % 1440 === 0) return minutes === 1440 ? 'day' : `${minutes / 1440} days`
+  if (minutes % 60 === 0) return minutes === 60 ? 'hour' : `${minutes / 60} hours`
+  return `${minutes} minutes`
+}
+
+/** One line of Outlook's header: a grey label, then the field. */
+function ComposeRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-2">
+      <span className="w-24 shrink-0 text-xs text-slate-500">{label}</span>
+      <div className="flex-1 min-w-0 flex items-center gap-1">{children}</div>
     </div>
   )
 }

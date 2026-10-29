@@ -4,6 +4,7 @@ import type {
 } from './marketing.ts'
 import { resultsBySender } from './marketing.ts'
 import { fetchAllRows } from './fetchAll.ts'
+import { clockNow } from './clock'
 import type { ProspectOutcome, ProspectRow } from './prospectImport.ts'
 
 /**
@@ -41,6 +42,11 @@ export interface CampaignRow {
   sender_address_id?: string | null
   /** When the results email went (S14). */
   results_sent_at?: string | null
+  /** Batches (29 Oct); absent until migration campaign_compose. Null size: all at once. */
+  batch_size?: number | null
+  batch_every_minutes?: number | null
+  next_batch_at?: string | null
+  template_id?: string | null
 }
 
 export type { CampaignResults }
@@ -57,6 +63,10 @@ export interface SenderConfig {
   warmupCeiling?: number
   /** Sending from the firm's own domain (liaisons, reports@): needs RESEND_FIRM_API_KEY. */
   firm?: { ready: boolean; missing: string[] }
+  /** Migration campaign_compose is on this database: templates, extra-address campaigns, batches, signatures. */
+  schemaReady?: boolean
+  /** Domains marked verified, beyond the firm's two. */
+  readyDomains?: string[]
 }
 
 export interface AudiencePreview {
@@ -73,6 +83,8 @@ export interface Allowance { sender: string; week: number; cap: number; used: nu
 export interface DrainReport {
   sent: number; failed: number; skipped: number; remaining: number; stoppedFor: string | null
   waitingForTomorrow?: number; allowance?: Allowance | null
+  /** Sent in batches: when the next batch goes (the sweep sends it, whether or not this page is open). */
+  nextBatchAt?: string | null
 }
 
 /*
@@ -171,15 +183,20 @@ export async function createCampaign(name: string, kind: CampaignKind = 'news'):
 }
 
 export type CampaignDraft = Pick<CampaignRow, 'name' | 'subject' | 'preheader' | 'body' | 'image_url' | 'audience' | 'first_approach' | 'kind'
-  | 'sender_id' | 'send_from' | 'sender_address_id'>
+  | 'sender_id' | 'send_from' | 'sender_address_id' | 'batch_size' | 'batch_every_minutes'>
 
 export async function saveCampaign(id: string, draft: CampaignDraft): Promise<void> {
-  /* The extra address is only written where the column exists (see CAMPAIGN_COLUMNS). */
-  const { sender_address_id: addressId, ...rest } = draft
+  /*
+   * The columns of migration campaign_compose are written only where they exist -- undefined means the row came
+   * back without them (see CAMPAIGN_COLUMNS). An introduction or prospect campaign may name an address too.
+   */
+  const { sender_address_id: addressId, batch_size: batchSize, batch_every_minutes: every, ...rest } = draft
+  const keepAddress = draft.send_from === 'address' || draft.kind !== 'news'
   const { error } = await supabase.from('marketing_campaigns')
     .update({
       ...rest, image_url: draft.image_url?.trim() || null,
-      ...(addressId !== undefined ? { sender_address_id: draft.send_from === 'address' ? addressId : null } : {}),
+      ...(addressId !== undefined ? { sender_address_id: keepAddress ? addressId : null } : {}),
+      ...(batchSize !== undefined ? { batch_size: batchSize ?? null, batch_every_minutes: batchSize ? every ?? 60 : null } : {}),
     })
     .eq('id', id).select('id').single()
   if (error) throw new Error(error.message)
@@ -199,10 +216,16 @@ export async function campaignResultsBySender(id: string): Promise<SenderResults
 
 /* --------------------------------------- extra senders --------------------------------------- */
 
-export interface ExtraSender { id: string; address: string; display_name: string; active: boolean; created_at: string }
+export interface ExtraSender {
+  id: string; address: string; display_name: string; active: boolean; created_at: string
+  /** Migration campaign_compose: when somebody marked the domain verified, and the address's signature. */
+  domain_ready_at?: string | null
+  signature_html?: string | null
+}
 
 export async function listSenders(): Promise<ExtraSender[]> {
-  const { data, error } = await supabase.from('marketing_senders').select('id, address, display_name, active, created_at').order('address')
+  /* '*': the two columns of migration campaign_compose may not be there yet. */
+  const { data, error } = await supabase.from('marketing_senders').select('*').order('address')
   if (error) throw new Error(error.message)
   return (data ?? []) as ExtraSender[]
 }
@@ -210,9 +233,120 @@ export async function listSenders(): Promise<ExtraSender[]> {
 export async function addSender(address: string, displayName: string): Promise<ExtraSender> {
   const { data, error } = await supabase.from('marketing_senders')
     .insert({ address: address.trim().toLowerCase(), display_name: displayName.trim() })
-    .select('id, address, display_name, active, created_at').single()
-  if (error) throw new Error(/duplicate|unique/i.test(error.message) ? 'That address is already on the list.' : error.message)
+    .select('*').single()
+  if (error) {
+    if (/duplicate|unique/i.test(error.message)) throw new Error('That address is already on the list.')
+    /* The 28 Oct check (two domains only) is still on a database without migration campaign_compose. */
+    if (/check constraint/i.test(error.message)) throw new Error('Addresses on other domains can be added once the database change campaign_compose is applied. Until then only bfnews.co.za and bredellferreira.co.za.')
+    throw new Error(error.message)
+  }
   return data as ExtraSender
+}
+
+/** Every address on the domain is ready once one is marked: verification is the DOMAIN's, in Resend. */
+export async function markDomainReady(domain: string, userId: string | null): Promise<void> {
+  const { error } = await supabase.from('marketing_senders')
+    .update({ domain_ready_at: clockNow().toISOString(), domain_ready_by: userId }).like('address', `%@${domain}`)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * AN ADDRESS'S SIGNATURE. For news@ or reports@, which are not on the list until somebody gives them one, the
+ * row is made then -- an upsert on the address.
+ */
+export async function saveSenderSignature(address: string, displayName: string, signatureHtml: string): Promise<void> {
+  const { error } = await supabase.from('marketing_senders')
+    .upsert({ address: address.trim().toLowerCase(), display_name: displayName.trim() || address, signature_html: signatureHtml }, { onConflict: 'address' })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * A PICTURE FOR AN EMAIL, uploaded to the public 'email-signatures' bucket under the person's own folder -- the
+ * place every signature picture already goes, whose policy already lets a person write there. Public because an
+ * inbox fetches it with no sign-in; the name is random, so nobody finds one they were not sent.
+ */
+export async function uploadEmailPicture(userId: string, file: File): Promise<string> {
+  if (!/^image\/(png|jpe?g|gif)$/.test(file.type)) throw new Error('Choose a PNG, JPEG or GIF picture.')
+  if (file.size > 3 * 1024 * 1024) throw new Error('That picture is larger than 3 MB. A smaller one loads faster in an inbox.')
+  const ext = file.type === 'image/png' ? 'png' : file.type === 'image/gif' ? 'gif' : 'jpg'
+  const path = `${userId}/campaigns/${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase.storage.from('email-signatures').upload(path, file, { contentType: file.type, upsert: false })
+  if (error) throw new Error(error.message)
+  return supabase.storage.from('email-signatures').getPublicUrl(path).data.publicUrl
+}
+
+/* ----------------------------------------- templates ----------------------------------------- */
+
+export interface TemplateRow {
+  id: string
+  name: string
+  kind: CampaignKind
+  subject: string
+  preheader: string
+  body: string
+  image_url: string | null
+  send_from: SendFrom
+  sender_address_id: string | null
+  archived_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export async function listTemplates(): Promise<TemplateRow[]> {
+  const { data, error } = await supabase.from('marketing_templates').select('*').is('archived_at', null).order('name')
+  if (error) throw new Error(error.message)
+  return (data ?? []) as TemplateRow[]
+}
+
+/** A campaign's words, design and sender, kept to start the next one from. */
+export async function saveAsTemplate(name: string, d: CampaignDraft): Promise<TemplateRow> {
+  const { data, error } = await supabase.from('marketing_templates').insert({
+    name: name.trim(), kind: d.kind, subject: d.subject, preheader: d.preheader, body: d.body, image_url: d.image_url?.trim() || null,
+    send_from: d.send_from, sender_address_id: d.sender_address_id ?? null,
+  }).select('*').single()
+  if (error) throw new Error(error.message)
+  return data as TemplateRow
+}
+
+export async function updateTemplate(id: string, patch: Partial<Pick<TemplateRow, 'name' | 'subject' | 'preheader' | 'body' | 'image_url' | 'send_from' | 'sender_address_id' | 'archived_at'>>): Promise<void> {
+  const { error } = await supabase.from('marketing_templates').update(patch).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** A new draft, filled from a template -- its words, design and sender -- and saying which template it came from. */
+export async function campaignFromTemplate(t: TemplateRow, name: string): Promise<CampaignRow> {
+  const { data, error } = await supabase.from('marketing_campaigns').insert({
+    name, kind: t.kind, first_approach: t.kind === 'introduction', subject: t.subject, preheader: t.preheader, body: t.body,
+    image_url: t.image_url, send_from: t.kind === 'news' ? t.send_from : 'news', sender_address_id: t.sender_address_id, template_id: t.id,
+    ...(t.kind === 'news' ? {} : { audience: { kind: 'imported_list', listIds: [] } }),
+  }).select('*').single()
+  if (error) throw new Error(error.message)
+  return asRow(data as Record<string, unknown>)
+}
+
+/** A new draft from a chosen address (the Email addresses drop-down). */
+export async function campaignFrom(sendFrom: SendFrom, senderAddressId: string | null, name: string): Promise<CampaignRow> {
+  const { data, error } = await supabase.from('marketing_campaigns').insert({
+    name, kind: 'news', first_approach: false, send_from: sendFrom, ...(senderAddressId ? { sender_address_id: senderAddressId } : {}),
+  }).select('*').single()
+  if (error) throw new Error(error.message)
+  return asRow(data as Record<string, unknown>)
+}
+
+/* ------------------------------- the sheet: Sent 1, Sent 2, ... ------------------------------- */
+
+export interface SheetSend {
+  campaign_id: string; email: string; first_name: string | null; company_name: string | null; state: string
+  sent_at: string | null; delivered_at: string | null; first_opened_at: string | null; first_clicked_at: string | null; unsubscribed_at: string | null
+}
+
+/** Every send of these campaigns, each campaign read whole (paged), for the workflow's sheet. */
+export async function sendsOf(campaignIds: string[]): Promise<SheetSend[]> {
+  const all = await Promise.all(campaignIds.map((id) => fetchAllRows<SheetSend>(() => supabase.from('marketing_sends')
+    .select('campaign_id, email, first_name, company_name, state, sent_at, delivered_at, first_opened_at, first_clicked_at, unsubscribed_at')
+    .eq('campaign_id', id).order('id'), { table: 'marketing_sends' })))
+  return all.flat()
 }
 
 /** Switched off, never deleted: a campaign that went from it keeps saying who it came from. */
@@ -400,4 +534,12 @@ export async function optInStep(token: string, step: 'status' | 'yes' | 'withdra
   const out = await res.json().catch(() => ({})) as OptInState & { error?: string }
   if (!res.ok) throw new Error(out.error ?? `The server answered ${res.status}.`)
   return out
+}
+
+/** A follow-up's email, filled from a template: its words, design and picture (the sender stays the workflow's). */
+export async function fillCampaignFromTemplate(campaignId: string, t: TemplateRow): Promise<void> {
+  const { error } = await supabase.from('marketing_campaigns')
+    .update({ subject: t.subject, preheader: t.preheader, body: t.body, image_url: t.image_url, template_id: t.id })
+    .eq('id', campaignId).eq('status', 'draft')
+  if (error) throw new Error(error.message)
 }

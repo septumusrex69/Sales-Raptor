@@ -151,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : firmSender(FIRM_SENDER_NAME, FIRM_REPORTS_ADDRESS)
       if ('error' in choice) { res.status(412).json({ error: choice.error }); return }
       sender = choice
-      key = process.env[resendKeyEnvFor(choice.replyTo ?? '')]?.trim() ?? ''
+      key = process.env[resendKeyEnvFor(choice.replyTo ?? '', process.env)]?.trim() ?? ''
     }
     const to = profile.email || caller.email
     const origin = originFor(host)

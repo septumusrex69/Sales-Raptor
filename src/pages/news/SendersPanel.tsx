@@ -75,7 +75,7 @@ export function SendersPanel() {
         </ul>
         <h4 className="text-sm font-medium text-slate-700 mb-2">Add another address</h4>
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-start">
-          <Field label="Address" hint={`On ${SENDER_ADDRESS_DOMAINS.join(' or ')}. No password or sign-in is needed: those domains are already set up for sending.`}>
+          <Field label="Address" hint={`Any address on a domain the firm owns. No password or sign-in is needed. ${SENDER_ADDRESS_DOMAINS.join(' and ')} are set up already; a new domain is set up once, with the steps under Email addresses on the campaigns page.`}>
             <input className={INPUT} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="marketing@bredellferreira.co.za" data-testid="news-sender-address-input" />
           </Field>
           <Field label="Name it signs with" hint="What the inbox shows as the From name.">

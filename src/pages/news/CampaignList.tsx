@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Megaphone, Plus } from 'lucide-react'
+import { LayoutTemplate, Megaphone, Plus } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
-import { CAMPAIGN_KIND_LABELS, SEND_FROM_LABELS, describeAudience, resultRates, type CampaignKind, type CampaignResults } from '../../lib/marketing.ts'
-import { createCampaign, listCampaigns, listSenders, type CampaignRow, type ExtraSender } from '../../lib/marketingApi'
+import { CAMPAIGN_KIND_LABELS, SEND_FROM_LABELS, describeAudience, resultRates, type CampaignKind, type CampaignResults, type SendFrom } from '../../lib/marketing.ts'
+import {
+  campaignFrom, campaignFromTemplate, createCampaign, listCampaigns, listSenders, listTemplates, type CampaignRow, type ExtraSender, type TemplateRow,
+} from '../../lib/marketingApi'
+import { EmailAddresses, type FromFilter } from './EmailAddresses'
 import { clockNow } from '../../lib/clock'
 import { ImportListCard } from './ImportListCard'
 import { UndeliveredCard } from './UndeliveredCard'
-import { Figure, StatusPill, errorText } from './shared'
+import { Figure, StatusPill, errorText, useSenderConfig } from './shared'
 
 /**
  * EVERY CAMPAIGN, AND WHO IT WENT FROM (S13). Ryno: "a drop-down where I can select different email
@@ -19,8 +22,6 @@ import { Figure, StatusPill, errorText } from './shared'
  * THE FILTER IS THE CAMPAIGN'S CHOICE (BF News, the liaisons, reports@, an extra address). One liaison's
  * own share of a liaison campaign is in that campaign's results, split by sender.
  */
-type FromFilter = 'all' | 'news' | 'liaison' | 'reports' | `address:${string}` | 'prospect'
-
 function fromLabel(c: CampaignRow, senders: Map<string, ExtraSender>): string {
   if (c.kind !== 'news') return 'The marketer'
   if (c.send_from === 'address') {
@@ -36,13 +37,24 @@ export function CampaignList() {
   const [counts, setCounts] = useState<Map<string, CampaignResults>>(new Map())
   const [senders, setSenders] = useState<ExtraSender[]>([])
   const [from, setFrom] = useState<FromFilter>('all')
+  const { config } = useSenderConfig()
+  const [templates, setTemplates] = useState<TemplateRow[]>([])
+  const [picking, setPicking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     listCampaigns().then(({ campaigns, counts: c }) => { setRows(campaigns); setCounts(c) }).catch((e: unknown) => setError(errorText(e)))
     listSenders().then(setSenders).catch(() => setSenders([]))
+    listTemplates().then(setTemplates).catch(() => setTemplates([]))
   }, [])
+
+  const monthName = () => clockNow().toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })
+  async function start(make: () => Promise<CampaignRow>) {
+    setBusy(true)
+    try { navigate(`/news/${(await make()).id}`) } catch (e) { setError(errorText(e)); setBusy(false) }
+  }
+  const newFrom = (sendFrom: SendFrom, addressId: string | null) => void start(() => campaignFrom(sendFrom, addressId, `Newsletter ${monthName()}`))
 
   async function newCampaign(kind: CampaignKind) {
     setBusy(true)
@@ -72,12 +84,6 @@ export function CampaignList() {
     return n ? { accepted: a.accepted + n.accepted, delivered: a.delivered + n.delivered, opened: a.opened + n.opened, unsubscribed: a.unsubscribed + n.unsubscribed } : a
   }, { accepted: 0, delivered: 0, opened: 0, unsubscribed: 0 })
   const openRate = sum.delivered ? Math.round((sum.opened / sum.delivered) * 1000) / 10 : null
-  const usedAddresses = senders.filter((s) => (rows ?? []).some((c) => c.sender_address_id === s.id))
-  const filters: { value: FromFilter; label: string }[] = [
-    { value: 'all', label: 'Everything' }, { value: 'news', label: 'BF News' }, { value: 'liaison', label: 'Each liaison' }, { value: 'reports', label: 'reports@' },
-    ...usedAddresses.map((s) => ({ value: `address:${s.id}` as FromFilter, label: s.address })),
-    { value: 'prospect', label: 'Introductions & prospects' },
-  ]
   const when = (c: CampaignRow) => {
     const iso = c.queued_at ?? (c.status === 'draft' ? c.updated_at : c.finished_at)
     return iso ? new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
@@ -92,15 +98,26 @@ export function CampaignList() {
         <Button variant="primary" icon={<Plus size={15} />} onClick={() => void newCampaign('news')} disabled={busy} data-testid="news-new">New news campaign</Button>
         <Button icon={<Plus size={15} />} onClick={() => void newCampaign('introduction')} disabled={busy} data-testid="news-new-introduction">New introduction</Button>
         <Button icon={<Plus size={15} />} onClick={() => void newCampaign('prospect')} disabled={busy} data-testid="news-new-prospect">New prospect campaign</Button>
+        {templates.length > 0 && (
+          <div className="relative">
+            <Button icon={<LayoutTemplate size={15} />} onClick={() => setPicking((p) => !p)} disabled={busy} data-testid="news-new-from-template">From a template</Button>
+            {picking && (
+              <ul className="absolute right-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white shadow-xl py-1" data-testid="news-template-menu">
+                {templates.map((t) => (
+                  <li key={t.id}>
+                    <button type="button" className="w-full text-left px-3 py-2 hover:bg-slate-50" onClick={() => void start(() => campaignFromTemplate(t, `${t.name} ${monthName()}`))}>
+                      <span className="block text-sm text-slate-800">{t.name}</span>
+                      <span className="block text-xs text-slate-500 truncate">{t.subject || 'No subject yet'}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="text-xs font-medium text-slate-500" htmlFor="news-from-filter">Sent from</label>
-        <select id="news-from-filter" value={from} onChange={(e) => setFrom(e.target.value as FromFilter)} data-testid="news-from-filter"
-          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm">
-          {filters.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-        </select>
-      </div>
+      <EmailAddresses value={from} onChange={setFrom} onNewFrom={newFrom} config={config} />
 
       {gone.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="news-history-summary">

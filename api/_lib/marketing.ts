@@ -6,13 +6,14 @@ import { fetchAllRows } from '../../src/lib/fetchAll.js'
 import {
   DEFAULT_WARMUP_CEILING, LEAD_AUDIENCES, PROSPECT_SENDER_ENV, RESEND_BATCH_MAX, RESEND_MIN_GAP_MS, SENDER_ENV,
   FIRM_SENDER_ENV, FIRM_SENDER_NAME, FIRM_REPORTS_ADDRESS,
-  clientLiaison, firmSender, inWorkflowAudience, parseSendFrom, parseWorkflowAudience, resendKeyEnvFor, resultRates,
+  clientLiaison, domainReady, firmSender, inWorkflowAudience, prospectAddressSender, parseSendFrom, parseWorkflowAudience, resendKeyEnvFor, resultRates,
   resultsBySender, senderForRecipient, splitFrom,
   isProspectKind, isSendableEmail, newsSender, newsletterActivitySubject, normaliseEmail, parseAudience, parseKind,
   prospectSender, renderCampaignEmail, replyToFor, resolveAudience, sendBlockReason, stoppedClientEmails, warmupDailyCap, warmupWeek,
   type AudienceResult, type CampaignKind, type CampaignResults, type LiaisonPerson, type Recipient, type RowSender, type SendFrom,
   type SendResultRow, type SenderChoice, type SenderCompany,
 } from '../../src/lib/marketing.js'
+import { campaignBodyEmpty } from '../../src/lib/campaignHtml.js'
 
 /**
  * NEWS & CAMPAIGNS ON THE SERVER: the sender, the list, the queue and the drain (S10, 21 Oct).
@@ -50,6 +51,14 @@ export interface SenderConfig {
    * RESEND_FIRM_API_KEY: the first key is restricted to the news domain and Resend refuses the rest.
    */
   firm: { ready: boolean; missing: string[] }
+  /**
+   * WHETHER MIGRATION campaign_compose IS ON THIS DATABASE (docs/briefs/S13-migration-campaign-compose.sql):
+   * templates, a campaign from an extra address, batches, signatures and any-domain senders. Until it is,
+   * the screens offer what works without it and say what is waiting.
+   */
+  schemaReady: boolean
+  /** Domains marked verified by somebody who followed the set-up guide, beyond the firm's two. */
+  readyDomains: string[]
 }
 
 export function warmupCeiling(): number {
@@ -83,6 +92,21 @@ export async function senderConfig(admin: SupabaseClient): Promise<SenderConfig>
     prospect: { ready: prospectMissing.length === 0 && !prospectProblem, missing: prospectMissing, problem: prospectProblem, domain },
     warmupCeiling: warmupCeiling(),
     firm: process.env[FIRM_SENDER_ENV]?.trim() ? { ready: true, missing: [] } : { ready: false, missing: [FIRM_SENDER_ENV] },
+    ...(await schemaState(admin)),
+  }
+}
+
+/** One cheap read: does the campaign_compose migration's last table exist, and which domains are marked ready. */
+async function schemaState(admin: SupabaseClient): Promise<{ schemaReady: boolean; readyDomains: string[] }> {
+  /* Any failure reads as "not there yet": the screens then offer only what works without it. */
+  try {
+    const probe = await admin.from('marketing_templates').select('id').limit(1)
+    if (probe.error) return { schemaReady: false, readyDomains: [] }
+    const { data } = await admin.from('marketing_senders').select('address').not('domain_ready_at', 'is', null)
+    const domains = ((data ?? []) as { address: string }[]).map((r) => r.address.split('@')[1] ?? '').filter(Boolean)
+    return { schemaReady: true, readyDomains: [...new Set(domains)] }
+  } catch {
+    return { schemaReady: false, readyDomains: [] }
   }
 }
 
@@ -92,6 +116,10 @@ export async function senderConfig(admin: SupabaseClient): Promise<SenderConfig>
  * on the screen in these words, and the queue refuses on the same ones.
  */
 export function sendFromNotReady(config: SenderConfig, sendFrom: SendFrom, extraAddress?: string | null): string | null {
+  /* An address whose domain nobody has set up would be refused by Resend on the morning it mattered. */
+  if (sendFrom === 'address' && extraAddress && !domainReady(extraAddress, config.readyDomains ?? [])) {
+    return `${extraAddress.split('@')[1]} is not set up for sending yet. Follow the steps under Email addresses, then mark it verified.`
+  }
   const needsFirmKey = sendFrom === 'liaison' || sendFrom === 'reports'
     || (sendFrom === 'address' && !!extraAddress && resendKeyEnvFor(extraAddress) === FIRM_SENDER_ENV)
   if (needsFirmKey && !config.firm.ready) {
@@ -123,9 +151,16 @@ export async function campaignMarketer(admin: SupabaseClient, campaign: Pick<Cam
 
 /** The From and Reply-To for one campaign, or why there are none. */
 export async function senderForCampaign(
-  admin: SupabaseClient, config: SenderConfig, campaign: Pick<CampaignRow, 'kind' | 'sender_id' | 'created_by'>,
+  admin: SupabaseClient, config: SenderConfig, campaign: Pick<CampaignRow, 'kind' | 'sender_id' | 'created_by'> & { sender_address_id?: string | null },
 ): Promise<SenderChoice> {
   if (isProspectKind(campaign.kind)) {
+    /* A chosen address (29 Oct), or the marketer on the prospect domain as before. Never the firm's own domain. */
+    if (campaign.sender_address_id) {
+      const extra = await loadExtraSender(admin, campaign.sender_address_id)
+      if (!extra || !extra.active) return { error: 'The address this campaign was to go from is no longer available. Choose another.' }
+      if (!domainReady(extra.address, config.readyDomains ?? [])) return { error: `${extra.address.split('@')[1]} is not set up for sending yet.` }
+      return prospectAddressSender(extra.display_name, extra.address)
+    }
     return prospectSender(process.env.MARKETING_PROSPECT_DOMAIN, await campaignMarketer(admin, campaign))
   }
   return newsSender(process.env.MARKETING_FROM, config.replyTo)
@@ -266,8 +301,12 @@ interface CampaignRow {
   created_by: string | null
   queued_by: string | null
   send_from: SendFrom
-  /** The extra address (marketing_senders) when send_from is 'address'. Absent until migration campaign_sender_address. */
+  /** The extra address (marketing_senders) when send_from is 'address'. Absent until migration campaign_compose. */
   sender_address_id?: string | null
+  /** Batches (29 Oct): up to batch_size, then wait batch_every_minutes. Absent or null: all at once. */
+  batch_size?: number | null
+  batch_every_minutes?: number | null
+  next_batch_at?: string | null
 }
 
 /*
@@ -291,12 +330,36 @@ export async function loadCampaign(admin: SupabaseClient, id: string): Promise<C
  * ---------------------------------------------------------------------------------------------- */
 
 /** An extra address, as marketing_senders keeps it. */
-export interface ExtraSender { id: string; address: string; display_name: string; active: boolean }
+export interface ExtraSender { id: string; address: string; display_name: string; active: boolean; signature_html?: string | null }
 
 export async function loadExtraSender(admin: SupabaseClient, id: string | null | undefined): Promise<ExtraSender | null> {
   if (!id) return null
-  const { data } = await admin.from('marketing_senders').select('id, address, display_name, active').eq('id', id).maybeSingle()
+  /* '*': signature_html arrives with migration campaign_compose. */
+  const { data } = await admin.from('marketing_senders').select('*').eq('id', id).maybeSingle()
   return (data as ExtraSender | null) ?? null
+}
+
+/**
+ * THE SIGNATURE AN ADDRESS SIGNS WITH, for {{signature}}: its own (marketing_senders.signature_html, set under
+ * Email addresses), or -- for a liaison -- the signature on her own profile, the one her everyday mail already
+ * carries, so Nicole's newsletter signs off the way her letters do. None is an empty string, never a guess.
+ */
+export async function signatureFor(admin: SupabaseClient, address: string): Promise<string> {
+  const a = normaliseEmail(address)
+  if (!a) return ''
+  const { data: own } = await admin.from('marketing_senders').select('*').eq('address', a).maybeSingle()
+  const html = (own as { signature_html?: string | null } | null)?.signature_html
+  if (html?.trim()) return html
+  const { data: person } = await admin.from('profiles')
+    .select('email_signature, email_signature_image_url, email_signature_image_width, email_signature_image_align').ilike('email', a).limit(1).maybeSingle()
+  const p = person as { email_signature?: string | null; email_signature_image_url?: string | null; email_signature_image_width?: number | null; email_signature_image_align?: string | null } | null
+  if (!p || (!p.email_signature?.trim() && !p.email_signature_image_url)) return ''
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const text = (p.email_signature ?? '').trim() ? `<p>${esc(p.email_signature ?? '').replace(/\n/g, '<br>')}</p>` : ''
+  const img = p.email_signature_image_url && /^https:\/\//.test(p.email_signature_image_url)
+    ? `<p align="${p.email_signature_image_align ?? 'left'}"><img src="${esc(p.email_signature_image_url)}" width="${Math.min(600, p.email_signature_image_width ?? 160)}" alt=""></p>`
+    : ''
+  return text + img
 }
 
 /** Everybody who could be somebody's liaison, keyed by id -- and by address, for crediting a timeline line. */
@@ -448,7 +511,7 @@ export async function queueCampaign(admin: SupabaseClient, campaignId: string, c
   const campaign = await loadCampaign(admin, campaignId)
   if (!campaign) return { error: 'No such campaign.', status: 404 }
   if (campaign.status !== 'draft') return { error: 'This campaign has already been sent.', status: 409 }
-  if (!campaign.subject.trim() || !campaign.body.trim()) return { error: 'Give it a subject and a body first.', status: 400 }
+  if (!campaign.subject.trim() || campaignBodyEmpty(campaign.body)) return { error: 'Give it a subject and a body first.', status: 400 }
 
   if (campaign.kind === 'news') {
     const extra = campaign.send_from === 'address' ? await loadExtraSender(admin, campaign.sender_address_id) : null
@@ -526,6 +589,8 @@ export interface DrainReport {
   waitingForTomorrow: number
   /** The sender's day, for a prospect campaign drained by itself. */
   allowance: Allowance | null
+  /** A campaign sent in batches (29 Oct) that has sent this batch: when the next one goes. The sweep sends it. */
+  nextBatchAt?: string | null
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -558,11 +623,17 @@ export async function drainMarketing(
   const senders = new Map<string, SenderChoice>()
   /* Campaigns whose sender is at today's allowance: not tried again in this drain. */
   const waiting = new Set<string>()
+  /* Batched campaigns between batches: not tried again in this drain, and not "waiting for tomorrow". */
+  const betweenBatches = new Set<string>()
   /* Campaigns that cannot go at all just now (no sender) -- said once, not retried. */
   const blocked = new Set<string>()
   /* Address -> the name it signs with, and -> the liaison's profile for the timeline. */
   const names = new Map<string, string | null>()
   const liaisonIds = new Map<string, string>()
+  /* Address -> its signature, for {{signature}}: read once per drain, not once per email. */
+  const signatures = new Map<string, string>()
+  /* A batched campaign's allowance left in THIS batch (29 Oct). */
+  const batchLeft = new Map<string, number>()
   const config = await senderConfig(admin)
   const apiKey = process.env.RESEND_API_KEY?.trim() ?? ''
   const origin = originFor(opts.host)
@@ -585,7 +656,7 @@ export async function drainMarketing(
     if (opts.campaignId) q = q.eq('id', opts.campaignId)
     const { data: live } = await q
     const open = ((live ?? []) as CampaignRow[]).map(asCampaign)
-      .filter((c) => !waiting.has(c.id) && !blocked.has(c.id))
+      .filter((c) => !waiting.has(c.id) && !blocked.has(c.id) && !betweenBatches.has(c.id))
     if (!open.length) break
     let progressed = false
     for (const campaign of open) {
@@ -604,6 +675,22 @@ export async function drainMarketing(
         const notReady = sendFromNotReady(config, campaign.send_from, extra?.address)
         if (notReady) { blocked.add(campaign.id); report.stoppedFor = notReady; continue }
       }
+      /*
+       * IN BATCHES, WHEN IT WAS ASKED FOR (Ryno, 29 Oct: "how many emails at a time, the frequency"). Up to
+       * batch_size, then nothing until next_batch_at -- which is written the moment a batch is used up, so the
+       * open screen, the five-minute sweep and a second tab all read the same clock. A batch is counted in
+       * CLAIMED rows: a row skipped for an unsubscribe still took its place, which errs on the slow side.
+       */
+      const batch = campaign.batch_size && campaign.batch_size > 0 ? campaign.batch_size : null
+      if (batch) {
+        if (campaign.next_batch_at && new Date(campaign.next_batch_at).getTime() > Date.now()) {
+          betweenBatches.add(campaign.id)
+          if (opts.campaignId === campaign.id || !report.nextBatchAt) report.nextBatchAt = campaign.next_batch_at
+          continue
+        }
+        if (!batchLeft.has(campaign.id)) batchLeft.set(campaign.id, batch)
+      }
+      const limit = batch ? Math.max(1, Math.min(RESEND_BATCH_MAX, batchLeft.get(campaign.id) ?? batch)) : RESEND_BATCH_MAX
 
       let claimed: SendRow[]
       if (isProspectKind(campaign.kind)) {
@@ -619,19 +706,30 @@ export async function drainMarketing(
         }
         if (used >= cap) { waiting.add(campaign.id); continue }
         const { data, error } = await admin.rpc('marketing_claim_prospect', {
-          p_campaign: campaign.id, p_sender: address, p_cap: cap, p_limit: RESEND_BATCH_MAX,
+          p_campaign: campaign.id, p_sender: address, p_cap: cap, p_limit: limit,
         })
         if (error) { halt = error.message; break }
         claimed = (data ?? []) as SendRow[]
         if (report.allowance?.sender === address) report.allowance.used = Math.min(cap, used + claimed.length)
         if (!claimed.length) { waiting.add(campaign.id); continue }
       } else {
-        const { data, error } = await admin.rpc('marketing_claim_sends', { p_limit: RESEND_BATCH_MAX, p_campaign: campaign.id })
+        const { data, error } = await admin.rpc('marketing_claim_sends', { p_limit: limit, p_campaign: campaign.id })
         if (error) { halt = error.message; break }
         claimed = (data ?? []) as SendRow[]
         if (!claimed.length) continue
       }
       progressed = true
+      if (batch) {
+        const left = (batchLeft.get(campaign.id) ?? batch) - claimed.length
+        batchLeft.set(campaign.id, left)
+        if (left <= 0) {
+          /* This batch is used: the next one waits its turn, whoever drains it. */
+          const next = new Date(Date.now() + (campaign.batch_every_minutes ?? 60) * 60_000).toISOString()
+          await admin.from('marketing_campaigns').update({ next_batch_at: next }).eq('id', campaign.id)
+          betweenBatches.add(campaign.id)
+          report.nextBatchAt = next
+        }
+      }
       if (campaign.kind !== 'news') { halt = await sendChunk(campaign, sender, claimed, apiKey); continue }
       /*
        * A NEWS CHUNK CAN CARRY SEVERAL SENDERS (S13): Nicole's clients, Ryno's, reports@ for the rest
@@ -651,7 +749,7 @@ export async function drainMarketing(
           continue
         }
         if (!address) { halt = await sendChunk(campaign, sender, rows, apiKey); continue }
-        const env = resendKeyEnvFor(address)
+        const env = resendKeyEnvFor(address, process.env)
         const key = process.env[env]?.trim() ?? ''
         const from = firmSender(await nameOf(address), address)
         if (!key || 'error' in from) {
@@ -707,6 +805,9 @@ export async function drainMarketing(
       .map((l) => [l.id, { marketingConsentAt: l.marketing_consent_at }]))
 
     const toSend: { row: SendRow; email: OutgoingEmail }[] = []
+    /* {{signature}} is the signature of the address these go from -- read once, only if the body asks for it. */
+    const from = bareAddress(sender.from)
+    if (/\{\{\s*signature\s*\}\}/.test(campaign.body) && !signatures.has(from)) signatures.set(from, await signatureFor(admin, from))
     for (const row of claimed) {
       if (stopped.has(row.email)) {
         const why = stopped.get(row.email)
@@ -721,7 +822,7 @@ export async function drainMarketing(
       if (block) { results.push({ id: row.id, state: 'skipped', error: block }); continue }
       if (!isSendableEmail(row.email)) { results.push({ id: row.id, state: 'failed', error: 'The address does not look right.' }); continue }
       if (row.attempts > MAX_ATTEMPTS) { results.push({ id: row.id, state: 'failed', error: `Gave up after ${MAX_ATTEMPTS} attempts.` }); continue }
-      toSend.push({ row, email: buildEmail(campaign, sender, row, personal) })
+      toSend.push({ row, email: buildEmail(campaign, sender, row, personal, signatures.get(bareAddress(sender.from)) ?? '') })
     }
 
     let stop: string | null = null
@@ -765,7 +866,7 @@ export async function drainMarketing(
     return stop
   }
 
-  function buildEmail(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, row: SendRow, personal = false): OutgoingEmail {
+  function buildEmail(campaign: CampaignRow, sender: { from: string; replyTo: string | null }, row: SendRow, personal = false, signatureHtml = ''): OutgoingEmail {
     const token = unsubscribeToken(row.email)
     const introduction = campaign.kind === 'introduction'
     const rendered = renderCampaignEmail(
@@ -775,6 +876,7 @@ export async function drainMarketing(
         unsubscribeUrl: `${origin}/unsubscribe/${token}`, firmName, face, firmAddress,
         basis: introduction ? 'introduction' : row.lead_id && !row.company_id ? 'lead' : 'client',
         optInUrl: introduction ? `${origin}/opt-in/${optInToken(row.id)}` : null,
+        signatureHtml,
       },
     )
     return {
@@ -935,7 +1037,7 @@ export async function queueWorkflowStep(
     await admin.from('marketing_workflow_steps').update({ run_at: new Date().toISOString() }).eq('id', step.step_id).is('run_at', null)
     return { error: `${label}: its email had already been sent by hand, so the workflow did not send it again.` }
   }
-  if (!campaign.subject.trim() || !campaign.body.trim()) return { error: `${label}: it has no subject or no body yet. It goes the first morning it has both.` }
+  if (!campaign.subject.trim() || campaignBodyEmpty(campaign.body)) return { error: `${label}: it has no subject or no body yet. It goes the first morning it has both.` }
   const extra = campaign.send_from === 'address' ? await loadExtraSender(admin, campaign.sender_address_id) : null
   const notReady = kindNotReady(config, 'news') ?? sendFromNotReady(config, campaign.send_from, extra?.address)
   if (notReady) return { error: `${label}: ${notReady}` }

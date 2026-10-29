@@ -104,11 +104,22 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm,
   ok('...and still refuses the prospect domain there', 'error' in M.prospectSender('bredellferreira.co.za', { name: 'R', email: 'r@bredellferreira.co.za' }))
   check('the deliberate door: a liaison goes from the firm\'s domain, replying to herself',
     M.firmSender('Nicole Loder', 'nicole@bredellferreira.co.za'), { from: '"Nicole Loder" <nicole@bredellferreira.co.za>', replyTo: 'nicole@bredellferreira.co.za' })
-  ok('...but only the two domains set up for sending', 'error' in M.firmSender('X', 'x@gmail.com'))
-  ok('...and not a subdomain', 'error' in M.firmSender('X', 'x@mail.bredellferreira.co.za'))
   ok('...and a quote typed into a name cannot break the header', !/"[^"]*"[^<]*"/.test(M.firmSender('Ni"cole <x>', 'n@bfnews.co.za').from))
   check('an extra address on either domain may be added', [M.senderAddressProblem('marketing@bredellferreira.co.za'), M.senderAddressProblem('Hello@BFNews.co.za')], [null, null])
-  ok('...an address anywhere else is refused, and says which domains', /bredellferreira\.co\.za or bfnews\.co\.za/.test(M.senderAddressProblem('me@gmail.com') ?? ''))
+  /* 29 Oct, Ryno: "the ability to add any addresses that I want" -- any domain the firm owns may be added. */
+  check('an address on any domain the firm owns may be added', M.senderAddressProblem('hello@bfmarketing.co.za'), null)
+  ok('...but never a public mail service nobody at the firm can verify', /public mail service/.test(M.senderAddressProblem('me@gmail.com') ?? ''))
+  ok('...so the door refuses one too', 'error' in M.firmSender('X', 'x@gmail.com'))
+  check('a domain is ready if it is one of the firm\'s two, or marked verified', [
+    M.domainReady('a@bfnews.co.za', []), M.domainReady('a@bfmarketing.co.za', []), M.domainReady('a@bfmarketing.co.za', ['bfmarketing.co.za']),
+    M.domainReady('a@mail.bfmarketing.co.za', ['bfmarketing.co.za']),
+  ], [true, false, true, false])
+  ok('...and the set-up guide names the domain and the Vercel setting for its key', M.domainSetupSteps('bfmarketing.co.za').some((x) => /RESEND_KEY_BFMARKETING_CO_ZA/.test(x))
+    && M.domainSetupSteps('bfmarketing.co.za').some((x) => /DKIM/.test(x)))
+  check('a third domain with its own key is sent with it; without one, with the first key',
+    [M.resendKeyEnvFor('a@bfmarketing.co.za', { RESEND_KEY_BFMARKETING_CO_ZA: 'k' }), M.resendKeyEnvFor('a@bfmarketing.co.za', {})], ['RESEND_KEY_BFMARKETING_CO_ZA', 'RESEND_API_KEY'])
+  ok('cold mail from a chosen address is still refused on the firm\'s own domain', 'error' in M.prospectAddressSender('X', 'x@bredellferreira.co.za'))
+  ok('...and allowed on another', 'from' in M.prospectAddressSender('Ryno', 'ryno@bfmarketing.co.za'))
   ok('...as is something that is not an address', !!M.senderAddressProblem('marketing'))
   check('the firm\'s domain needs the second key; the news domain the first',
     [M.resendKeyEnvFor('reports@bredellferreira.co.za'), M.resendKeyEnvFor('news@bfnews.co.za')], ['RESEND_FIRM_API_KEY', 'RESEND_API_KEY'])
@@ -125,6 +136,8 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm,
     S.sendFromNotReady(base, 'liaison'), 'Sending from the liaisons is not set up yet: RESEND_FIRM_API_KEY must be set in Vercel.')
   ok('...nor reports@', /reports@ is not set up yet/.test(S.sendFromNotReady(base, 'reports') ?? ''))
   check('...but BF News, and an extra address on bfnews.co.za, can', [S.sendFromNotReady(base, 'news'), S.sendFromNotReady(base, 'address', 'hello@bfnews.co.za')], [null, null])
+  ok('an address whose domain is not set up cannot be chosen to send', /not set up for sending yet/.test(S.sendFromNotReady(base, 'address', 'a@bfmarketing.co.za') ?? ''))
+  check('...until it is marked verified', S.sendFromNotReady({ ...base, readyDomains: ['bfmarketing.co.za'] }, 'address', 'a@bfmarketing.co.za'), null)
   check('with the key, all can', S.sendFromNotReady({ ...base, firm: { ready: true, missing: [] } }, 'liaison'), null)
 }
 
