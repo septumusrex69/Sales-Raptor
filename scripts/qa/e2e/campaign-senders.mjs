@@ -161,11 +161,11 @@ try {
     await page.getByTestId('news-step-send').click()
     t.check('Send says the split before anything goes', await page.getByTestId('news-send-split').innerText(), 'From Nicole Loder 42 · Ryno 31 · reports@ 9 · news@ (leads) 12')
     await t.shot(page, 'campaign-send')
-    let confirmText = ''
-    page.once('dialog', async (d) => { confirmText = d.message(); await d.accept() })
     await page.getByTestId('news-send').click()
+    await page.getByTestId('news-send-modal').waitFor({ timeout: 5000 })
+    t.check('...and the pop-up asks first, with the split', await page.getByTestId('news-send-modal-from').innerText(), 'From Nicole Loder 42 · Ryno 31 · reports@ 9 · news@ (leads) 12')
+    await page.getByTestId('news-send-confirm').click()
     for (let i = 0; i < 40 && !asked.some((b) => b.step === 'queue'); i += 1) await page.waitForTimeout(100)
-    t.ok('...and asks first, with the split', /to 94 people\? From Nicole Loder 42 · Ryno 31 · reports@ 9 · news@ \(leads\) 12\. This cannot be called back/.test(confirmText))
     t.ok('...then queues', asked.some((b) => b.step === 'queue'))
     await context.close()
   }
@@ -183,10 +183,12 @@ try {
     await page.setViewportSize({ width: 820, height: 1180 })
     await t.shot(page, 'campaign-list-ipad')
     await page.setViewportSize({ width: 1440, height: 1000 })
-    await page.getByTestId('news-from-filter').selectOption('liaison')
+    await page.getByTestId('news-addresses').click()
+    await page.getByTestId('news-address-option').filter({ hasText: 'Each client’s liaison' }).click()
     t.check('filtered to the liaisons, only their campaign', JSON.stringify(await froms()), JSON.stringify(['Each liaison']))
     t.ok('...with what went from them summed', /Campaigns sent\s*1[\s\S]*Emails sent\s*5/.test(await page.getByTestId('news-history-summary').innerText()))
-    await page.getByTestId('news-from-filter').selectOption('reports')
+    await page.getByTestId('news-addresses').click()
+    await page.getByTestId('news-address-option').filter({ hasText: 'reports@bredellferreira.co.za' }).click()
     t.check('...and to reports@', JSON.stringify(await froms()), JSON.stringify(['reports@']))
     await context.close()
   }
@@ -234,8 +236,8 @@ try {
     await page.getByTestId('news-senders').waitFor({ timeout: 20000 })
     t.ok('the extra addresses are listed', /marketing@bfnews\.co\.za/.test(await page.getByTestId('news-senders').innerText()))
     await page.getByTestId('news-sender-address-input').fill('me@gmail.com')
-    t.ok('an address on a domain that cannot send is refused before it is added',
-      /Only addresses on bredellferreira\.co\.za or bfnews\.co\.za can send/.test(await page.getByTestId('news-sender-problem').innerText()) && await page.getByTestId('news-sender-add').isDisabled())
+    t.ok('an address on a public mail service nobody can verify is refused before it is added',
+      /public mail service/.test(await page.getByTestId('news-sender-problem').innerText()) && await page.getByTestId('news-sender-add').isDisabled())
     await page.getByTestId('news-sender-address-input').fill('marketing@bredellferreira.co.za')
     t.ok('...one on the firm\'s domain can be', await page.getByTestId('news-sender-add').isEnabled())
     t.check('the results email says who gets it', await page.getByTestId('news-results-to').inputValue(), 'ryno@bredellferreira.co.za')

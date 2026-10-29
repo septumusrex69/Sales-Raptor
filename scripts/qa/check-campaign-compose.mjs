@@ -47,6 +47,8 @@ const ok = (name, v) => check(name, !!v, true)
   check('...a picture on the web stays', clean('<img src="https://cdn.test/logo.png" width="120" alt="Logo">'), '<img src="https://cdn.test/logo.png" width="120" alt="Logo">')
   ok('a style that loads a file goes; colour and size stay',
     clean('<span style="color:#b91c1c;background:url(https://evil.test/t.gif);font-size:14pt">x</span>') === '<span style="color:#b91c1c;font-size:14pt">x</span>')
+  /* The url() guard alone, on a property no other rule narrows. */
+  check('...on any property', clean('<span style="font-family:url(https://evil.test/f.woff);color:red">x</span>'), '<span style="color:red">x</span>')
   check('Word\'s markup goes and its words stay', clean('<p class=MsoNormal><o:p></o:p><span style="mso-bidi-font-weight:bold">Dear client</span></p>'), '<p><span>Dear client</span></p>')
   check('a <style> block is not words', clean('<style>p{color:red}</style><p>Text</p>'), '<p>Text</p>')
   check('an Outlook signature\'s table is kept', clean('<table cellpadding="0" onmouseover="x"><tr><td valign="top" style="padding:4px">Nicole</td></tr></table>'),
@@ -70,6 +72,9 @@ const ok = (name, v) => check(name, !!v, true)
   const r = M.renderCampaignEmail({ subject: 'Hi {{first_name}}', preheader: '', body, imageUrl: null }, { firstName: 'Piet', companyName: 'Smit & Seun' }, opts)
   ok('the HTML body is the email, merged', /Dear Piet at Smit &amp; Seun,/.test(r.html))
   ok('...a name is escaped, never markup', !/Smit & Seun/.test(r.html))
+  /* A name with angle brackets: escaped it reads as typed; unescaped the closed set would take it for a tag and drop it. */
+  const odd = M.renderCampaignEmail({ subject: 's', preheader: '', body: `${H.EMAIL_HTML_MARKER}<p>Dear {{first_name}}</p>`, imageUrl: null }, { firstName: 'Piet <Jnr>', companyName: null }, opts)
+  ok('...even one with angle brackets, which reads as typed', /Dear Piet &lt;Jnr&gt;/.test(odd.html))
   ok('...nothing outside the closed set reaches the inbox', !/<script|x\(\)/.test(r.html))
   ok('...{{signature}} is the sending address\'s signature', /<b>Nicole Loder<\/b><br>Liaison/.test(r.html))
   ok('...its picture from somebody\'s own computer is gone', !/file:/.test(r.html))

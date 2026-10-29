@@ -89,7 +89,7 @@ export function EmailAddresses({ value, onChange, onNewFrom, config }: {
     try {
       const s = await addSender(typed, display || typed.split('@')[0])
       await reload()
-      setAddress(''); setDisplay(''); setAdding(false)
+      setAddress(''); setDisplay(''); setAdding(false); setOpen(false)
       onChange(`address:${s.id}`)
     } catch (e) { setError(errorText(e)) }
   }

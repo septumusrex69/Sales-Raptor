@@ -149,11 +149,13 @@ try {
     await page.getByTestId('news-next').click()
     t.check('Next from Check is Send', await page.getByTestId('news-step-send').getAttribute('aria-current'), 'step')
     t.check('the Send button names the count', await page.getByTestId('news-send').innerText(), 'Send to 3 people')
-    let confirmText = ''
-    page.once('dialog', async (d) => { confirmText = d.message(); await d.accept() })
+    /* 29 Oct: Send opens the pop-up (batches, follow-ups); its own Send is the press that cannot be called back. */
     await page.getByTestId('news-send').click()
+    await page.getByTestId('news-send-modal').waitFor({ timeout: 5000 })
+    t.ok('it asks first, with the count', /3 addresses, each once/.test(await page.getByTestId('news-send-modal').innerText()))
+    t.check('...and nothing has gone yet', steps.includes('queue'), false)
+    await page.getByTestId('news-send-confirm').click()
     for (let i = 0; i < 40 && drains < 2; i += 1) await page.waitForTimeout(150)
-    t.ok('it asks first, with the count', /to 3 people\? This cannot be called back/.test(confirmText))
     t.ok('pressing Send queues, then drains until nothing is left', JSON.stringify(steps.filter((s) => ['queue', 'drain'].includes(s))) === '["queue","drain","drain"]')
     await context.close()
   }
