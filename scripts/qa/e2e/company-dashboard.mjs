@@ -138,16 +138,19 @@ try {
     '/accounts?book=whole&from=2026-10-11&to=2026-11-10')
 
   /* ---------- Departments ---------- */
-  t.ok('each department carries its headline: sales', /4\s+accounts from new clients/.test(await page.getByTestId('headline-Sales').innerText()))
-  t.ok('...communications', /5\s+accounts from existing clients/.test(await page.getByTestId('headline-Communications').innerText()))
-  t.ok('...administration', /9\s+accounts loaded/.test(await page.getByTestId('headline-Administration').innerText()))
-  t.ok('...call centre, in rand', /R\s?0\s+collected this month/.test(await page.getByTestId('headline-Call centre').innerText()))
+  /* S16, Stephan: "not completely necessary to say administration runs the firm, reception sits here too ...
+     the zero accounts from new clients ... also not necessary. Just make a tab ... a light other colour." */
+  const depts = await page.getByTestId('departments').innerText()
+  t.ok('each department is a tab with no blurb and no headline', !/Reception sits here|accounts from (new|existing) clients|accounts loaded|collected this month/i.test(depts)
+    && /Sales[\s\S]*people/.test(depts))
+  t.ok('...in a light colour of its own', /EEF4F9/i.test(await page.getByTestId('department-Sales').getAttribute('class') ?? ''))
   t.check('four departments in one row', await page.getByTestId('departments').locator('a').count(), 4)
   /* S15, Stephan: "this is too much. remove the pictures." The hero is the one photograph on the page. */
   t.check('...and no photograph on any of them', await page.getByTestId('departments').locator('img').count(), 0)
   const row = await page.getByTestId('departments').locator('a').evaluateAll((as) => as.map((a) => Math.round(a.getBoundingClientRect().top)))
   t.ok('...on one line at a laptop\'s width', new Set(row).size === 1)
-  t.ok('yours is marked', /Administration[\s\S]*Yours/.test(await page.getByTestId('department-Administration').innerText()))
+  t.ok('yours is marked', /yours/i.test(await page.getByTestId('department-Administration').innerText())
+    && /gold/.test(await page.getByTestId('department-Administration').getAttribute('class') ?? ''))
 
   /* ---------- the promise the screen was agreed under ---------- */
   t.ok('no commission on the screen', !/commission/i.test(text.replace(/Commission and Annexure B income are deliberately not on[\s\S]*?audience\./, '')))

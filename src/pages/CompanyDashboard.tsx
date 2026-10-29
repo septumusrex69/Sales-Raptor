@@ -13,7 +13,7 @@ import { MonthProgress } from '../components/collections/MonthProgress'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import { useCollectionsMonth } from '../hooks/useCollectionsMonth'
-import { bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeMonthBars, spansMonths, intakeSplit, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
+import { bookSlices, intakeBars, intakeComparison, intakeMonthBars, spansMonths, intakeSplit, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
 import { getPreviousSalesMonth } from '../lib/salesMonth'
 import { viewParams } from '../lib/accountViews'
 import { fetchBookSnapshot, fetchIntakeByDay, isoDay } from '../lib/companySnapshotData'
@@ -293,19 +293,11 @@ export function CompanyDashboard() {
 
         /* ---------- the departments: a row across the page in every arrangement ---------- */
         { id: 'departments', kind: 'full', node: (
-      <Section title="Departments" why="Everybody sees everybody's headline. Yours opens in full.">
+      <Section title="Departments" why="Open any department's dashboard. Yours is the gold one.">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="departments">
           {DEPARTMENTS.filter((d) => d.id !== 'Other').map((d) => (
-            <DepartmentCard key={d.id} id={d.id} label={d.label} blurb={d.blurb}
-              people={headcount.get(d.id) ?? 0} ours={d.id === mine}
-              headline={departmentHeadline(d.id, {
-                collected: month.rows === null ? null : month.figures.collected,
-                mandates: sales.mandatesSigned,
-                intakeClients: book?.intakeClients ?? null,
-                intakeAccounts: book?.intakeAccounts ?? null,
-                fromNew: split ? split.fresh.accounts : null,
-                fromExisting: split ? split.existing.accounts : null,
-              }, formatCurrency)} />
+            <DepartmentCard key={d.id} id={d.id} label={d.label}
+              people={headcount.get(d.id) ?? 0} ours={d.id === mine} />
           ))}
         </div>
       </Section>
@@ -384,44 +376,33 @@ function Figures({ loading, error, plain, children }: {
  * ... their own statistics is important, their team statistics is important, and their
  * department statistics is important for them to see."
  */
-function DepartmentCard({ id, label, blurb, people, ours, headline }: {
+function DepartmentCard({ id, label, people, ours }: {
   id: Department
   label: string
-  blurb: string
   people: number
   ours: boolean
-  headline: { value: string; label: string } | null
 }) {
   /*
-   * PLAIN CARDS, NO PHOTOGRAPHS (S15). The firm sent four pictures on 18 Oct and asked for them; Stephan,
-   * looking at the row under the hero: "this is too much. remove the pictures." The company dashboard keeps
-   * exactly one photograph -- the hero's -- which is what "only one very special page" meant in the first
-   * place. Yours still wears the gold edge and the gold button.
+   * A TAB, NOT A CARD (S16, Raptor · Handover 15). Stephan, of the four cards: "not completely necessary to say
+   * administration runs the firm, reception sits here too. Useless information. Also, the zero accounts from new
+   * clients, zero accounts from existing clients, that's also not necessary. Just make a tab ... maybe even
+   * another colour, like a light other colour, just to pop out a little bit." So the blurb and the headline are
+   * gone (departmentHeadline stays in companySnapshot for whoever wants it back) and each department is one
+   * light-blue tab -- the brief's #97B4CC washed out -- with its name and headcount; yours is the gold one.
+   * PLAIN, NO PHOTOGRAPHS (S15: "this is too much. remove the pictures").
    */
   return (
-    <div data-testid={`department-${id}`}
-      className={clsx('rounded-2xl bg-white border p-4 min-h-[150px]',
-        ours ? 'border-gold-400 ring-1 ring-gold-400' : 'border-slate-200')}>
-      <div className="flex h-full flex-col gap-1.5">
-        <div className="flex items-baseline justify-between gap-2">
-          <h3 className="text-base font-bold leading-tight text-navy-950">{label}</h3>
-          <span className="shrink-0 text-xs tabular-nums text-slate-500">
-            {people === 1 ? '1 person' : `${people} people`}
-          </span>
-        </div>
-        <p className="max-w-[17rem] text-[12.5px] leading-snug text-slate-600">{blurb}</p>
-        {headline && (
-          <p className="text-xs text-slate-600" data-testid={`headline-${id}`}>
-            <span className="font-bold tabular-nums text-navy-950">{headline.value}</span> {headline.label}
-          </p>
-        )}
-        <Link to={dashboardPathFor(id)}
-          className={clsx('mt-auto inline-flex w-fit items-center gap-1.5 rounded-lg border px-4 py-1.5 text-xs font-semibold',
-            ours ? 'border-gold-400 bg-gold-400 text-navy-950 hover:bg-gold-300' : 'border-slate-300 text-slate-700 hover:bg-slate-50')}>
-          {ours ? 'Yours' : 'Open'} <ArrowRight size={13} />
-        </Link>
-      </div>
-    </div>
+    <Link to={dashboardPathFor(id)} data-testid={`department-${id}`} aria-current={ours ? 'page' : undefined}
+      className={clsx('group flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors',
+        ours ? 'border-gold-400 bg-gold-50 hover:bg-gold-100' : 'border-[#D6E2EC] bg-[#EEF4F9] hover:bg-[#E2ECF4]')}>
+      <span className="min-w-0">
+        <span className="block truncate text-[15px] font-bold leading-tight text-navy-950">{label}</span>
+        <span className="block text-xs tabular-nums text-slate-500">
+          {people === 1 ? '1 person' : `${people} people`}{ours ? ' · yours' : ''}
+        </span>
+      </span>
+      <ArrowRight size={16} className={clsx('shrink-0 transition-transform group-hover:translate-x-0.5', ours ? 'text-gold-600' : 'text-[#46607B]')} />
+    </Link>
   )
 }
 
