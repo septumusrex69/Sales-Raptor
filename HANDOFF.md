@@ -116,6 +116,27 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   `check-progress-report` (14, break-tested), e2e client-portal 83. **NOT BUILT, PUT TO STEPHAN: the monthly
   EMAIL** (totals + a link into the portal, every month even with no remittance, kept as sent like the advices) --
   it writes to real client addresses on a timer, so it waits for his yes and for which mailbox sends it.
+- **THE COLLECTIONS FLOOR, TIDIED (Stephan, 29 Oct, three screenshots).** (1) "New accounts not yet worked, by
+  collector" -- fifteen lines -- is ONE warning line for those who lead collections ("37 new accounts not yet worked,
+  across 14 collectors -- the oldest 13 working days. Show them ->"), linking **`/accounts?book=whole&carried=1`**:
+  a new `AccountQuery.accountIds` (applied as `.in('id', ...)`, an empty list matches nothing), the ids from the
+  same function that counts them (`fetchLateNewAccountIds`, newAccounts.ts), so number and list are one set; long
+  lists are carried in the URL (dozens fine, hundreds would fail loudly). (2) The eight squeezed tiles are one
+  **Actions** card (calls, emails, SMS, notes, all actions -- today and this period; `mineToday` in
+  useCollectionsMonth for "You"); average payment and book value moved under How the work is going. (3) Clerk
+  performance and How people compare are **one collectors table**, ranked on collected (rank, collector · grade,
+  team, collected, target, achieved bar, status, payments, average, book, per 100, kept, actions); Reached, Today,
+  Gap and Needed/day dropped from it to avoid a sideways scroll (the CSV export keeps them). Built by a helper agent
+  in a worktree, re-run here: e2e performance 127, accounts 148. The achieved bar restarting in green past 100%
+  is the firm's old rule, not a bug.
+- **THE PORTAL OPENS LIKE A CONSOLE** (Stephan: "linger a little bit longer ... our logo ... epic cool animation ...
+  a cool sound. Like PlayStation 2 vibes"). `PortalSplash.tsx` + `portal.css` (ps-* keyframes): deep navy with
+  drifting lights and rising pillars, the gold ring drawn (0.3-1.4 s), a flare and the monogram on the chord
+  (1.4 s), the wordmark opening from the middle with a light across it, "Client portal"; 3.4 s, tap to skip once
+  ready; it sits ON TOP of the portal and dissolves into it (one element, never remounted). `portalSound.ts`: Web
+  Audio, no file -- low fifths swell, a rising noise wash, an E-major bell chord through an echo. Sound needs a
+  press: the sign-in buttons `primeSplashAudio()`; from a saved session it may stay silent. Full once per tab
+  (sessionStorage), then a short fade; reduced motion gets the still logo. e2e client-portal 87.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
