@@ -75,6 +75,8 @@ export interface PortalDashboard {
   tickets: { waitingOnYou: number; open: number }
   /** Accounts handed over per day, the last thirteen months -- the shape the staff dashboards' intake has. */
   handoverDays: { day: string; accounts: number; capital: number }[]
+  /** Collected per calendar month ('YYYY-MM'), the last thirteen months -- the tiles' trends. */
+  collectedMonths?: { month: string; collected: number }[]
   /** The client's liaison, to call or write to; null where the client has none yet. */
   liaison: { name: string; email: string | null; phone: string | null; whatsapp: string | null } | null
 }

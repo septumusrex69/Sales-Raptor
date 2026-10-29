@@ -94,8 +94,16 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
 - **THE COMPANY DASHBOARD'S DEPARTMENTS ARE LIGHT TABS** (Stephan: blurb and "0 accounts from new clients" are
   "useless information ... just make a tab ... a light other colour"): name + headcount, light blue, yours gold.
   `departmentHeadline` stays in companySnapshot unused. e2e company-dashboard 54.
+- **THE PORTAL DASHBOARD TO STEPHAN'S SECOND MOCK-UP (29 Oct)**: a top bar (search -> Accounts with the words in,
+  `Book initialSearch`; a bell lit when a ticket waits on the client; the user's name with Sign out); the coastline
+  band edge to edge under it; a ticket count on the sidebar's Tickets; the cliffs and a gold line at the sidebar's
+  foot; tiles with an arrow and a real 12-month trend (capital handed over and collected, cumulative; collected per
+  month) -- staging migration **`portal_collected_by_month`** on portal_summary's own filter; outstanding shows its
+  share of the capital as a bar, because it has no honest monthly series; the open and finished rings side by
+  side under the chart (the navy "Paid up in full" tile went); what-to-do as a list with chevrons, the liaison
+  under it. GapRing's caption now wraps. e2e client-portal 77.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
-- **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords` and `user_emails_done` after `portal_handovers` in the S15 list below. The test history is staging-only.
+- **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
 ## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
 

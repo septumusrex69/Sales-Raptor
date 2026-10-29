@@ -40,7 +40,7 @@ export function GapRing({ slices, total, label, size = 168, stroke = 24, testId 
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-3xl font-bold tabular-nums text-slate-800">{total}</span>
-        <span className="text-xs text-slate-500">{label}</span>
+        <span className="max-w-[62%] text-center text-xs leading-tight text-slate-500">{label}</span>
       </div>
     </div>
   )

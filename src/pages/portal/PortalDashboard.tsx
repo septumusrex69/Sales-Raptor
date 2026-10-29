@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { BarChart3, CalendarDays, FileText, FolderUp, Landmark, List, Mail, MessageCircle, Phone, ReceiptText, Ticket } from 'lucide-react'
+import { ArrowRight, BarChart3, CalendarDays, ChevronRight, Clock3, FileText, FolderUp, Landmark, List, Mail, MessageCircle, Phone, ReceiptText, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { clockNow } from '../../lib/clock.ts'
 import { getCurrentSalesMonth } from '../../lib/salesMonth.ts'
@@ -49,6 +49,26 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
   const [months, setMonths] = useState<6 | 12>(12)
   /* The same arithmetic as the communications dashboard's card, over this client's handovers only: every
      account the portal shows is the client's own, so it is all "existing client" work. */
+  /*
+   * THE TILES' TRENDS (S16, Stephan's mock-up puts a small chart under each figure). Real, not decoration: the
+   * capital handed over and the money collected, month by month over the last year, read from the same two
+   * series the server already sends (handovers per day, collected per month). Outstanding has no honest monthly
+   * series -- it moves with closures and write-offs too -- so its tile shows its share of the capital instead.
+   */
+  const trends = useMemo(() => {
+    const months: string[] = []
+    const now = clockNow()
+    for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)); months.push(d.toISOString().slice(0, 7)) }
+    const handed = new Map<string, number>()
+    for (const r of d?.handoverDays ?? []) handed.set(r.day.slice(0, 7), (handed.get(r.day.slice(0, 7)) ?? 0) + r.capital)
+    const paid = new Map((d?.collectedMonths ?? []).map((r) => [r.month, r.collected]))
+    let h = 0, c = 0
+    return {
+      handedCumulative: months.map((m) => (h += handed.get(m) ?? 0)),
+      collectedCumulative: months.map((m) => (c += paid.get(m) ?? 0)),
+      collectedMonthly: months.map((m) => paid.get(m) ?? 0),
+    }
+  }, [d])
   const track = useMemo(() => monthTrack({
     current: getCurrentSalesMonth(clockNow()), months, leads: [], deals: [],
     intake: (d?.handoverDays ?? []).map((r) => ({ day: r.day, accounts: r.accounts, capital: r.capital })),
@@ -86,13 +106,22 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
         width; the liaison, what to do and the finished accounts read fine in a third. Opens on the split
         pane, the mock-ups' own drawing.
       */}
+      {/*
+        IN RAPTOR'S THREE ARRANGEMENTS (S16; Stephan: "the views, the three panes, everything underneath each
+        other, the two panes, the split pane"), laid out as his mock-up: the four figures across; the handovers
+        chart with the two rings side by side under it on the left; what to do, then the liaison, on the right.
+      */}
       <DashboardPanes layoutKey="raptor.portal.dashboard.layout" initial="wide" panes={[
         { id: 'figures', kind: 'full', node: (
           <section className="grid grid-cols-2 xl:grid-cols-4 gap-3" data-testid="portal-figures">
-            <Tile icon={<Landmark size={19} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`} />
-            <Tile icon={<BarChart3 size={19} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`} invert />
-            <Tile icon={<CalendarDays size={19} />} label="Collected this month" value={rand(f.collectedThisMonth)} />
-            <Tile icon={<ReceiptText size={19} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`} />
+            <Tile icon={<Landmark size={20} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`}
+              trend={trends.handedCumulative} onOpen={() => onOpen('accounts')} />
+            <Tile icon={<BarChart3 size={20} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`}
+              trend={trends.collectedCumulative} invert onOpen={() => onOpen('reports')} />
+            <Tile icon={<CalendarDays size={20} />} label="Collected this month" value={rand(f.collectedThisMonth)} note={`${pct(f.collectedThisMonth, f.capitalHandedOver)} of capital`}
+              trend={trends.collectedMonthly} onOpen={() => onOpen('reports')} />
+            <Tile icon={<Clock3 size={20} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`}
+              share={f.capitalHandedOver > 0 ? f.capitalOutstanding / f.capitalHandedOver : null} onOpen={() => onOpen('accounts')} />
           </section>
         ) },
         { id: 'handovers', kind: 'wide', node: (
@@ -101,51 +130,47 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
             subtitle="The accounts you handed us each month. Switch to Rand for the capital, or to a line for the trend." />
         ) },
         { id: 'open', kind: 'wide', node: (
-          <div className="card p-5">
-            <PortalHeading title="Where your open accounts stand" subtitle="Every account we are still collecting, by where it is."
-              action={<button type="button" onClick={() => onOpen('accounts')} className="text-sm font-semibold text-[#3F5F86] hover:underline">See every account</button>} />
-            {open.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">No open accounts.</p> : (
-              <div className="mt-4 flex flex-wrap items-center gap-6">
-                <GapRing testId="portal-open-ring" total={String(d.open)} label="Open"
-                  slices={open.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
-                <div className="flex-1 min-w-[240px]"><OutcomeTable lines={open} total={d.open} testId="portal-positions" /></div>
-              </div>
-            )}
-          </div>
-        ) },
-        { id: 'liaison', node: <Liaison liaison={d.liaison} onCall={() => onAsk('callback')} /> },
-        { id: 'actions', node: (
-          <div className="card p-5" data-testid="portal-actions">
-            <PortalHeading title="What would you like to do?" />
-            <div className="grid grid-cols-2 gap-2 mt-3">
-              <Action icon={<FolderUp size={18} />} label="Hand over accounts" onClick={() => onOpen('handover')} testId="handover" />
-              <Action icon={<Ticket size={18} />} label="Raise a ticket" hint="From the account's line" onClick={() => onOpen('accounts')} testId="ticket" />
-              <Action icon={<ReceiptText size={18} />} label="Tell us about a payment" hint="From the account's line" onClick={() => onOpen('accounts')} testId="payment" />
-              <Action icon={<FileText size={18} />} label="Your reports" onClick={() => onOpen('reports')} testId="reports" />
-              <Action icon={<List size={18} />} label="Every account" onClick={() => onOpen('accounts')} testId="accounts" />
-              <Action icon={<MessageCircle size={18} />} label="Your tickets" hint={d.tickets.open ? `${d.tickets.open} open` : undefined} onClick={() => onOpen('tickets')} testId="tickets" />
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="card p-5" data-testid="portal-open">
+              <PortalHeading title="Where your open accounts stand" subtitle="Every account we are still collecting, by where it is."
+                action={<button type="button" onClick={() => onOpen('accounts')} className="text-sm font-semibold text-[#3F5F86] hover:underline inline-flex items-center gap-1">See every account <ArrowRight size={14} /></button>} />
+              {open.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">No open accounts.</p> : (
+                <div className="mt-4 flex flex-wrap items-center gap-5">
+                  <GapRing testId="portal-open-ring" size={150} stroke={22} total={String(d.open)} label="Open accounts"
+                    slices={open.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
+                  <div className="flex-1 min-w-[210px]"><OutcomeTable lines={open} total={d.open} testId="portal-positions" /></div>
+                </div>
+              )}
+            </div>
+            <div className="card p-5" data-testid="portal-finished-card">
+              <PortalHeading title="Finished accounts" subtitle="How the accounts we are no longer collecting ended." />
+              {finished.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">None finished yet.</p> : (
+                <div className="mt-4 flex flex-wrap items-center gap-5">
+                  <GapRing testId="portal-finished-ring" size={150} stroke={22} total={String(d.accounts - d.open)} label="Finished accounts"
+                    slices={finished.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
+                  <div className="flex-1 min-w-[210px]">
+                    <p className="sr-only" data-testid="portal-paid-up">{paidUp}</p>
+                    <OutcomeTable lines={finished} total={d.accounts - d.open} testId="portal-finished" />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) },
-        { id: 'finished', node: (
-          <div className="card p-5">
-            <PortalHeading title="Finished accounts" subtitle="How the accounts we are no longer collecting ended." />
-            {finished.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">None finished yet.</p> : (
-              <>
-                <div className="mt-4 rounded-xl bg-[#111E2D] text-white p-4">
-                  <PortalLabel invert>Paid up in full</PortalLabel>
-                  <p className="text-3xl font-bold mt-1 tabular-nums" data-testid="portal-paid-up">{paidUp}</p>
-                  <p className="text-xs text-[#AEBBCB] mt-0.5">{pct(paidUp, d.accounts)} of every account handed over</p>
-                </div>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-5">
-                  <GapRing testId="portal-finished-ring" size={128} stroke={18} total={String(d.accounts - d.open)} label="Finished"
-                    slices={finished.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
-                  <div className="flex-1 min-w-[200px]"><OutcomeTable lines={finished} total={d.accounts - d.open} testId="portal-finished" /></div>
-                </div>
-              </>
-            )}
+        { id: 'actions', node: (
+          <div className="card p-5" data-testid="portal-actions">
+            <PortalHeading title="What would you like to do?" />
+            <div className="mt-3 space-y-2">
+              <Action icon={<FolderUp size={19} />} label="Hand over accounts" hint="Send us new accounts" onClick={() => onOpen('handover')} testId="handover" />
+              <Action icon={<Ticket size={19} />} label="Raise a ticket" hint="From the account's line" onClick={() => onOpen('accounts')} testId="ticket" />
+              <Action icon={<ReceiptText size={19} />} label="Tell us about a payment" hint="From the account's line" onClick={() => onOpen('accounts')} testId="payment" />
+              <Action icon={<FileText size={19} />} label="Your reports" hint="Download your remittance advices" onClick={() => onOpen('reports')} testId="reports" />
+              <Action icon={<List size={19} />} label="Every account" hint="View all open and finished accounts" onClick={() => onOpen('accounts')} testId="accounts" />
+              <Action icon={<MessageCircle size={19} />} label="Your tickets" hint={d.tickets.open ? `${d.tickets.open} open ticket${d.tickets.open === 1 ? '' : 's'}` : 'Questions between you and us'} onClick={() => onOpen('tickets')} testId="tickets" />
+            </div>
           </div>
         ) },
+        { id: 'liaison', node: <Liaison liaison={d.liaison} onCall={() => onAsk('callback')} /> },
       ]} />
     </div>
   )
@@ -170,20 +195,51 @@ function OutcomeTable({ lines, total, testId }: { lines: PortalOutcomeLine[]; to
 }
 
 /**
- * Raptor's tile: the label with its icon in a box beside it (StatTile's arrangement), the figure under them at
- * the tile's full width -- a seven-figure book does not fit beside an icon at four across. The one that matters
- * most is inverted.
+ * THE MOCK-UP'S TILE (S16): the icon in its box, the tracked label, the figure with an arrow to where it comes
+ * from, the line under it, and a quiet trend along the foot -- or, for outstanding, its share of the capital.
+ * The one that matters most is inverted. A seven-figure book fits at four across: the figure has the width.
  */
-function Tile({ icon, label, value, note, invert = false }: { icon: ReactNode; label: string; value: string; note?: string; invert?: boolean }) {
+function Tile({ icon, label, value, note, invert = false, trend, share, onOpen }: {
+  icon: ReactNode; label: string; value: string; note?: string; invert?: boolean
+  trend?: number[]; share?: number | null; onOpen: () => void
+}) {
   return (
-    <div className={`rounded-2xl p-4 sm:p-5 ${invert ? 'bg-[#111E2D] text-white border-l-[3px] border-l-[#C69F54]' : 'card'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <PortalLabel invert={invert}>{label}</PortalLabel>
-        <span className={`hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${invert ? 'bg-white/10 text-[#C69F54]' : 'bg-[#F2F5F8] text-[#3F5F86]'}`}>{icon}</span>
+    <button type="button" onClick={onOpen}
+      className={`group relative overflow-hidden text-left rounded-2xl px-4 pt-4 sm:px-5 sm:pt-5 pb-12 transition-shadow hover:shadow-md ${invert ? 'bg-[#111E2D] text-white' : 'card'}`}>
+      <div className="flex items-start gap-3">
+        <span className={`hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${invert ? 'bg-white/10 text-[#C69F54]' : 'bg-[#F2F5F8] text-[#3F5F86] border border-[#E3E8EE]'}`}>{icon}</span>
+        <div className="min-w-0 flex-1">
+          <PortalLabel invert={invert}>{label}</PortalLabel>
+          <p className={`flex items-center gap-2 text-xl sm:text-[1.45rem] font-bold tabular-nums mt-1 whitespace-nowrap ${invert ? 'text-white' : 'text-[#111E2D]'}`}>
+            {value}
+            <ArrowRight size={17} className="shrink-0 text-[#C69F54] transition-transform group-hover:translate-x-0.5" />
+          </p>
+          {note && <p className={`text-xs mt-0.5 ${invert ? 'text-[#AEBBCB]' : 'text-[#5A6B80]'}`}>{note}</p>}
+        </div>
       </div>
-      <p className={`text-xl sm:text-[1.55rem] font-bold tabular-nums whitespace-nowrap ${invert ? 'text-white' : 'text-[#111E2D]'}`}>{value}</p>
-      {note && <p className={`text-xs mt-0.5 ${invert ? 'text-[#AEBBCB]' : 'text-[#5A6B80]'}`}>{note}</p>}
-    </div>
+      {trend && <Spark values={trend} invert={invert} />}
+      {share !== undefined && share !== null && (
+        <div className="absolute left-5 right-5 bottom-5" title={`${Math.round(share * 1000) / 10}% of the capital handed over is still out`} data-testid="portal-outstanding-share">
+          <div className="h-1.5 rounded-full bg-[#EEF2F6] overflow-hidden"><div className="h-full rounded-full bg-[#97B4CC]" style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} /></div>
+        </div>
+      )}
+    </button>
+  )
+}
+
+/** A filled line along the tile's foot: twelve months, no axes, no figures -- the tile already says the figure. */
+function Spark({ values, invert }: { values: number[]; invert: boolean }) {
+  const max = Math.max(...values, 0)
+  if (!(max > 0)) return null
+  const w = 300, h = 40
+  const pts = values.map((v, i) => [(i / (values.length - 1)) * w, h - 4 - (v / max) * (h - 8)] as const)
+  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
+  const colour = invert ? '#C69F54' : '#97B4CC'
+  return (
+    <svg aria-hidden className="absolute left-0 right-0 bottom-0 h-10 w-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <path d={`${line} L${w} ${h} L0 ${h} Z`} fill={colour} fillOpacity={invert ? 0.22 : 0.25} />
+      <path d={line} stroke={colour} strokeOpacity="0.8" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
+    </svg>
   )
 }
 
@@ -212,10 +268,13 @@ function Liaison({ liaison, onCall }: { liaison: Dash['liaison']; onCall: () => 
 function Action({ icon, label, hint, onClick, testId }: { icon: ReactNode; label: string; hint?: string; onClick: () => void; testId: string }) {
   return (
     <button type="button" onClick={onClick} data-testid={`portal-action-${testId}`}
-      className="text-left rounded-xl border border-[#D5DBE3] px-3 py-2.5 hover:border-[#C69F54] hover:bg-[#C69F54]/5 transition-colors">
-      <span className="text-[#3F5F86]">{icon}</span>
-      <span className="block text-[13px] font-semibold text-[#111E2D] mt-1.5 leading-tight">{label}</span>
-      {hint && <span className="block text-[11px] text-[#5A6B80] mt-0.5">{hint}</span>}
+      className="group w-full flex items-center gap-3.5 text-left rounded-xl border border-[#E3E8EE] px-3.5 py-3 hover:border-[#C69F54] hover:bg-[#C69F54]/5 transition-colors">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F2F5F8] text-[#3F5F86]">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] font-semibold text-[#111E2D] leading-tight">{label}</span>
+        {hint && <span className="block text-[12px] text-[#5A6B80] mt-0.5">{hint}</span>}
+      </span>
+      <ChevronRight size={17} className="shrink-0 text-[#5A6B80] transition-transform group-hover:translate-x-0.5" />
     </button>
   )
 }

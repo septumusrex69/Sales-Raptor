@@ -40,6 +40,10 @@ const DASH = {
     const d = new Date(); d.setUTCDate(5); d.setUTCMonth(d.getUTCMonth() - back)
     return { day: d.toISOString().slice(0, 10), accounts: i + 2, capital: 1000 * (i + 1) }
   }),
+  collectedMonths: [2, 1, 0].map((back, i) => {
+    const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - back)
+    return { month: d.toISOString().slice(0, 7), collected: 100 * (i + 1) }
+  }),
   liaison: { name: 'Camille Liaison', email: 'camille@example.test', phone: '021 555 0101', whatsapp: '082 555 0101' },
 }
 const REPORTS = [{ id: 'r1', kind: 'remittance', version: 1, sentAt: '2026-10-12T08:00:00Z', title: 'Remittance', client: 'Alianna Pharmacy',
@@ -168,6 +172,11 @@ try {
   t.ok('the navy is the firm\'s inside the portal, whatever skin the browser has', (await page.getByTestId('portal-page')
     .evaluate((e) => getComputedStyle(e).getPropertyValue('--color-navy-900'))).trim().toLowerCase() === '#111e2d')
   await t.shot(page, 'client-portal-dashboard')
+  /* S16, Stephan's second mock-up: a top bar, the rings side by side, a trend under the figures, actions as a list. */
+  t.ok('the top bar searches the book', await page.getByTestId('portal-top-search').count() === 1)
+  t.ok('the open and the finished accounts sit side by side', Math.abs((await page.getByTestId('portal-open').boundingBox()).y - (await page.getByTestId('portal-finished-card').boundingBox()).y) < 2)
+  t.ok('the figures carry a trend drawn from the months sent', await page.getByTestId('portal-figures').locator('svg path').count() >= 4)
+  t.ok('the sidebar counts the open tickets', (await page.getByTestId('portal-tickets-count').innerText()).trim() === '1')
   /* S16: the company dashboard's ring, white cuts between the slices (Stephan: "use this type of pie chart"). */
   t.check('the open accounts are drawn on the cut ring, a slice per position', await page.getByTestId('portal-open-ring').locator('circle[data-slice]').count(), 2)
   /* And Raptor's three arrangements, the same switcher (Stephan: "the three panes, everything underneath each
@@ -181,10 +190,17 @@ try {
     && Math.abs((await box('liaison')).x - (await box('handovers')).x) < 2 && (await box('liaison')).y > (await box('open')).y)
   await t.shot(page, 'client-portal-dashboard-stacked')
   await page.getByRole('button', { name: 'Three columns' }).click()
-  t.ok('three columns sets the liaison, the actions and the finished accounts three abreast', await panes.getAttribute('data-layout') === 'columns'
-    && Math.abs((await box('liaison')).y - (await box('finished')).y) < 2 && (await box('finished')).x > (await box('actions')).x)
+  t.ok('three columns sets what to do and the liaison side by side', await panes.getAttribute('data-layout') === 'columns'
+    && Math.abs((await box('liaison')).y - (await box('actions')).y) < 2 && (await box('liaison')).x > (await box('actions')).x)
   await t.shot(page, 'client-portal-dashboard-columns')
   await page.getByRole('button', { name: 'Wide' }).click()
+  await page.getByTestId('portal-top-search').fill('Fourie')
+  await page.getByTestId('portal-top-search').press('Enter')
+  await page.getByTestId('portal-search').waitFor({ timeout: 5000 })
+  t.ok('a search from the top bar opens Accounts with the words in', await page.getByTestId('portal-nav-accounts').getAttribute('aria-current') === 'page'
+    && await page.getByTestId('portal-search').inputValue() === 'Fourie')
+  await page.getByTestId('portal-nav-dashboard').click()
+  await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
   await page.getByTestId('portal-action-handover').click()
   t.ok('a button on the dashboard takes the client where they act', await page.getByTestId('portal-nav-handover').getAttribute('aria-current') === 'page')
   await page.getByTestId('portal-nav-dashboard').click()

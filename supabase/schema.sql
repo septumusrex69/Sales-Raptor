@@ -53867,3 +53867,32 @@ as $$
         and state = 'open'
         and due_on <= public.raptor_today());
 $$;
+
+-- ============================================================================================
+-- portal_collected_by_month (S16, Raptor · Handover 15, 29 Oct 2026) -- THE PORTAL TILES' TRENDS.
+--
+-- Stephan's mock-up of the portal dashboard puts a small trend under each figure. Collected per month, for a
+-- client and its branches, on EXACTLY portal_summary's filter (not reversed, not rejected, not demo, by the day
+-- received in Johannesburg) -- so the tile's "this month" and the last point of its trend are one figure.
+-- Service role only; the portal's server asks for the signed-in client.
+-- ============================================================================================
+create or replace function public.portal_collected_by_month(p_client uuid, p_from date)
+returns table (month date, collected numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select date_trunc('month', (p.received_at at time zone 'Africa/Johannesburg'))::date as month,
+         sum(p.amount) as collected
+    from public.account_payments p
+    join public.debtor_accounts a on a.id = p.account_id
+    join public.companies c on c.id = a.company_id
+   where coalesce(c.parent_company_id, c.id) = p_client
+     and p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+     and (p.received_at at time zone 'Africa/Johannesburg')::date >= p_from
+   group by 1
+   order by 1;
+$$;
+revoke all on function public.portal_collected_by_month(uuid, date) from public, anon, authenticated;
+grant execute on function public.portal_collected_by_month(uuid, date) to service_role;

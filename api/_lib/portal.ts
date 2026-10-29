@@ -516,10 +516,12 @@ const dashboard: Handler = async (req, res, admin) => {
   if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
   /* Thirteen months of handovers, so the 12-month chart has a whole first month whatever today's date. */
   const from = new Date(); from.setUTCMonth(from.getUTCMonth() - 13)
-  const [{ data, error }, { data: t }, { data: days }, { owner }] = await Promise.all([
+  const [{ data, error }, { data: t }, { data: days }, { data: paid }, { owner }] = await Promise.all([
     admin.rpc('portal_summary', { p_client: who.companyId }),
     admin.rpc('portal_tickets', { p_client: who.companyId }),
     admin.rpc('portal_handovers_by_day', { p_client: who.companyId, p_from: from.toISOString().slice(0, 10) }),
+    /* The tiles' trends (S16, Stephan's mock-up): collected per month, on portal_summary's own filter. */
+    admin.rpc('portal_collected_by_month', { p_client: who.companyId, p_from: from.toISOString().slice(0, 10) }),
     liaisonFor(admin, who.companyId),
   ])
   /* WHO TO CALL (S16; Stephan's list: "the liaison's details -- name, number, WhatsApp, email"). Only what
@@ -546,6 +548,8 @@ const dashboard: Handler = async (req, res, admin) => {
     },
     handoverDays: ((days ?? []) as { day: string; accounts: number; capital: number | string }[])
       .map((r) => ({ day: String(r.day).slice(0, 10), accounts: Number(r.accounts) || 0, capital: Number(r.capital) || 0 })),
+    collectedMonths: ((paid ?? []) as { month: string; collected: number | string }[])
+      .map((r) => ({ month: String(r.month).slice(0, 7), collected: Number(r.collected) || 0 })),
     liaison: l ? { name: (l.name as string) || '', email: (l.email as string) || null,
       phone: (l.phone as string) || null, whatsapp: (l.whatsapp as string) || null } : null,
   })

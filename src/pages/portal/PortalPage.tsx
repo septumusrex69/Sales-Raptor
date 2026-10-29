@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, Headphones, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Ticket } from 'lucide-react'
+import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, Headphones, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
 import { PORTAL_PASSWORD_MIN, portalPasswordProblem } from '../../lib/clientPortal'
 import {
-  PortalSignedOut, fetchPortalBook, fetchPortalMe, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
+  PortalSignedOut, fetchPortalBook, fetchPortalMe, fetchPortalTickets, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
   savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
 import { PortalTickets } from './PortalTickets'
@@ -299,7 +299,20 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
   const [done, setDone] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [folded, toggleFold] = useFold()
-  const go = (s: Section) => { setSection(s); setDone(null) }
+  /* THE TOP BAR'S SEARCH (S16, Stephan's mock-up): it searches the book, so it opens Accounts with the words in. */
+  const [query, setQuery] = useState('')
+  const [lookFor, setLookFor] = useState('')
+  const [menu, setMenu] = useState(false)
+  /* Open tickets, for the sidebar's count and the bell -- the bell is the ones waiting on the client. */
+  const [tickets, setTickets] = useState<{ open: number; waiting: number }>({ open: 0, waiting: 0 })
+  useEffect(() => {
+    let live = true
+    fetchPortalTickets(token).then(({ tickets: t }) => {
+      if (live) setTickets({ open: t.filter((x) => x.status === 'open').length, waiting: t.filter((x) => x.status === 'open' && x.stage === 'client').length })
+    }).catch(() => {})
+    return () => { live = false }
+  }, [token, refresh])
+  const go = (s: Section) => { setSection(s); setDone(null); if (s !== 'accounts') setLookFor('') }
   const here = SECTIONS.find((s) => s.id === section)!
 
   return (
@@ -326,7 +339,11 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
               className={`w-full flex items-center gap-3 rounded-lg py-2.5 text-sm font-medium transition-colors ${folded ? 'justify-center' : 'px-3'} ${section === s.id
                 ? 'bg-[#C69F54] text-[#111E2D]' : 'hover:bg-white/5 hover:text-white'}`}>
               <s.icon size={17} className="shrink-0" />
-              {!folded && s.label}
+              {!folded && <span className="flex-1 text-left">{s.label}</span>}
+              {!folded && s.id === 'tickets' && tickets.open > 0 && (
+                <span className={`rounded-md px-1.5 text-[11px] font-semibold tabular-nums ${section === s.id ? 'bg-[#111E2D]/15' : 'bg-white/10 text-white'}`}
+                  data-testid="portal-tickets-count">{tickets.open}</span>
+              )}
             </button>
           ))}
           <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-call-me"
@@ -336,7 +353,16 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
             {!folded && 'Ask us to call you'}
           </button>
         </nav>
-        <div className="px-3 pb-2">
+        {/* THE MOCK-UP'S FOOT: the coastline's cliffs fading up out of the navy, a gold line drawn across them. */}
+        {!folded && (
+          <div aria-hidden className="relative h-56 -mb-2 pointer-events-none overflow-hidden">
+            <div className="absolute inset-0 opacity-45" style={{ background: `linear-gradient(180deg, ${NAVY} 0%, rgba(17,30,45,0.2) 45%, ${NAVY} 100%), url('/brand/remittance-cover.jpg') 8% 40% / 260% auto` }} />
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 224" fill="none" preserveAspectRatio="none">
+              <path d="M-10 40 C 90 70, 190 120, 270 224" stroke="#C69F54" strokeOpacity="0.7" strokeWidth="1.6" />
+            </svg>
+          </div>
+        )}
+        <div className="px-3 pb-2 relative">
           <button type="button" onClick={toggleFold} aria-expanded={!folded} data-testid="portal-fold"
             title={folded ? 'Widen the menu' : 'Narrow the menu'}
             className={`w-full flex items-center gap-2.5 rounded-lg py-2 text-xs hover:bg-white/5 hover:text-white ${folded ? 'justify-center' : 'px-3'}`}>
@@ -379,31 +405,62 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
       </div>
 
       {/* ONLY THE PAGE SCROLLS, on a wide screen: the sidebar stays where it is, as Raptor's does. */}
-      <main className="flex-1 min-w-0 lg:overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5">
-          {/*
-            THE BAND IS RAPTOR'S (S16; Stephan: "make it look and feel like Raptor"): a rounded panel at the
-            top of the page, the BF mark beside the title, the actions on the right -- DashboardHero's shape.
-            Its picture stays the remittance advice's coastline ("the image ... was the same image that you
-            put on the remittance"), under the navy wash, so the portal and the advice are one hand.
-          */}
-          <header className="relative overflow-hidden rounded-2xl text-white px-6 sm:px-7 py-7 sm:py-8" data-testid="portal-hero"
-            style={{ background: `linear-gradient(100deg, rgba(17,30,45,0.97) 0%, rgba(17,30,45,0.85) 45%, rgba(17,30,45,0.30) 100%), url('/brand/remittance-cover.jpg') center 60% / cover` }}>
-            <div className="relative flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-4 min-w-0">
-                <img src="/brand/icon-light.svg" alt="" className="hidden sm:block h-12 w-12 shrink-0" />
-                <div className="min-w-0">
-                  <PortalLabel invert>{me.client}</PortalLabel>
-                  <h1 className="text-2xl sm:text-[1.75rem] font-extrabold tracking-tight mt-1">{here.title}</h1>
-                  <p className="text-[13px] text-white/80 mt-0.5">{here.blurb}</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
-                className="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/20 px-3.5 py-2 text-sm font-medium backdrop-blur-sm">
-                <Phone size={15} /> Ask us to call you
+      <main className="flex-1 min-w-0 lg:overflow-y-auto bg-[#F4F6F9]">
+        {/* THE TOP BAR (S16, Stephan's mock-up): search the book, the bell for what waits on the client, who is in. */}
+        <div className="hidden lg:flex sticky top-0 z-20 items-center gap-4 h-16 px-8 bg-white/95 backdrop-blur border-b border-[#E3E8EE]" data-testid="portal-topbar">
+          <form className="flex-1 max-w-xl" onSubmit={(e) => { e.preventDefault(); setLookFor(query.trim()); setSection('accounts'); setDone(null) }}>
+            <label className="relative block">
+              <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5A6B80]" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search accounts, debtors or reference numbers…"
+                className="w-full rounded-xl border border-[#D5DBE3] bg-[#F7F9FB] pl-10 pr-3 py-2 text-sm text-[#111E2D] focus:outline-none focus:ring-2 focus:ring-[#C69F54]/40"
+                data-testid="portal-top-search" />
+            </label>
+          </form>
+          <div className="ml-auto flex items-center gap-3">
+            <button type="button" onClick={() => go('tickets')} className="relative p-2 rounded-lg text-[#46607B] hover:bg-[#F2F5F8]"
+              aria-label={tickets.waiting ? `${tickets.waiting} waiting on you` : 'Tickets'} data-testid="portal-bell">
+              <Bell size={19} />
+              {tickets.waiting > 0 && <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-[#C69F54] ring-2 ring-white" />}
+            </button>
+            <div className="relative">
+              <button type="button" onClick={() => setMenu((m) => !m)} className="flex items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-[#F2F5F8]" data-testid="portal-me">
+                <span className="h-8 w-8 rounded-full bg-[#46607B] text-white text-sm font-semibold flex items-center justify-center">
+                  {(me.name || me.email).trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="text-sm font-semibold text-[#111E2D]">{(me.name || me.email).split(' ')[0]}</span>
+                <ChevronDown size={15} className="text-[#5A6B80]" />
               </button>
+              {menu && (
+                <div className="absolute right-0 mt-2 w-60 rounded-xl border border-[#E3E8EE] bg-white shadow-lg p-2 text-sm" onMouseLeave={() => setMenu(false)}>
+                  <p className="px-3 py-2 text-[#5A6B80] truncate">{me.email}</p>
+                  <button type="button" onClick={onSignedOut} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-[#111E2D] hover:bg-[#F2F5F8]">
+                    <LogOut size={15} /> Sign out
+                  </button>
+                </div>
+              )}
             </div>
-          </header>
+          </div>
+        </div>
+        {/*
+          THE BAND (S16, the mock-up): the remittance advice's coastline across the whole width under the top bar,
+          the navy wash only where the words are, so the sunset shows on the right. Raptor's DashboardHero shape:
+          the client's name above the title, the action on the right.
+        */}
+        <header className="relative text-white" data-testid="portal-hero"
+          style={{ background: `linear-gradient(95deg, rgba(17,30,45,0.92) 0%, rgba(17,30,45,0.72) 34%, rgba(17,30,45,0.12) 70%, rgba(17,30,45,0.05) 100%), url('/brand/remittance-cover.jpg') center 30% / cover` }}>
+          <div className="max-w-[1400px] mx-auto px-5 sm:px-10 py-8 sm:py-10 flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <PortalLabel invert>{me.client}</PortalLabel>
+              <h1 className="text-3xl sm:text-[2.6rem] font-bold tracking-tight mt-1.5">{here.title}</h1>
+              <p className="text-[15px] text-white/85 mt-1">{section === 'dashboard' ? 'Your book, where it stands, whenever you want to look.' : here.blurb}</p>
+            </div>
+            <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#111E2D]/55 hover:bg-[#111E2D]/70 border border-white/25 px-4 py-2.5 text-sm font-medium backdrop-blur-sm">
+              <Phone size={15} /> Ask us to call you
+            </button>
+          </div>
+        </header>
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-5 sm:py-6 space-y-5">
           {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
           {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go}
             onAsk={(mode) => { setDone(null); setAsking({ about: null, mode }) }} />}
@@ -411,7 +468,7 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh} />}
           {section === 'handover' && <PortalHandovers token={token} onSignedOut={onExpired} />}
           {section === 'accounts' && (
-            <Book token={token} onSignedOut={onExpired}
+            <Book key={lookFor} token={token} onSignedOut={onExpired} initialSearch={lookFor}
               onAsk={(about, mode) => { setDone(null); setAsking({ about, mode }) }} />
           )}
         </div>
@@ -434,9 +491,9 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
 
 const PAGE = 100
 
-function Book({ token, onSignedOut, onAsk }: { token: string; onSignedOut: () => void; onAsk: (about: AskAbout, mode?: AskMode) => void }) {
-  const [search, setSearch] = useState('')
-  const [asked, setAsked] = useState('')
+function Book({ token, onSignedOut, onAsk, initialSearch = '' }: { token: string; onSignedOut: () => void; onAsk: (about: AskAbout, mode?: AskMode) => void; initialSearch?: string }) {
+  const [search, setSearch] = useState(initialSearch)
+  const [asked, setAsked] = useState(initialSearch)
   const [includeClosed, setIncludeClosed] = useState(false)
   const [offset, setOffset] = useState(0)
   const [book, setBook] = useState<PortalBook | null>(null)
