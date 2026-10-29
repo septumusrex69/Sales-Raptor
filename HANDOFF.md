@@ -10,6 +10,7 @@
 Started from Handover 15 on a container that had checked out `Main`; the branch was moved onto
 `claude/s15-side-panel` and the preview merged in. **Not yet on the preview** (asked Stephan; waiting).
 
+- **R-12 (builder, 29 Oct): an email to the client sent from a ticket now also lands on the client's Emails tab** -- it was filed on the ticket and the account only (`QueryDetail` onSent), never as an Email activity. Written only when it went to the client; no extra charge. `check-ticket-client-email` (seen failing before the fix).
 - **`portal_handovers` applied on staging** (see the S15 entry below for how and the md5).
 - **TWO YEARS OF HISTORY ON STEPHAN'S TEST CLIENT (staging, `07574f60-...`)**, Stephan: "add like a lot of data
   ... Two years." All of it through the real engine, as Stephan (claims set), tagged so it can be found:
