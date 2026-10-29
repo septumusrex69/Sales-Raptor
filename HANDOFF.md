@@ -24,13 +24,18 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   - **24 payover runs** PO-STC-2412 .. PO-STC-2611: 22 paid, Sep 2026 sent, Oct 2026 ready. Built, approved, sent
     and paid by the real functions; `approved_at`/`sent_at` and the sends' `sent_at` then backdated to each run's
     payout day with `session_replication_role = replica` (the protect triggers refuse it otherwise).
-  - **23 remittance sends** (`payover_run_sends`) -- **THE FILES DO NOT EXIST**: their `pdf_path`/`xlsx_path` point
-    at `payover-advice/{client}/{invoice}/...-s16hist.pdf` and nothing was uploaded (no session holds a key that
-    can write to Storage). The portal's Reports list shows them; **Open/Download will fail**. Ask Stephan
-    before deploying anything to upload them (a one-off edge function would hold the service role).
+  - **23 remittance sends** (`payover_run_sends`) **with their files** (Stephan: "you're just going to upload the
+    report files"): each PDF and schedule built by Raptor's own `adviceFromRun`/`remittancePdf`/`adviceSchedule`
+    from the run's real lines (`payover_run_payments`), stored at the paths the sends already named. How, since
+    a container cannot reach supabase.co (the proxy refuses it): the data parked in a temporary table, a one-off
+    Edge Function `s16-history-files` (service role; imported src/lib from the public repo at `cb7a54b` through
+    an import map, `.js` -> `.ts`; refused any call without a one-off key) triggered from SQL with **`pg_net`**
+    (switched on for this, staging only, mirrored in schema.sql). Then the function was redeployed as a 410 stub
+    with no key (the tools cannot delete one) and the table removed. The `snapshot` on those sends is still the
+    short one written at the time, not the full advice; nothing reads it.
   - 26 tickets (dispute / client / litigation / import; closed before Aug 2026, open after, every stage) and 14
-    portal handover submissions (12 loaded, linked to their batches; 2 declined with reasons) -- their files do
-    not exist either.
+    portal handover submissions (12 loaded, linked to their batches; 2 declined with reasons), each with a sheet of
+    the batch's accounts in `portal-handovers` (written the same way).
 - **THE PORTAL DASHBOARD IN RAPTOR'S SHAPE, BREDELL'S COLOURS** (Stephan sent three ChatGPT mock-ups: "make it
   look and feel like Raptor, except maybe the colour schemes ... more like Bredell"; "the handover thing that we
   have on the communications dashboard is better"; "the image ... was the same image that you put on the

@@ -53751,3 +53751,8 @@ alter table public.client_portal_users
   add column if not exists password_locked_until timestamptz;
 comment on column public.client_portal_users.password_hash is
   'scrypt of the keyed hash of the password, salted (S16). Only api/portal (service role) reads or writes it; never sent to a browser.';
+
+-- s16_enable_pg_net (S16, Raptor · Handover 15, 29 Oct 2026). STAGING. Switched on so the database could call a
+-- one-off Edge Function (s16-history-files, since retired to a 410 stub) that wrote the PDF and spreadsheet files
+-- behind the test history -- a session's container cannot reach supabase.co. Nothing in the app uses it.
+create extension if not exists pg_net;
