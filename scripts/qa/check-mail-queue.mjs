@@ -57,8 +57,10 @@ const rules = readFileSync(new URL('../../src/lib/emailRules.ts', import.meta.ur
  */
 {
   ok('the mailbox still has tabs', /const TABS: \{ id: Pane/.test(page))
-  ok('...and there are three of them plus the blocklist',
-    (page.match(/^  \{ id: '[a-z-]+', label:/gm) ?? []).length === 4)
+  /* FOUR NOW, plus the blocklist: Done came back in S16 (check-mail-done), and it is not a queue --
+     nothing is owed to it and it carries no badge. */
+  ok('...and there are four of them plus the blocklist',
+    (page.match(/^  \{ id: '[a-z-]+', label:/gm) ?? []).length === 5)
   /* THE THREE THAT WENT. Named one at a time, because a single "none of these" assertion would
      pass the day somebody put one back under a new label. */
   ok('...no Needs matching tab', !/id: 'needs-filing'/.test(page))
@@ -75,7 +77,7 @@ const rules = readFileSync(new URL('../../src/lib/emailRules.ts', import.meta.ur
   ok("...and no longer one for mail that is not on a record",
     !/filter === 'needs-filing'|filter === 'filed'|filter === 'no-record'/.test(mail))
   ok('...nor a type that would let one be asked for',
-    /export type MailFilter = 'junk' \| 'sent' \| 'all'/.test(rules))
+    /export type MailFilter = 'junk' \| 'sent' \| 'done' \| 'all'/.test(rules))
 
   /*
    * AND NOTHING COUNTS WHAT IS NOT MATCHED.
@@ -475,8 +477,9 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
    * nobody has asked to stop seeing it.
    */
   ok('the tabs carry a badge', /unreadByTab\[t\.id\]/.test(page))
-  ok('...and it is unread, on every one of them',
-    /const n = t\.id === 'blocked' \? 0 : unreadByTab\[t\.id\]/.test(page))
+  /* Every one but Done (S16): unread mail somebody has marked done is not waiting on them. */
+  ok('...and it is unread, on every one of them but Done',
+    /const n = t\.id === 'blocked' \|\| t\.id === 'done' \? 0 : unreadByTab\[t\.id\]/.test(page))
   ok('...with nothing counting work left to do', !/outstanding/.test(page.replace(/\/\*[\s\S]*?\*\//g, '')))
   ok('...and nothing at zero, which is what teaches people to stop reading badges',
     /if \(n <= 0\) return null/.test(page))

@@ -89,6 +89,11 @@ export interface MailItem {
   /** Dealt with, however it was dealt with: matched OR marked as needing no record. */
   isSettled: boolean
   /**
+   * When somebody said this message is DONE -- dealt with, out of the inbox (S16). Null is still in
+   * All. Not `isSettled`, which the sync can set on its own; this only a person sets. See markMailDone.
+   */
+  doneAt: string | null
+  /**
    * What this person told the organiser, where the message was a meeting request.
    *
    * Null means unanswered, which is not the same as declined — the organiser's tracking list
@@ -129,6 +134,7 @@ interface MailRow {
   is_junk: boolean
   occurred_at: string
   read_at: string | null
+  done_at: string | null
   linked_account_id: string | null
   linked_lead_id: string | null
   linked_deal_id: string | null
@@ -183,7 +189,7 @@ interface MailRow {
 const COLUMNS = `
   id, folder, is_sent, to_address, to_name, to_recipients, cc_recipients,
   uid, message_id, from_address, from_name, subject, snippet,
-  attachment_names, is_junk, occurred_at, read_at, is_filed, is_settled, no_record_at,
+  attachment_names, is_junk, occurred_at, read_at, done_at, is_filed, is_settled, no_record_at,
   invite_response, body_cached_at,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
@@ -275,6 +281,8 @@ function toItem(r: MailRow): MailItem {
     isFiled: r.is_filed,
     noRecordAt: r.no_record_at,
     isSettled: r.is_settled,
+    /* By hand like every other column: missing here, every done message would read as still in All. */
+    doneAt: r.done_at ?? null,
     inviteResponse: r.invite_response ?? null,
     linkedTo: linkedRecord(r),
   }
@@ -389,7 +397,15 @@ export function scope<Q>(q: Q, input: MailScope): Q {
    * Without that, a debtor's reply the mail server misfiled as spam would be rescued onto an
    * account and then vanish from All anyway.
    */
-  else if (input.filter === 'all') out = out.eq('is_junk', false).eq('is_sent', false)
+  /*
+   * DONE (S16), the inbox's other half. Stephan: "if an email has been dealt with ... that it's archived
+   * ... they want their inboxes to show that it's empty". So All leaves done mail out and Done holds it
+   * -- on the same two exclusions All has, because only mail that would be in All can be done (tabOf).
+   * NOTHING IS LOST: a search reaches the whole mailbox (`everywhere`, above), done mail included, and
+   * "Not done" puts a message back.
+   */
+  else if (input.filter === 'done') out = out.not('done_at', 'is', null).eq('is_junk', false).eq('is_sent', false)
+  else if (input.filter === 'all') out = out.eq('is_junk', false).eq('is_sent', false).is('done_at', null)
 
   /*
    * Unread NARROWS whichever tab you are on rather than being a sixth tab of its own.
@@ -444,7 +460,7 @@ export async function countUnread(userId: string, input: MailScope): Promise<num
 export async function countUnreadByTab(
   userId: string, search?: string,
 ): Promise<Record<MailFilter, number>> {
-  const tabs: MailFilter[] = ['all', 'junk', 'sent']
+  const tabs: MailFilter[] = ['all', 'done', 'junk', 'sent']
   const counts = await Promise.all(
     tabs.map((filter) => countUnread(userId, { filter, search }).catch(() => 0)),
   )
@@ -927,6 +943,44 @@ export async function markMailUnread(ids: string[]): Promise<void> {
 }
 
 /**
+ * DONE: this message is dealt with, and leaves the inbox (S16, Raptor · Handover 15).
+ *
+ * Stephan, of the staff: "what they want is if an email has been dealt with ... that it's archived ...
+ * completed or responded to ... they want their inboxes to show that it's empty ... that's how they used
+ * to working." So Done is its own fact, beside read and not instead of it: read changes how a row LOOKS,
+ * done changes whether it is still WORK. Opening a message is not dealing with it.
+ *
+ * RAPTOR ONLY. Nothing moves or is flagged on the mail server -- the sync is one-way, and a message
+ * archived in Outlook because somebody clicked in Raptor is a change to a mailbox they did not make.
+ * The sync's insert ignores duplicates, so a re-sync cannot undo this either.
+ *
+ * Narrowed to rows not already done, so a second press does not move who did it or when.
+ */
+export async function markMailDone(ids: string[], actorId: string | null): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from('user_emails')
+    .update({ done_at: new Date().toISOString(), done_by: actorId })
+    .in('id', ids)
+    .is('done_at', null)
+  if (error) throw new Error(error.message)
+  // The sidebar's Mail badge leaves done mail out (nav_counts), so it moves with this.
+  refreshNavCounts()
+}
+
+/** Not done after all: back into the inbox, as it was. Who goes with when -- a check holds the two together. */
+export async function markMailNotDone(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from('user_emails')
+    .update({ done_at: null, done_by: null })
+    .in('id', ids)
+    .not('done_at', 'is', null)
+  if (error) throw new Error(error.message)
+  refreshNavCounts()
+}
+
+/**
  * Throw a message away.
  *
  * Raptor forgets it; the real mailbox keeps it. Nothing here touches the IMAP server — this
@@ -1215,6 +1269,11 @@ export async function unblockSender(id: string): Promise<void> {
  * still unlinked. That is what makes the fee happen once: a double click, a retried request, or
  * two people looking at the same shared address cannot raise two R13s for one email.
  */
+/* The done half of "match and mark done", or nothing at all -- so plain filing writes no done column. */
+function doneFields(markDone: boolean | undefined, actorId: string | null): Record<string, string | null> {
+  return markDone ? { done_at: new Date().toISOString(), done_by: actorId } : {}
+}
+
 export async function linkMailToAccount(input: {
   mail: MailItem
   accountId: string
@@ -1226,10 +1285,18 @@ export async function linkMailToAccount(input: {
    * account (mail_ticket_same_account), so a wrong pick is an error, not a misfiling.
    */
   queryId?: string | null
+  /**
+   * MATCH AND MARK DONE IN ONE STEP (S16). Filing a debtor's reply is usually the whole of dealing with
+   * it, so the box offers both together; written in the SAME claiming update, so a message is never left
+   * filed-but-in-the-inbox or done-but-unfiled by a request that failed halfway. Absent is plain filing,
+   * exactly as before.
+   */
+  markDone?: boolean
 }): Promise<ChargeResult> {
   const { data: claimed, error: claimError } = await supabase
     .from('user_emails')
     .update({
+      ...doneFields(input.markDone, input.actor.id),
       linked_account_id: input.accountId,
       linked_at: new Date().toISOString(),
       linked_by: input.actor.id,
@@ -1458,6 +1525,8 @@ export async function linkMailToRecord(input: {
   mail: MailItem
   to: { kind: 'lead' | 'deal' | 'client' | 'contact'; id: string; label: string }
   actor: { id: string | null; name: string | null }
+  /** Match and mark done in one step -- see linkMailToAccount. */
+  markDone?: boolean
 }): Promise<void> {
   const column = {
     lead: 'linked_lead_id',
@@ -1469,6 +1538,7 @@ export async function linkMailToRecord(input: {
   const { data: claimed, error: claimError } = await supabase
     .from('user_emails')
     .update({
+      ...doneFields(input.markDone, input.actor.id),
       [column]: input.to.id,
       linked_at: new Date().toISOString(),
       linked_by: input.actor.id,

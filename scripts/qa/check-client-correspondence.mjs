@@ -168,7 +168,7 @@ ok('...and client mail on a ticket stays on the ticket, the sync\'s own rule', /
   const mail = code('src/pages/mail/MailPage.tsx')
   ok('the Mail page offers the account\'s open tickets, choosing one the subject quotes',
     /const open = qs\.filter\(\(q\) => q\.status !== 'closed'\)/.test(mail) && /open\.find\(\(q\) => q\.ticketNo === quoted\)/.test(mail)
-    && /linkMailToAccount\(\{ mail, accountId, actor, queryId: ticketId \}\)/.test(mail))
+    && /linkMailToAccount\(\{ mail, accountId, actor, queryId: ticketId(, markDone: [^}]+)? \}\)/.test(mail))
 }
 
 /* ---------- 5. the fee is not touched ---------- */

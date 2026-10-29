@@ -2,7 +2,7 @@ import { dropDraft, listDrafts, type MailDraft } from '../../lib/mailDrafts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
+  AlertTriangle, Ban, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
   Inbox, Link2, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
@@ -45,7 +45,7 @@ import {
   countUnreadByTab, debtorFileFor, deleteMail, fetchMailItem, fetchSenderRules, tabOf,
   domainBlockProblem, domainOf, emptyJunk, fetchAttachment, fetchBlockedSenders, fetchMail,
   isSharedDomain,
-  fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
+  fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailDone, markMailNotDone, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type DebtorFile, type InlineImage, type LinkedRecord,
   type MailFilter, type MailItem,
@@ -133,7 +133,15 @@ type Pane = MailFilter | 'blocked'
  * folder. Blocked is not a filter at all -- it is the blocklist, shown in the same place.
  */
 const TABS: { id: Pane; label: string; hint: string }[] = [
-  { id: 'all', label: 'All', hint: 'Your whole mailbox, junk aside' },
+  { id: 'all', label: 'All', hint: 'Your inbox: everything not yet done, junk aside' },
+  /*
+   * DONE, BESIDE ALL (S16, Raptor · Handover 15). Stephan, of the staff: "if an email has been dealt with
+   * ... that it's archived ... they want their inboxes to show that it's empty ... that's how they used to
+   * working." So a message somebody marks done leaves All and lands here -- nothing is lost, a search still
+   * finds it, and "Not done" puts it back. There is no undo toast on this page, so this tab IS the undo.
+   * Next to All because it is All's other half, not a folder the mail server keeps.
+   */
+  { id: 'done', label: 'Done', hint: 'Mail you have marked done. Not done puts it back in your inbox' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   /*
    * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
@@ -179,6 +187,13 @@ function senderColour(address: string): string {
   return SENDER_COLOURS[hash % SENDER_COLOURS.length]
 }
 
+/**
+ * Whether a message can be marked done (S16): only one that is in the inbox or already done. Junk is a
+ * shelf of its own and sent mail is not waiting on anybody, so neither has an inbox to leave -- the same
+ * order tabOf decides tabs in.
+ */
+const canBeDone = (m: MailItem) => !m.isJunk && !m.isSent
+
 /** A debtor by name, falling back to whatever else identifies the account. */
 const debtorLabel = (a: DebtorAccount) =>
   [a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ')
@@ -206,7 +221,7 @@ export function MailPage() {
    * misfiled sat in Junk with nothing anywhere saying so.
    */
   const [unreadByTab, setUnreadByTab] = useState<Record<MailFilter, number>>(
-    { all: 0, junk: 0, sent: 0 },
+    { all: 0, done: 0, junk: 0, sent: 0 },
   )
   const [unreadOnly, setUnreadOnly] = useState(false)
   /* The count for the tab you are standing on, which is what the Unread only option applies to. */
@@ -1113,6 +1128,51 @@ export function MailPage() {
     }
   }
 
+  /**
+   * DONE, OR NOT DONE AFTER ALL, for one message (S16).
+   *
+   * Like unreadOne, NOTHING IS RELOADED: the row leaves the list it is on (All for done, Done for not
+   * done) and the badges move by one, so the reader stays where they were in the list. Except while a
+   * search is reaching the whole mailbox -- that list holds every tab, so the row stays and only says so.
+   *
+   * Read state is not touched. Done is whether it is still work; read is how the row looks.
+   */
+  async function doneOne(mail: MailItem, done: boolean) {
+    const next = { ...mail, doneAt: done ? new Date().toISOString() : null }
+    const stays = searchEverywhere && !!asked.trim()
+    setItems((list) => (stays
+      ? list.map((m) => (m.id === mail.id ? next : m))
+      : list.filter((m) => m.id !== mail.id)))
+    if (!mail.readAt) setUnreadByTab((counts) => bumpUnread(bumpUnread(counts, mail, -1), next, 1))
+    if (open === mail.id) setOpen(null)
+    try {
+      if (done) await markMailDone([mail.id], currentUser?.id ?? null)
+      else await markMailNotDone([mail.id])
+      setStatus(done
+        ? 'Done — out of your inbox. It is under Done, where Not done puts it back.'
+        : 'Not done — back in your inbox.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      await load(page)
+    }
+  }
+
+  /** The same for a selection: only the chosen rows that can be done, which is never junk or sent. */
+  async function doneChosen(done: boolean) {
+    const ids = items.filter((m) => chosen.has(m.id) && canBeDone(m) && !!m.doneAt !== done).map((m) => m.id)
+    if (ids.length === 0) return
+    try {
+      if (done) await markMailDone(ids, currentUser?.id ?? null)
+      else await markMailNotDone(ids)
+      setStatus(done
+        ? `${ids.length} ${ids.length === 1 ? 'email' : 'emails'} done — under Done, where Not done puts them back.`
+        : `${ids.length} ${ids.length === 1 ? 'email' : 'emails'} back in your inbox.`)
+      await afterBulk()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function unreadOne(mail: MailItem) {
     /*
      * NOTHING IS RELOADED. The firm: "when I mark an email as unread it kind of reloads
@@ -1303,7 +1363,9 @@ export function MailPage() {
                   teaches people to stop reading the others.
                 */}
                 {(() => {
-                  const n = t.id === 'blocked' ? 0 : unreadByTab[t.id]
+                  /* NONE ON DONE: unread mail somebody has marked done is not waiting on them, and a
+                     badge on the tab of finished work is a number nobody is meant to clear. */
+                  const n = t.id === 'blocked' || t.id === 'done' ? 0 : unreadByTab[t.id]
                   if (n <= 0) return null
                   return (
                     /* Brand, matching the dot on a row and the Unread only filter. There used to be
@@ -1361,7 +1423,10 @@ export function MailPage() {
                     ? 'border-gold-500 bg-gold-400 text-navy-950'
                     : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
                 {selecting ? <X size={14} /> : <CheckSquare size={14} />}
-                {selecting ? 'Done' : 'Select'}
+                {/* CANCEL, NOT "Done" (S16): Done is now what a message is, and two buttons called
+                    Done on one screen -- one finishing a selection, one finishing an email -- is a
+                    press on the wrong one waiting to happen. */}
+                {selecting ? 'Cancel' : 'Select'}
               </button>
             )}
             {/* Not on the blocklist, which is a list of senders rather than of mail. */}
@@ -1389,6 +1454,23 @@ export function MailPage() {
               <button onClick={() => void unreadChosen()}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
                 <MailIcon size={14} /> Mark unread
+              </button>
+            )}
+            {/*
+              DONE, IN BULK (S16): a morning's dealt-with mail out of the inbox in one press. Offered
+              on the two tabs a message can be done from -- All marks done, Done marks not done -- and
+              acting only on the chosen rows that can be, so junk and sent picked up by Select all on
+              a search are left alone rather than refused.
+            */}
+            {filter === 'done' ? (
+              <button onClick={() => void doneChosen(false)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <Undo2 size={14} /> Not done
+              </button>
+            ) : filter === 'all' && (
+              <button onClick={() => void doneChosen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+                <CheckCircle2 size={14} /> Mark done
               </button>
             )}
             {/*
@@ -1651,6 +1733,7 @@ export function MailPage() {
                   onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
                   onMove={() => setMoving(m)}
                   onUnread={() => void unreadOne(m)}
+                  onDone={canBeDone(m) ? (d) => void doneOne(m, d) : null}
                   onLink={() => startLink(m)}
                   onCreateLead={() => setCreatingLead(m)}
                   sticky
@@ -1702,6 +1785,7 @@ export function MailPage() {
                   onJunk={(j) => void junkOne(m, j)}
                   onMove={() => setMoving(m)}
                   onUnread={() => void unreadOne(m)}
+                  onDone={canBeDone(m) ? (d) => void doneOne(m, d) : null}
                   onCreateLead={() => setCreatingLead(m)}
                   fetchAttachment={(f) => attachmentOf(m, f)} />
               ))}
@@ -2052,9 +2136,12 @@ function LoadFailed({ onRetry }: { onRetry: () => void }) {
 function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; searching: boolean }) {
   if (searching) return <p className="py-14 text-center text-sm text-slate-400">Nothing matches that.</p>
   const words: Record<MailFilter, string> = {
-    all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
+    /* EMPTY IS THE POINT NOW (S16) -- the inbox the staff work towards -- so it says so, and only then
+       mentions connecting a mailbox, for the person who has never had any mail at all. */
+    all: 'Nothing waiting — your inbox is clear. (No mail at all? Connect your mailbox under Settings → Integrations.)',
     // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
     junk: 'Nothing in junk.',
+    done: 'Nothing marked done yet. Tick a message done and it leaves your inbox for here.',
     sent: 'Nothing sent yet. This fills from your mailbox\u2019s Sent folder, so mail you send from Outlook or your phone shows here too.',
   }
   return (
@@ -2393,7 +2480,7 @@ function MailSummary({ mail, tight, blocked }: {
  * the top of an expanded list row. Written once so the two cannot end up offering different things.
  */
 function MessageActions({
-  mail, sticky, moreActions, onReply, onReplyAll, onForward, onUnread,
+  mail, sticky, moreActions, onReply, onReplyAll, onForward, onUnread, onDone,
 }: {
   mail: MailItem
   sticky: boolean
@@ -2402,6 +2489,8 @@ function MessageActions({
   onReplyAll: () => void
   onForward: () => void
   onUnread: () => void
+  /** Done or not done. Null where it cannot be -- junk and sent are not in the inbox to leave it. */
+  onDone: ((done: boolean) => void) | null
 }) {
   /*
    * SPARK'S BAR, WHICH THE FIRM SENT OVER: "I kind of like the one that Spark did better -- it's
@@ -2436,6 +2525,15 @@ function MessageActions({
         Not yet, which is a legitimate answer. Without it, opening a message to see whether it
         was urgent was the same act as deciding it was not. First, as it is in Spark.
       */}
+      {/*
+        DONE, FIRST ON THE BAR (S16): dealing with a message and sending it out of the inbox is the
+        motion the staff asked for, so it is where the hand already is. Not done on a done message,
+        which is the way back.
+      */}
+      {onDone && (mail.doneAt
+        ? <BarButton sticky={sticky} onClick={() => onDone(false)} label="Not done" icon={<Undo2 size={15} />} />
+        : <BarButton sticky={sticky} onClick={() => onDone(true)} label="Mark done" icon={<CheckCircle2 size={15} />} />)}
+
       <BarButton sticky={sticky} onClick={onUnread} label="Mark unread" icon={<MailIcon size={15} />} />
 
       {/*
@@ -2612,7 +2710,7 @@ function EmailFrame({ html }: { html: string }) {
 function MailBody({
   mail, body, html, showPictures, onShowPictures,
   images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
-  bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread,
+  bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onDone,
   onLink, onCreateLead, fetchAttachment, sticky,
 }: {
   mail: MailItem
@@ -2657,6 +2755,8 @@ function MailBody({
   onMove: (() => void) | null
   /** Put it back on the pile, and close it. */
   onUnread: () => void
+  /** Done, or not done. Null where the message cannot be (junk, sent). */
+  onDone: ((done: boolean) => void) | null
   /** Put it on a record -- the picker, which searches leads, deals, clients and the book. */
   onLink: () => void
   /**
@@ -2768,7 +2868,7 @@ function MailBody({
   /* Gathered once, because the bar renders in one of two places and a second argument list would
      be a second set of buttons waiting to happen. */
   const bar = {
-    mail, sticky: !!sticky, moreActions, onReply, onReplyAll, onForward, onUnread,
+    mail, sticky: !!sticky, moreActions, onReply, onReplyAll, onForward, onUnread, onDone,
   }
 
   return (
@@ -3278,7 +3378,7 @@ function MailRow({
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
-  onUnread, fetchAttachment,
+  onUnread, onDone, fetchAttachment,
 }: {
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
@@ -3316,6 +3416,7 @@ function MailRow({
   onJunk: (junk: boolean) => void
   onMove: (() => void) | null
   onUnread: () => void
+  onDone: ((done: boolean) => void) | null
   onCreateLead: () => void
   /** This agent's own addresses, so a recipient line can say "you" instead of naming them. */
   mine: (string | null | undefined)[]
@@ -3352,6 +3453,18 @@ function MailRow({
               <Link2 size={12} /> Match
             </button>
           )}
+          {/*
+            THE TICK ON THE ROW (S16), so a message can be done without opening it -- the notice whose
+            subject says everything. Icon-only, because the list was made thin at the firm's request,
+            and named for a screen reader and the tooltip.
+          */}
+          {onDone && (
+            <button onClick={() => onDone(!mail.doneAt)}
+              aria-label={mail.doneAt ? 'Not done' : 'Mark done'} title={mail.doneAt ? 'Not done — back to your inbox' : 'Mark done — out of your inbox'}
+              className={mail.doneAt ? 'text-[var(--c-green)] hover:text-slate-600' : 'text-slate-300 hover:text-[var(--c-green)]'}>
+              <CheckCircle2 size={16} />
+            </button>
+          )}
           <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
             className="text-slate-400 hover:text-slate-600">
             {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -3377,7 +3490,7 @@ function MailRow({
             loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onJunk={onJunk}
-            onMove={onMove} onUnread={onUnread}
+            onMove={onMove} onUnread={onUnread} onDone={onDone}
             onLink={onLink} onCreateLead={onCreateLead} fetchAttachment={fetchAttachment} />
         </div>
       )}
@@ -4040,6 +4153,18 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
   const [looking, setLooking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * MATCH AND MARK DONE, AS ONE STEP (S16). A CHECKBOX, DEFAULTING ON, rather than a second button,
+   * because this box has two ways to file and one of them has no button at all: a lead, deal, client
+   * or contact files on the TAP. A second button could only ever sit beside the debtor's "Match to ...
+   * R13" and would leave the other half of the box unable to do it. One tick above both governs both.
+   *
+   * On, because filing is usually the whole of dealing with a message. OFF WHEN OPENED BY REPLY: the
+   * answer has not been written yet, and a message marked done before it is answered is one that drops
+   * out of the inbox if the composer is closed. Untick it and filing is exactly what it was before.
+   */
+  const [alsoDone, setAlsoDone] = useState(!replying && !mail.isJunk && !mail.isSent && !mail.doneAt)
+  const doneOffered = !mail.isJunk && !mail.isSent && !mail.doneAt
 
   /*
    * CRM records come from the store, which already holds every lead, deal, client and contact
@@ -4160,8 +4285,8 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
     setBusy(true)
     setError(null)
     try {
-      await linkMailToRecord({ mail, to: hit, actor })
-      onDone(`Matched to ${hit.label}. No charge — Annexure B is for debtor accounts.`, null, {
+      await linkMailToRecord({ mail, to: hit, actor, markDone: doneOffered && alsoDone })
+      onDone(`Matched to ${hit.label}${doneOffered && alsoDone ? ' and done' : ''}. No charge — Annexure B is for debtor accounts.`, null, {
         kind: hit.kind, id: hit.id, label: hit.label, path: CRM_PATH[hit.kind](hit.id),
       })
     } catch (e) {
@@ -4176,7 +4301,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
     setBusy(true)
     setError(null)
     try {
-      const charge = await linkMailToAccount({ mail, accountId, actor, queryId: ticketId })
+      const charge = await linkMailToAccount({ mail, accountId, actor, queryId: ticketId, markDone: doneOffered && alsoDone })
 
       /*
        * Saved AFTER the filing, and never allowed to undo it. The message is on the account and
@@ -4208,7 +4333,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
       }
 
       onDone(
-        `Matched to ${label}${ticketId ? `, on ticket ${ticketLabel(tickets.find((q) => q.id === ticketId)!)}` : ''}. ${chargeMessage(charge, '6')}`
+        `Matched to ${label}${doneOffered && alsoDone ? ' and done' : ''}${ticketId ? `, on ticket ${ticketLabel(tickets.find((q) => q.id === ticketId)!)}` : ''}. ${chargeMessage(charge, '6')}`
         + (saved > 0 ? ` ${saved} contact ${saved === 1 ? 'detail' : 'details'} saved on the account.` : ''),
         accountId,
         { kind: 'account', id: accountId, label, path: `/accounts/${accountId}` },
@@ -4235,6 +4360,15 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
         <p className="text-xs text-slate-400 mt-0.5 truncate">From {mail.fromAddress}</p>
         {mail.snippet && <p className="text-[13px] text-slate-500 mt-1.5">{mail.snippet.slice(0, 160)}</p>}
       </div>
+
+      {/* Above both ways of filing, because it governs both -- see alsoDone. */}
+      {doneOffered && (
+        <label className="flex items-center gap-2.5 mt-3 cursor-pointer text-sm text-slate-700">
+          <input type="checkbox" checked={alsoDone} disabled={busy}
+            onChange={(e) => setAlsoDone(e.target.checked)} data-testid="mail-match-done" />
+          Mark it done as well &mdash; out of your inbox once it is matched
+        </label>
+      )}
 
       {picked ? (
         /*
