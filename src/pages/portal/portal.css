@@ -10,13 +10,29 @@
  * definition wins and nothing outside `.portal-brand` changes.
  */
 .portal-brand {
+  /* THE BREDELL FERREIRA PALETTE (S16, Stephan's dashboard brief, 29 Oct) -- every portal colour comes from here or
+     from portalColours.ts, which repeats these values for the charts. No green, red, orange or purple. */
+  --bf-navy: #101F2C;
+  --bf-navy-chart: #203B60;
+  --bf-slate: #46607B;
+  --bf-blue: #97B4CC;
+  --bf-gold: #C69F54;
+  --bf-charcoal: #32404D;
+  --bf-muted: #525D66;
+  --bf-blue-grey: #B4BFCC;
+  --bf-pale-blue: #D5E1EB;
+  --bf-border: #ECECEC;
+  --bf-background: #F4F4F4;
+  --bf-white: #FFFFFF;
+  /* The brief's type: Raleway for headings and figures, Open Sans for everything else. */
+  font-family: 'Open Sans Variable', 'Open Sans', ui-sans-serif, system-ui, sans-serif;
   --color-navy-950: #0f161d;
   --color-navy-900: #111e2d;
   --color-navy-800: #1d2c3a;
   --color-navy-700: #283d50;
   --color-navy-600: #355069;
   --color-gold-500: #c69f54;
-  --color-gold-400: #d9b876;
+  --color-gold-400: #C69F54;
   --color-gold-300: #ecdcb8;
   --color-gold-600: #a9822f;
   --color-gold-50: #faf5ea;
@@ -40,12 +56,28 @@
 /* A skin styles `.card` directly (glass, a tinted fill); this is more specific than any of them. */
 html[data-theme] .portal-brand .card,
 html .portal-brand .card {
-  background-color: #ffffff;
-  border-radius: 1rem;
-  border: 1px solid #d5dbe3;
-  box-shadow: 0 1px 2px rgba(17, 30, 45, 0.04);
+  background-color: var(--bf-white);
+  border-radius: 16px;
+  border: 1px solid var(--bf-border);
+  box-shadow: 0 1px 2px rgba(16, 31, 44, 0.04), 0 8px 24px -16px rgba(16, 31, 44, 0.18);
   backdrop-filter: none;
 }
+/* Headings and the large figures in Raleway Bold (the brief, section 9). */
+.portal-brand h1, .portal-brand h2, .portal-brand h3, .portal-brand .bf-figure, .portal-brand .gap-ring-total {
+  font-family: 'Raleway Variable', 'Raleway', 'Poppins', sans-serif; font-weight: 700;
+}
+/* Raleway's own digits are old-style (a 5 and a 9 hang below the line); a figure wants lining, even-width ones. */
+.portal-brand .bf-figure, .portal-brand .gap-ring-total, .portal-brand h1, .portal-brand h2, .portal-brand h3 {
+  font-variant-numeric: lining-nums tabular-nums; font-feature-settings: 'lnum' 1, 'tnum' 1;
+}
+/* The handovers chart is Raptor's shared card; in the portal its title is a section title like the others. */
+.portal-brand [data-testid="portal-handovers"] h3 { font-size: 20px; color: var(--bf-navy); }
+.portal-brand [data-testid="portal-handovers"] h3 + p { font-size: 13px; color: var(--bf-muted); }
+.portal-brand .bf-label { font-family: 'Raleway Variable', 'Raleway', sans-serif; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
+/* The rings come in: a quarter turn and a fade, once, as the data lands. */
+.portal-brand .gap-ring-svg { animation: bf-ring-in 0.9s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes bf-ring-in { from { opacity: 0; transform: rotate(-60deg) scale(0.92); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .portal-brand .gap-ring-svg { animation: none; } }
 
 /*
  * THE OPENING (S16, PortalSplash.tsx). Stephan: "some sort of epic cool animation ... PlayStation 2 vibes."

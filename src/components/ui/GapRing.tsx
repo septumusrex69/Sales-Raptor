@@ -25,7 +25,7 @@ export function GapRing({ slices, total, label, size = 168, stroke = 24, testId 
   let at = 0
   return (
     <div className="relative shrink-0" style={{ height: size, width: size }} data-testid={testId}>
-      <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" aria-hidden>
+      <svg viewBox={`0 0 ${size} ${size}`} className="gap-ring-svg h-full w-full -rotate-90" aria-hidden>
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-slate-100)" strokeWidth={stroke} />
         {sum > 0 && live.map((x) => {
           const raw = (x.value / sum) * c
@@ -39,7 +39,7 @@ export function GapRing({ slices, total, label, size = 168, stroke = 24, testId 
         })}
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold tabular-nums text-slate-800">{total}</span>
+        <span className="gap-ring-total text-3xl font-bold tabular-nums text-slate-800">{total}</span>
         <span className="max-w-[62%] text-center text-xs leading-tight text-slate-500">{label}</span>
       </div>
     </div>

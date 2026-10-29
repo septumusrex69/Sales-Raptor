@@ -406,7 +406,8 @@ export const PORTAL_ENDING_LABEL: Record<'paid_up' | 'settled' | 'written_off' |
 }
 /** The finished outcomes' colours, beside CLIENT_POSITION_COLOUR for the open ones. */
 export const PORTAL_ENDING_COLOUR: Record<'paid_up' | 'settled' | 'written_off' | 'withdrawn', string> = {
-  paid_up: '#065f46', settled: '#0f766e', written_off: '#9f1239', withdrawn: '#94a3b8',
+  /* The brand's (S16): no green, no red -- see src/pages/portal/portalColours.ts. */
+  paid_up: '#203B60', settled: '#C69F54', written_off: '#97B4CC', withdrawn: '#B4BFCC',
 }
 
 export interface PortalOutcomeLine {

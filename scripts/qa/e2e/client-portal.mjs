@@ -187,7 +187,13 @@ try {
   await t.shot(page, 'client-portal-dashboard')
   /* S16, Stephan's second mock-up: a top bar, the rings side by side, a trend under the figures, actions as a list. */
   t.ok('the top bar searches the book', await page.getByTestId('portal-top-search').count() === 1)
-  t.ok('the open and the finished accounts sit side by side', Math.abs((await page.getByTestId('portal-open').boundingBox()).y - (await page.getByTestId('portal-finished-card').boundingBox()).y) < 2)
+  /* Side by side where they fit (2xl); on a laptop or an iPad one above the other, each with its legend beside the ring. */
+  t.ok('the open and the finished accounts are matching cards, one above the other at 1440', (await page.getByTestId('portal-finished-card').boundingBox()).y > (await page.getByTestId('portal-open').boundingBox()).y
+    && Math.abs((await page.getByTestId('portal-finished-card').boundingBox()).width - (await page.getByTestId('portal-open').boundingBox()).width) < 2)
+  /* Stephan's brief: "No green ... No red" -- every slice of both rings is from the firm's palette. */
+  const fills = await page.locator('[data-testid$="-ring"] circle[data-slice]').evaluateAll((cs) => cs.map((c) => (c.getAttribute('stroke') || '').toUpperCase()))
+  t.ok('every ring slice is a Bredell Ferreira colour', fills.length > 0 && fills.every((f) => ['#203B60', '#C69F54', '#97B4CC', '#46607B', '#32404D', '#525D66', '#B4BFCC', '#D5E1EB'].includes(f)))
+  t.ok('...and each legend dot is its slice\'s colour', (await page.locator('[data-legend]').evaluateAll((ds) => ds.map((d) => getComputedStyle(d).backgroundColor))).length === fills.length)
   t.ok('the figures carry a trend drawn from the months sent', await page.getByTestId('portal-figures').locator('svg path').count() >= 4)
   t.ok('the sidebar counts the open tickets', (await page.getByTestId('portal-tickets-count').innerText()).trim() === '1')
   /* S16: the company dashboard's ring, white cuts between the slices (Stephan: "use this type of pie chart"). */

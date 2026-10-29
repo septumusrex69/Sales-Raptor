@@ -18,8 +18,10 @@ import type { MonthTrack } from '../../lib/clientBook'
 /** The closing rate printed over each month. */
 const RATE_LABEL = { fontSize: 10, fontWeight: 600, fill: 'var(--color-slate-600)' } as const
 
-export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, testId }: {
+export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, testId, colours }: {
   kind: 'pipeline' | 'new' | 'existing'
+  /** The bars' and the line's colours, where a screen has its own palette (the client portal, S16). */
+  colours?: { bar: string; line: string }
   rows: MonthTrack[]
   months: 6 | 12
   onMonths: (m: 6 | 12) => void
@@ -106,9 +108,9 @@ export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, 
                 {lines && <Line yAxisId="n" dataKey="mandates" name="Mandates" stroke="var(--color-navy-900)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
               </> : <>
                 {bars && <Bar yAxisId="n" dataKey="value" name={kind === 'new' ? 'From new clients' : 'From existing clients'}
-                  fill={kind === 'new' ? 'var(--color-navy-700)' : 'var(--color-gold-400)'} radius={[3, 3, 0, 0]} isAnimationActive={false} />}
-                {lines && <Line yAxisId="n" dataKey="value" name="Trend" stroke={kind === 'new' ? 'var(--color-navy-900)' : 'var(--color-gold-600)'}
-                  strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
+                  fill={colours?.bar ?? (kind === 'new' ? 'var(--color-navy-700)' : 'var(--color-gold-400)')} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+                {lines && <Line yAxisId="n" dataKey="value" name="Trend" stroke={colours?.line ?? (kind === 'new' ? 'var(--color-navy-900)' : 'var(--color-gold-600)')}
+                  strokeWidth={2} dot={{ r: 2.5, fill: colours?.line, stroke: colours?.line }} isAnimationActive={false} />}
               </>}
             </ComposedChart>
           </ResponsiveContainer>

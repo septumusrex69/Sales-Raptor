@@ -5,12 +5,13 @@ import { clockNow } from '../../lib/clock.ts'
 import { getCurrentSalesMonth } from '../../lib/salesMonth.ts'
 import { monthTrack } from '../../lib/clientBook.ts'
 import { MonthTrackCard } from '../../components/dashboard/MonthTrackCard'
-import { CLIENT_POSITIONS, CLIENT_POSITION_COLOUR, type ClientPosition } from '../../lib/clientPosition'
+import { CLIENT_POSITIONS, type ClientPosition } from '../../lib/clientPosition'
 import { PORTAL_ENDING_COLOUR, type PortalOutcome, type PortalOutcomeLine } from '../../lib/clientPortal'
+import { BF, portalOutcomeColour } from './portalColours'
 import { GapRing } from '../../components/ui/GapRing'
 import { DashboardPanes } from '../../components/dashboard/DashboardPanes'
 import { PortalSignedOut, fetchPortalDashboard, type PortalDashboard as Dash } from '../../lib/portalApi'
-import { PortalHeading, PortalLabel } from './portalStyle'
+import { PortalLabel } from './portalStyle'
 import type { Section } from './PortalPage'
 import type { AskMode } from './PortalAsk'
 import type { PortalTopic } from '../../lib/clientPortal'
@@ -32,9 +33,14 @@ import type { PortalTopic } from '../../lib/clientPortal'
  * the handovers are the communications dashboard's own MonthTrackCard over this client's book, and the
  * dashboard is where the client ACTS (his list, 29 Oct): who their liaison is and how to reach them, and a
  * button for each thing they come here to do.
+ *
+ * AND THEN TO HIS BRIEF (S16, 29 Oct: "Looks weird. Here some guidance."): the firm's palette and nothing else --
+ * the rings by status in navy, gold, light blue, slate (portalColours.ts), no green, no red; Raleway for headings
+ * and figures, Open Sans for the rest (portal.css); white cards on off-white, 16 px corners, quiet shadows; the
+ * figures four across only where a seven-figure rand fits, two across on an iPad; the two rings in matching
+ * cards with the largest status leading the legend; the actions a compact list.
  */
-const colour = (o: PortalOutcome) =>
-  o in PORTAL_ENDING_COLOUR ? PORTAL_ENDING_COLOUR[o as keyof typeof PORTAL_ENDING_COLOUR] : CLIENT_POSITION_COLOUR[o as ClientPosition]
+const colour = (o: PortalOutcome) => portalOutcomeColour(o)
 const meaning = (o: PortalOutcome) =>
   o in PORTAL_ENDING_COLOUR ? null : CLIENT_POSITIONS[o as ClientPosition].meaning
 const pct = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 1000) / 10}%` : '—')
@@ -95,9 +101,9 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
     <div className="space-y-6" data-testid="portal-dashboard">
       {d.tickets.waitingOnYou > 0 && (
         <button type="button" onClick={() => onOpen('tickets')} data-testid="portal-waiting"
-          className="w-full text-left rounded-xl border border-[#C69F54]/40 bg-[#C69F54]/10 px-5 py-3.5 text-sm text-[#111E2D] flex items-center justify-between gap-3">
+          className="w-full text-left rounded-[14px] border border-[#C69F54]/45 bg-white px-5 py-3.5 text-sm text-[#101F2C] flex items-center justify-between gap-3 shadow-[0_1px_2px_rgba(16,31,44,0.04)] border-l-[3px] border-l-[#C69F54]">
           <span><b>{d.tickets.waitingOnYou} ticket{d.tickets.waitingOnYou === 1 ? ' is' : 's are'} waiting on you.</b> We need your answer to carry on.</span>
-          <span className="shrink-0 font-semibold text-[#3F5F86]">Open tickets →</span>
+          <span className="shrink-0 font-semibold text-[#46607B]">Open tickets →</span>
         </button>
       )}
 
@@ -115,62 +121,46 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
       */}
       <DashboardPanes layoutKey="raptor.portal.dashboard.layout" initial="wide" panes={[
         { id: 'figures', kind: 'full', node: (
-          <section className="grid grid-cols-2 xl:grid-cols-4 gap-3" data-testid="portal-figures">
-            <Tile icon={<Landmark size={20} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`}
+          <section className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4" data-testid="portal-figures">
+            <Tile icon={<Landmark size={19} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`}
               trend={trends.handedCumulative} onOpen={() => onOpen('accounts')} />
-            <Tile icon={<BarChart3 size={20} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`}
+            <Tile icon={<BarChart3 size={19} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`}
               trend={trends.collectedCumulative} invert onOpen={() => onOpen('reports')} />
-            <Tile icon={<CalendarDays size={20} />} label="Collected this month" value={rand(f.collectedThisMonth)} note={`${pct(f.collectedThisMonth, f.capitalHandedOver)} of capital`}
+            <Tile icon={<CalendarDays size={19} />} label="Collected this month" value={rand(f.collectedThisMonth)} note={`${pct(f.collectedThisMonth, f.capitalHandedOver)} of capital`}
               trend={trends.collectedMonthly} onOpen={() => onOpen('reports')} />
-            <Tile icon={<Clock3 size={20} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`}
+            <Tile icon={<Clock3 size={19} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`}
               share={f.capitalHandedOver > 0 ? f.capitalOutstanding / f.capitalHandedOver : null} onOpen={() => onOpen('accounts')} />
           </section>
         ) },
         { id: 'handovers', kind: 'wide', node: (
           <MonthTrackCard kind="existing" rows={track} months={months} onMonths={setMonths} testId="portal-handovers"
+            colours={{ bar: BF.gold, line: BF.navyChart }}
             title="Your handovers, month by month"
             subtitle="The accounts you handed us each month. Switch to Rand for the capital, or to a line for the trend." />
         ) },
         { id: 'open', kind: 'wide', node: (
-          <div className="grid gap-5 md:grid-cols-2">
-            <div className="card p-5" data-testid="portal-open">
-              <PortalHeading title="Where your open accounts stand" subtitle="Every account we are still collecting, by where it is."
-                action={<button type="button" onClick={() => onOpen('accounts')} className="text-sm font-semibold text-[#3F5F86] hover:underline inline-flex items-center gap-1">See every account <ArrowRight size={14} /></button>} />
-              {open.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">No open accounts.</p> : (
-                <div className="mt-4 flex flex-wrap items-center gap-5">
-                  <GapRing testId="portal-open-ring" size={150} stroke={22} total={String(d.open)} label="Open accounts"
-                    slices={open.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
-                  <div className="flex-1 min-w-[210px]"><OutcomeTable lines={open} total={d.open} testId="portal-positions" /></div>
-                </div>
-              )}
-            </div>
-            <div className="card p-5" data-testid="portal-finished-card">
-              <PortalHeading title="Finished accounts" subtitle="How the accounts we are no longer collecting ended." />
-              {finished.length === 0 ? <p className="text-sm text-[#5A6B80] mt-4">None finished yet.</p> : (
-                <div className="mt-4 flex flex-wrap items-center gap-5">
-                  <GapRing testId="portal-finished-ring" size={150} stroke={22} total={String(d.accounts - d.open)} label="Finished accounts"
-                    slices={finished.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
-                  <div className="flex-1 min-w-[210px]">
-                    <p className="sr-only" data-testid="portal-paid-up">{paidUp}</p>
-                    <OutcomeTable lines={finished} total={d.accounts - d.open} testId="portal-finished" />
-                  </div>
-                </div>
-              )}
-            </div>
+          <div className="grid gap-4 2xl:grid-cols-2 items-stretch">
+            <RingCard testId="portal-open" ringTestId="portal-open-ring" tableTestId="portal-positions"
+              title="Where your open accounts stand" subtitle="Every account we are still collecting, by where it is."
+              lines={open} total={d.open} centre="Open accounts" empty="No open accounts." onSeeAll={() => onOpen('accounts')} />
+            <RingCard testId="portal-finished-card" ringTestId="portal-finished-ring" tableTestId="portal-finished"
+              title="Finished accounts" subtitle="How the accounts we are no longer collecting ended."
+              lines={finished} total={d.accounts - d.open} centre="Finished accounts" empty="None finished yet." onSeeAll={() => onOpen('accounts')}
+              extra={<p className="sr-only" data-testid="portal-paid-up">{paidUp}</p>} />
           </div>
         ) },
         { id: 'actions', node: (
-          <div className="card p-5" data-testid="portal-actions">
-            <PortalHeading title="What would you like to do?" />
-            <div className="mt-3 space-y-2">
-              <Action icon={<FolderUp size={19} />} label="Hand over accounts" hint="Send us new accounts" onClick={() => onOpen('handover')} testId="handover" />
-              <Action icon={<Ticket size={19} />} label="Raise a ticket" hint="A question about one of your accounts" onClick={() => onAsk('question')} testId="ticket" />
-              <Action icon={<ReceiptText size={19} />} label="Tell us about a payment" hint="The debtor paid you directly" onClick={() => onAsk('payment')} testId="payment" />
-              <Action icon={<UserPen size={19} />} label="Update a debtor's details" hint="A new number, address or employer" onClick={() => onAsk('question', 'New details for the debtor')} testId="details" />
-              <Action icon={<CircleSlash size={19} />} label="Request a withdrawal" hint="Stop collecting on an account" onClick={() => onAsk('question', 'Stop or withdraw this account')} testId="withdraw" />
-              <Action icon={<FileText size={19} />} label="Your reports" hint="Download your remittance advices" onClick={() => onOpen('reports')} testId="reports" />
-              <Action icon={<List size={19} />} label="Every account" hint="View all open and finished accounts" onClick={() => onOpen('accounts')} testId="accounts" />
-              <Action icon={<MessageCircle size={19} />} label="Your tickets" hint={d.tickets.open ? `${d.tickets.open} open ticket${d.tickets.open === 1 ? '' : 's'}` : 'Questions between you and us'} onClick={() => onOpen('tickets')} testId="tickets" />
+          <div className="card p-6" data-testid="portal-actions">
+            <h2 className="text-[20px] text-[#101F2C]">What would you like to do?</h2>
+            <div className="mt-4 space-y-2">
+              <Action icon={<FolderUp size={18} />} label="Hand over accounts" hint="Send us new accounts" onClick={() => onOpen('handover')} testId="handover" />
+              <Action icon={<Ticket size={18} />} label="Raise a ticket" hint="A question about one of your accounts" onClick={() => onAsk('question')} testId="ticket" />
+              <Action icon={<ReceiptText size={18} />} label="Tell us about a payment" hint="The debtor paid you directly" onClick={() => onAsk('payment')} testId="payment" />
+              <Action icon={<UserPen size={18} />} label="Update a debtor's details" hint="A new number, address or employer" onClick={() => onAsk('question', 'New details for the debtor')} testId="details" />
+              <Action icon={<CircleSlash size={18} />} label="Request a withdrawal" hint="Stop collecting on an account" onClick={() => onAsk('question', 'Stop or withdraw this account')} testId="withdraw" />
+              <Action icon={<FileText size={18} />} label="Your reports" hint="Progress reports and remittance advices" onClick={() => onOpen('reports')} testId="reports" />
+              <Action icon={<List size={18} />} label="Every account" hint="All open and finished accounts" onClick={() => onOpen('accounts')} testId="accounts" />
+              <Action icon={<MessageCircle size={18} />} label="Your tickets" hint={d.tickets.open ? `${d.tickets.open} open ticket${d.tickets.open === 1 ? '' : 's'}` : 'Questions between you and us'} onClick={() => onOpen('tickets')} testId="tickets" />
             </div>
           </div>
         ) },
@@ -180,18 +170,46 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
   )
 }
 
-/** One rung a row, the advice's zebra table: a colour, the words, the count, the share, the capital. */
+/*
+ * A RING AND ITS LEGEND, ONE CARD SHAPE FOR BOTH BOOKS (the brief, section 7: "These two cards need to feel like
+ * part of the same component family ... equal card heights"). The legend leads with the largest status -- for the
+ * finished book that is "Paid up in full", which is what the oversized navy panel used to say on its own.
+ */
+function RingCard({ title, subtitle, lines, total, centre, empty, onSeeAll, testId, ringTestId, tableTestId, extra }: {
+  title: string; subtitle: string; lines: PortalOutcomeLine[]; total: number; centre: string; empty: string
+  onSeeAll: () => void; testId: string; ringTestId: string; tableTestId: string; extra?: ReactNode
+}) {
+  const sorted = [...lines].sort((a, b) => b.accounts - a.accounts)
+  return (
+    <div className="card p-6 h-full flex flex-col" data-testid={testId}>
+      <h2 className="text-[20px] leading-tight text-[#101F2C]">{title}</h2>
+      <p className="text-[13px] text-[#525D66] mt-1">{subtitle}</p>
+      <button type="button" onClick={onSeeAll} className="mt-2 self-start text-[13px] font-semibold text-[#46607B] hover:text-[#101F2C] inline-flex items-center gap-1">
+        See every account <ArrowRight size={13} />
+      </button>
+      {extra}
+      {sorted.length === 0 ? <p className="text-sm text-[#525D66] mt-5">{empty}</p> : (
+        <div className="mt-5 flex flex-1 flex-wrap items-center justify-center gap-x-6 gap-y-4">
+          <GapRing testId={ringTestId} size={156} stroke={20} total={String(total)} label={centre}
+            slices={sorted.map((o) => ({ key: o.outcome, value: o.accounts, color: colour(o.outcome) }))} />
+          <div className="flex-1 min-w-[200px] w-full"><OutcomeTable lines={sorted} total={total} testId={tableTestId} /></div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One status a row: its colour (the ring's own), the words, the count, the share. */
 function OutcomeTable({ lines, total, testId }: { lines: PortalOutcomeLine[]; total: number; testId: string }) {
   return (
-    <ul className="mt-2 text-sm min-w-0" data-testid={testId}>
+    <ul className="text-[14px] min-w-0 space-y-1" data-testid={testId}>
       {lines.map((o, i) => (
         <li key={o.outcome} title={meaning(o.outcome) ?? undefined}
-          className={`flex items-center gap-3 px-3 py-2 rounded-lg ${i % 2 ? '' : 'bg-[#F2F5F8]'}`}>
-          <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: colour(o.outcome) }} />
-          <span className="flex-1 min-w-0 truncate whitespace-nowrap text-[#1B2B3E]">{o.label}</span>
-          <span className="tabular-nums font-semibold text-[#111E2D] w-10 text-right shrink-0">{o.accounts}</span>
-          <span className="tabular-nums text-[#5A6B80] w-12 text-right shrink-0">{pct(o.accounts, total)}</span>
-          <span className="tabular-nums text-[#5A6B80] w-24 text-right shrink-0 hidden 2xl:block">{rand(o.finished ? o.paidToDate : o.outstanding)}</span>
+          className={`flex items-center gap-3 px-3 py-2 rounded-[10px] ${i % 2 ? '' : 'bg-[#F4F4F4]'}`}>
+          <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: colour(o.outcome) }} data-legend={o.outcome} />
+          <span className="flex-1 min-w-0 leading-snug text-[#32404D]">{o.outcome === 'paid_up' ? 'Paid up in full' : o.label}</span>
+          <span className="bf-figure tabular-nums text-[#101F2C] w-10 text-right shrink-0">{o.accounts}</span>
+          <span className="tabular-nums text-[#525D66] w-14 text-right shrink-0">{pct(o.accounts, total)}</span>
         </li>
       ))}
     </ul>
@@ -199,9 +217,10 @@ function OutcomeTable({ lines, total, testId }: { lines: PortalOutcomeLine[]; to
 }
 
 /**
- * THE MOCK-UP'S TILE (S16): the icon in its box, the tracked label, the figure with an arrow to where it comes
- * from, the line under it, and a quiet trend along the foot -- or, for outstanding, its share of the capital.
- * The one that matters most is inverted. A seven-figure book fits at four across: the figure has the width.
+ * THE FIGURE TILE (the brief, section 5): the icon in its box and the arrow on one line, the tracked Raleway label,
+ * the figure in Raleway on a line of its own -- so a seven-figure rand never runs out of its card -- the line
+ * under it, and a quiet trend from real months along the foot (outstanding: its share of the capital). Three
+ * white, one navy with a gold edge: collected to date, the figure that matters most.
  */
 function Tile({ icon, label, value, note, invert = false, trend, share, onOpen }: {
   icon: ReactNode; label: string; value: string; note?: string; invert?: boolean
@@ -209,40 +228,37 @@ function Tile({ icon, label, value, note, invert = false, trend, share, onOpen }
 }) {
   return (
     <button type="button" onClick={onOpen}
-      className={`group relative overflow-hidden text-left rounded-2xl px-4 pt-4 sm:px-5 sm:pt-5 pb-12 transition-shadow hover:shadow-md ${invert ? 'bg-[#111E2D] text-white' : 'card'}`}>
-      <div className="flex items-start gap-3">
-        <span className={`hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${invert ? 'bg-white/10 text-[#C69F54]' : 'bg-[#F2F5F8] text-[#3F5F86] border border-[#E3E8EE]'}`}>{icon}</span>
-        <div className="min-w-0 flex-1">
-          <PortalLabel invert={invert}>{label}</PortalLabel>
-          <p className={`flex items-center gap-2 text-xl sm:text-[1.45rem] font-bold tabular-nums mt-1 whitespace-nowrap ${invert ? 'text-white' : 'text-[#111E2D]'}`}>
-            {value}
-            <ArrowRight size={17} className="shrink-0 text-[#C69F54] transition-transform group-hover:translate-x-0.5" />
-          </p>
-          {note && <p className={`text-xs mt-0.5 ${invert ? 'text-[#AEBBCB]' : 'text-[#5A6B80]'}`}>{note}</p>}
-        </div>
+      className={`group relative overflow-hidden text-left rounded-2xl px-6 pt-5 pb-14 transition-shadow hover:shadow-lg min-w-0 ${invert
+        ? 'bg-[#101F2C] text-white border-t-[3px] border-t-[#C69F54] shadow-[0_8px_24px_-12px_rgba(16,31,44,0.5)]' : 'card'}`}>
+      <div className="flex items-center justify-between">
+        <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${invert ? 'bg-white/10 text-[#C69F54]' : 'bg-[#D5E1EB]/60 text-[#46607B]'}`}>{icon}</span>
+        <ArrowRight size={17} className="text-[#C69F54] transition-transform group-hover:translate-x-0.5" />
       </div>
+      <p className={`bf-label text-[11px] mt-4 ${invert ? 'text-[#C69F54]' : 'text-[#46607B]'}`}>{label}</p>
+      <p className={`bf-figure text-[clamp(1.5rem,2.1vw,1.85rem)] leading-tight tabular-nums mt-1 whitespace-nowrap ${invert ? 'text-white' : 'text-[#101F2C]'}`}>{value}</p>
+      {note && <p className={`text-[12.5px] mt-1 ${invert ? 'text-[#B4BFCC]' : 'text-[#525D66]'}`}>{note}</p>}
       {trend && <Spark values={trend} invert={invert} />}
       {share !== undefined && share !== null && (
-        <div className="absolute left-5 right-5 bottom-5" title={`${Math.round(share * 1000) / 10}% of the capital handed over is still out`} data-testid="portal-outstanding-share">
-          <div className="h-1.5 rounded-full bg-[#EEF2F6] overflow-hidden"><div className="h-full rounded-full bg-[#97B4CC]" style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} /></div>
+        <div className="absolute left-6 right-6 bottom-6" title={`${Math.round(share * 1000) / 10}% of the capital handed over is still out`} data-testid="portal-outstanding-share">
+          <div className="h-1.5 rounded-full bg-[#ECECEC] overflow-hidden"><div className="h-full rounded-full bg-[#97B4CC]" style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} /></div>
         </div>
       )}
     </button>
   )
 }
 
-/** A filled line along the tile's foot: twelve months, no axes, no figures -- the tile already says the figure. */
+/** A filled line along the tile's foot: twelve real months, no axes, no figures -- the tile already says the figure. */
 function Spark({ values, invert }: { values: number[]; invert: boolean }) {
   const max = Math.max(...values, 0)
   if (!(max > 0)) return null
   const w = 300, h = 40
   const pts = values.map((v, i) => [(i / (values.length - 1)) * w, h - 4 - (v / max) * (h - 8)] as const)
   const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
-  const colour = invert ? '#C69F54' : '#97B4CC'
+  const tone = invert ? BF.gold : BF.blue
   return (
     <svg aria-hidden className="absolute left-0 right-0 bottom-0 h-10 w-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <path d={`${line} L${w} ${h} L0 ${h} Z`} fill={colour} fillOpacity={invert ? 0.22 : 0.25} />
-      <path d={line} stroke={colour} strokeOpacity="0.8" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
+      <path d={`${line} L${w} ${h} L0 ${h} Z`} fill={tone} fillOpacity={invert ? 0.18 : 0.22} />
+      <path d={line} stroke={tone} strokeOpacity="0.85" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }
@@ -255,30 +271,31 @@ function Spark({ values, invert }: { values: number[]; invert: boolean }) {
 function Liaison({ liaison, onCall }: { liaison: Dash['liaison']; onCall: () => void }) {
   const digits = (n: string) => n.replace(/\D/g, '').replace(/^0/, '27')
   return (
-    <div className="rounded-2xl bg-[#111E2D] text-white p-5" data-testid="portal-liaison">
+    <div className="rounded-2xl bg-[#101F2C] text-white p-6" data-testid="portal-liaison">
       <PortalLabel invert>Your liaison</PortalLabel>
-      <p className="text-lg font-semibold mt-1">{liaison?.name || 'Our client team'}</p>
-      <div className="mt-3 space-y-1.5 text-sm">
+      <p className="text-[19px] mt-1.5" style={{ fontFamily: "'Raleway Variable', 'Raleway', sans-serif", fontWeight: 700 }}>{liaison?.name || 'Our client team'}</p>
+      <div className="mt-3 space-y-2 text-[14px]">
         {liaison?.phone && <a href={`tel:${liaison.phone.replace(/\s/g, '')}`} className="flex items-center gap-2.5 text-white/90 hover:text-white"><Phone size={15} className="text-[#C69F54]" />{liaison.phone}</a>}
         {liaison?.whatsapp && <a href={`https://wa.me/${digits(liaison.whatsapp)}`} target="_blank" rel="noreferrer" className="flex items-center gap-2.5 text-white/90 hover:text-white"><MessageCircle size={15} className="text-[#C69F54]" />WhatsApp {liaison.whatsapp}</a>}
         {liaison?.email && <a href={`mailto:${liaison.email}`} className="flex items-center gap-2.5 text-white/90 hover:text-white truncate"><Mail size={15} className="text-[#C69F54] shrink-0" /><span className="truncate">{liaison.email}</span></a>}
       </div>
       <button type="button" onClick={onCall} data-testid="portal-liaison-call"
-        className="mt-4 w-full rounded-lg bg-[#C69F54] text-[#111E2D] font-semibold text-sm py-2 hover:bg-[#d4b16c]">Ask us to call you</button>
+        className="mt-5 w-full rounded-[10px] bg-[#C69F54] text-[#101F2C] font-semibold text-sm py-2.5 hover:brightness-105">Ask us to call you</button>
     </div>
   )
 }
 
+/** One thing to do, a compact row (the brief, section 8): a pale icon square, the words, a small arrow. */
 function Action({ icon, label, hint, onClick, testId }: { icon: ReactNode; label: string; hint?: string; onClick: () => void; testId: string }) {
   return (
     <button type="button" onClick={onClick} data-testid={`portal-action-${testId}`}
-      className="group w-full flex items-center gap-3.5 text-left rounded-xl border border-[#E3E8EE] px-3.5 py-3 hover:border-[#C69F54] hover:bg-[#C69F54]/5 transition-colors">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F2F5F8] text-[#3F5F86]">{icon}</span>
+      className="group w-full flex items-center gap-3 text-left rounded-xl border border-[#ECECEC] px-3 py-2.5 hover:border-[#B4BFCC] hover:bg-[#D5E1EB]/30 transition-colors">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#D5E1EB]/55 text-[#46607B]">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[14px] font-semibold text-[#111E2D] leading-tight">{label}</span>
-        {hint && <span className="block text-[12px] text-[#5A6B80] mt-0.5">{hint}</span>}
+        <span className="block text-[14px] font-semibold text-[#101F2C] leading-tight">{label}</span>
+        {hint && <span className="block text-[12px] text-[#525D66] mt-0.5">{hint}</span>}
       </span>
-      <ChevronRight size={17} className="shrink-0 text-[#5A6B80] transition-transform group-hover:translate-x-0.5" />
+      <ChevronRight size={16} className="shrink-0 text-[#B4BFCC] group-hover:text-[#C69F54] transition-colors" />
     </button>
   )
 }

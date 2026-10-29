@@ -137,6 +137,16 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   Audio, no file -- low fifths swell, a rising noise wash, an E-major bell chord through an echo. Sound needs a
   press: the sign-in buttons `primeSplashAudio()`; from a saved session it may stay silent. Full once per tab
   (sessionStorage), then a short fade; reduced motion gets the still logo. e2e client-portal 87.
+- **THE PORTAL DASHBOARD TO STEPHAN'S WRITTEN BRIEF (29 Oct, "Looks weird. Here some guidance.")**: the palette as
+  `--bf-*` tokens in portal.css and `portalColours.ts` for the charts -- rings by status (In progress / Paid up navy
+  #203B60, Paying / Settled gold, arranged / written off light blue, legal slate, the rest the brief's greys);
+  `PORTAL_ENDING_COLOUR` lost its green and red; Raleway (lining numerals) for headings and figures, Open Sans for
+  the rest; the hero back to a rounded 18 px panel in the content area; tiles with the figure on its own line (four
+  across from 2xl, two on a laptop or iPad -- the iPad screenshot had the figures cut off); the two rings in one
+  `RingCard` shape, largest status first ("Paid up in full"), side by side from 2xl and stacked below; the
+  handovers chart gold bars and a navy line (`MonthTrackCard colours`); actions a compact list; sidebar in #101F2C
+  with a thin gold edge. Kept against the brief's "six actions": update details and withdraw, which Stephan asked
+  for earlier the same day. e2e client-portal 89 (every ring slice must be a brand colour -- seen failing with green).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

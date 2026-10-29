@@ -29,7 +29,7 @@ import '@fontsource-variable/open-sans'
  * firm's wordmark and gold for where you are -- Dashboard, Reports, Tickets, Accounts, in Stephan's order --
  * that folds to a rail of icons, and on a phone becomes a row across the top.
  */
-const NAVY = '#111E2D'
+const NAVY = '#101F2C'
 
 export default function PortalPage() {
   const [token, setToken] = useState<string | null>(() => portalToken())
@@ -322,7 +322,7 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
   return (
     <div className="portal-brand min-h-screen lg:h-screen lg:flex lg:overflow-hidden bg-[#F2F5F8]" data-testid="portal-page">
       {/* THE SIDEBAR, Raptor's own shape: navy, the wordmark, gold for where you are; folds to icons. */}
-      <aside className={`hidden lg:flex flex-col shrink-0 h-full overflow-hidden text-[#AEBBCB] transition-[width] duration-200 ${folded ? 'w-[4.5rem]' : 'w-64'}`}
+      <aside className={`hidden lg:flex flex-col shrink-0 h-full overflow-hidden text-[#B4BFCC] border-r border-[#C69F54]/30 transition-[width] duration-200 ${folded ? 'w-[4.5rem]' : 'w-64'}`}
         style={{ background: NAVY }} data-testid="portal-sidebar">
         {/* THE FULL LOGO, THE BF CIRCLE BESIDE THE WORDMARK (Stephan's list, 29 Oct). The ringed lockup on
             file is drawn on white, so the mark and the wordmark are set side by side on the navy instead. */}
@@ -340,8 +340,8 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           {SECTIONS.map((s) => (
             <button key={s.id} type="button" onClick={() => go(s.id)} aria-current={section === s.id ? 'page' : undefined}
               title={folded ? s.label : undefined} data-testid={`portal-nav-${s.id}`}
-              className={`w-full flex items-center gap-3 rounded-lg py-2.5 text-sm font-medium transition-colors ${folded ? 'justify-center' : 'px-3'} ${section === s.id
-                ? 'bg-[#C69F54] text-[#111E2D]' : 'hover:bg-white/5 hover:text-white'}`}>
+              className={`w-full flex items-center gap-3 rounded-[10px] py-2.5 text-sm font-semibold transition-colors ${folded ? 'justify-center' : 'px-3'} ${section === s.id
+                ? 'bg-[#C69F54] text-[#101F2C]' : 'hover:bg-white/[0.06] hover:text-white'}`}>
               <s.icon size={17} className="shrink-0" />
               {!folded && <span className="flex-1 text-left">{s.label}</span>}
               {!folded && s.id === 'tickets' && tickets.open > 0 && (
@@ -409,7 +409,7 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
       </div>
 
       {/* ONLY THE PAGE SCROLLS, on a wide screen: the sidebar stays where it is, as Raptor's does. */}
-      <main className="flex-1 min-w-0 lg:overflow-y-auto bg-[#F4F6F9]">
+      <main className="flex-1 min-w-0 lg:overflow-y-auto bg-[#F4F4F4]">
         {/* THE TOP BAR (S16, Stephan's mock-up): search the book, the bell for what waits on the client, who is in. */}
         <div className="hidden lg:flex sticky top-0 z-20 items-center gap-4 h-16 px-8 bg-white/95 backdrop-blur border-b border-[#E3E8EE]" data-testid="portal-topbar">
           <form className="flex-1 max-w-xl" onSubmit={(e) => { e.preventDefault(); setLookFor(query.trim()); setSection('accounts'); setDone(null) }}>
@@ -445,26 +445,26 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
             </div>
           </div>
         </div>
-        {/*
-          THE BAND (S16, the mock-up): the remittance advice's coastline across the whole width under the top bar,
-          the navy wash only where the words are, so the sunset shows on the right. Raptor's DashboardHero shape:
-          the client's name above the title, the action on the right.
-        */}
-        <header className="relative text-white" data-testid="portal-hero"
-          style={{ background: `linear-gradient(95deg, rgba(17,30,45,0.92) 0%, rgba(17,30,45,0.72) 34%, rgba(17,30,45,0.12) 70%, rgba(17,30,45,0.05) 100%), url('/brand/remittance-cover.jpg') center 30% / cover` }}>
-          <div className="max-w-[1400px] mx-auto px-5 sm:px-10 py-8 sm:py-10 flex flex-wrap items-end justify-between gap-4">
-            <div className="min-w-0">
-              <PortalLabel invert>{me.client}</PortalLabel>
-              <h1 className="text-3xl sm:text-[2.6rem] font-bold tracking-tight mt-1.5">{here.title}</h1>
-              <p className="text-[15px] text-white/85 mt-1">{section === 'dashboard' ? 'Your book, where it stands, whenever you want to look.' : here.blurb}</p>
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
+          {/*
+            THE BAND (the brief, section 4): the remittance coastline in a rounded panel across the content area,
+            18 px corners, a navy wash from the left so the words read and the sea and the light stay; the
+            client's name in gold, the title, the line under it, and one glass "Ask us to call you" on the right.
+          */}
+          <header className="relative overflow-hidden rounded-[18px] text-white min-h-[176px] flex" data-testid="portal-hero"
+            style={{ background: `linear-gradient(95deg, rgba(16,31,44,0.94) 0%, rgba(16,31,44,0.74) 36%, rgba(16,31,44,0.18) 72%, rgba(16,31,44,0.06) 100%), url('/brand/remittance-cover.jpg') center 32% / cover` }}>
+            <div className="w-full px-6 sm:px-9 py-7 flex flex-wrap items-end justify-between gap-4">
+              <div className="min-w-0">
+                <p className="bf-label text-[11.5px] text-[#C69F54]">{me.client}</p>
+                <h1 className="text-[30px] sm:text-[36px] leading-tight mt-1.5">{here.title}</h1>
+                <p className="text-[15px] text-white/85 mt-1">{section === 'dashboard' ? 'Your book, where it stands, whenever you want to look.' : here.blurb}</p>
+              </div>
+              <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
+                className="inline-flex items-center gap-2 rounded-[10px] bg-[#101F2C]/45 hover:bg-[#101F2C]/65 border border-white/25 px-4 py-2.5 text-sm font-semibold backdrop-blur-md">
+                <Phone size={15} /> Ask us to call you
+              </button>
             </div>
-            <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
-              className="inline-flex items-center gap-2 rounded-xl bg-[#111E2D]/55 hover:bg-[#111E2D]/70 border border-white/25 px-4 py-2.5 text-sm font-medium backdrop-blur-sm">
-              <Phone size={15} /> Ask us to call you
-            </button>
-          </div>
-        </header>
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-5 sm:py-6 space-y-5">
+          </header>
           {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
           {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go}
             onAsk={(mode, topic) => { setDone(null); setAsking({ about: null, mode, topic }) }} />}
