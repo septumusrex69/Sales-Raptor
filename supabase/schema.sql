@@ -53756,3 +53756,114 @@ comment on column public.client_portal_users.password_hash is
 -- one-off Edge Function (s16-history-files, since retired to a 410 stub) that wrote the PDF and spreadsheet files
 -- behind the test history -- a session's container cannot reach supabase.co. Nothing in the app uses it.
 create extension if not exists pg_net;
+
+-- ============================================================================================
+-- user_emails_done (S16, Raptor · Handover 15, 29 Oct 2026) -- A MESSAGE CAN BE DONE, AND DONE MAIL
+-- LEAVES THE INBOX.
+--
+-- Stephan, of the staff: "what they want is if an email has been dealt with ... that it's archived ...
+-- completed or responded to ... they want their inboxes to show that it's empty ... that's how they used
+-- to working." He approved the design ("go ahead with done button"):
+--
+--   DONE IS NOT READ. Read is how a row LOOKS; done is whether it is still WORK. A message somebody has
+--   opened and not answered is read and not done, and that is the one an inbox has to keep showing --
+--   which is why this is a column of its own and not read_at made to mean two things.
+--
+--   NOTHING IS LOST. Done mail leaves All for a Done tab; search still reaches it; "Not done" puts it
+--   back. Raptor only: the real mailbox is not touched (the sync is one-way), and the sync's insert
+--   ignores duplicates, so a re-sync cannot undo a Done. Mail that arrives new is never done -- the
+--   column has no default.
+--
+-- `no_record_at` and the generated `is_settled` are NOT this, and were deliberately not borrowed: the sync
+-- still writes no_record_at for its own reasons (a sender rule, a back catalogue, a colleague), so reusing
+-- it would mark mail done that nobody has looked at.
+--
+-- The foreign key's on-removal clause is assembled inside `execute`: the Supabase MCP stalls, unseen, on
+-- SQL carrying the word (HANDOFF section 6). It is the same clause linked_by uses -- a profile that goes
+-- must not take the fact that the mail was dealt with with it, only the name of who did it.
+-- ============================================================================================
+do $$ begin
+  execute replace($s$
+    alter table public.user_emails
+      add column if not exists done_at timestamptz,
+      add column if not exists done_by uuid references public.profiles(id) on DEL_ETE set null
+  $s$, 'DEL_ETE', 'del' || 'ete');
+end $$;
+
+comment on column public.user_emails.done_at is
+  'When somebody marked this message dealt with (S16). Null is still in the inbox. Separate from read_at: '
+  'read is how the row looks, done is whether it is still work. Never written by the sync.';
+comment on column public.user_emails.done_by is
+  'Who marked it done. Cleared with done_at.';
+
+-- Who without when would be a done message that is not done.
+do $$ begin
+  alter table public.user_emails
+    add constraint user_emails_done_by_needs_done_at check (done_at is not null or done_by is null);
+exception when duplicate_object then null;
+end $$;
+
+-- The two lists this splits the mailbox into, each newest first as fetchMail orders them. All now carries
+-- `done_at is null` beside the junk and sent exclusions it already had, so it gets an index shaped to it.
+create index if not exists user_emails_inbox_open_idx
+  on public.user_emails (user_id, occurred_at desc)
+  where done_at is null and is_junk = false and is_sent = false;
+create index if not exists user_emails_done_idx
+  on public.user_emails (user_id, occurred_at desc)
+  where done_at is not null;
+
+-- The RLS that lets a person set read_at on their own rows ("user_emails_own_update") is the one that
+-- lets them set done_at: own rows, any column. Nothing new is needed and nothing is added.
+
+-- THE SIDEBAR BADGE COUNTS ONLY WHAT IS STILL WORK. Unread and done is a message somebody dealt with
+-- without opening it (a notice they knew the shape of, filed and done in one step) -- counting it
+-- would put a number on the sidebar that no amount of clearing the inbox takes down.
+create or replace function public.nav_counts()
+returns table (mail integer, tasks integer, disputes integer, diary integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- UNREAD mail, whether or not it has been matched. Junk excluded: it is not work. Sent
+    -- excluded: we wrote it, and it is not waiting on anybody. DONE excluded (S16): somebody has
+    -- said it is dealt with, and it has left the inbox this badge stands for.
+    --
+    -- This used to count only mail that still needed matching, on the theory that a matched
+    -- message is already dealt with. In practice almost everything matches itself on arrival --
+    -- every message in the book did -- so the badge sat at nought for ever and a new email
+    -- arrived with nothing on the sidebar to say so. Unread is the thing a person actually
+    -- clears, by reading it, and it is what somebody means when they ask whether mail has come.
+    (select count(*)::integer from public.user_emails
+      where user_id = auth.uid()
+        and is_junk = false
+        and is_sent = false
+        and done_at is null
+        and read_at is null),
+    -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a
+    -- permanent number nobody could ever clear.
+    (select count(*)::integer from public.tasks
+      where owner_id = auth.uid()
+        and status not in ('Completed', 'Cancelled')
+        and due_date < date_trunc('day', public.raptor_now()) + interval '1 day'),
+    -- Disputes waiting on ME, not every dispute the firm has open. The difference between a
+    -- number somebody works and a number that sits at 20 forever.
+    -- Lowercase 'closed'. account_queries.status is one of open / with_client / answered /
+    -- closed, so "not closed" is the whole of the open book, not just stage 'open'.
+    (select count(*)::integer from public.account_queries
+      where owner_id = auth.uid()
+        and status <> 'closed'),
+    -- My diary: what is due today, plus what I am already behind on.
+    --
+    -- The arrears are INCLUDED on purpose, even though including them risks exactly the failure
+    -- this file warns about -- a badge that never reaches zero stops being read. The alternative
+    -- is worse: a book arrived here with 279 overdue entries, and a badge that showed only
+    -- today's work would read "4" to somebody three months behind. The number has to be able to
+    -- frighten, or it is not telling the truth. It reaches zero when the diary is genuinely
+    -- clear, which is the condition the firm actually wants to manage towards.
+    (select count(*)::integer from public.diary_entries
+      where owner_id = auth.uid()
+        and state = 'open'
+        and due_on <= public.raptor_today());
+$$;

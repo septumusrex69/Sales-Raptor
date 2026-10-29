@@ -277,10 +277,13 @@ check('no other file reads the machine\'s clock', offenders, [])
    wall time, so a jumped staging clock must not make every booking look older than the visit.
    52 since 23 Oct: staleChunk.ts's reload guard. 53 since 27 Oct (S14): the bell's "Today 07:39".
    54 since 28 Oct (S15): the mail page's "Checked ... ago" -- a sync is stamped on the real clock, so on
-   staging it read "14 days ago" a minute after a check. */
+   staging it read "14 days ago" a minute after a check.
+   57 since 29 Oct (S16): when a message was marked DONE -- userMail's markMailDone and the match-and-done
+   claim, and the Mail page's own row while the write is on its way. Stamped on the real clock exactly as
+   read_at beside it is: mail arrives and is dealt with in real time, not on staging's day. */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 54)
+check('...and the allowed files keep exactly their real-world reads', realReads, 57)
 
 /* ---------- 7. the arithmetic ---------- */
 

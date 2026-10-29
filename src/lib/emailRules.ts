@@ -524,7 +524,14 @@ export function recipientSummary(
  * `no-record` only ever existed to get a message out of the queue, so with the queue gone it had
  * nothing left to do: a shelf for mail that is not waiting is just the mailbox.
  */
-export type MailFilter = 'junk' | 'sent' | 'all'
+/*
+ * AND ONE CAME BACK, WHICH IS NOT A QUEUE: `done` (S16, Raptor · Handover 15). Stephan, of the staff:
+ * "if an email has been dealt with ... that it's archived ... they want their inboxes to show that it's
+ * empty ... that's how they used to working." The difference from the three that went is who decides:
+ * a queue asked everybody to answer for every message, Done is a person saying "this one is dealt with"
+ * when they choose to. Nothing is owed to it, so it carries no badge.
+ */
+export type MailFilter = 'junk' | 'sent' | 'done' | 'all'
 
 /**
  * Move one message's unread count on every tab it belongs to, without asking the database.
@@ -549,12 +556,15 @@ export type MailFilter = 'junk' | 'sent' | 'all'
 export interface TabFacts {
   isSent: boolean
   isJunk: boolean
+  /* REQUIRED, not optional (S16). Optional would let a caller that forgot it read every done message as
+     All -- the hand-written-mapper trap CLAUDE.md names, moved into a type. */
+  doneAt: string | null
 }
 
 /**
  * The one tab a message lives on.
  *
- * Sent, junk, or the mailbox -- and exactly one of the three, which is what scope() says too.
+ * Sent, junk, done or the mailbox -- and exactly one of the four, which is what scope() says too.
  * A message on a record is still in All: being matched is a fact about it, not a place it goes.
  * Read by the badges below and by a link that names a message (MailPage), which has to open the
  * tab holding it or it lands on a list the message is not in.
@@ -562,6 +572,9 @@ export interface TabFacts {
 export function tabOf(mail: TabFacts): MailFilter {
   if (mail.isSent) return 'sent'
   if (mail.isJunk) return 'junk'
+  /* AFTER junk and sent, which is the order scope() writes: Done is the working list's other half, so
+     only mail that would otherwise be in All can be in it. Junk somebody once marked done is still junk. */
+  if (mail.doneAt) return 'done'
   return 'all'
 }
 

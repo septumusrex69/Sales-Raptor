@@ -84,7 +84,8 @@ const handlers = [
     (u) => u.includes('/rpc/nav_counts'),
     () => ({
       body: {
-        mail: MAIL.filter((m) => !m.is_junk && !m.is_sent && !m.read_at).length,
+        /* And not done (S16), as nav_counts now reads. */
+        mail: MAIL.filter((m) => !m.is_junk && !m.is_sent && !m.done_at && !m.read_at).length,
         tasks: 0, disputes: 0, diary: 0,
       },
     }),
@@ -104,6 +105,18 @@ const handlers = [
        */
       if (req.method() === 'PATCH') {
         const one = /id=(?:eq|in)\.\(?"?([0-9a-f-]+)/.exec(decodeURIComponent(u))?.[1]
+        /*
+         * DONE IS WRITTEN BACK INTO THE FIXTURE (S16), because what is checked is that the message
+         * LEAVES All and turns up under Done -- which a stub that forgot the write could only fake.
+         * Every id the request names, anchored on `[?&]id=` so the signed-in person's own id is not
+         * read as a message (see oneId below).
+         */
+        const sent = (() => { try { return req.postDataJSON() ?? {} } catch { return {} } })()
+        if ('done_at' in sent) {
+          const ids = /[?&]id=(?:eq\.([0-9a-f-]+)|in\.\(([^)]*)\))/.exec(decodeURIComponent(u))
+          const named = ids ? (ids[1] ? [ids[1]] : ids[2].split(',').map((x) => x.replace(/"/g, ''))) : []
+          for (const m of MAIL) if (named.includes(m.id)) { m.done_at = sent.done_at; m.done_by = sent.done_by ?? null }
+        }
         return { body: one ? [{ id: one }] : [] }
       }
       /*
@@ -137,6 +150,9 @@ const handlers = [
         rows = rows.filter((m) => !m.is_settled && !m.is_junk && !m.is_sent)
       } else if (has('is_junk=eq.false')) rows = rows.filter((m) => !m.is_junk && !m.is_sent)
       if (has('read_at=is.null')) rows = rows.filter((m) => !m.read_at)
+      /* All leaves done mail out, Done holds only it (S16) -- the two clauses scope() writes. */
+      if (has('done_at=is.null')) rows = rows.filter((m) => !m.done_at)
+      if (has('done_at=not.is.null')) rows = rows.filter((m) => m.done_at)
 
       /*
        * AND THE SEARCH TERM, which this stub used to ignore completely.
@@ -875,7 +891,8 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
   t.ok('...with a way out', !/Neither of these blocks anyone/.test(await page.locator('body').innerText()))
-  await page.getByRole('button', { name: 'Done' }).click()
+  /* "Cancel" since S16: Done is now what a message is, so leaving a selection is not called it too. */
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: 'List' }).click()
   await page.waitForTimeout(600)
@@ -1117,6 +1134,45 @@ try {
   t.check('pane: ...and not the empty pane', await page.getByText('Pick a message on the left to read it.').count(), 0)
   await t.shot(page, '28b-mail-opened-by-link')
   offPage.clear()
+
+  /* ---------- done takes a message out of the inbox, and Not done puts it back (S16) ---------- */
+
+  /*
+   * Stephan, of the staff: "if an email has been dealt with ... that it's archived ... they want their
+   * inboxes to show that it's empty". Checked in a browser because the promise is about WHERE the
+   * message is afterwards -- out of All, under Done, and back -- which is three lists, not one function.
+   */
+  {
+    const target = MAIL.find((m) => m.subject === 'Follow up on outstanding account')
+    const allTab = () => page.getByRole('button', { name: /^All/ }).first()
+    const doneTab = () => page.getByRole('button', { name: /^Done/ }).first()
+    const inList = () => page.getByRole('button', { name: new RegExp(target.subject) })
+    await page.goto(`http://localhost:${PORT}/mail`)
+    await page.getByRole('heading', { name: 'Raptor Mail', exact: true }).waitFor({ timeout: 20000 })
+    await page.getByText(target.subject).first().waitFor({ timeout: 10000 })
+    t.ok('done: the tab is beside All', await doneTab().isVisible())
+    await inList().first().click()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Mark done' }).first().click()
+    await page.waitForTimeout(800)
+    t.ok('done: ...the write reached the row', !!target.done_at)
+    t.check('done: ...and it has left All', await inList().count(), 0)
+    t.ok('done: ...saying where it went', await page.getByText(/It is under Done/).first().isVisible())
+    await doneTab().click()
+    await page.waitForTimeout(800)
+    t.check('done: ...Done is the tab now', await doneTab().getAttribute('aria-pressed'), 'true')
+    t.ok('done: ...and the message is under it', await inList().first().isVisible())
+    await t.shot(page, '28c-mail-done-tab')
+    await inList().first().click()
+    await page.waitForTimeout(600)
+    await page.getByRole('button', { name: 'Not done' }).first().click()
+    await page.waitForTimeout(800)
+    t.ok('not done: ...the write cleared it', !target.done_at)
+    t.check('not done: ...it has left Done', await inList().count(), 0)
+    await allTab().click()
+    await page.waitForTimeout(800)
+    t.ok('not done: ...and it is back in All', await inList().first().isVisible())
+  }
 
   /* AND ONE THAT IS GONE SAYS SO rather than leaving an empty pane to be puzzled over. */
   await page.goto(`http://localhost:${PORT}/mail?message=aaaaaaa1-0000-4000-8000-0000000000ff`)
