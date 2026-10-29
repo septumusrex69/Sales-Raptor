@@ -291,7 +291,17 @@ ok('...carrying the work days behind and ahead', /working days completed/.test(b
 ok('...and marking the pace expected by now', /% expected by now/.test(bar))
 ok('the day\u2019s own figure leads', /Collected today/.test(hook))
 ok('the teams sheet is rendered', /<TeamTable/.test(page))
-ok('the clerk sheet is rendered', /<ClerkTable/.test(page))
+ok('the collectors table is rendered', /<CollectorTable/.test(page))
+/*
+ * ONE PEOPLE TABLE, NOT TWO (Stephan, 29 Oct: "it's the same information ... we can have like one
+ * there ... It's not necessary to have all of them"). Comments stripped, or the note saying why
+ * the second table went would satisfy the absence.
+ */
+{
+  const live = page.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\s*\}/g, '')
+  ok('...and it is the only one: no clerk sheet beside it', !/<ClerkTable|function ClerkTable/.test(live))
+  ok('...and no separate comparison table', !/<FairTable|function FairTable|How people compare/.test(live))
+}
 ok('needed a week is on the teams table only', /Needed a week/.test(page))
 
 /*
@@ -302,7 +312,7 @@ ok('needed a week is on the teams table only', /Needed a week/.test(page))
  * page." Asserted as absences as well as presences, because the failure this guards against is a
  * tab quietly surviving the merge with half the columns behind it.
  */
-const clerks = page.slice(page.indexOf('function ClerkTable('), page.indexOf('function ExportButton('))
+const clerks = page.slice(page.indexOf('function CollectorTable('), page.indexOf('function ExportButton('))
 ok('there is a clerk table to read', clerks.length > 1000)
 {
   /* Comments stripped, or the paragraph explaining why the tabs went would satisfy every one of
@@ -362,9 +372,11 @@ ok('...and the caption says how to read the two together',
 {
   const thead = clerks.slice(clerks.indexOf('<thead>'), clerks.indexOf('</thead>'))
   const headings = [...thead.matchAll(/<th[^>]*>([^<{}]+)<\/th>/g)].map((m) => m[1].trim())
-  check('the columns are in the order the firm asked for', headings.join(' | '),
-    '# | Clerk | Team | Target | Today | Period to date | Accounts | Payments '
-    + '| Average payment | Achieved | Gap vs pace | Needed / day | Status')
+  /* Who, what they collected and against what, then the payments and the average Stephan named
+     ("amount of payments, you know, the average payment"), then the book and the fair figures. */
+  check('the columns are the merged table\u2019s, in order', headings.join(' | '),
+    '# | Collector | Team | Collected | Target | Achieved | Status | Payments '
+    + '| Average | Book | Per 100 | Kept | Actions')
 }
 
 /* Where a target came from is shown, or nobody can tell a figure set wrong from one never set. */
@@ -387,7 +399,7 @@ ok('...and saying nothing at nought', /\{behind > 0 && \(/.test(clerks))
  * sort the same way, so a page-wide regex is satisfied by either one and would go on passing with
  * the other reversed.
  */
-const sorter = page.slice(page.indexOf('function worstFirst'), page.indexOf('function ClerkTable('))
+const sorter = page.slice(page.indexOf('function worstFirst'), page.indexOf('function CollectorTable('))
 ok('there is a worst-first sort to read', sorter.length > 100)
 ok('it sorts worst first', /a\.line\.achieved - b\.line\.achieved/.test(sorter))
 ok('...with people who have no target at the bottom',
@@ -402,17 +414,16 @@ ok('a collector with no team is a line on the teams table', /'No team'/.test(tea
  * what the firm runs the month on -- but the figures that compare two collectors fairly must
  * still be on the screen, or the redesign quietly turned the page into a rand leaderboard.
  */
-ok('the fair comparison is still there', /<FairTable/.test(page))
-ok('...ordered on the book-independent figure',
-  /paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred/.test(page))
+ok('the fair comparison is still there, on the ranked row', /l\.score\.paymentsPerHundred/.test(clerks))
 /*
- * ASSERTED AGAINST THE RENDERED TEXT, NOT THE PAGE. The comment above FairTable says the same
+ * ASSERTED AGAINST THE RENDERED TEXT, NOT THE PAGE. The comment above the table says the same
  * thing in almost the same words, so a regex over the whole file is satisfied by the explanation
  * of the behaviour rather than by the behaviour -- the exact trap this codebase has a name for.
- * The card's own caption is sliced out and asserted on.
+ * The table's own caption is sliced out and asserted on.
  */
-const fairCaption = page.slice(page.indexOf('How people compare\n'), page.indexOf('<div className="overflow-x-auto">', page.indexOf('How people compare\n')))
-ok('there is a caption on the fair card to read', fairCaption.length > 100)
+const captionAt = clerks.indexOf('Ranked on rand collected,')
+const fairCaption = captionAt === -1 ? '' : clerks.slice(captionAt, clerks.indexOf('</p>', captionAt))
+ok('there is a caption on the collectors table to read', fairCaption.length > 100)
 ok('...naming what the ranking above it is for', /the month the firm is run on/.test(fairCaption))
 ok('...and what these figures survive', /survive being given a different/.test(fairCaption))
 ok('...and what they are for', /should decide who is promoted/.test(fairCaption))

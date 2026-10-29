@@ -251,16 +251,17 @@ const page = readFileSync(new URL('../../src/pages/CollectorDashboard.tsx', impo
    used to live on -- the firm's month is one decision and it is made once. */
 ok('the period is the sales month',
   /getCurrentSalesMonth/.test(readFileSync(new URL('../../src/hooks/useCollectionsMonth.ts', import.meta.url), 'utf8')))
-ok('...and the previous one is fetched to compare', /getPreviousSalesMonth\(period\)/.test(page))
+ok('...and the previous one is fetched to compare',
+  /getPreviousSalesMonth\(period\)/.test(readFileSync(new URL('../../src/hooks/useCollectionsMonth.ts', import.meta.url), 'utf8')))
 
 /*
- * pctDelta, not arithmetic of its own. StatTile prints the number it is given verbatim, so a raw
- * ratio rendered as "0.6666666666666666%" on the first screenshot — and the shared helper
- * already returns null for a zero prior period, which the tile says in words rather than as a
- * fabricated 100% rise.
+ * THE SQUEEZED TILES ARE GONE (Stephan, 29 Oct: "that just looks weird there"). The payments tile
+ * was the one carrying a change on last period, drawn as "208% vs October 2026" wrapped down four
+ * lines of a box too narrow for it; payments and the book are said in the measures card already.
+ * What must not come back with them is percentage arithmetic of the page's own.
  */
-ok('the change uses the shared helper', /import \{ pctDelta \}/.test(page))
-ok('...and does no percentage arithmetic of its own', !/\(now - before\) \/ before/.test(page))
+ok('the payments tile and its wrapped comparison are gone', !/pctChange=\{pct\(/.test(page))
+ok('...and the page does no percentage arithmetic of its own', !/\(now - before\) \/ before/.test(page))
 
 /*
  * THE RANKING ON RAND EXISTS NOW, AND IT CARRIES ITS OWN CONTEXT.
@@ -279,26 +280,30 @@ ok('the ranking orders on rand', /b\.line\.collected - a\.line\.collected/.test(
  * Where it is drawn was never the point. That it is on the row is.
  */
 ok('...carrying the grade beside it', /\{l\.grade\}/.test(page))
-ok('...and the size of the book', /Accounts<\/th>/.test(page))
+ok('...and the size of the book', /Book<\/th>/.test(page) && /\{l\.accounts\.toLocaleString\('en-ZA'\)\}/.test(page))
 ok('...and says in words why the two are read together',
   /part of their rand is the book they were handed/.test(page))
 ok('...and carries payments and the average, which move independently',
-  /Payments<\/th>/.test(page) && /Average payment<\/th>/.test(page))
+  /Payments<\/th>/.test(page) && /title="Average payment">Average<\/th>/.test(page))
 /*
- * AND THE BOOK-INDEPENDENT ORDER IS STILL ON THE PAGE, in its own card. It is what should decide
- * who is promoted, and if the ranking quietly replaced it the page would be a rand leaderboard
- * with nothing to read against it.
+ * AND THE BOOK-INDEPENDENT FIGURES ARE ON THE SAME ROW. They had a card of their own ("How people
+ * compare"), which Stephan folded into the ranking on 29 Oct: "it's the same information ... just
+ * have one part of that." What must survive is that they are on the screen at all -- without
+ * them the page is the rand leaderboard collectorScore.ts exists to prevent.
  */
-ok('the fair comparison still orders on payments per hundred',
-  /b\.paymentsPerHundred \?\? -1\) - \(a\.paymentsPerHundred \?\? -1\)/.test(page))
+ok('the fair figures ride on the ranked row',
+  /l\.score\.paymentsPerHundred/.test(page) && /l\.score\.promiseKeptRate/.test(page)
+    && /l\.score\.actions/.test(page))
+ok('...worked out by scoreCollector, once per row', /score: scoreCollector\(r\)/.test(page))
 /*
- * ASSERTED AGAINST THE RENDERED TEXT, NOT THE PAGE. The comment above FairTable says the same
+ * ASSERTED AGAINST THE RENDERED TEXT, NOT THE PAGE. The comment above the table says the same
  * thing in almost the same words, so a regex over the whole file is satisfied by the explanation
  * of the behaviour rather than by the behaviour -- the exact trap this codebase has a name for.
- * The card's own caption is sliced out and asserted on.
+ * The table's own caption is sliced out and asserted on.
  */
-const fairCaption = page.slice(page.indexOf('How people compare\n'), page.indexOf('<div className="overflow-x-auto">', page.indexOf('How people compare\n')))
-ok('there is a caption on the fair card to read', fairCaption.length > 100)
+const captionAt = page.indexOf('Ranked on rand collected,')
+const fairCaption = captionAt === -1 ? '' : page.slice(captionAt, page.indexOf('</p>', captionAt))
+ok('there is a caption on the collectors table to read', fairCaption.length > 100)
 ok('...naming what the ranking is for', /the month the firm is run on/.test(fairCaption))
 ok('...and what these figures survive', /survive being given a different/.test(fairCaption))
 ok('...and what they are for', /should decide who is promoted/.test(fairCaption))
@@ -308,7 +313,7 @@ ok('...and what they are for', /should decide who is promoted/.test(fairCaption)
  * their own; a person cannot tell those apart by looking harder, and the fix is the caption.
  */
 ok('the fair figures are a component, not two copies of four tiles',
-  /function Measures\(\{ score, caption \}/.test(page))
+  /function Measures\(\{ score, caption, footer \}/.test(page))
 ok('...drawn for the floor', /<Measures score=\{score\}/.test(page))
 ok('...and for the person reading it', /<Measures score=\{myScore\}/.test(page))
 ok('...each saying whose they are',

@@ -176,13 +176,78 @@ export function lateForLeaders<T extends CarryableEntry & { ownerId: string | nu
 ): LateForLeader[] {
   const by = new Map<string, LateForLeader>();
   for (const entry of entries) {
-    if (entry.ownerId === null) continue
-    if (!isCarried(entry, today) || stillInTime(entry, today, holidays)) continue
+    if (!isLateForLeader(entry, today, holidays)) continue
     const waited = daysCarried(entry, today, holidays)
-    const row = by.get(entry.ownerId) ?? { ownerId: entry.ownerId, carried: 0, worst: 0 }
+    const owner = entry.ownerId as string
+    const row = by.get(owner) ?? { ownerId: owner, carried: 0, worst: 0 }
     row.carried += 1
     row.worst = Math.max(row.worst, waited)
-    by.set(entry.ownerId, row)
+    by.set(owner, row)
   }
   return [...by.values()].sort((a, b) => b.worst - a.worst || b.carried - a.carried)
+}
+
+/**
+ * THE ONE QUESTION BOTH SCREENS ASK OF AN ENTRY: is this a new account a leader should hear about?
+ *
+ * Open, new, past its day, not still inside the grace a closed office gives it, and on SOMEBODY's
+ * desk -- an account nobody holds is not anybody's failure; it belongs on the unallocated warning.
+ *
+ * Named on its own because two things count with it and they must not count differently: the
+ * warning on the collections floor ("37 new accounts not yet worked") and the Accounts list its
+ * "Show them" opens (`?carried=1`, see lateAccountIds). Written twice, the day they drift the
+ * leader is told 37 and shown 35, and the two missing accounts are exactly the ones nobody finds.
+ */
+export function isLateForLeader<T extends CarryableEntry & { ownerId: string | null }>(
+  entry: T, today: string, holidays: Record<string, string> = {},
+): boolean {
+  return entry.ownerId !== null && isCarried(entry, today) && !stillInTime(entry, today, holidays)
+}
+
+/**
+ * The accounts behind the leader's warning, as ids -- what `?carried=1` on the Accounts list
+ * narrows to. Distinct and sorted, so the same floor reads the same list every time.
+ */
+export function lateAccountIds<T extends CarryableEntry & { ownerId: string | null; accountId: string }>(
+  entries: T[], today: string, holidays: Record<string, string> = {},
+): string[] {
+  const ids = new Set<string>()
+  for (const entry of entries) if (isLateForLeader(entry, today, holidays)) ids.add(entry.accountId)
+  return [...ids].sort()
+}
+
+export interface LateSummary {
+  /** Distinct accounts behind the warning -- exactly lateAccountIds(...).length. */
+  accounts: number
+  /** How many collectors they are spread over. */
+  collectors: number
+  /** Working days the oldest of them has waited. */
+  worst: number
+}
+
+/**
+ * THE LEADER'S WARNING IN THREE NUMBERS.
+ *
+ * Stephan, 29 Oct, of the list this replaced (fifteen lines, a name each): "making a long ...
+ * list like that is stupid. Maybe you can just show a warning and say, okay, you know, these
+ * accounts are not being worked. Click on them and it's filtered in the account section." So the
+ * people are folded into a count, and the accounts are one click away on the list that can act
+ * on them.
+ *
+ * THE COUNT IS THE LENGTH OF THE SAME LIST THE CLICK OPENS -- lateAccountIds, not a sum of the
+ * per-person rows. The two agree today because an account has one open entry, but "agree today"
+ * is not the guarantee; one function is. Null when there is nothing, so the warning is absent
+ * rather than an empty box reading nought.
+ */
+export function lateSummary<T extends CarryableEntry & { ownerId: string | null; accountId: string }>(
+  entries: T[], today: string, holidays: Record<string, string> = {},
+): LateSummary | null {
+  const accounts = lateAccountIds(entries, today, holidays).length
+  if (accounts === 0) return null
+  const people = lateForLeaders(entries, today, holidays)
+  return {
+    accounts,
+    collectors: people.length,
+    worst: people.reduce((w, l) => Math.max(w, l.worst), 0),
+  }
 }

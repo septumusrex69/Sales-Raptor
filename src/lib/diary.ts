@@ -18,6 +18,7 @@ import {
   type DiaryKind, calendarStrip, isMissed, sortDiary,
 } from './diaryPriority.ts'
 import { clockNow } from './clock.ts'
+import { lateAccountIds } from './newAccounts.ts'
 
 export interface DiaryEntry {
   id: string
@@ -872,6 +873,20 @@ export async function fetchCarriedNewAccounts(date: string): Promise<{
       state: 'open',
       dueOn: r.due_on,
     }))
+}
+
+/**
+ * THE ACCOUNTS BEHIND THE FLOOR'S "NEW ACCOUNTS NOT YET WORKED" WARNING, as ids -- what the
+ * Accounts list narrows to on `?carried=1`.
+ *
+ * THE SAME READ AND THE SAME RULE the warning counts with: fetchCarriedNewAccounts against the
+ * same day, then lateAccountIds, which is the function lateSummary takes its count from. Stephan,
+ * 29 Oct: "show a warning ... Click on them and it's filtered in the account section" -- and the
+ * list behind the click is only worth anything while it is exactly the accounts the warning
+ * counted.
+ */
+export async function fetchLateNewAccountIds(date: string): Promise<string[]> {
+  return lateAccountIds(await fetchCarriedNewAccounts(date), date)
 }
 
 /** Everything one agent has missed, for the bulk re-diarise tool. */
