@@ -143,18 +143,65 @@
   is a line on the account's activity. The **disputes board** names each ticket's client and filters by client.
   Checks: `check-ticket-refer` (26, new), `check-client-portal` (142), e2e `client-portal` (50), all seen failing.
 
-**S16 starts here (Stephan's order from 28 Oct, S14's list, items 1 and most of 2 now done):**
-1. **Client portal, phase 2b:** client handovers (upload a sheet or one account, with the firm's approval). 2a
-   (tickets, questions, callbacks) is built -- see above. Answer on the portal-message charge first.
-2. **Monthly progress report** (see S14's item 3 below for the shape).
-3. **Debtor pay page** (EFT first) and self-service promise to pay; PayShap/DebiCheck wait on FNB's answers.
-4. **Early collections.**
-Ask Stephan whether he wants the sheet ticket's T-number shown on its page (see "Noticed" above).
+- **29 Oct.** The company dashboard's **department cards lost their photographs** (Stephan: "this is too much.
+  remove the pictures"); the hero is the page's one picture again; `public/brand/departments/` removed.
+- **EMAIL (29 Oct).** Stephan: forwarding slow to open; selecting text and pressing Backspace "takes me out of that
+  email draft"; "add a drafts section"; a forward reported sent never reached Sent Items, not even after a refresh.
+  - A forward **opens at once** and the original fills in when fetched (`startForward`, `quotedLoading`); the
+    original is now **shown and editable** (it went out underneath unseen, so a selection was never in a field and
+    Backspace meant Back); what is sent is what that box holds.
+  - **Backspace never leaves a dialog** (`Modal`): outside an input/textarea/select/contenteditable it is
+    prevented.
+  - **Drafts**: every compose box saves as it is typed (`mailDrafts.ts`, this browser only, said so), offers it
+    back when the same box opens, and Mail has a **Drafts** list; sending removes it.
+  - **The Sent copy**: `openSentAppender.append` returns the folder and uid; `sendAsUser` logs a failure with its
+    reason (it was a bare catch); `api/email/send` puts the copy on the Sent list at once, keyed (user_id,
+    message_id) as the sync keys it, and returns `filedInSent`, which the Mail page says when false. **Not yet
+    diagnosed: why Stephan's forward was not filed** -- the next failure now writes `[sendAsUser] ... the Sent copy
+    was not filed: <reason>` to the Vercel logs. His mailbox has both `INBOX.Sent` (\Sent, used) and
+    `INBOX.Sent Items` (what Outlook shows) -- check which he looks at before blaming the append.
+  - `check-mail-drafts` (23, new, seen failing); five older checks re-pointed. e2e mail/compose/record/ticket green.
+- **CLIENT HANDOVERS FROM THE PORTAL -- BUILT, COMMITTED, NOT PUSHED, MIGRATION NOT APPLIED.** Commit `ae765007` on
+  `claude/s15-side-panel` only (the preview has the email fixes cherry-picked as `b8f4023b`, without it). The
+  staging migration **`portal_handovers`** timed out waiting for Stephan's approval in the Supabase tool; its SQL
+  is the last block of `supabase/schema.sql` (md5 of that block `c8874adb...` before two later edits -- re-check
+  after applying). **To finish: apply it, verify the md5, merge the preview into the branch, push.**
+  What it is: a portal **Hand over** section -- a sheet (+ PDFs, ≤ 3 MB so base64 fits Vercel's 4.5 MB) or one
+  account in a short form, which the server writes as a ONE-LINE SHEET in the firm's own handover format
+  (`portalSingleHandover`) -- kept as sent in bucket `portal-handovers/{client}/{id}/`; table
+  `client_handover_submissions` (received -> loaded | declined with a reason); read under `may_load_accounts`;
+  `decide_client_handover` the only writer. On the client page, **Handed over in the portal**: *Open in the
+  import* (`/companies/:id/upload?submission=`) puts the files into the ordinary HandoverImportCard, and approving
+  marks it loaded with the batch; *Decline* asks why. The liaison's bell rings on arrival. check-client-portal
+  +14 (156).
+- **The schema checks now read SQL comments in one pass** (`scripts/qa/sqlComments.mjs`, used by
+  check-select-columns): a block comment saying "if -- and only if --" lost its `*/` to the line-comment pass and
+  swallowed the file to the next `*/` -- the day one was appended, a live column read as missing. Ten other checks
+  still use the two-regex strip; move them over if one ever reports something impossible.
+
+**S16 starts here -- Stephan's list for the portal (29 Oct), after finishing the handovers above:**
+1. **Password after the first sign-in.** "Should I get a code every time? ... Maybe the first time, but ... if you
+   have a password, then that's fine." Code once to prove the address, then set a password; code stays as the
+   reset. (Portal users are not Supabase users -- keep it in `client_portal_users`, hashed with `keyedHash`-style
+   scrypt, never in the browser.)
+2. **The top band like Raptor's** (DashboardHero, not the photo band) and **the full Bredell Ferreira logo with
+   the BF circle** (`/brand/bf-lockup.jpg` is the ringed lockup; the portal shows only the wordmark).
+3. **The dashboard as the place you act:** the **liaison's details** (name, number, WhatsApp, email -- clickable),
+   and buttons to **raise a ticket**, **tell us about a payment**, **update a debtor's details**, **request a
+   withdrawal** -- "with a brief overview of what's happening"; **Reports** the in-depth half.
+4. **Raise a ticket from the Tickets section** too, not only from an account.
+5. **"Paid to you" not beside "Ask"** on the account line ("it takes you to the same tab"): separate actions, each
+   its own form; the dashboard buttons in 3 are the main way in.
+6. **Fill Stephan's Test Client** (staging, `07574f60-...`) with more: payments, a paid-up and a settled account,
+   tickets in every stage, a remittance advice -- so every portal screen has something on it.
+7. Still asked and unanswered: should a portal message cost the debtor R13 like an emailed reply? (Not charged now.)
+8. Then S14's order: **Monthly progress report** (into Reports), **debtor pay page**, **early collections**.
 
 **AT GO-LIVE (production):** S15's staging migrations, in order: `close_account_admin_or_liaison`,
 `withdrawal_basis_for_closers`, `sheet_ticket_mail`, `big_boss`, `big_boss_queue`, then RUN
 `scripts/letters/seed-paid-up.mjs` (the letters), then `paid_up_letter`, `settlement_letter`, `client_portal_tickets`, `change_request_edit_notify`,
-`account_queries_stage_on_record`, `portal_record_ptc`, `portal_summary` -- after S14's list below. The backfill in the first moves every closed account off
+`account_queries_stage_on_record`, `portal_record_ptc`, `portal_summary`, `portal_handovers` (once applied on
+staging) -- after S14's list below. The backfill in the first moves every closed account off
 its collector; on production that is the whole closed book, run out of hours.
 
 ---
