@@ -90,6 +90,22 @@ try {
   await page.getByTestId('portal-sign-in').waitFor({ timeout: 20000 })
   t.check('no staff navigation on the portal', await page.locator('nav').count(), 0)
 
+  /* S16: drawn to Stephan's brief -- the coastline and the mark, Secure client portal, and no Microsoft button
+     ("do not introduce Microsoft sign-in unless ... already configured"). */
+  await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(300)
+  await t.shot(page, 'client-portal-sign-in')
+  t.ok('the sign-in carries the BF circle and the wordmark over the coastline', await page.getByTestId('portal-sign-in-logo').locator('img').count() === 2)
+  t.ok('...says it is the secure client portal, and offers no Microsoft sign-in', /secure client portal/i.test(await page.getByTestId('portal-page').innerText())
+    && !/microsoft/i.test(await page.getByTestId('portal-page').innerText()))
+  t.ok('...and a way to reach the firm', /^mailto:info@bredellferreira\.co\.za/.test(await page.getByTestId('portal-support').getAttribute('href') ?? ''))
+  await page.getByTestId('portal-password').fill('peek')
+  await page.getByTestId('portal-password-show').click()
+  t.ok('the eye shows the password, and again hides it', await page.getByTestId('portal-password').getAttribute('type') === 'text')
+  await page.getByTestId('portal-password-show').click()
+  t.ok('...', await page.getByTestId('portal-password').getAttribute('type') === 'password')
+  await page.getByTestId('portal-forgot').click()
+  t.ok('Forgot your password? is the emailed code', await page.getByRole('button', { name: 'Email me a code' }).count() === 1)
+  await page.getByRole('button', { name: 'I have a password' }).click()
   /* S16: the door is the address and a password; a wrong one is refused without saying which half was wrong. */
   await page.getByTestId('portal-email').fill('jan@alianna.co.za')
   await page.getByTestId('portal-password').fill('guess')
@@ -281,8 +297,11 @@ try {
   const codesBefore = calls.filter((c) => c.action === 'request-code').length
   await page.getByTestId('portal-email').fill('jan@alianna.co.za')
   await page.getByTestId('portal-password').fill('tafelberg sunrise')
+  await page.getByTestId('portal-remember').check()
   await page.getByTestId('portal-sign-in-button').click()
   await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
+  t.ok('Keep me signed in is asked for, and the browser keeps the session', calls.filter((c) => c.action === 'sign-in').pop()?.body?.remember === true
+    && await page.evaluate(() => Object.keys(localStorage).some((k) => /portal/i.test(k))))
   t.ok('the next visit signs in with the password, and no code is emailed', calls.filter((c) => c.action === 'request-code').length === codesBefore)
 } catch (e) {
   t.ok(`the run finished without throwing (${String(e).slice(0, 200)})`, false)

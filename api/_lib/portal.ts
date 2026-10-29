@@ -121,7 +121,7 @@ const verify: Handler = async (req, res, admin) => {
 
   /* Spent the moment it matches, so the same six digits cannot open a second browser. */
   await admin.from('client_portal_codes').delete().eq('user_id', user!.id)
-  const session = await openSession(admin, req, user!.id, t)
+  const session = await openSession(admin, req, user!.id, t, body.remember !== false)
   if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
   /* A CODE IS THE FIRST VISIT OR THE RESET (S16), so the browser asks for a password next: always when there
      is none yet, and when the client came here because they forgot it. The code also clears a lock. */
@@ -130,9 +130,11 @@ const verify: Handler = async (req, res, admin) => {
 }
 
 /** A new signed-in browser: the token goes to it once, only its keyed hash is kept. */
-async function openSession(admin: SupabaseClient, req: VercelRequest, userId: string, t: number): Promise<{ token: string; expiresAt: string } | null> {
+/* KEEP ME SIGNED IN (S16): ticked, a month, as before; not ticked, a day -- the browser forgets it sooner still
+   (portalApi keeps it for the tab only), and the server must not hold a month-long key for a shared office PC. */
+async function openSession(admin: SupabaseClient, req: VercelRequest, userId: string, t: number, remember = true): Promise<{ token: string; expiresAt: string } | null> {
   const token = crypto.randomBytes(32).toString('hex')
-  const expiresAt = new Date(t + PORTAL_SESSION_DAYS * 86_400_000).toISOString()
+  const expiresAt = new Date(t + (remember ? PORTAL_SESSION_DAYS : 1) * 86_400_000).toISOString()
   const { error } = await admin.from('client_portal_sessions').insert({
     user_id: userId, token_hash: keyedHash('portal-session', token), expires_at: expiresAt,
     device: deviceLabel(req.headers['user-agent'] as string | undefined),
@@ -170,7 +172,7 @@ const signIn: Handler = async (req, res, admin) => {
     }
     res.status(400).json({ error: PORTAL_PASSWORD_WRONG }); return
   }
-  const session = await openSession(admin, req, user.id as string, t)
+  const session = await openSession(admin, req, user.id as string, t, body.remember !== false)
   if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
   await admin.from('client_portal_users').update({ password_failures: 0, password_locked_until: null }).eq('id', user.id)
   res.status(200).json(session)

@@ -61,6 +61,15 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   **Why Stephan "never got a code" (29 Oct):** the 09:52 request WAS sent (Vercel log: from his own mailbox) to
   **stephan@urbanhausgroup.co.za**, the address his portal login is under; the 06:06 one was for
   stephan@bredellferreira.co.za, which has no portal login. Look in the log (`[portal]`) before the code.
+- **THE SIGN-IN, TO STEPHAN'S BRIEF (29 Oct, with a mock-up)**: split screen in a rounded frame over the softened
+  coastline; left 58% the coastline with the BF circle + wordmark and "Your book, where it stands, whenever you want
+  to look." over a gold rule; right 42% warm white with fine gold curves, "Secure client portal", icon fields, a
+  password eye, **Keep me signed in** (real: ticked = 30-day session kept in localStorage; not ticked = a 1-day
+  session kept for the tab only -- `openSession(..., remember)`, `savePortalToken(token, remember)`), Forgot your
+  password? (the code), and "Need help signing in?" (mailto info@). Raleway / Open Sans as `@fontsource-variable`
+  packages, imported by the portal only. **No "Continue with Microsoft"**: the brief says not unless it is already
+  configured, and it is not. e2e client-portal 72. Stephan also asked for the coastline at 8K: the original is
+  1672x609; he was sent a 7680-wide Lanczos upscale (softer than a real 8K photograph, and said so).
 - **THE PORTAL'S EMAILS LOOK LIKE THE ADVICE** (Stephan: "make it look nicer ... the link should be like a thing,
   like press here ... don't say anything about ... at no charge"). `portalEmailHtml` (clientPortal.ts): navy band
   with the name in tracked gold TEXT (no image to block), the code in a box, a gold "Open the client portal"

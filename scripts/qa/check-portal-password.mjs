@@ -63,7 +63,7 @@ check('the columns are in schema.sql', ['password_hash text', 'password_set_at t
 /* The screen: the password is the door, the code the way to set it. */
 const page = strip(fs.readFileSync('src/pages/portal/PortalPage.tsx', 'utf8'))
 check('the sign-in opens on the password', /useState<Step>\('password'\)/.test(page), true)
-check('...and a code always ends by choosing a password', /verifyPortalCode\(email, code, true\)/.test(page), true)
+check('...and a code always ends by choosing a password', /verifyPortalCode\(email, code, true[,)]/.test(page), true)
 
 if (failures.length) {
   console.log(`${failures.length} failed:\n  ${failures.join('\n  ')}`)
