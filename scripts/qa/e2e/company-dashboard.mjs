@@ -143,7 +143,8 @@ try {
   t.ok('...administration', /9\s+accounts loaded/.test(await page.getByTestId('headline-Administration').innerText()))
   t.ok('...call centre, in rand', /R\s?0\s+collected this month/.test(await page.getByTestId('headline-Call centre').innerText()))
   t.check('four departments in one row', await page.getByTestId('departments').locator('a').count(), 4)
-  t.check('...each on its own photograph', await page.getByTestId('departments').locator('img[src^="/brand/departments/"]').count(), 4)
+  /* S15, Stephan: "this is too much. remove the pictures." The hero is the one photograph on the page. */
+  t.check('...and no photograph on any of them', await page.getByTestId('departments').locator('img').count(), 0)
   const row = await page.getByTestId('departments').locator('a').evaluateAll((as) => as.map((a) => Math.round(a.getBoundingClientRect().top)))
   t.ok('...on one line at a laptop\'s width', new Set(row).size === 1)
   t.ok('yours is marked', /Administration[\s\S]*Yours/.test(await page.getByTestId('department-Administration').innerText()))
