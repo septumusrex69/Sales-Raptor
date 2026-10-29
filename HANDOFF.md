@@ -81,8 +81,20 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   portal's open and finished accounts are drawn on it. The portal dashboard is in `DashboardPanes`
   (`raptor.portal.dashboard.layout`, opens Wide): figures full, the chart and open accounts wide, the liaison,
   what-to-do and finished narrow. e2e checks each arrangement by where the panes land.
+- **MAIL HAS A DONE STATE ("inbox zero")** (Stephan: "if an email has been dealt with ... they want their inboxes
+  to show that it's empty ... that's how they used to working"; approved: "go ahead with done button"). Staging
+  migration **`user_emails_done`**: `done_at`, `done_by` (+ a check pairing them, two partial indexes);
+  `nav_counts()` leaves done mail out of the badge (md5 `c63a779d...`). Tabs **All | Done | Junk | Sent | Blocked**;
+  Mark done on the open message's bar and a tick on each row, bulk with Select; Not done puts it back; search
+  still finds done mail; the match box has **"Mark it done as well"** (on by default, off when opened by Reply).
+  Raptor only: nothing moves on the mail server (sync is one-way). The selection's own "Done" button now says
+  Cancel. `check-mail-done` (55, break-tested), e2e mail +done (145). Built by a helper agent in a worktree and
+  re-run here. **Open choices:** replying does not mark done; the Done tab orders by arrival, not by when done.
+- **THE COMPANY DASHBOARD'S DEPARTMENTS ARE LIGHT TABS** (Stephan: blurb and "0 accounts from new clients" are
+  "useless information ... just make a tab ... a light other colour"): name + headcount, light blue, yours gold.
+  `departmentHeadline` stays in companySnapshot unused. e2e company-dashboard 54.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
-- **AT GO-LIVE:** add `portal_handovers_by_day` and `portal_passwords` after `portal_handovers` in the S15 list below. The test history is staging-only.
+- **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords` and `user_emails_done` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
 ## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
 
