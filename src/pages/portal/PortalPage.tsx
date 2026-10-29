@@ -12,6 +12,7 @@ import { PortalDashboard } from './PortalDashboard'
 import { PortalReports } from './PortalReports'
 import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
+import './portal.css'
 
 /**
  * THE CLIENT PORTAL (S14, Raptor H13) -- outside the firm, like /sign/:token: no staff login, no staff
@@ -118,7 +119,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
 
 /* ------------------------------------------------------------------ signed in */
 
-type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts' | 'handover'
+export type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts' | 'handover'
 const SECTIONS: { id: Section; label: string; icon: typeof LayoutDashboard; title: string; blurb: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, title: 'Dashboard', blurb: 'How your book is doing.' },
   { id: 'reports', label: 'Reports', icon: FileText, title: 'Reports', blurb: 'Every remittance advice we have sent you.' },
@@ -150,13 +151,15 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
   const here = SECTIONS.find((s) => s.id === section)!
 
   return (
-    <div className="min-h-screen lg:h-screen lg:flex lg:overflow-hidden bg-[#F2F5F8]" data-testid="portal-page">
+    <div className="portal-brand min-h-screen lg:h-screen lg:flex lg:overflow-hidden bg-[#F2F5F8]" data-testid="portal-page">
       {/* THE SIDEBAR, Raptor's own shape: navy, the wordmark, gold for where you are; folds to icons. */}
       <aside className={`hidden lg:flex flex-col shrink-0 h-full overflow-hidden text-[#AEBBCB] transition-[width] duration-200 ${folded ? 'w-[4.5rem]' : 'w-64'}`}
         style={{ background: NAVY }} data-testid="portal-sidebar">
-        <div className={`h-16 flex items-center border-b border-white/10 ${folded ? 'justify-center' : 'px-5'}`}>
-          {folded ? <img src="/favicon.svg" alt="Bredell Ferreira" className="w-7 h-7" />
-            : <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-4 w-auto" />}
+        {/* THE FULL LOGO, THE BF CIRCLE BESIDE THE WORDMARK (Stephan's list, 29 Oct). The ringed lockup on
+            file is drawn on white, so the mark and the wordmark are set side by side on the navy instead. */}
+        <div className={`h-20 flex items-center gap-3 border-b border-white/10 ${folded ? 'justify-center' : 'px-4'}`} data-testid="portal-logo">
+          <img src="/brand/icon-light.svg" alt={folded ? 'Bredell Ferreira' : ''} className={folded ? 'w-9 h-9' : 'w-11 h-11 shrink-0'} />
+          {!folded && <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-[13px] w-auto min-w-0" />}
         </div>
         {!folded && (
           <div className="px-5 pt-5 pb-2">
@@ -205,7 +208,10 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
       {/* ON A PHONE: the same four across the top, and the way out. */}
       <div className="lg:hidden sticky top-0 z-30" style={{ background: NAVY }}>
         <div className="flex items-center justify-between px-4 h-14">
-          <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 w-auto" />
+          <span className="flex items-center gap-2.5">
+            <img src="/brand/icon-light.svg" alt="" className="h-8 w-8" />
+            <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3 w-auto" />
+          </span>
           <button type="button" onClick={onSignedOut} className="text-xs text-[#AEBBCB] underline">Sign out</button>
         </div>
         <nav aria-label="Portal" className="flex gap-1 overflow-x-auto px-3 pb-3">
@@ -222,18 +228,33 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
 
       {/* ONLY THE PAGE SCROLLS, on a wide screen: the sidebar stays where it is, as Raptor's does. */}
       <main className="flex-1 min-w-0 lg:overflow-y-auto">
-        {/* THE BAND: the advice's coastline under a navy wash, the client's name on it. */}
-        <header className="relative text-white"
-          style={{ background: `linear-gradient(100deg, rgba(17,30,45,0.96) 0%, rgba(17,30,45,0.82) 45%, rgba(17,30,45,0.35) 100%), url('/brand/remittance-cover.jpg') center 60% / cover` }}>
-          <div className="max-w-6xl mx-auto px-5 sm:px-8 py-8 sm:py-10">
-            <PortalLabel invert>{me.client}</PortalLabel>
-            <h1 className="text-3xl sm:text-4xl font-bold mt-1.5">{here.title}</h1>
-            <p className="text-[#AEBBCB] mt-1.5">{here.blurb}</p>
-          </div>
-        </header>
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-6 sm:py-8 space-y-5">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 py-5 sm:py-7 space-y-5">
+          {/*
+            THE BAND IS RAPTOR'S (S16; Stephan: "make it look and feel like Raptor"): a rounded panel at the
+            top of the page, the BF mark beside the title, the actions on the right -- DashboardHero's shape.
+            Its picture stays the remittance advice's coastline ("the image ... was the same image that you
+            put on the remittance"), under the navy wash, so the portal and the advice are one hand.
+          */}
+          <header className="relative overflow-hidden rounded-2xl text-white px-6 sm:px-7 py-7 sm:py-8" data-testid="portal-hero"
+            style={{ background: `linear-gradient(100deg, rgba(17,30,45,0.97) 0%, rgba(17,30,45,0.85) 45%, rgba(17,30,45,0.30) 100%), url('/brand/remittance-cover.jpg') center 60% / cover` }}>
+            <div className="relative flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-4 min-w-0">
+                <img src="/brand/icon-light.svg" alt="" className="hidden sm:block h-12 w-12 shrink-0" />
+                <div className="min-w-0">
+                  <PortalLabel invert>{me.client}</PortalLabel>
+                  <h1 className="text-2xl sm:text-[1.75rem] font-extrabold tracking-tight mt-1">{here.title}</h1>
+                  <p className="text-[13px] text-white/80 mt-0.5">{here.blurb}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
+                className="inline-flex items-center gap-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/20 px-3.5 py-2 text-sm font-medium backdrop-blur-sm">
+                <Phone size={15} /> Ask us to call you
+              </button>
+            </div>
+          </header>
           {done && <p className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2.5 text-sm text-emerald-800" data-testid="portal-asked">{done}</p>}
-          {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go} />}
+          {section === 'dashboard' && <PortalDashboard key={refresh} token={token} onSignedOut={onExpired} onOpen={go}
+            onAsk={(mode) => { setDone(null); setAsking({ about: null, mode }) }} />}
           {section === 'reports' && <PortalReports token={token} onSignedOut={onExpired} />}
           {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh} />}
           {section === 'handover' && <PortalHandovers token={token} onSignedOut={onExpired} />}

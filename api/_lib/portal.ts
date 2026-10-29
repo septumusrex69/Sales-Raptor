@@ -447,10 +447,19 @@ const callback: Handler = async (req, res, admin) => {
 const dashboard: Handler = async (req, res, admin) => {
   const who = await requirePortalUser(req, admin)
   if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
-  const [{ data, error }, { data: t }] = await Promise.all([
+  /* Thirteen months of handovers, so the 12-month chart has a whole first month whatever today's date. */
+  const from = new Date(); from.setUTCMonth(from.getUTCMonth() - 13)
+  const [{ data, error }, { data: t }, { data: days }, { owner }] = await Promise.all([
     admin.rpc('portal_summary', { p_client: who.companyId }),
     admin.rpc('portal_tickets', { p_client: who.companyId }),
+    admin.rpc('portal_handovers_by_day', { p_client: who.companyId, p_from: from.toISOString().slice(0, 10) }),
+    liaisonFor(admin, who.companyId),
   ])
+  /* WHO TO CALL (S16; Stephan's list: "the liaison's details -- name, number, WhatsApp, email"). Only what
+     the firm already gives a client in an email signature; nobody else's. */
+  const { data: l } = owner
+    ? await admin.from('profiles').select('name, email, phone, whatsapp').eq('id', owner).maybeSingle()
+    : { data: null }
   if (error) { res.status(500).json({ error: 'Your dashboard could not be read just now.' }); return }
   const d = data as { totals: Record<string, number>; groups: PortalSummaryGroup[] }
   const tickets = (t ?? []) as { status: string; stage: string }[]
@@ -468,6 +477,10 @@ const dashboard: Handler = async (req, res, admin) => {
       waitingOnYou: tickets.filter((x) => x.status === 'open' && x.stage === 'client').length,
       open: tickets.filter((x) => x.status === 'open').length,
     },
+    handoverDays: ((days ?? []) as { day: string; accounts: number; capital: number | string }[])
+      .map((r) => ({ day: String(r.day).slice(0, 10), accounts: Number(r.accounts) || 0, capital: Number(r.capital) || 0 })),
+    liaison: l ? { name: (l.name as string) || '', email: (l.email as string) || null,
+      phone: (l.phone as string) || null, whatsapp: (l.whatsapp as string) || null } : null,
   })
 }
 

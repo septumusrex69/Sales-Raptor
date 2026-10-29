@@ -5,6 +5,49 @@
 > Handover 16. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
 > and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
 
+## S16 -- IN PROGRESS (Raptor · Handover 15 -> 16, 29 Oct; branch `claude/beautiful-curie-f7deq7`)
+
+Started from Handover 15 on a container that had checked out `Main`; the branch was moved onto
+`claude/s15-side-panel` and the preview merged in. **Not yet on the preview** (asked Stephan; waiting).
+
+- **`portal_handovers` applied on staging** (see the S15 entry below for how and the md5).
+- **TWO YEARS OF HISTORY ON STEPHAN'S TEST CLIENT (staging, `07574f60-...`)**, Stephan: "add like a lot of data
+  ... Two years." All of it through the real engine, as Stephan (claims set), tagged so it can be found:
+  - 24 monthly batches, Nov 2024 - Oct 2026 (`handovers.notes = 'Test history (S16)'`), **140 accounts**
+    `STC-H0001..0140` (every 9th a company), R2.5m capital, no interest, 25% commission, nobody on them (an
+    allocation to a collector would start the Handover workflow and email fake debtors).
+  - **~600 approved receipts** (`allocate_payment` ran on each: instalments, lump sums, 70%
+    settlements, a few one-off part payments; a handful paid to the client). Overpayments (33, R7 838) released
+    to the client with `dispose_excess_credit`.
+  - Closed: 34 paid up, 8 settled, 7 written off, 5 withdrawn -- by a direct UPDATE (not `settle_account`, which
+    would start the paid-up letter workflow and email).
+  - **24 payover runs** PO-STC-2412 .. PO-STC-2611: 22 paid, Sep 2026 sent, Oct 2026 ready. Built, approved, sent
+    and paid by the real functions; `approved_at`/`sent_at` and the sends' `sent_at` then backdated to each run's
+    payout day with `session_replication_role = replica` (the protect triggers refuse it otherwise).
+  - **23 remittance sends** (`payover_run_sends`) -- **THE FILES DO NOT EXIST**: their `pdf_path`/`xlsx_path` point
+    at `payover-advice/{client}/{invoice}/...-s16hist.pdf` and nothing was uploaded (no session holds a key that
+    can write to Storage). The portal's Reports list shows them; **Open/Download will fail**. Ask Stephan
+    before deploying anything to upload them (a one-off edge function would hold the service role).
+  - 26 tickets (dispute / client / litigation / import; closed before Aug 2026, open after, every stage) and 14
+    portal handover submissions (12 loaded, linked to their batches; 2 declined with reasons) -- their files do
+    not exist either.
+- **THE PORTAL DASHBOARD IN RAPTOR'S SHAPE, BREDELL'S COLOURS** (Stephan sent three ChatGPT mock-ups: "make it
+  look and feel like Raptor, except maybe the colour schemes ... more like Bredell"; "the handover thing that we
+  have on the communications dashboard is better"; "the image ... was the same image that you put on the
+  remittance"). The band is DashboardHero's shape (rounded, BF mark, actions right) over the remittance
+  coastline; the sidebar has the BF circle beside the wordmark (`icon-light.svg` + `wordmark-light.svg`: the
+  ringed lockup jpg is on white); the four figures are Raptor tiles; **Your handovers, month by month** is the
+  communications dashboard's own `MonthTrackCard` (`kind="existing"`) fed by staging migration
+  **`portal_handovers_by_day`** (service role only; read off the accounts' handover dates, not the batch table);
+  a **liaison card** (name, tel:, wa.me, mailto:, Ask us to call you) and **What would you like to do?** buttons.
+  `portal.css` puts the firm's navy/gold/slate tokens and a plain `.card` back inside `.portal-brand`, so a
+  staff skin in the same browser never recolours the client's portal. e2e `client-portal` +6 (56), the brand
+  scope and the chart each seen failing.
+  **Not done from Stephan's list:** a ticket or a payment still needs an account (the dashboard buttons send the
+  client to Accounts); item 4 (a ticket from the Tickets section with no account) needs a server route.
+- **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
+- **AT GO-LIVE:** add `portal_handovers_by_day` after `portal_handovers` in the S15 list below. The test history is staging-only.
+
 ## S15 -- WHERE IT STANDS, AND WHERE S16 STARTS (Raptor · Handover 15, 28 Oct)
 
 **S15 · Side Panel** -- branch `claude/s15-side-panel`, from the preview `claude/sales-raptor-review-p1pzx2` at

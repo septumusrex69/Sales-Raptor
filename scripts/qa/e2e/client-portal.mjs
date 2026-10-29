@@ -28,13 +28,19 @@ const TICKETS = [
 ]
 const DASH = {
   accounts: 3, open: 2,
-  figures: { capitalHandedOver: 2500, collectedToDate: 500, collectedThisMonth: 100, capitalOutstanding: 1550.9 },
+  figures: { capitalHandedOver: 2505475.92, collectedToDate: 501095.18, collectedThisMonth: 100, capitalOutstanding: 1550.9 },
   outcomes: [
     { outcome: 'paying', label: 'Paying', finished: false, accounts: 1, handedOver: 800.4, outstanding: 600.4, paidToDate: 200 },
     { outcome: 'in_progress', label: 'In progress', finished: false, accounts: 1, handedOver: 950.5, outstanding: 950.5, paidToDate: 0 },
     { outcome: 'paid_up', label: 'Paid up', finished: true, accounts: 1, handedOver: 749.1, outstanding: 0, paidToDate: 300 },
   ],
   tickets: { waitingOnYou: 1, open: 1 },
+  /* S16: a handover on the 5th of each of the last three months, and the liaison. */
+  handoverDays: [3, 2, 1].map((back, i) => {
+    const d = new Date(); d.setUTCDate(5); d.setUTCMonth(d.getUTCMonth() - back)
+    return { day: d.toISOString().slice(0, 10), accounts: i + 2, capital: 1000 * (i + 1) }
+  }),
+  liaison: { name: 'Camille Liaison', email: 'camille@example.test', phone: '021 555 0101', whatsapp: '082 555 0101' },
 }
 const REPORTS = [{ id: 'r1', kind: 'remittance', version: 1, sentAt: '2026-10-12T08:00:00Z', title: 'Remittance', client: 'Alianna Pharmacy',
   amount: 420.5, periodStart: '2026-09-11', periodEnd: '2026-10-10', hasPdf: true, hasSheet: true }]
@@ -98,7 +104,7 @@ try {
   const nav = (await page.getByTestId('portal-sidebar').innerText()).replace(/\s+/g, ' ')
   t.ok('the sidebar reads Dashboard, Reports, Tickets, Accounts, in that order', /Dashboard.*Reports.*Tickets.*Accounts/.test(nav))
   const figs = (await page.getByTestId('portal-figures').innerText()).replace(/\u00a0/g, ' ')
-  t.ok('the dashboard shows handed over, collected and outstanding', /Capital handed over/i.test(figs) && /Collected to date/i.test(figs) && /R\s?2\s?500/.test(figs) && /20% of capital/.test(figs))
+  t.ok('the dashboard shows handed over, collected and outstanding', /Capital handed over/i.test(figs) && /Collected to date/i.test(figs) && /R\s?2[\s,]?505[\s,]?475/.test(figs) && /20% of capital/.test(figs))
   t.check('...one line per open outcome beside the ring', await page.getByTestId('portal-positions').locator('li').count(), 2)
   t.ok('...and the finished accounts by how they ended, paid up counted', await page.getByTestId('portal-finished').locator('li').count() === 1
     && (await page.getByTestId('portal-paid-up').innerText()).trim() === '1')
@@ -111,7 +117,24 @@ try {
   await page.waitForTimeout(400)
   t.ok('...and says a ticket is waiting on the client', /1 ticket is waiting on you/.test(await page.getByTestId('portal-waiting').innerText()))
   t.ok('...with no fee, commission or interest anywhere on it', !/fee|commission|interest/i.test(await page.getByTestId('portal-dashboard').innerText()))
+  /* S16: Raptor's shape in the firm's colours (Stephan: "make it look and feel like Raptor ... more like Bredell"). */
+  t.ok('the band is Raptor\'s, over the remittance coastline', /remittance-cover/.test(await page.getByTestId('portal-hero').evaluate((e) => e.style.background))
+    && /Dashboard/.test(await page.getByTestId('portal-hero').innerText()))
+  t.check('the sidebar carries the BF circle beside the wordmark', await page.getByTestId('portal-logo').locator('img').count(), 2)
+  const chart = page.getByTestId('portal-handovers')
+  await chart.locator('.recharts-bar-rectangle').first().waitFor({ timeout: 5000 })
+  t.ok('the handovers are drawn month by month, the communications dashboard\'s card', /Your handovers, month by month/.test(await chart.innerText())
+    && await chart.locator('.recharts-bar-rectangle path').count() >= 3)
+  const liaison = page.getByTestId('portal-liaison')
+  t.ok('the liaison is named, and the number is a link to call', /Camille Liaison/.test(await liaison.innerText())
+    && await liaison.locator('a[href="tel:0215550101"]').count() === 1 && await liaison.locator('a[href^="https://wa.me/27825550101"]').count() === 1)
+  t.ok('the navy is the firm\'s inside the portal, whatever skin the browser has', (await page.getByTestId('portal-page')
+    .evaluate((e) => getComputedStyle(e).getPropertyValue('--color-navy-900'))).trim().toLowerCase() === '#111e2d')
   await t.shot(page, 'client-portal-dashboard')
+  await page.getByTestId('portal-action-handover').click()
+  t.ok('a button on the dashboard takes the client where they act', await page.getByTestId('portal-nav-handover').getAttribute('aria-current') === 'page')
+  await page.getByTestId('portal-nav-dashboard').click()
+  await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
 
   await page.getByTestId('portal-nav-reports').click()
   await page.getByTestId('portal-reports').waitFor({ timeout: 5000 })

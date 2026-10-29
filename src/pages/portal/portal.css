@@ -1,0 +1,48 @@
+/*
+ * THE PORTAL WEARS BREDELL FERREIRA'S COLOURS, WHATEVER SKIN THE BROWSER HAS (S16, Raptor · Handover 15).
+ *
+ * Stephan, of the portal: "make it look and feel like Raptor, except maybe the colour schemes ... more like
+ * Bredell". It borrows Raptor's own pieces (the cards, the handover chart), and those read their colours
+ * from tokens every staff skin redefines -- Africa's navy is brown, Forest's is green. A client is never
+ * given a skin, but a liaison checking the portal in the browser they work in would see their own skin on
+ * the client's screen. So the portal sets the tokens back, here, for everything inside it: the firm's navy
+ * and gold (index.css's @theme values) and a plain slate. Custom properties inherit, so the nearest
+ * definition wins and nothing outside `.portal-brand` changes.
+ */
+.portal-brand {
+  --color-navy-950: #0f161d;
+  --color-navy-900: #111e2d;
+  --color-navy-800: #1d2c3a;
+  --color-navy-700: #283d50;
+  --color-navy-600: #355069;
+  --color-gold-500: #c69f54;
+  --color-gold-400: #d9b876;
+  --color-gold-300: #ecdcb8;
+  --color-gold-600: #a9822f;
+  --color-gold-50: #faf5ea;
+  --color-gold-100: #f4ead3;
+  --color-surface: #f2f5f8;
+  --color-card: #ffffff;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --skin-card-radius: 1rem;
+  --skin-card-border: #d5dbe3;
+  --skin-card-shadow: 0 1px 2px rgba(17, 30, 45, 0.04);
+}
+
+/* A skin styles `.card` directly (glass, a tinted fill); this is more specific than any of them. */
+html[data-theme] .portal-brand .card,
+html .portal-brand .card {
+  background-color: #ffffff;
+  border-radius: 1rem;
+  border: 1px solid #d5dbe3;
+  box-shadow: 0 1px 2px rgba(17, 30, 45, 0.04);
+  backdrop-filter: none;
+}

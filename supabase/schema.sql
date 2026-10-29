@@ -53705,3 +53705,30 @@ create policy portal_handovers_read on storage.objects
   for select to authenticated
   using (bucket_id = 'portal-handovers'
          and public.may_load_accounts(nullif((storage.foldername(name))[1], '')::uuid));
+
+-- ============================================================================================
+-- portal_handovers_by_day (S16, Raptor · Handover 15, 29 Oct 2026) -- THE PORTAL'S HANDOVER CHART.
+--
+-- Stephan, of the portal dashboard: "the handover thing that we have on the communications dashboard is
+-- better ... over the past months, how did the handover, when did the handover". That card (MonthTrackCard)
+-- is drawn from accounts handed over per DAY; this gives the portal the same rows for one client and its
+-- branches. Read off the accounts' own handover dates, not the handovers (batch) table: an imported book
+-- has accounts and no batch rows. Service role only -- the portal's server asks for the signed-in client.
+-- ============================================================================================
+create or replace function public.portal_handovers_by_day(p_client uuid, p_from date)
+returns table (day date, accounts integer, capital numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select a.handover_date as day, count(*)::integer as accounts, coalesce(sum(a.capital_handed_over), 0) as capital
+    from public.debtor_accounts a
+    join public.companies c on c.id = a.company_id
+   where coalesce(c.parent_company_id, c.id) = p_client
+     and a.handover_date >= p_from
+   group by a.handover_date
+   order by a.handover_date;
+$$;
+revoke all on function public.portal_handovers_by_day(uuid, date) from public, anon, authenticated;
+grant execute on function public.portal_handovers_by_day(uuid, date) to service_role;

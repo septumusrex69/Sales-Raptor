@@ -64,6 +64,10 @@ export interface PortalDashboard {
   figures: { capitalHandedOver: number; collectedToDate: number; collectedThisMonth: number; capitalOutstanding: number }
   outcomes: import('./clientPortal').PortalOutcomeLine[]
   tickets: { waitingOnYou: number; open: number }
+  /** Accounts handed over per day, the last thirteen months -- the shape the staff dashboards' intake has. */
+  handoverDays: { day: string; accounts: number; capital: number }[]
+  /** The client's liaison, to call or write to; null where the client has none yet. */
+  liaison: { name: string; email: string | null; phone: string | null; whatsapp: string | null } | null
 }
 export const fetchPortalDashboard = (token: string) => call<PortalDashboard>('dashboard', {}, token)
 
