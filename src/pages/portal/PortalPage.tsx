@@ -35,6 +35,8 @@ export default function PortalPage() {
   const [token, setToken] = useState<string | null>(() => portalToken())
   const [me, setMe] = useState<PortalMe | null>(null)
   const [opened, setOpened] = useState(false)
+  /* Set by a sign-in, so the full opening plays then -- not only the first time in this tab (PortalSplash). */
+  const [fresh, setFresh] = useState(false)
 
   const signedOut = useCallback(() => { savePortalToken(null); setToken(null); setMe(null) }, [])
 
@@ -45,12 +47,12 @@ export default function PortalPage() {
     return () => { live = false }
   }, [token, signedOut])
 
-  if (!token) return <SignIn onSignedIn={(t, remember) => { savePortalToken(t, remember); setToken(t); setOpened(false) }} />
+  if (!token) return <SignIn onSignedIn={(t, remember) => { savePortalToken(t, remember); setToken(t); setOpened(false); setFresh(true) }} />
   /* THE OPENING plays while the portal reads who this is, and a little longer (PortalSplash) -- ON TOP of the
      portal once it is there, so its fade dissolves into the dashboard rather than into an empty page. */
   /* One element in one place, so the opening is never remounted (and restarted) when the portal arrives. */
   return <>
-    {!opened && <PortalSplash ready={!!me} onDone={() => setOpened(true)} />}
+    {!opened && <PortalSplash ready={!!me} fresh={fresh} onDone={() => { setOpened(true); setFresh(false) }} />}
     {me && <Signed token={token} me={me} onSignedOut={() => { portalSignOut(token).catch(() => {}); signedOut() }} onExpired={signedOut} />}
   </>
 }

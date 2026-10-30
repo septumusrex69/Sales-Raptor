@@ -400,12 +400,18 @@ try {
   await page.getByTestId('portal-remember').check()
   await page.getByTestId('portal-sign-in-button').click()
   await page.getByTestId('portal-splash').waitFor({ timeout: 5000 })
-  t.ok('a second opening in the same tab is the short one', await page.locator('[data-splash="short"]').count() === 1)
+  /* EVERY SIGN-IN GETS THE FULL OPENING (Stephan, 30 Oct: "The loading does no animation" -- it was once per tab, and he
+     tested all day in one tab). A reload of a portal already signed in is the short one. */
+  t.ok('a second sign-in in the same tab plays the full opening again', await page.locator('[data-splash="full"]').count() === 1)
   await page.getByTestId('portal-dashboard').waitFor({ timeout: 5000 })
-  await page.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 5000 })
+  await page.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 8000 })
   t.ok('Keep me signed in is asked for, and the browser keeps the session', calls.filter((c) => c.action === 'sign-in').pop()?.body?.remember === true
     && await page.evaluate(() => Object.keys(localStorage).some((k) => /portal/i.test(k))))
   t.ok('the next visit signs in with the password, and no code is emailed', calls.filter((c) => c.action === 'request-code').length === codesBefore)
+  await page.reload()
+  await page.getByTestId('portal-splash').waitFor({ timeout: 5000 })
+  t.ok('...while a reload, already signed in, is the short fade', await page.locator('[data-splash="short"]').count() === 1)
+  await page.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 5000 })
 } catch (e) {
   t.ok(`the run finished without throwing (${String(e).slice(0, 200)})`, false)
 } finally {

@@ -16,8 +16,10 @@ import { playSplashSound } from './portalSound'
  * same three-and-a-half-second clock with their own sound, and /portal/opening plays any of them on demand. Until
  * Stephan picks, the portal keeps `circle`.
  *
- * ONCE PER VISIT, AND NEVER IN THE WAY. The full opening plays the first time in a tab; after that (a reload, a
- * second look) it is a short fade and no sound, because a ritual on every refresh is a wait. A tap skips it once
+ * ON EVERY SIGN-IN, AND NEVER IN THE WAY. The full opening plays whenever somebody signs in (`fresh`), and the first
+ * time a tab opens the portal; a reload of a portal already signed in is a short fade and no sound, because a ritual
+ * on every refresh is a wait. It was once per TAB until 30 Oct, and Stephan, testing all day in one Safari tab, only
+ * ever saw the fade: "The loading does no animation." Signing in is the moment it is for. A tap skips it once
  * the portal has what it needs. Reduced motion (the system setting) gets the logo, still, and no sound. It never
  * holds the portal past its own length: it waits for `ready` only because there is nothing to show before then.
  * `force` (the replay page only) plays the full opening regardless of all three.
@@ -65,14 +67,16 @@ function Mark({ variant }: { variant: SplashVariant }) {
   )
 }
 
-export function PortalSplash({ ready, onDone, variant = 'circle', force = false }: {
+export function PortalSplash({ ready, onDone, variant = 'circle', force = false, fresh = false }: {
   ready: boolean
   onDone: () => void
   variant?: SplashVariant
   force?: boolean
+  /** Straight after a sign-in: the full opening whatever this tab has seen. Reduced motion still wins. */
+  fresh?: boolean
 }) {
   const [full] = useState(() => {
-    if (force) return true
+    if (force || fresh) return true
     try { return sessionStorage.getItem(SEEN) !== '1' } catch { return true }
   })
   const reduced = !force && typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches

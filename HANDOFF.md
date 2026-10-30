@@ -218,6 +218,10 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
 - **PORTAL FIGURE TILES MADE LEAN (30 Oct: "way too big and bulky. Make smaller and leaner")**: icon small beside the
   label, figure a size down, thin trend, four across from `lg` (an iPad on its side) instead of 2x2 until 2xl; arrow
   only from 2xl so the labels fit. e2e client-portal 99 (one row, <= 120 px tall, no figure or label cut).
+- **THE OPENING PLAYS ON EVERY SIGN-IN (30 Oct: "The loading does no animation")**: it was full once per TAB, then a
+  short fade, and he tested all day in one Safari tab. `PortalSplash fresh` (set by SignIn's onSignedIn) plays it in
+  full on every sign-in; a reload already signed in is still the short fade. An iPad with Reduce Motion on gets the
+  still logo by design. e2e client-portal 100 (break-tested).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
