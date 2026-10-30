@@ -161,6 +161,89 @@ html .portal-brand .card {
 @keyframes ps-sweep { to { left: 110%; } }
 @keyframes ps-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
+/*
+ * THE COAST (variant 2, 30 Oct). Dusk over the sea the remittance advice is photographed on: a gold horizon draws out
+ * from the middle at 0.4 s, a sun swells behind it, the monogram RISES out of the horizon at 1.2 s with its
+ * reflection under the line and the swell catching the light, then the wordmark surfaces out of a blur.
+ */
+.portal-splash.is-coast { background: linear-gradient(180deg, #070d15 0%, #13243a 30%, #2a3f57 52%, #13243a 75%, #070d15 100%); }
+.is-coast .portal-splash-glow { top: 50%; background: radial-gradient(circle, rgba(198, 159, 84, 0.22) 0%, rgba(17, 30, 45, 0) 55%); }
+.tide-mark { position: relative; width: 132px; height: 132px; }
+.tide-rise { position: absolute; inset: 0; overflow: hidden; }
+.is-coast .tide-rise .portal-splash-monogram { opacity: 1; filter: none; transform: translateY(105%); animation: tide-rise 1.2s cubic-bezier(.2, .8, .2, 1) 1.15s forwards; }
+.tide-horizon {
+  position: absolute; left: 50%; bottom: 0; width: 120vw; height: 1.5px; transform: translateX(-50%) scaleX(0);
+  background: linear-gradient(90deg, rgba(198, 159, 84, 0) 0%, rgba(236, 220, 184, 0.95) 50%, rgba(198, 159, 84, 0) 100%);
+  box-shadow: 0 0 14px rgba(198, 159, 84, 0.8);
+  animation: tide-line 1.1s cubic-bezier(.6, 0, .3, 1) 0.35s forwards;
+}
+.tide-sun {
+  position: absolute; left: 50%; bottom: 0; width: 360px; height: 180px; transform: translate(-50%, 0) scale(0.2); opacity: 0;
+  border-radius: 360px 360px 0 0;
+  background: radial-gradient(ellipse at 50% 100%, rgba(255, 236, 196, 0.55) 0%, rgba(198, 159, 84, 0.25) 35%, rgba(198, 159, 84, 0) 70%);
+  animation: tide-sun 1.6s ease-out 0.9s forwards;
+}
+/* The sea is drawn from the horizon down, so the line and the water meet wherever the column puts the mark. */
+.tide-sea { position: absolute; left: 50%; top: 100%; width: 120vw; height: 100vh; transform: translateX(-50%); background: linear-gradient(180deg, #16283c 0%, #0b1622 30%, #070d15 100%); }
+.tide-reflection {
+  position: absolute; left: 50%; top: 0; width: 132px; height: 132px; transform: translateX(-50%) scaleY(-1); opacity: 0;
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.5), transparent 70%); mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.5), transparent 70%);
+  filter: blur(1.5px); animation: tide-reflect 1.2s ease 1.5s forwards;
+}
+.tide-wave {
+  position: absolute; left: 50%; height: 1px; transform: translateX(-50%) scaleX(0); opacity: 0;
+  background: linear-gradient(90deg, rgba(151, 180, 204, 0), rgba(236, 220, 184, 0.55), rgba(151, 180, 204, 0));
+  animation: tide-wave 2.6s ease-in-out infinite;
+}
+.is-coast .portal-splash-word { margin-top: 26vh; }
+.is-coast .portal-splash-word img { clip-path: none; opacity: 0; filter: blur(8px); transform: translateY(10px); animation: tide-surface 1s ease 1.9s forwards; }
+.is-coast .portal-splash-label { position: relative; opacity: 0; animation: ps-rise 0.8s ease 2.5s forwards; }
+@keyframes tide-line { to { transform: translateX(-50%) scaleX(1); } }
+@keyframes tide-sun { to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes tide-rise { to { transform: translateY(0); } }
+@keyframes tide-reflect { to { opacity: 0.6; } }
+@keyframes tide-wave { 0% { opacity: 0; transform: translateX(-50%) scaleX(0.2); } 50% { opacity: 1; transform: translateX(-50%) scaleX(1); } 100% { opacity: 0; transform: translateX(-50%) scaleX(1.3); } }
+@keyframes tide-surface { to { opacity: 1; filter: blur(0); transform: none; } }
+
+/*
+ * THE TOWERS (variant 3, 30 Oct). The truest to "PlayStation 2": a gold grid floor running away from you, glass
+ * towers of light rising out of it in two rows, the camera pushing in, a double shock-ring at 1.35 s, and the
+ * monogram turning in on its axis like a chrome badge -- then the wordmark opens with the light across it.
+ */
+.portal-splash.is-towers { background: radial-gradient(ellipse at 50% 40%, #1d3550 0%, #0e1a29 50%, #04080e 100%); }
+.ps2-stage { position: absolute; inset: 0; overflow: hidden; perspective: 700px; animation: ps2-push 3.4s cubic-bezier(.3, .1, .2, 1) forwards; }
+.ps2-floor {
+  position: absolute; left: -60%; right: -60%; bottom: -10%; height: 70%; transform-origin: 50% 100%; transform: rotateX(76deg);
+  background-image: linear-gradient(rgba(198, 159, 84, 0.75) 1.5px, transparent 1.5px), linear-gradient(90deg, rgba(198, 159, 84, 0.6) 1.5px, transparent 1.5px);
+  background-size: 60px 60px;
+  -webkit-mask-image: linear-gradient(to top, #000 30%, transparent 100%); mask-image: linear-gradient(to top, #000 30%, transparent 100%);
+  animation: ps2-run 1.2s linear infinite;
+}
+.ps2-tower {
+  position: absolute; transform: translateX(-50%) scaleY(0); transform-origin: bottom; border-radius: 2px;
+  background: linear-gradient(to top, rgba(151, 180, 204, 0.08), rgba(207, 224, 239, 0.55));
+  border: 1px solid rgba(207, 224, 239, 0.55); box-shadow: 0 0 18px rgba(151, 180, 204, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.15);
+  animation: ps2-rise 1s cubic-bezier(.2, .9, .25, 1.15) forwards, ps2-dim 0.8s ease 1.5s forwards;
+}
+.ps2-tower.is-far { opacity: 0.6; filter: blur(0.6px); }
+.ps2-burst {
+  position: absolute; left: 50%; top: 46%; width: 140px; height: 140px; border-radius: 9999px; transform: translate(-50%, -50%) scale(0); opacity: 0;
+  border: 2px solid rgba(236, 220, 184, 0.9); box-shadow: 0 0 30px rgba(198, 159, 84, 0.8), inset 0 0 30px rgba(198, 159, 84, 0.5);
+  animation: ps2-burst 1.1s ease-out 1.35s forwards;
+}
+.ps2-burst.is-second { animation-delay: 1.55s; border-color: rgba(151, 180, 204, 0.8); }
+.ps2-mark { width: 132px; height: 132px; perspective: 600px; }
+.is-towers .portal-splash-monogram {
+  opacity: 0; transform: rotateY(-100deg) scale(0.7); filter: brightness(2.6) drop-shadow(0 0 18px rgba(207, 224, 239, 0.9));
+  animation: ps2-badge 1.2s cubic-bezier(.2, .8, .2, 1) 1.3s forwards;
+}
+@keyframes ps2-push { from { transform: scale(1); } to { transform: scale(1.18); } }
+@keyframes ps2-run { from { background-position: 0 0; } to { background-position: 0 60px; } }
+@keyframes ps2-rise { to { transform: translateX(-50%) scaleY(1); } }
+@keyframes ps2-dim { to { opacity: 0.25; } }
+@keyframes ps2-burst { 0% { opacity: 1; transform: translate(-50%, -50%) scale(0.2); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(7); } }
+@keyframes ps2-badge { 60% { opacity: 1; filter: brightness(1.8) drop-shadow(0 0 18px rgba(207, 224, 239, 0.7)); } to { opacity: 1; transform: none; filter: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .portal-splash *, .portal-splash { animation: none !important; transition: none !important; }
   .portal-splash .portal-splash-monogram, .portal-splash .portal-splash-word img, .portal-splash .portal-splash-label { opacity: 1 !important; clip-path: none !important; filter: none !important; transform: none !important; }

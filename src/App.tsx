@@ -13,6 +13,7 @@ const SignPage = lazy(() => import('./pages/sign/SignPage'))
 const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
 const OptInPage = lazy(() => import('./pages/news/OptInPage'))
 const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
+const PortalOpeningPage = lazy(() => import('./pages/portal/PortalOpeningPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -154,6 +155,8 @@ function App() {
             {/* THE FOURTH (S14, 28 Oct): the CLIENT PORTAL. A client signs in with an emailed code and is
                 never a Supabase user, so it sits outside RequireAuth like the rest -- see clientPortal.ts. */}
             <Route path="/portal" element={<PortalPage />} />
+            {/* The portal's opening animations, replayable on demand (S16, 30 Oct). No data, so no sign-in. */}
+            <Route path="/portal/opening" element={<PortalOpeningPage />} />
             <Route
               element={
                 <RequireAuth>

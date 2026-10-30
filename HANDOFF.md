@@ -183,6 +183,13 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   sign-in panel is taller than wide, so the browser stretched a ~600-px piece about 4x. Now `portal-signin.webp`, a
   tall cut (1900 x 2209) from the 7680-px Lanczos copy. There is NO larger original in the repo; a true high-resolution
   file of that photo would be better still. e2e client-portal 90 (break-tested: the strip fails it).
+- **THE OPENINGS, REPLAYABLE, AND TWO MORE (30 Oct: "a link where I can replay it ... and just make two different ones
+  as well")**: `/portal/opening` (no sign-in, `PortalOpeningPage.tsx`) plays each on a press -- the press is what lets
+  the sound start on an iPad. `PortalSplash` takes `variant` (`circle` = the live one, `coast` = gold horizon and the
+  monogram rising out of the sea, `towers` = gold grid floor, towers of light, shock-ring, chrome turn) and `force`;
+  `playSplashSound(variant)` has a sound for each. **The portal still plays `circle` until Stephan picks.** e2e
+  portal-openings 14 (each one's monogram and wordmark actually drawn by the end -- a base rule hid the coast's logo
+  while it was being written).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
