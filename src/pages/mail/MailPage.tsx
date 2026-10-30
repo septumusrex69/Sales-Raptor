@@ -2550,9 +2550,13 @@ function MessageActions({
         motion the staff asked for, so it is where the hand already is. Not done on a done message,
         which is the way back.
       */}
+      {/* WITH ITS WORD (Stephan, 30 Oct, circling the bar on the iPad: "put the option here like Mark has done or
+          archive"). It was here as a bare icon, and an iPad shows no tooltip, so it was not there for him. Like Reply,
+          the one other action somebody comes to this bar for, it says what it does; then a divider. */}
       {onDone && (mail.doneAt
-        ? <BarButton sticky={sticky} onClick={() => onDone(false)} label="Move to inbox" icon={<ArchiveRestore size={15} />} />
-        : <BarButton sticky={sticky} onClick={() => onDone(true)} label="Archive" icon={<Archive size={15} />} />)}
+        ? <BarButton sticky={sticky} worded testId="mail-bar-archive" onClick={() => onDone(false)} label="Move to inbox" icon={<ArchiveRestore size={15} />} />
+        : <BarButton sticky={sticky} worded testId="mail-bar-archive" onClick={() => onDone(true)} label="Archive" icon={<Archive size={15} />} />)}
+      {onDone && sticky && <span aria-hidden className="mx-0.5 h-5 w-px bg-slate-200" />}
 
       <BarButton sticky={sticky} onClick={onUnread} label="Mark unread" icon={<MailIcon size={15} />} />
 
@@ -2640,19 +2644,24 @@ function MessageActions({
  * is a button nobody can name, and "which arrow was reply-all?" is exactly the question a
  * collector should not have to answer from memory.
  */
-function BarButton({ sticky, onClick, label, icon }: {
+function BarButton({ sticky, onClick, label, icon, worded = false, testId }: {
   sticky: boolean
   onClick: () => void
   label: string
   icon: ReactNode
+  /** Its word on the floating pill too, not only in a tooltip an iPad never shows. */
+  worded?: boolean
+  testId?: string
 }) {
   return (
-    <button onClick={onClick} title={label} aria-label={label}
+    <button onClick={onClick} title={label} aria-label={label} data-testid={testId}
       className={sticky
-        ? 'inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+        ? worded
+          ? 'inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[13px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+          : 'inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800'
         : 'inline-flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'}>
       {icon}
-      {!sticky && label}
+      {(!sticky || worded) && label}
     </button>
   )
 }

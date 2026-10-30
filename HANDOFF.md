@@ -209,6 +209,9 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   the firm, each with its count, and a separate Closed button. In Open the client's turn sorts first and is drawn in
   gold with a line saying how many need their answer. Badges moved to the brand palette (gold / pale blue). e2e
   client-portal 96 (a newer with-the-firm fixture ticket proves the order; break-tested by removing the sort).
+- **MAIL: ARCHIVE SAYS ITS NAME ON THE FLOATING BAR (30 Oct, circling the bar: "put the option here like Mark has done or
+  archive")**: it was the bar's first button but icon-only, and an iPad shows no tooltip. `BarButton worded`, then a
+  divider. (His screenshot was an older tab: All / Done -- the live tabs read Inbox / Archive.) e2e mail 151.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

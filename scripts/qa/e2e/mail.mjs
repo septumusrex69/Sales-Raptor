@@ -1159,6 +1159,10 @@ try {
     await inList().first().click()
     await page.getByTestId('mail-archive').waitFor({ timeout: 5000 })
     t.ok('archive: the open message offers Archive at the top, in words', /Archive/.test(await page.getByTestId('mail-archive').innerText()))
+    /* AND ON THE FLOATING BAR, IN WORDS (Stephan, 30 Oct): an icon there had only a tooltip, which an iPad never shows. */
+    t.ok('archive: the floating bar says Archive too, not only an icon', await page.getByTestId('mail-bar-archive').first().isVisible()
+      && /Archive/.test(await page.getByTestId('mail-bar-archive').first().innerText()))
+    await t.shot(page, '28b-mail-bar-archive')
     await page.getByTestId('mail-archive').click()
     await page.waitForTimeout(800)
     t.ok('archive: ...the write reached the row', !!target.done_at)
