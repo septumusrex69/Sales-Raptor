@@ -357,12 +357,17 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
             {!folded && 'Ask us to call you'}
           </button>
         </nav>
-        {/* THE MOCK-UP'S FOOT: the coastline's cliffs fading up out of the navy, a gold line drawn across them. */}
+        {/*
+          THE FOOT OF THE SIDEBAR: the coastline's lit cliffs rising out of the navy, and the brief's one thin gold line
+          (S16). Its own sharp crop (portal-sidebar.webp) at its own size -- it was the band's picture blown up 260%, a
+          blurred dark patch Stephan called "a weird spot".
+        */}
         {!folded && (
-          <div aria-hidden className="relative h-56 -mb-2 pointer-events-none overflow-hidden">
-            <div className="absolute inset-0 opacity-45" style={{ background: `linear-gradient(180deg, ${NAVY} 0%, rgba(17,30,45,0.2) 45%, ${NAVY} 100%), url('/brand/remittance-cover.jpg') 8% 40% / 260% auto` }} />
-            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 224" fill="none" preserveAspectRatio="none">
-              <path d="M-10 40 C 90 70, 190 120, 270 224" stroke="#C69F54" strokeOpacity="0.7" strokeWidth="1.6" />
+          <div aria-hidden className="relative mt-auto h-60 -mb-2 pointer-events-none overflow-hidden" data-testid="portal-sidebar-foot">
+            <div className="absolute inset-0 opacity-70" style={{ background: `url('/brand/portal-sidebar.webp') center bottom / cover` }} />
+            <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, ${NAVY} 0%, rgba(16,31,44,0.55) 40%, rgba(16,31,44,0.25) 75%, rgba(16,31,44,0.55) 100%)` }} />
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 240" fill="none" preserveAspectRatio="none">
+              <path d="M-10 70 C 90 95, 190 150, 270 240" stroke="#C69F54" strokeOpacity="0.75" strokeWidth="1.4" />
             </svg>
           </div>
         )}
@@ -451,13 +456,19 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
             18 px corners, a navy wash from the left so the words read and the sea and the light stay; the
             client's name in gold, the title, the line under it, and one glass "Ask us to call you" on the right.
           */}
-          <header className="relative overflow-hidden rounded-[18px] text-white min-h-[176px] flex" data-testid="portal-hero"
-            style={{ background: `linear-gradient(95deg, rgba(16,31,44,0.94) 0%, rgba(16,31,44,0.74) 36%, rgba(16,31,44,0.18) 72%, rgba(16,31,44,0.06) 100%), url('/brand/remittance-cover.jpg') center 32% / cover` }}>
-            <div className="w-full px-6 sm:px-9 py-7 flex flex-wrap items-end justify-between gap-4">
+          {/*
+            CLEARER, AND THE WORDS IN THE MIDDLE (S16, 30 Oct; Stephan on the iPad: "the picture ... looks vague. It's like
+            dark ... the script is not centered in the middle"). A 3000 px copy of the coastline sharpened for the iPad's
+            screen (portal-hero.webp; the advice keeps its own), the navy only as a soft shade behind the words so the cliffs,
+            the sea and the light stay bright, and the words and the button centred on the band's height.
+          */}
+          <header className="relative overflow-hidden rounded-[18px] text-white min-h-[188px] flex" data-testid="portal-hero"
+            style={{ background: `linear-gradient(90deg, rgba(16,31,44,0.82) 0%, rgba(16,31,44,0.55) 30%, rgba(16,31,44,0.12) 58%, rgba(16,31,44,0) 80%), url('/brand/portal-hero.webp') center 38% / cover` }}>
+            <div className="w-full px-6 sm:px-10 py-7 flex flex-wrap items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="bf-label text-[11.5px] text-[#C69F54]">{me.client}</p>
-                <h1 className="text-[30px] sm:text-[36px] leading-tight mt-1.5">{here.title}</h1>
-                <p className="text-[15px] text-white/85 mt-1">{section === 'dashboard' ? 'Your book, where it stands, whenever you want to look.' : here.blurb}</p>
+                <h1 className="text-[30px] sm:text-[36px] leading-tight mt-1.5 [text-shadow:0_1px_12px_rgba(16,31,44,0.45)]">{here.title}</h1>
+                <p className="text-[15px] text-white/90 mt-1 [text-shadow:0_1px_8px_rgba(16,31,44,0.5)]">{section === 'dashboard' ? 'Your book, where it stands, whenever you want to look.' : here.blurb}</p>
               </div>
               <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
                 className="inline-flex items-center gap-2 rounded-[10px] bg-[#101F2C]/45 hover:bg-[#101F2C]/65 border border-white/25 px-4 py-2.5 text-sm font-semibold backdrop-blur-md">

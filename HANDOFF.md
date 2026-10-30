@@ -172,6 +172,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   Raptor hero, is put on Raptor on purpose (`signedInPage(..., { skin: 'raptor' })`, new option in harness.mjs).
   Full run after: 437 of 438; `trust-sort-statement` ("the receipt in suspense is on it") failed once under the
   full run's load and passes alone 3 of 3 -- untouched today; a flake to watch, not chased.
+- **THE PORTAL HERO AND SIDEBAR PHOTOGRAPHS (30 Oct, iPad: "the script is not centered ... the picture ... looks
+  vague ... dark ... just a weird spot")**: the hero had used the 1600-px remittance photo stretched over a wide band
+  under a 0.9 navy shade, with the words pinned to the bottom. Now `public/brand/portal-hero.webp` (3000 px, Lanczos,
+  sharpened, a touch of contrast), a shade that clears by 80% across, and the words centred in the band. The
+  sidebar foot was the whole photo squeezed into 256 px (mostly dark sea); it is now `portal-sidebar.webp`, a crop
+  of the lit cliffs, with a navy fade and a gold curve. e2e client-portal 89.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

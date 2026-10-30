@@ -172,7 +172,7 @@ try {
   t.ok('...and says a ticket is waiting on the client', /1 ticket is waiting on you/.test(await page.getByTestId('portal-waiting').innerText()))
   t.ok('...with no fee, commission or interest anywhere on it', !/fee|commission|interest/i.test(await page.getByTestId('portal-dashboard').innerText()))
   /* S16: Raptor's shape in the firm's colours (Stephan: "make it look and feel like Raptor ... more like Bredell"). */
-  t.ok('the band is Raptor\'s, over the remittance coastline', /remittance-cover/.test(await page.getByTestId('portal-hero').evaluate((e) => e.style.background))
+  t.ok('the band is Raptor\'s, over the remittance coastline', /portal-hero/.test(await page.getByTestId('portal-hero').evaluate((e) => e.style.background))
     && /Dashboard/.test(await page.getByTestId('portal-hero').innerText()))
   t.check('the sidebar carries the BF circle beside the wordmark', await page.getByTestId('portal-logo').locator('img').count(), 2)
   const chart = page.getByTestId('portal-handovers')
