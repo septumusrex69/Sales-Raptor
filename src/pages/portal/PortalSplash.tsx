@@ -24,7 +24,7 @@ import { playSplashSound } from './portalSound'
  * holds the portal past its own length: it waits for `ready` only because there is nothing to show before then.
  * `force` (the replay page only) plays the full opening regardless of all three.
  */
-export type SplashVariant = 'circle' | 'coast' | 'towers'
+export type SplashVariant = 'circle' | 'coast' | 'towers' | 'arcs'
 
 const SEEN = 'raptor.portal.opened'
 const FULL_MS = 3400
@@ -40,6 +40,25 @@ const PILLARS = [8, 19, 31, 44, 57, 69, 81, 92].map((x, i) => ({ x, h: 26 + ((i 
 const TOWERS = [
   ...[6, 15, 24, 33, 64, 73, 82, 91].map((x, i) => ({ x, bottom: 34, w: 2.2, h: 10 + ((i * 29) % 16), delay: 0.25 + i * 0.07, far: true })),
   ...[2, 13, 26, 70, 84, 95].map((x, i) => ({ x, bottom: 8, w: 4.2, h: 22 + ((i * 41) % 26), delay: 0.1 + i * 0.09, far: false })),
+]
+/*
+ * THE ARCS (variant 4, 30 Oct). Stephan, of the sidebar foot's gold sweep and open rings: "this theme that you did,
+ * this looks fucking cool. Maybe it can draw like the circles and like stuff like that." So the sweeps draw themselves
+ * across the screen, open rings in the shape of the BF circle draw out around the mark and turn slowly against each
+ * other, and the monogram settles inside them.
+ */
+const SWEEPS = [
+  { d: 'M -100 230 C 420 300, 980 560, 1700 1040', o: 0.85, w: 1.6, delay: 0.1 },
+  { d: 'M -100 290 C 420 360, 980 620, 1700 1100', o: 0.3, w: 1.1, delay: 0.25 },
+  { d: 'M 1700 120 C 1180 210, 640 470, -100 900', o: 0.55, w: 1.3, delay: 0.4 },
+  { d: 'M 1700 60 C 1180 150, 640 410, -100 840', o: 0.22, w: 1, delay: 0.55 },
+]
+const RINGS = [
+  { r: 96, o: 0.9, w: 1.6, arc: 0.86, turn: -100, gold: true, delay: 0.35 },
+  { r: 140, o: 0.45, w: 1.1, arc: 0.7, turn: 40, gold: false, delay: 0.5 },
+  { r: 196, o: 0.55, w: 1.2, arc: 0.78, turn: 160, gold: true, delay: 0.65 },
+  { r: 270, o: 0.25, w: 1, arc: 0.62, turn: -30, gold: false, delay: 0.8 },
+  { r: 370, o: 0.3, w: 1, arc: 0.7, turn: 95, gold: true, delay: 0.95 },
 ]
 const WAVES = [8, 18, 30, 44, 60].map((y, i) => ({ y, w: 30 + ((i * 23) % 40), delay: 1.0 + i * 0.12 }))
 
@@ -57,6 +76,19 @@ function Mark({ variant }: { variant: SplashVariant }) {
     </div>
   )
   if (variant === 'towers') return <div className="ps2-mark">{monogram}</div>
+  if (variant === 'arcs') return (
+    <div className="arcs-mark">
+      <svg aria-hidden className="arcs-rings" viewBox="-450 -450 900 900" fill="none">
+        {RINGS.map((g, i) => (
+          <g key={i} className={`arcs-ring-turn ${i % 2 ? 'is-back' : ''}`}>
+            <circle r={g.r} pathLength={1} transform={`rotate(${g.turn})`} stroke={g.gold ? '#C69F54' : '#97B4CC'} strokeOpacity={g.o} strokeWidth={g.w}
+              strokeLinecap="round" className="arcs-ring" style={{ strokeDasharray: `${g.arc} 1`, ['--arc' as string]: g.arc, animationDelay: `${g.delay}s` }} />
+          </g>
+        ))}
+      </svg>
+      {monogram}
+    </div>
+  )
   return (
     <div className="portal-splash-mark">
       <svg aria-hidden className="portal-splash-ring" viewBox="0 0 120 120">
@@ -122,6 +154,13 @@ export function PortalSplash({ ready, onDone, variant = 'circle', force = false,
             <span key={i} className="portal-splash-light" style={{ left: `${l.x}%`, top: `${l.y * 0.45}%`, width: l.size, height: l.size, animationDelay: `${l.delay}s`, animationDuration: `${l.dur}s` }} />
           ))}
         </div>
+      )}
+      {epic && look === 'arcs' && (
+        <svg aria-hidden className="arcs-sweeps" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" fill="none">
+          {SWEEPS.map((w, i) => (
+            <path key={i} d={w.d} pathLength={1} stroke="#C69F54" strokeOpacity={w.o} strokeWidth={w.w} className="arcs-sweep" style={{ animationDelay: `${w.delay}s` }} />
+          ))}
+        </svg>
       )}
       {epic && look === 'towers' && (
         <div aria-hidden className="ps2-stage">

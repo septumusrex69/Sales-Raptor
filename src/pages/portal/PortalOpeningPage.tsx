@@ -17,6 +17,7 @@ const OPENINGS: { id: SplashVariant; name: string; line: string }[] = [
   { id: 'circle', name: '1 · The circle', line: 'The first one. Lights and pillars, the gold ring draws, a flare, a bell chord.' },
   { id: 'coast', name: '2 · The coast', line: 'Dusk over the sea. A gold horizon, the monogram rising out of it, the swell, a soft piano.' },
   { id: 'towers', name: '3 · The towers', line: 'The one the portal plays. A gold grid floor, towers of light, a shock-ring, a chrome turn.' },
+  { id: 'arcs', name: '4 · The arcs', line: 'The sidebar\'s gold lines and rings, drawn: sweeps across the screen, open rings turning around the mark.' },
 ]
 
 export default function PortalOpeningPage() {

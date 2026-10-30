@@ -244,6 +244,29 @@ html .portal-brand .card {
 @keyframes ps2-burst { 0% { opacity: 1; transform: translate(-50%, -50%) scale(0.2); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(7); } }
 @keyframes ps2-badge { 60% { opacity: 1; filter: brightness(1.8) drop-shadow(0 0 18px rgba(207, 224, 239, 0.7)); } to { opacity: 1; transform: none; filter: none; } }
 
+/*
+ * THE ARCS (variant 4, 30 Oct). The sidebar foot's gold sweep and open rings, drawn: the sweeps cross the screen
+ * 0.1-1.6 s, the rings draw out around the mark 0.35-1.9 s and turn slowly against each other, and the monogram and
+ * the name come in on the same beats as the circle's.
+ */
+.portal-splash.is-arcs { background: linear-gradient(180deg, #101F2C 0%, #15283A 65%, #101F2C 100%); }
+/* The sweeps fade out around the middle, so they cross the screen but never strike through the mark or the name. */
+.arcs-sweeps {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  -webkit-mask-image: radial-gradient(ellipse 300px 190px at 50% 54%, transparent 45%, #000 100%);
+  mask-image: radial-gradient(ellipse 300px 190px at 50% 54%, transparent 45%, #000 100%);
+}
+.arcs-sweep { stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: arcs-draw 1.5s cubic-bezier(.5, 0, .2, 1) forwards; }
+@keyframes arcs-draw { to { stroke-dashoffset: 0; } }
+.arcs-mark { position: relative; width: 132px; height: 132px; }
+.arcs-rings { position: absolute; left: 50%; top: 50%; width: 900px; height: 900px; transform: translate(-50%, -50%); overflow: visible; pointer-events: none; }
+.arcs-ring { stroke-dashoffset: var(--arc); animation: arcs-ring 1.4s cubic-bezier(.4, 0, .2, 1) forwards; }
+@keyframes arcs-ring { to { stroke-dashoffset: 0; } }
+.arcs-ring-turn { animation: arcs-turn 6s linear forwards; }
+.arcs-ring-turn.is-back { animation-name: arcs-turn-back; }
+@keyframes arcs-turn { to { transform: rotate(40deg); } }
+@keyframes arcs-turn-back { to { transform: rotate(-30deg); } }
+
 @media (prefers-reduced-motion: reduce) {
   .portal-splash *, .portal-splash { animation: none !important; transition: none !important; }
   .portal-splash .portal-splash-monogram, .portal-splash .portal-splash-word img, .portal-splash .portal-splash-label { opacity: 1 !important; clip-path: none !important; filter: none !important; transform: none !important; }

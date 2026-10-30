@@ -29,13 +29,14 @@ export function primeSplashAudio(): void {
 /**
  * The sound itself, one per opening (PortalSplash's `variant`). Returns false when the browser would not let it play.
  */
-export function playSplashSound(variant: 'circle' | 'coast' | 'towers' = 'circle'): boolean {
+export function playSplashSound(variant: 'circle' | 'coast' | 'towers' | 'arcs' = 'circle'): boolean {
   const c = context()
   if (!c) return false
   if (c.state === 'suspended') void c.resume().catch(() => {})
   if (c.state !== 'running') return false
   if (variant === 'coast') return coastSound(c)
   if (variant === 'towers') return towersSound(c)
+  if (variant === 'arcs') return arcsSound(c)
   const t0 = c.currentTime + 0.05
   const master = c.createGain()
   master.gain.setValueAtTime(0.0001, t0)
@@ -352,5 +353,23 @@ function towersSound(c: AudioContext): boolean {
   lowChord(c, out, hit, [164.81, 207.65, 246.94, 329.63], 0.05, 3.2)
   warm(c, out, 329.63, hit + 0.35, 0.07, 2.8)
   warm(c, out, 246.94, hit + 0.75, 0.06, 2.6)
+  return true
+}
+
+/*
+ * THE ARCS: the lines drawing as one long, slow breath of air over a warm pad; the rings closing on the mark as a
+ * soft boom with the low "zzz" under it; and three felt notes, falling, as the monogram and the name settle.
+ */
+function arcsSound(c: AudioContext): boolean {
+  const t0 = c.currentTime + 0.05
+  const out = softBus(c, t0, t0 + 5)
+  pad(c, out, t0, 4.6, [98, 146.83, 196, 246.94], 0.06, 0.9)
+  rush(c, out, t0 + 0.1, 1.5, 300, 900, 0.09)
+  const hit = t0 + 1.4
+  boom(c, out, hit, 0.4)
+  lowChord(c, out, hit, [146.83, 196, 246.94, 293.66], 0.045, 3.3)
+  warm(c, out, 392, hit + 0.2, 0.06, 2.8)
+  warm(c, out, 293.66, hit + 0.5, 0.06, 2.8)
+  warm(c, out, 246.94, hit + 0.8, 0.07, 3)
   return true
 }

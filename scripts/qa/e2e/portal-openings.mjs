@@ -19,10 +19,10 @@ try {
   await stubSupabase(page, [])
   await page.goto(`http://localhost:${PORT}/portal/opening`)
   await page.getByTestId('portal-openings').waitFor()
-  t.ok('no sign-in: the page opens straight onto the three', await page.getByTestId('opening-circle').isVisible())
+  t.ok('no sign-in: the page opens straight onto the openings', await page.getByTestId('opening-circle').isVisible())
   await t.shot(page, 'portal-openings')
 
-  for (const v of ['circle', 'coast', 'towers']) {
+  for (const v of ['circle', 'coast', 'towers', 'arcs']) {
     await page.getByTestId(`opening-${v}`).click()
     const splash = page.locator(`.portal-splash[data-variant="${v}"]`)
     await splash.waitFor()

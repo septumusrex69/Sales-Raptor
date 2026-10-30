@@ -22,6 +22,7 @@ const CASES = [
   ['Raptor ascent', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'ascent'],
   ['Raptor lock-on', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'lock'],
   ['portal towers', '/src/pages/portal/portalSound.ts', 'playSplashSound', 'towers'],
+  ['portal arcs', '/src/pages/portal/portalSound.ts', 'playSplashSound', 'arcs'],
 ]
 const server = await startServer()
 const browser = await chromium.launch()

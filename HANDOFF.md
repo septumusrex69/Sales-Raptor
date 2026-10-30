@@ -238,6 +238,11 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   waves. Body kept at ~75-330 Hz because an iPad's speakers play almost nothing lower. The portal's circle and coast
   (not in use) keep their old sounds. e2e opening-sounds 16: each is RENDERED (OfflineAudioContext) and measured --
   average pitch 140-400 Hz (now 156-229; the chimed ones were 535-1 560, which fails it), no clipping, not silent.
+- **A FOURTH PORTAL OPENING, THE ARCS (30 Oct, of the sidebar foot's lines: "this looks fucking cool. Maybe it can draw
+  like the circles")**: `PortalSplash variant="arcs"` -- the gold sweeps draw across the screen (masked out around the
+  centre so they never cross the name), five open rings in the BF circle's shape draw out around the mark and turn
+  against each other; soft sound `arcsSound`. On /portal/opening as number 4. **The portal still plays the towers**
+  until Stephan says otherwise. e2e portal-openings 18, opening-sounds 20.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
