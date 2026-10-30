@@ -1135,43 +1135,55 @@ try {
   await t.shot(page, '28b-mail-opened-by-link')
   offPage.clear()
 
-  /* ---------- done takes a message out of the inbox, and Not done puts it back (S16) ---------- */
+  /* ---------- Archive takes a message out of the inbox, and Move to inbox puts it back (S16) ---------- */
 
   /*
    * Stephan, of the staff: "if an email has been dealt with ... that it's archived ... they want their
-   * inboxes to show that it's empty". Checked in a browser because the promise is about WHERE the
-   * message is afterwards -- out of All, under Done, and back -- which is three lists, not one function.
+   * inboxes to show that it's empty" -- then, 30 Oct: "instead of done, just say archive and just put it to the
+   * right of drafts. Still don't know how to archive something." Checked in a browser because the promise is
+   * about WHERE the message is afterwards -- out of All, under Archive, and back -- and where the button is.
    */
   {
     const target = MAIL.find((m) => m.subject === 'Follow up on outstanding account')
-    const allTab = () => page.getByRole('button', { name: /^All/ }).first()
-    const doneTab = () => page.getByRole('button', { name: /^Done/ }).first()
+    const allTab = () => page.getByTestId('mail-tab-all')
+    const archiveTab = () => page.getByTestId('mail-tab-done')
     const inList = () => page.getByRole('button', { name: new RegExp(target.subject) })
     await page.goto(`http://localhost:${PORT}/mail`)
     await page.getByRole('heading', { name: 'Raptor Mail', exact: true }).waitFor({ timeout: 20000 })
     await page.getByText(target.subject).first().waitFor({ timeout: 10000 })
-    t.ok('done: the tab is beside All', await doneTab().isVisible())
+    t.ok('archive: the tab says Archive', /^Archive/.test((await archiveTab().innerText()).trim()))
+    t.ok('archive: ...to the right of Drafts', (await archiveTab().boundingBox()).x > (await page.getByTestId('mail-drafts-tab').boundingBox()).x)
+    t.check('archive: no tab is called Done any more', await page.getByRole('button', { name: /^Done/ }).count(), 0)
+    /* From the ROW, without opening it: the button says what it does. */
+    /* Opened, the message says Archive at the top, beside its subject, in words. */
     await inList().first().click()
-    await page.waitForTimeout(600)
-    await page.getByRole('button', { name: 'Mark done' }).first().click()
+    await page.getByTestId('mail-archive').waitFor({ timeout: 5000 })
+    t.ok('archive: the open message offers Archive at the top, in words', /Archive/.test(await page.getByTestId('mail-archive').innerText()))
+    await page.getByTestId('mail-archive').click()
     await page.waitForTimeout(800)
-    t.ok('done: ...the write reached the row', !!target.done_at)
-    t.check('done: ...and it has left All', await inList().count(), 0)
-    t.ok('done: ...saying where it went', await page.getByText(/It is under Done/).first().isVisible())
-    await doneTab().click()
+    t.ok('archive: ...the write reached the row', !!target.done_at)
+    t.check('archive: ...and it has left All', await inList().count(), 0)
+    t.ok('archive: ...saying where it went', await page.getByText(/It is under Archive/).first().isVisible())
+    await archiveTab().click()
     await page.waitForTimeout(800)
-    t.check('done: ...Done is the tab now', await doneTab().getAttribute('aria-pressed'), 'true')
-    t.ok('done: ...and the message is under it', await inList().first().isVisible())
-    await t.shot(page, '28c-mail-done-tab')
+    t.check('archive: ...Archive is the tab now', await archiveTab().getAttribute('aria-pressed'), 'true')
+    t.ok('archive: ...and the message is under it', await inList().first().isVisible())
+    await t.shot(page, '28c-mail-archive-tab')
+    /* And back: the same place now reads Move to inbox. */
     await inList().first().click()
-    await page.waitForTimeout(600)
-    await page.getByRole('button', { name: 'Not done' }).first().click()
+    await page.getByTestId('mail-archive').waitFor({ timeout: 5000 })
+    t.ok('move to inbox: the archived message offers its way back', /Move to inbox/.test(await page.getByTestId('mail-archive').innerText()))
+    await page.getByTestId('mail-archive').click()
     await page.waitForTimeout(800)
-    t.ok('not done: ...the write cleared it', !target.done_at)
-    t.check('not done: ...it has left Done', await inList().count(), 0)
+    t.ok('move to inbox: ...the write cleared it', !target.done_at)
+    t.check('move to inbox: ...it has left Archive', await inList().count(), 0)
     await allTab().click()
     await page.waitForTimeout(800)
-    t.ok('not done: ...and it is back in All', await inList().first().isVisible())
+    t.ok('move to inbox: ...and it is back in All', await inList().first().isVisible())
+    /* And the open message's own bar offers Archive. */
+    await inList().first().click()
+    await page.waitForTimeout(600)
+    t.ok('archive: the open message\'s bar offers Archive too', await page.getByRole('button', { name: 'Archive', exact: true }).first().isVisible())
   }
 
   /* AND ONE THAT IS GONE SAYS SO rather than leaving an empty pane to be puzzled over. */

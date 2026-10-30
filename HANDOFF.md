@@ -91,6 +91,13 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   Raptor only: nothing moves on the mail server (sync is one-way). The selection's own "Done" button now says
   Cancel. `check-mail-done` (55, break-tested), e2e mail +done (145). Built by a helper agent in a worktree and
   re-run here. **Open choices:** replying does not mark done; the Done tab orders by arrival, not by when done.
+- **DONE IS NOW "ARCHIVE", RIGHT OF DRAFTS (30 Oct)** (Stephan: "instead of done, just say archive and just put it to
+  the right of drafts. Still don't know how to archive something."). Tabs read All | Junk | Sent | Blocked | Drafts |
+  Archive (`order` on the strip; the id stays 'done', the column done_at). Buttons: **Archive** / **Move to inbox**
+  on the open message's bar, AT THE TOP of the open message beside its subject (`mail-archive` -- in the reading-pane
+  layout a list row is one button and cannot hold another), on each row of the stacked layout (`mail-row-archive`,
+  now a labelled button, was a faint tick), and in bulk. The match box's checkbox: "Archive it as well".
+  check-mail-done 57, e2e mail 150 (the top button break-tested).
 - **THE COMPANY DASHBOARD'S DEPARTMENTS ARE LIGHT TABS** (Stephan: blurb and "0 accounts from new clients" are
   "useless information ... just make a tab ... a light other colour"): name + headcount, light blue, yours gold.
   `departmentHeadline` stays in companySnapshot unused. e2e company-dashboard 54.

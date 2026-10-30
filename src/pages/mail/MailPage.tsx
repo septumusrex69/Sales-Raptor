@@ -2,7 +2,7 @@ import { dropDraft, listDrafts, type MailDraft } from '../../lib/mailDrafts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, Ban, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
+  AlertTriangle, Archive, ArchiveRestore, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
   Inbox, Link2, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
@@ -139,9 +139,13 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * ... that it's archived ... they want their inboxes to show that it's empty ... that's how they used to
    * working." So a message somebody marks done leaves All and lands here -- nothing is lost, a search still
    * finds it, and "Not done" puts it back. There is no undo toast on this page, so this tab IS the undo.
-   * Next to All because it is All's other half, not a folder the mail server keeps.
+   * ARCHIVE, AND TO THE RIGHT OF DRAFTS (S16, 30 Oct). Stephan: "instead of done, just say archive and just put it to
+   * the right of drafts. Still don't know how to archive something." The word people already use for it, at the end
+   * of the row where an archive belongs; the id stays 'done' (the column is done_at) because nothing a person sees
+   * reads it. The order is set with `order` on the strip, below, so Drafts -- which is a toggle, not a tab -- sits
+   * between Blocked and Archive.
    */
-  { id: 'done', label: 'Done', hint: 'Mail you have marked done. Not done puts it back in your inbox' },
+  { id: 'done', label: 'Archive', hint: 'Mail you have archived. Move to inbox puts it back' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   /*
    * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
@@ -1149,8 +1153,8 @@ export function MailPage() {
       if (done) await markMailDone([mail.id], currentUser?.id ?? null)
       else await markMailNotDone([mail.id])
       setStatus(done
-        ? 'Done — out of your inbox. It is under Done, where Not done puts it back.'
-        : 'Not done — back in your inbox.')
+        ? 'Archived — out of your inbox. It is under Archive, where Move to inbox puts it back.'
+        : 'Moved back to your inbox.')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       await load(page)
@@ -1165,7 +1169,7 @@ export function MailPage() {
       if (done) await markMailDone(ids, currentUser?.id ?? null)
       else await markMailNotDone(ids)
       setStatus(done
-        ? `${ids.length} ${ids.length === 1 ? 'email' : 'emails'} done — under Done, where Not done puts them back.`
+        ? `${ids.length} ${ids.length === 1 ? 'email' : 'emails'} archived — under Archive, where Move to inbox puts them back.`
         : `${ids.length} ${ids.length === 1 ? 'email' : 'emails'} back in your inbox.`)
       await afterBulk()
     } catch (e) {
@@ -1335,6 +1339,7 @@ export function MailPage() {
           <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px min-w-0 flex-1">
             {TABS.map((t) => (
               <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint} aria-pressed={filter === t.id}
+                data-testid={`mail-tab-${t.id}`} style={{ order: t.id === 'done' ? 2 : 0 }}
                 className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
                   filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                 {t.label}
@@ -1382,7 +1387,7 @@ export function MailPage() {
             ))}
             {/* DRAFTS (S15): unsent email kept in this browser -- see mailDrafts.ts. */}
             <button type="button" onClick={() => { refreshDrafts(); setShowDrafts((v) => !v) }} aria-pressed={showDrafts}
-              data-testid="mail-drafts-tab"
+              data-testid="mail-drafts-tab" style={{ order: 1 }}
               className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
                 showDrafts ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               Drafts
@@ -1465,12 +1470,12 @@ export function MailPage() {
             {filter === 'done' ? (
               <button onClick={() => void doneChosen(false)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-                <Undo2 size={14} /> Not done
+                <ArchiveRestore size={14} /> Move to inbox
               </button>
             ) : filter === 'all' && (
               <button onClick={() => void doneChosen(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-                <CheckCircle2 size={14} /> Mark done
+                <Archive size={14} /> Archive
               </button>
             )}
             {/*
@@ -1676,6 +1681,19 @@ export function MailPage() {
                     {relativeDayLabel(m.occurredAt)}{' '}
                     <span className="tabular-nums">{timeOfDay(m.occurredAt)}</span>
                   </span>
+                  {/*
+                    ARCHIVE, AT THE TOP OF THE OPEN MESSAGE (S16, 30 Oct; Stephan: "Still don't know how to archive
+                    something"). In this layout a row of the list is one button, so it cannot hold another; the
+                    first place the eye goes once a message is open is here, beside its subject. The floating bar
+                    at the foot offers the same.
+                  */}
+                  {canBeDone(m) && (
+                    <button type="button" onClick={() => void doneOne(m, !m.doneAt)} data-testid="mail-archive"
+                      title={m.doneAt ? 'Move this email back to your inbox' : 'Archive this email: out of your inbox, kept under Archive'}
+                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-navy-950 hover:bg-slate-50">
+                      {m.doneAt ? <><ArchiveRestore size={15} /> Move to inbox</> : <><Archive size={15} /> Archive</>}
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-start gap-3 mt-3 pb-3 mb-3 border-b border-slate-100">
@@ -2531,8 +2549,8 @@ function MessageActions({
         which is the way back.
       */}
       {onDone && (mail.doneAt
-        ? <BarButton sticky={sticky} onClick={() => onDone(false)} label="Not done" icon={<Undo2 size={15} />} />
-        : <BarButton sticky={sticky} onClick={() => onDone(true)} label="Mark done" icon={<CheckCircle2 size={15} />} />)}
+        ? <BarButton sticky={sticky} onClick={() => onDone(false)} label="Move to inbox" icon={<ArchiveRestore size={15} />} />
+        : <BarButton sticky={sticky} onClick={() => onDone(true)} label="Archive" icon={<Archive size={15} />} />)}
 
       <BarButton sticky={sticky} onClick={onUnread} label="Mark unread" icon={<MailIcon size={15} />} />
 
@@ -3454,15 +3472,15 @@ function MailRow({
             </button>
           )}
           {/*
-            THE TICK ON THE ROW (S16), so a message can be done without opening it -- the notice whose
-            subject says everything. Icon-only, because the list was made thin at the firm's request,
-            and named for a screen reader and the tooltip.
+            ARCHIVE ON THE ROW, IN WORDS (S16, 30 Oct). It was a faint tick and Stephan, looking at it: "Still don't
+            know how to archive something." So a small labelled button beside Match, in the same shape, so a message
+            can be archived without opening it; on the Archive tab it reads Move to inbox.
           */}
           {onDone && (
-            <button onClick={() => onDone(!mail.doneAt)}
-              aria-label={mail.doneAt ? 'Not done' : 'Mark done'} title={mail.doneAt ? 'Not done — back to your inbox' : 'Mark done — out of your inbox'}
-              className={mail.doneAt ? 'text-[var(--c-green)] hover:text-slate-600' : 'text-slate-300 hover:text-[var(--c-green)]'}>
-              <CheckCircle2 size={16} />
+            <button onClick={() => onDone(!mail.doneAt)} data-testid="mail-row-archive"
+              title={mail.doneAt ? 'Move this email back to your inbox' : 'Archive this email: out of your inbox, kept under Archive'}
+              className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400">
+              {mail.doneAt ? <><ArchiveRestore size={12} /> Move to inbox</> : <><Archive size={12} /> Archive</>}
             </button>
           )}
           <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
@@ -4366,7 +4384,7 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
         <label className="flex items-center gap-2.5 mt-3 cursor-pointer text-sm text-slate-700">
           <input type="checkbox" checked={alsoDone} disabled={busy}
             onChange={(e) => setAlsoDone(e.target.checked)} data-testid="mail-match-done" />
-          Mark it done as well &mdash; out of your inbox once it is matched
+          Archive it as well &mdash; out of your inbox once it is matched
         </label>
       )}
 

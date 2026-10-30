@@ -92,12 +92,15 @@ ok('...and both ways of filing honour it',
 
 /* ---------- 4. the screen ---------- */
 
-ok('there is a Done tab', /\{ id: 'done', label: 'Done',/.test(page))
-ok('...beside All', page.indexOf("{ id: 'done', label: 'Done',") > page.indexOf("{ id: 'all', label: 'All',")
-  && page.indexOf("{ id: 'done', label: 'Done',") < page.indexOf("{ id: 'junk', label: 'Junk',"))
+/* Called ARCHIVE since 30 Oct, and to the right of Drafts (Stephan: "instead of done, just say archive and just put it
+   to the right of drafts. Still don't know how to archive something."). */
+ok('there is an Archive tab', /\{ id: 'done', label: 'Archive',/.test(page))
+ok('...and no tab or button is called Done', !/label: 'Done'/.test(page) && !/label="Mark done"/.test(page) && !/label="Not done"/.test(page))
+ok('...to the right of Drafts', /style=\{\{ order: t\.id === 'done' \? 2 : 0 \}\}/.test(page) && /data-testid="mail-drafts-tab" style=\{\{ order: 1 \}\}/.test(page))
 ok('...with no unread badge', /const n = t\.id === 'blocked' \|\| t\.id === 'done' \? 0/.test(page))
-ok('the open message offers Mark done and Not done', /label="Mark done"/.test(page) && /label="Not done"/.test(page))
-ok('...and so does the list row', /aria-label=\{mail\.doneAt \? 'Not done' : 'Mark done'\}/.test(page))
+ok('the open message offers Archive and Move to inbox, on its bar', /label="Archive"/.test(page) && /label="Move to inbox"/.test(page))
+ok('...and at its top, in words', /data-testid="mail-archive"/.test(page))
+ok('...and so does the list row', /data-testid="mail-row-archive"/.test(page))
 ok('...and a selection', /doneChosen\(true\)/.test(page) && /doneChosen\(false\)/.test(page))
 ok('...never on junk or sent', /const canBeDone = \(m: MailItem\) => !m\.isJunk && !m\.isSent/.test(page))
 ok('leaving a selection is no longer called Done', !/selecting \? 'Done'/.test(page))
