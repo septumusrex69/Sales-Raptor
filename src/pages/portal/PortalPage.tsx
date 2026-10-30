@@ -362,16 +362,24 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           </button>
         </nav>
         {/*
-          THE FOOT OF THE SIDEBAR: the coastline's lit cliffs rising out of the navy, and the brief's one thin gold line
-          (S16). Its own sharp crop (portal-sidebar.webp) at its own size -- it was the band's picture blown up 260%, a
-          blurred dark patch Stephan called "a weird spot".
+          THE FOOT OF THE SIDEBAR: LINES, NOT A PHOTOGRAPH (30 Oct). It held a crop of the coastline, and Stephan, on
+          the iPad: "the picture ... I think it's a little bit too much ... keep the line or something like a pattern
+          ... maybe the line or a circle there ... I like that kind of the line thing." So the photograph is gone (the
+          hero still carries it, once) and what stays is drawn: the gold sweep he liked, and two open rings off the
+          corner in the shape of the BF circle, faint enough to read as texture. The navy lifts a touch toward the
+          foot so the lines have something to sit on. Pure SVG: nothing to fetch, sharp at any size.
         */}
         {!folded && (
           <div aria-hidden className="relative mt-auto h-60 -mb-2 pointer-events-none overflow-hidden" data-testid="portal-sidebar-foot">
-            <div className="absolute inset-0 opacity-70" style={{ background: `url('/brand/portal-sidebar.webp') center bottom / cover` }} />
-            <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, ${NAVY} 0%, rgba(16,31,44,0.55) 40%, rgba(16,31,44,0.25) 75%, rgba(16,31,44,0.55) 100%)` }} />
+            <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, ${NAVY} 0%, #15283A 70%, ${NAVY} 100%)` }} />
+            {/* The rings keep their shape (meet, not stretched); the sweep fills the width (none). */}
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 240" fill="none" preserveAspectRatio="xMaxYMax meet">
+              <path d="M 300 128 A 112 112 0 1 0 300 352" stroke="#C69F54" strokeOpacity="0.32" strokeWidth="1.2" transform="translate(-60 -20)" />
+              <path d="M 300 160 A 80 80 0 1 0 300 320" stroke="#97B4CC" strokeOpacity="0.18" strokeWidth="1" transform="translate(-60 -20)" />
+            </svg>
             <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 240" fill="none" preserveAspectRatio="none">
-              <path d="M-10 70 C 90 95, 190 150, 270 240" stroke="#C69F54" strokeOpacity="0.75" strokeWidth="1.4" />
+              <path d="M-10 70 C 90 95, 190 150, 270 240" stroke="#C69F54" strokeOpacity="0.8" strokeWidth="1.4" />
+              <path d="M-10 92 C 90 117, 190 172, 270 262" stroke="#C69F54" strokeOpacity="0.22" strokeWidth="1" />
             </svg>
           </div>
         )}

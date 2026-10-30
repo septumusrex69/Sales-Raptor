@@ -212,6 +212,9 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
 - **MAIL: ARCHIVE SAYS ITS NAME ON THE FLOATING BAR (30 Oct, circling the bar: "put the option here like Mark has done or
   archive")**: it was the bar's first button but icon-only, and an iPad shows no tooltip. `BarButton worded`, then a
   divider. (His screenshot was an older tab: All / Done -- the live tabs read Inbox / Archive.) e2e mail 151.
+- **PORTAL SIDEBAR FOOT: LINES, NO PHOTOGRAPH (30 Oct: "the picture ... a little bit too much ... keep the line ... or
+  a circle")**: SVG only -- the gold sweep plus a faint second one, and two open rings in the BF circle's shape;
+  `portal-sidebar.webp` deleted (supersedes the note above about it).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
