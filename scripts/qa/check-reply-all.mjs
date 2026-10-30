@@ -372,7 +372,11 @@ const barButton = slice(page, 'function BarButton', '\nfunction ', 'BarButton')
 ok('an icon on the bar says what it is on hover', /title=\{label\}/.test(barButton))
 ok('...and to a screen reader', /aria-label=\{label\}/.test(barButton))
 /* And spells it out where there is room for it, which is the list placement. */
-ok('...and spells it out where there is room', /\{!sticky && label\}/.test(barButton))
+ok('...and spells it out where there is room', /\{\(?!sticky( \|\| worded\))? && label\}/.test(barButton))
+/* AND ARCHIVE ON THE PILL TOO (Stephan, 30 Oct): an iPad shows no tooltip, so the one filing action the bar is reached
+   for carries its word there as well. */
+ok('...and Archive says its name on the floating pill', /\(!sticky \|\| worded\) && label/.test(barButton)
+  && /<BarButton sticky=\{sticky\} worded [^\n]*label="Archive"/.test(page))
 ok('...and it is not in the menu instead', !/linkedTo\.path/.test(more))
 
 if (failures.length) {
