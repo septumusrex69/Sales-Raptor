@@ -204,6 +204,11 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   Already-sent PDFs keep the old one (they are stored exactly as sent).
 - **MAIL: "ALL" IS NOW "INBOX" (30 Oct)**: the label only; the tab id stays `all` (URLs and the remembered tab). e2e
   mail 150.
+- **PORTAL TICKETS HAVE VIEWS (30 Oct: "the different views ... with the firm, with you, or closed ... a button ... that
+  goes to the closed ones ... waiting on you ... at the top ... highlight it")**: Open (default) | Waiting on you | With
+  the firm, each with its count, and a separate Closed button. In Open the client's turn sorts first and is drawn in
+  gold with a line saying how many need their answer. Badges moved to the brand palette (gold / pale blue). e2e
+  client-portal 96 (a newer with-the-firm fixture ticket proves the order; break-tested by removing the sort).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

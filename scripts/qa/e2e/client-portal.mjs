@@ -19,6 +19,10 @@ const LINES = [
 
 /* Phase 2a (S15): one ticket waiting on the client, one closed. */
 const TICKETS = [
+  /* Newest, and with the firm: listed first by the server, it must still come BELOW the one waiting on the client. */
+  { ticketNo: 52, kind: 'client', status: 'open', stage: 'liaison', description: 'Please confirm the balance.',
+    raisedAt: '2026-10-25T08:00:00Z', closedAt: null, caseNumber: 'RAP-125327', accountNumber: null, clientReference: null,
+    debtor: 'Annelie Fourie', sheetReference: null, lastMessageAt: null, messages: 0 },
   { ticketNo: 41, kind: 'dispute', status: 'open', stage: 'client', description: 'The debtor says she paid in March.',
     raisedAt: '2026-10-20T08:00:00Z', closedAt: null, caseNumber: 'RAP-125321', accountNumber: null, clientReference: 'ALIANNAPH/30209',
     debtor: 'Alicia Smith', sheetReference: null, lastMessageAt: '2026-10-21T08:00:00Z', messages: 1 },
@@ -197,7 +201,7 @@ try {
   t.ok('every ring slice is a Bredell Ferreira colour', fills.length > 0 && fills.every((f) => ['#203B60', '#C69F54', '#97B4CC', '#46607B', '#32404D', '#525D66', '#B4BFCC', '#D5E1EB'].includes(f)))
   t.ok('...and each legend dot is its slice\'s colour', (await page.locator('[data-legend]').evaluateAll((ds) => ds.map((d) => getComputedStyle(d).backgroundColor))).length === fills.length)
   t.ok('the figures carry a trend drawn from the months sent', await page.getByTestId('portal-figures').locator('svg path').count() >= 4)
-  t.ok('the sidebar counts the open tickets', (await page.getByTestId('portal-tickets-count').innerText()).trim() === '1')
+  t.ok('the sidebar counts the open tickets', (await page.getByTestId('portal-tickets-count').innerText()).trim() === '2')
   /* S16: the company dashboard's ring, white cuts between the slices (Stephan: "use this type of pie chart"). */
   t.check('the open accounts are drawn on the cut ring, a slice per position', await page.getByTestId('portal-open-ring').locator('circle[data-slice]').count(), 2)
   /* And Raptor's three arrangements, the same switcher (Stephan: "the three panes, everything underneath each
@@ -341,10 +345,20 @@ try {
     && /Raise a ticket/.test(await page.getByTestId('portal-ask').innerText()))
   await page.getByRole('button', { name: 'Cancel' }).click()
   await page.getByTestId('portal-tickets').waitFor({ timeout: 5000 })
-  t.check('both tickets are listed', await page.getByTestId('portal-ticket').count(), 2)
+  /* VIEWS (Stephan, 30 Oct): open by default, the client's move first and in gold; closed behind a button. */
+  t.check('the list opens on the open tickets only', await page.getByTestId('portal-ticket').count(), 2)
   const firstTicket = await page.getByTestId('portal-ticket').first().innerText()
-  t.ok('the one waiting on the client says so, in their words', /Waiting on you/.test(firstTicket) && /The debtor disputes the account/.test(firstTicket))
-  t.ok('...and the closed one says closed', /Closed/.test(await page.getByTestId('portal-ticket').nth(1).innerText()))
+  t.ok('the one waiting on the client comes first, though it is older, and says so in their words',
+    /Waiting on you/.test(firstTicket) && /The debtor disputes the account/.test(firstTicket) && /With the firm/.test(await page.getByTestId('portal-ticket').nth(1).innerText()))
+  t.ok('...drawn in gold, with a line saying it needs their answer', /C69F54/i.test(await page.getByTestId('portal-ticket').first().getAttribute('class'))
+    && /1 ticket needs your answer/.test(await page.getByTestId('portal-tickets-yours-note').innerText()))
+  t.ok('the views count their tickets', /Waiting on you\s*1/.test(await page.getByTestId('portal-ticket-view-yours').innerText())
+    && /With the firm\s*1/.test(await page.getByTestId('portal-ticket-view-ours').innerText()) && /Closed \(1\)/.test(await page.getByTestId('portal-ticket-view-closed').innerText()))
+  await t.shot(page, 'client-portal-tickets-open')
+  await page.getByTestId('portal-ticket-view-ours').click()
+  t.ok('With the firm shows only what the firm is doing', await page.getByTestId('portal-ticket').count() === 1
+    && (await page.getByTestId('portal-ticket').first().getAttribute('data-turn')) === 'ours')
+  await page.getByTestId('portal-ticket-view-open').click()
   await page.getByTestId('portal-ticket').first().locator('button').first().click()
   await page.getByTestId('portal-thread').waitFor({ timeout: 5000 })
   t.ok('the thread shows what the firm wrote, and who wrote it', /statement for March/.test(await page.getByTestId('portal-thread').innerText()) && /Liesl Liaison/.test(await page.getByTestId('portal-thread').innerText()))
@@ -353,9 +367,12 @@ try {
   await page.waitForTimeout(500)
   const reply = calls.filter((c) => c.action === 'ticket-reply').pop()
   t.ok('a reply goes on the right ticket', reply?.body?.ticketNo === 41 && reply?.body?.message === 'Attached is the proof.')
-  await page.getByTestId('portal-ticket').nth(1).locator('button').first().click()
+  await page.getByTestId('portal-ticket-view-closed').click()
+  t.ok('the Closed button shows the closed ones, and only them', await page.getByTestId('portal-ticket').count() === 1
+    && /Closed/.test(await page.getByTestId('portal-ticket').first().innerText()))
+  await page.getByTestId('portal-ticket').first().locator('button').first().click()
   await page.waitForTimeout(500)
-  t.check('a closed ticket offers no reply box', await page.getByTestId('portal-ticket').nth(1).getByTestId('portal-reply').count(), 0)
+  t.check('a closed ticket offers no reply box', await page.getByTestId('portal-ticket').first().getByTestId('portal-reply').count(), 0)
   await t.shot(page, 'client-portal-tickets')
 
   await page.reload()
