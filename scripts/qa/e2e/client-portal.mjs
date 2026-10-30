@@ -246,14 +246,24 @@ try {
 
   await page.getByTestId('portal-nav-reports').click()
   await page.getByTestId('portal-progress-report').waitFor({ timeout: 5000 })
-  t.ok('Reports opens with the monthly progress report, as PDF and spreadsheet', /Monthly progress report/.test(await page.getByTestId('portal-progress-report').innerText())
-    && /PDF/.test(await page.getByTestId('portal-progress-report').innerText()) && /Spreadsheet/.test(await page.getByTestId('portal-progress-report').innerText()))
+  t.ok('Reports opens with the monthly progress report, as PDF or Excel', /Monthly progress report/.test(await page.getByTestId('portal-progress-report').innerText())
+    && await page.getByTestId('portal-progress-files').locator('[data-format-choice]').allInnerTexts().then((x) => x.join('|') === 'PDF|Excel'))
   await page.getByTestId('portal-reports').waitFor({ timeout: 5000 })
   t.check('Reports lists what was sent', await page.getByTestId('portal-report').count(), 1)
   t.ok('...by period, with the PDF and the spreadsheet', /Remittance advice, 11 Sept 2026 – 10 Oct 2026/.test(await page.getByTestId('portal-report').innerText().then((x) => x.replace(/\u00a0/g, ' ')))
-    && await page.getByTestId('portal-report-pdf').count() === 1 && await page.getByTestId('portal-report-xlsx').count() === 1)
+    && await page.getByTestId('portal-report-files').count() === 1)
+  /* CHOOSE THE FORMAT, THEN OPEN OR DOWNLOAD (Stephan, 30 Oct): one choice, and one Open and one Download, never
+     the four look-alike buttons of two labelled pairs. PDF is chosen first -- it is what was emailed. */
+  const files = page.getByTestId('portal-report-files')
+  t.ok('a report offers PDF or Excel, PDF chosen', (await files.getAttribute('data-format')) === 'pdf'
+    && await files.locator('[data-format-choice="pdf"]').getAttribute('aria-checked') === 'true')
+  t.ok('...with exactly one Open and one Download', await files.locator('[data-action="open"]').count() === 1 && await files.locator('[data-action="download"]').count() === 1)
+  await files.locator('[data-format-choice="xlsx"]').click()
+  t.ok('choosing Excel points the buttons at the spreadsheet', (await files.getAttribute('data-format')) === 'xlsx'
+    && /\.xlsx$/.test(await files.locator('[data-action="open"]').getAttribute('title')))
+  await t.shot(page, 'client-portal-reports')
   const popup = page.waitForEvent('popup', { timeout: 5000 }).catch(() => null)
-  await page.getByTestId('portal-report-xlsx').locator('[data-action="open"]').click()
+  await files.locator('[data-action="open"]').click()
   await (await popup)?.close()
   await page.waitForTimeout(300)
   t.ok('a file is asked for by the report id and kind, never a path', calls.some((c) => c.action === 'report-file' && c.body.id === 'r1' && c.body.file === 'xlsx' && !('path' in c.body)))

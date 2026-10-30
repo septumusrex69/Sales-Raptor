@@ -190,6 +190,13 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   `playSplashSound(variant)` has a sound for each. **The portal still plays `circle` until Stephan picks.** e2e
   portal-openings 14 (each one's monogram and wordmark actually drawn by the end -- a base rule hid the coast's logo
   while it was being written).
+- **"ANNEXURE B" ON PAID-DIRECTLY-TO-YOU INCLUDES THE INTEREST -- CONFIRMED, NOT CHANGED (30 Oct, Stephan: "make sure
+  ... includes the interest as well")**: `annexureBFees = toInterest + toCosts` (remittanceAdvice.ts), and the
+  footnote says "fees and interest". The staging test advices show interest 0.00 only because S16's seeded history put
+  every fee in `to_costs`. The one check there had interest 0, so dropping it passed; check-remittance-advice now has
+  a line WITH interest (break-tested).
+- **PORTAL REPORTS: CHOOSE PDF OR EXCEL, THEN OPEN OR DOWNLOAD (30 Oct)**: `FormatFiles` in PortalReports.tsx, on the
+  progress report and every advice -- replaces the two labelled Open/Download pairs. e2e client-portal 93.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

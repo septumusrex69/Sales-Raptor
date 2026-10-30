@@ -148,6 +148,17 @@ check('...and the capital portion and commission', [d.capitalPortion, d.commissi
 /* DUE TO US EXCLUDES THE COMMISSION VAT -- the same rule as due_to_bf, and the board's own
    1 975.11 + 877.47 = 2 852.58. Including it would charge the client that VAT twice. */
 check('due to us is fees plus commission, without the VAT', d.dueToUs, 2852.58)
+/* THE COLUMN INCLUDES THE INTEREST (Stephan, 30 Oct: "make sure ... the one that says Annexure B here includes the
+   interest as well"). The footnote says "fees and interest"; the line above has none, so without this a sum that
+   dropped toInterest would pass. */
+{
+  const wi = build([line({
+    lineKind: 'ptc', paidToClient: true, paymentAmount: 4900, toInterest: 312.40, toCosts: 1662.71,
+    toCapital: 2924.89, commission: 877.47, commissionVat: 131.62, dueToBf: 2852.58, toClient: 0,
+  })]).direct[0]
+  check('the Annexure B column counts the interest the payment recovered', Math.round(wi.annexureBFees * 100) / 100, 1975.11)
+  check('...and so does due to us', Math.round(wi.dueToUs * 100) / 100, 2852.58)
+}
 ok('the footnote explains what an Annexure B fee is',
   ANNEXURE_B_FOOTNOTE.includes('Debt Collectors Act') && ANNEXURE_B_FOOTNOTE.includes('do not form part of the capital'))
 

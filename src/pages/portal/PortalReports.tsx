@@ -19,6 +19,42 @@ import { progressPdf, progressSheet, type ProgressReport } from '../../lib/progr
  */
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
 
+/*
+ * CHOOSE THE FORMAT, THEN WHAT TO DO WITH IT (30 Oct; Stephan, marking up the iPad: "when you want to download
+ * something, choose PDF or Excel, and then say download or open"). Two labelled pairs per row -- PDF Open Download,
+ * Spreadsheet Open Download -- read as four look-alike buttons on every line of a two-year list. Now one choice,
+ * PDF | Excel, and the firm's one Open-and-Download (FileActions, which carries the iPad's second tap) for whichever
+ * is picked. PDF first: it is what the client was emailed. A format a report does not have is not offered.
+ */
+type Format = 'pdf' | 'xlsx'
+const FORMAT_WORD: Record<Format, string> = { pdf: 'PDF', xlsx: 'Excel' }
+
+function FormatFiles({ formats, name, fetchFile, openUrl, testId }: {
+  formats: Format[]
+  name: (f: Format) => string
+  fetchFile: (f: Format) => Promise<Blob>
+  openUrl?: (f: Format) => Promise<string>
+  testId: string
+}) {
+  const [format, setFormat] = useState<Format>(formats[0])
+  if (formats.length === 0) return null
+  return (
+    <div className="inline-flex items-center gap-2" data-testid={testId} data-format={format}>
+      <div role="radiogroup" aria-label="Format" className="inline-flex rounded-lg border border-[#D5DBE3] bg-[#F4F4F4] p-0.5">
+        {formats.map((f) => (
+          <button key={f} type="button" role="radio" aria-checked={format === f} onClick={() => setFormat(f)} data-format-choice={f}
+            className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${format === f ? 'bg-[#101F2C] text-white shadow-sm' : 'text-[#525D66] hover:text-[#101F2C]'}`}>
+            {FORMAT_WORD[f]}
+          </button>
+        ))}
+      </div>
+      {/* Keyed on the format, so a waiting "Save" from the other one never saves the wrong file. */}
+      <FileActions key={format} name={name(format)} buttonsOnly testId={`${testId}-${format}`}
+        fetchFile={() => fetchFile(format)} openUrl={openUrl ? () => openUrl(format) : undefined} />
+    </div>
+  )
+}
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
 /* Every line of the book, open and finished, page by page (the server sends a hundred at a time). */
@@ -77,12 +113,10 @@ export function PortalReports({ token, onSignedOut, clientName }: { token: strin
           <p className="text-slate-900 font-semibold">Monthly progress report, {month}</p>
           <p className="text-xs text-slate-500">Every account, where it stands and what has been paid -- drawn up now, as at {day(today)}.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <FileActions name={`Progress report ${today}.pdf`} label="PDF" testId="portal-progress-pdf"
-            fetchFile={async () => new Blob([(await progressPdf(await report())) as BlobPart], { type: 'application/pdf' })} />
-          <FileActions name={`Progress report ${today}.xlsx`} label="Spreadsheet" testId="portal-progress-xlsx"
-            fetchFile={async () => new Blob([progressSheet(await report()) as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })} />
-        </div>
+        <FormatFiles formats={['pdf', 'xlsx']} testId="portal-progress-files" name={(f) => `Progress report ${today}.${f}`}
+          fetchFile={async (f) => f === 'pdf'
+            ? new Blob([(await progressPdf(await report())) as BlobPart], { type: 'application/pdf' })
+            : new Blob([progressSheet(await report()) as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })} />
       </div>
       {reports.length === 0 ? (
         <p className="px-4 pb-5 text-sm text-slate-500" data-testid="portal-no-reports">No reports yet. Your first remittance advice will be here once it is sent.</p>
@@ -97,16 +131,9 @@ export function PortalReports({ token, onSignedOut, clientName }: { token: strin
                 </p>
                 <p className="text-xs text-slate-500">Sent {day(r.sentAt)}{r.client ? ` · ${r.client}` : ''} · paid over {rand(r.amount)}</p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {r.hasPdf && (
-                  <FileActions name={fileName(r, 'pdf')} label="PDF" testId="portal-report-pdf"
-                    openUrl={() => link(r, 'pdf')} fetchFile={async () => blobFromUrl(await link(r, 'pdf'))} />
-                )}
-                {r.hasSheet && (
-                  <FileActions name={fileName(r, 'xlsx')} label="Spreadsheet" testId="portal-report-xlsx"
-                    openUrl={() => link(r, 'xlsx')} fetchFile={async () => blobFromUrl(await link(r, 'xlsx'))} />
-                )}
-              </div>
+              <FormatFiles formats={[...(r.hasPdf ? ['pdf' as const] : []), ...(r.hasSheet ? ['xlsx' as const] : [])]}
+                testId="portal-report-files" name={(f) => fileName(r, f)}
+                openUrl={(f) => link(r, f)} fetchFile={async (f) => blobFromUrl(await link(r, f))} />
             </li>
           ))}
         </ul>
