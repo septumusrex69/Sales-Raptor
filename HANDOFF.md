@@ -178,6 +178,11 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   sharpened, a touch of contrast), a shade that clears by 80% across, and the words centred in the band. The
   sidebar foot was the whole photo squeezed into 256 px (mostly dark sea); it is now `portal-sidebar.webp`, a crop
   of the lit cliffs, with a navy fade and a gold curve. e2e client-portal 89.
+- **THE SIGN-IN PHOTOGRAPH (30 Oct: "the same picture that is on the remittance advices. Why are you using low quality
+  one?")**: it was the same file, `remittance-cover.jpg`, 1672 x 609 -- a strip, fine on the advice's wide band, but the
+  sign-in panel is taller than wide, so the browser stretched a ~600-px piece about 4x. Now `portal-signin.webp`, a
+  tall cut (1900 x 2209) from the 7680-px Lanczos copy. There is NO larger original in the repo; a true high-resolution
+  file of that photo would be better still. e2e client-portal 90 (break-tested: the strip fails it).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

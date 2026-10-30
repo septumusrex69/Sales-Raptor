@@ -99,6 +99,8 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 }); await page.waitForTimeout(300)
   await t.shot(page, 'client-portal-sign-in')
   t.ok('the sign-in carries the BF circle and the wordmark over the coastline', await page.getByTestId('portal-sign-in-logo').locator('img').count() === 2)
+  // The panel is taller than it is wide: the remittance strip (1672 x 609) stretched four times over there (S16, 30 Oct).
+  t.ok('the sign-in photograph is its own tall cut, not the remittance strip', /portal-signin\.webp/.test(await page.getByTestId('portal-sign-in-logo').evaluate((e) => e.parentElement.style.background)))
   t.ok('...says it is the secure client portal, and offers no Microsoft sign-in', /secure client portal/i.test(await page.getByTestId('portal-page').innerText())
     && !/microsoft/i.test(await page.getByTestId('portal-page').innerText()))
   t.ok('...and a way to reach the firm', /^mailto:info@bredellferreira\.co\.za/.test(await page.getByTestId('portal-support').getAttribute('href') ?? ''))

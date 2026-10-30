@@ -154,9 +154,13 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
         style={{ background: `url('/brand/remittance-cover.jpg') center / cover` }} />
       <div className="relative w-full min-h-screen lg:max-w-[1360px] lg:min-h-[640px] lg:h-[min(860px,calc(100vh-4rem))] lg:rounded-[24px] lg:overflow-hidden
         lg:shadow-[0_30px_80px_-20px_rgba(16,31,44,0.45)] lg:ring-1 lg:ring-white/40 flex flex-col lg:grid lg:grid-cols-[58fr_42fr] bg-[#FBFAF7]">
-        {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. */}
+        {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. Its own tall cut, portal-signin.webp (S16, 30 Oct; Stephan on the
+            iPad: "the same picture that is on the remittance advices. Why are you using low quality one?"). It IS the same
+            photograph, and the same file was the problem: remittance-cover.jpg is a 1672 x 609 strip, right for the
+            advice's wide band, and this panel is taller than it is wide -- so the browser cut a 600-pixel-wide piece out of
+            it and stretched that about four times over. The cut here is from the 7680-px copy, made for this shape. */}
         <div className="relative text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14 min-h-[300px] sm:min-h-[380px] lg:min-h-0"
-          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), url('/brand/remittance-cover.jpg') 28% center / cover` }}>
+          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), url('/brand/portal-signin.webp') center / cover` }}>
           <div className="flex items-center gap-3.5" data-testid="portal-sign-in-logo">
             <img src="/brand/icon-light.svg" alt="" className="h-14 w-14 sm:h-20 sm:w-20" />
             <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 sm:h-[18px] w-auto" />
