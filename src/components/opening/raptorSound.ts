@@ -1,11 +1,17 @@
-import { bus, context, strike } from '../../pages/portal/portalSound'
+import { boom, context, lowChord, pad, rush, softBus, warm } from '../../pages/portal/portalSound'
 import type { RaptorVariant } from './RaptorOpening'
 
 /**
- * THE SOUND OF RAPTOR'S OPENINGS (S16), drawn by the browser like the portal's (portalSound.ts, whose master bus,
- * echo and struck note these share), and timed to RaptorOpening's clock: the impact at ~1.25 s. As there, a browser
- * plays sound only after a press -- the Sign In button primes it (primeSplashAudio) -- and a refusal is silence,
- * never a wait.
+ * THE SOUND OF RAPTOR'S OPENINGS (S16), drawn by the browser and timed to RaptorOpening's clock: the arrival at
+ * ~1.25 s. As in the portal, a browser plays sound only after a press -- the Sign In button primes it
+ * (primeSplashAudio) -- and a refusal is silence, never a wait.
+ *
+ * DEEP AND SOFT, NOTHING HIGH (30 Oct). The first versions had bells, chimes, radar pings and square-wave beeps, and
+ * Stephan: "It sounds like a video game. Just epic, deeper, softer, soothing sounds ... the high pitched things is too
+ * high pitched." What he liked was "this deep, like, zzz thing ... with a deep undertone" -- the detuned low saws --
+ * so each is now built from portalSound's soft pieces only: a pad, a slow rush of air, a boom with no click, that
+ * low "zzz" opened only to a warm midrange, and felt-piano notes no higher than A4, all through a dark, long echo.
+ * The body sits from about 75 to 330 Hz on purpose: lower than that an iPad's speakers do not play at all.
  */
 export function playRaptorSound(variant: RaptorVariant): boolean {
   const c = context()
@@ -19,114 +25,52 @@ export function playRaptorSound(variant: RaptorVariant): boolean {
   return true
 }
 
-function noise(c: AudioContext, seconds: number): AudioBufferSourceNode {
-  const buf = c.createBuffer(1, Math.floor(c.sampleRate * seconds), c.sampleRate)
-  const d = buf.getChannelData(0)
-  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-  const src = c.createBufferSource()
-  src.buffer = buf
-  return src
-}
-
-/* A deep hit: a sine falling from `from` to `to` Hz. */
-function thump(c: AudioContext, out: GainNode, at: number, from = 130, to = 36, level = 0.6) {
-  const o = c.createOscillator()
-  o.type = 'sine'
-  o.frequency.setValueAtTime(from, at)
-  o.frequency.exponentialRampToValueAtTime(to, at + 0.5)
-  const g = c.createGain()
-  g.gain.setValueAtTime(0.0001, at)
-  g.gain.exponentialRampToValueAtTime(level, at + 0.01)
-  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.9)
-  o.connect(g); g.connect(out)
-  o.start(at); o.stop(at + 1)
-}
-
-/* A chord of detuned saws swept open through a filter -- the "arrival". */
-function sweptChord(c: AudioContext, out: { master: GainNode; delay: DelayNode }, at: number, freqs: number[], level = 0.08) {
-  const f = c.createBiquadFilter()
-  f.type = 'lowpass'
-  f.Q.value = 5
-  f.frequency.setValueAtTime(300, at)
-  f.frequency.exponentialRampToValueAtTime(4000, at + 0.7)
-  f.frequency.exponentialRampToValueAtTime(800, at + 2.6)
-  const g = c.createGain()
-  g.gain.setValueAtTime(0.0001, at)
-  g.gain.exponentialRampToValueAtTime(level, at + 0.04)
-  g.gain.exponentialRampToValueAtTime(0.0001, at + 2.7)
-  f.connect(g); g.connect(out.master); g.connect(out.delay)
-  for (const hz of freqs) for (const det of [-9, 9]) {
-    const o = c.createOscillator()
-    o.type = 'sawtooth'
-    o.frequency.value = hz
-    o.detune.value = det
-    o.connect(f)
-    o.start(at); o.stop(at + 2.8)
-  }
-}
-
-/* FLIGHT: air tearing past (noise swept high to low and loud), the strike -- a thump and a bright D-major arrival. */
+/* FLIGHT: a low rush of air building as the wing comes in, the arrival as a boom with the deep D chord opening
+   under it, and two warm notes as the name slides out. */
 function flight(c: AudioContext, t0: number) {
-  const out = bus(c, t0, t0 + 4.2, 0.5)
-  const src = noise(c, 1.5)
-  const band = c.createBiquadFilter()
-  band.type = 'bandpass'
-  band.Q.value = 0.9
-  band.frequency.setValueAtTime(5000, t0)
-  band.frequency.exponentialRampToValueAtTime(400, t0 + 1.25)
-  const g = c.createGain()
-  g.gain.setValueAtTime(0.0001, t0)
-  g.gain.exponentialRampToValueAtTime(0.22, t0 + 1.05)
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.35)
-  src.connect(band); band.connect(g); g.connect(out.master)
-  src.start(t0); src.stop(t0 + 1.5)
+  const out = softBus(c, t0, t0 + 4.8)
+  rush(c, out, t0, 1.25, 1400, 220, 0.16)
+  pad(c, out, t0 + 0.2, 4.2, [73.42, 110, 146.83], 0.05)
   const hit = t0 + 1.2
-  thump(c, out.master, hit)
-  sweptChord(c, out, hit, [146.83, 220, 293.66, 369.99, 440])
-  strike(c, out, 1174.66, hit + 0.05, 0.05, 2.2)
+  boom(c, out, hit, 0.55)
+  lowChord(c, out, hit, [110, 146.83, 185, 220], 0.06, 3.3)
+  warm(c, out, 293.66, hit + 0.3, 0.07, 2.8)
+  warm(c, out, 220, hit + 0.65, 0.06, 2.8)
 }
 
-/* ASCENT: wind, a pad that climbs, and as the light runs along the wing, a high chime of three. */
+/* ASCENT: wind low in the cloud, a pad that slowly climbs into place, the light along the wing as a gentle swell of
+   the low chord, and three soft notes, low to lower, as the name comes into focus. */
 function ascent(c: AudioContext, t0: number) {
-  const out = bus(c, t0, t0 + 4.4, 0.5)
-  const src = noise(c, 3.6)
-  const lp = c.createBiquadFilter()
-  lp.type = 'lowpass'
-  lp.frequency.setValueAtTime(300, t0)
-  lp.frequency.linearRampToValueAtTime(1600, t0 + 1.3)
-  lp.frequency.linearRampToValueAtTime(400, t0 + 3.4)
-  const w = c.createGain()
-  w.gain.setValueAtTime(0.0001, t0)
-  w.gain.exponentialRampToValueAtTime(0.12, t0 + 1.0)
-  w.gain.exponentialRampToValueAtTime(0.0001, t0 + 3.5)
-  src.connect(lp); lp.connect(w); w.connect(out.master)
-  src.start(t0); src.stop(t0 + 3.6)
-  const pad = c.createGain()
-  pad.gain.setValueAtTime(0.0001, t0)
-  pad.gain.exponentialRampToValueAtTime(0.06, t0 + 1.3)
-  pad.gain.exponentialRampToValueAtTime(0.0001, t0 + 4.2)
-  pad.connect(out.master)
-  for (const hz of [130.81, 196, 261.63, 329.63]) {
-    const o = c.createOscillator()
-    o.type = 'triangle'
-    o.frequency.setValueAtTime(hz * 0.75, t0)
-    o.frequency.exponentialRampToValueAtTime(hz, t0 + 1.3)
-    o.connect(pad)
-    o.start(t0); o.stop(t0 + 4.3)
-  }
-  strike(c, out, 1318.51, t0 + 1.3, 0.08, 2.4)
-  strike(c, out, 1975.53, t0 + 1.5, 0.06, 2.2)
-  strike(c, out, 2637.02, t0 + 1.7, 0.04, 2.0)
+  const out = softBus(c, t0, t0 + 5)
+  rush(c, out, t0, 3.2, 300, 700, 0.1)
+  pad(c, out, t0, 4.6, [98, 130.81, 196, 261.63], 0.07, 0.75)
+  const hit = t0 + 1.3
+  boom(c, out, hit, 0.35)
+  lowChord(c, out, hit, [130.81, 196, 261.63, 329.63], 0.045, 3.4)
+  warm(c, out, 392, hit + 0.25, 0.06, 2.8)
+  warm(c, out, 329.63, hit + 0.55, 0.06, 2.8)
+  warm(c, out, 261.63, hit + 0.85, 0.07, 3)
 }
 
-/* LOCK: radar pings, the lock-on beeps climbing, then the hit and the chord -- and a last double blip, "online". */
+/* LOCK-ON: a slow low pulse, like a heartbeat, while the brackets close; the lock as the deepest boom of the three
+   with the low chord under it; and one warm note, held, for "Raptor online". */
 function lock(c: AudioContext, t0: number) {
-  const out = bus(c, t0, t0 + 4.2, 0.5)
-  for (let i = 0; i < 4; i++) strike(c, out, 1567.98, t0 + 0.1 + i * 0.27, 0.05, 0.35)
-  ;[880, 1046.5, 1318.51, 1760].forEach((hz, i) => strike(c, out, hz, t0 + 0.95 + i * 0.07, 0.04, 0.12, 'square'))
+  const out = softBus(c, t0, t0 + 4.8)
+  for (let i = 0; i < 4; i++) {
+    const at = t0 + 0.1 + i * 0.28
+    const o = c.createOscillator()
+    o.type = 'sine'
+    o.frequency.value = 73.42
+    const g = c.createGain()
+    g.gain.setValueAtTime(0.0001, at)
+    g.gain.exponentialRampToValueAtTime(0.18 + i * 0.05, at + 0.04)
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.25)
+    o.connect(g); g.connect(out.master)
+    o.start(at); o.stop(at + 0.3)
+  }
+  pad(c, out, t0, 4.4, [73.42, 98, 146.83], 0.05)
   const hit = t0 + 1.25
-  thump(c, out.master, hit, 110, 32, 0.65)
-  sweptChord(c, out, hit, [110, 164.81, 220, 277.18, 329.63], 0.07)
-  strike(c, out, 2093, t0 + 2.5, 0.035, 0.15, 'square')
-  strike(c, out, 2637.02, t0 + 2.6, 0.035, 0.2, 'square')
+  boom(c, out, hit, 0.6)
+  lowChord(c, out, hit, [123.47, 185, 246.94, 311.13], 0.055, 3.2)
+  warm(c, out, 246.94, t0 + 2.5, 0.07, 2.2)
 }

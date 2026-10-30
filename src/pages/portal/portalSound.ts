@@ -192,47 +192,165 @@ function coastSound(c: AudioContext): boolean {
 }
 
 /*
- * THE TOWERS: a quick rising arpeggio as the towers go up (each note a small glassy blip), a deep drop-thump on the
- * shock-ring at 1.35 s, and a bright chord swept open through a filter as the badge turns in.
+ * DEEP, SOFT, NOTHING HIGH (30 Oct). Stephan, after hearing them: "It sounds like a video game. Just epic, deeper,
+ * softer, soothing sounds, not video gamey ... it's got this deep, like, zzz thing ... with a deep undertone ... But
+ * the high pitched things is too high pitched." So the openings he plays now are built only from these: a dark,
+ * long echo; a warm pad; a soft cinematic boom with no click; the low detuned "zzz" he liked, swept open only as far
+ * as a warm midrange; and felt-piano notes that never go above A4. No bells, no chimes, no square waves.
+ */
+export function softBus(c: AudioContext, t0: number, end: number, peak = 0.6) {
+  const master = c.createGain()
+  master.gain.setValueAtTime(0.0001, t0)
+  master.gain.exponentialRampToValueAtTime(peak, t0 + 0.5)
+  master.gain.setValueAtTime(peak, end - 1.6)
+  master.gain.exponentialRampToValueAtTime(0.0001, end)
+  /* A gentle low-pass over everything: the last word on "nothing high". */
+  const air = c.createBiquadFilter()
+  air.type = 'lowpass'
+  air.frequency.value = 2400
+  master.connect(air); air.connect(c.destination)
+  const delay = c.createDelay(1.5)
+  delay.delayTime.value = 0.42
+  const feedback = c.createGain()
+  feedback.gain.value = 0.45
+  const tone = c.createBiquadFilter()
+  tone.type = 'lowpass'
+  tone.frequency.value = 1100
+  delay.connect(tone); tone.connect(feedback); feedback.connect(delay); tone.connect(master)
+  return { master, delay }
+}
+type Out = { master: GainNode; delay: DelayNode }
+
+/** A warm pad: sines and soft triangles, slow in and slow out, through a closing low-pass. */
+export function pad(c: AudioContext, out: Out, at: number, len: number, freqs: number[], level = 0.07, climb = 1) {
+  const lp = c.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(260, at)
+  lp.frequency.linearRampToValueAtTime(900, at + len * 0.45)
+  lp.frequency.linearRampToValueAtTime(320, at + len)
+  const g = c.createGain()
+  g.gain.setValueAtTime(0.0001, at)
+  g.gain.exponentialRampToValueAtTime(level, at + Math.min(1.4, len * 0.4))
+  g.gain.exponentialRampToValueAtTime(0.0001, at + len)
+  lp.connect(g); g.connect(out.master); g.connect(out.delay)
+  freqs.forEach((hz, i) => {
+    for (const det of [-5, 5]) {
+      const o = c.createOscillator()
+      o.type = i % 2 ? 'triangle' : 'sine'
+      o.frequency.setValueAtTime(hz * climb, at)
+      if (climb !== 1) o.frequency.exponentialRampToValueAtTime(hz, at + len * 0.4)
+      o.detune.value = det
+      o.connect(lp)
+      o.start(at); o.stop(at + len + 0.1)
+    }
+  })
+}
+
+/** A soft cinematic boom: a low sine sinking slowly, with a breath of low noise under it. No click. */
+export function boom(c: AudioContext, out: Out, at: number, level = 0.5) {
+  const o = c.createOscillator()
+  o.type = 'sine'
+  o.frequency.setValueAtTime(92, at)
+  o.frequency.exponentialRampToValueAtTime(42, at + 2.2)
+  const g = c.createGain()
+  g.gain.setValueAtTime(0.0001, at)
+  g.gain.exponentialRampToValueAtTime(level, at + 0.06)
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 2.6)
+  o.connect(g); g.connect(out.master)
+  o.start(at); o.stop(at + 2.7)
+  const n = c.createBuffer(1, Math.floor(c.sampleRate * 1.6), c.sampleRate)
+  const d = n.getChannelData(0)
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+  const src = c.createBufferSource()
+  src.buffer = n
+  const lp = c.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(420, at)
+  lp.frequency.exponentialRampToValueAtTime(90, at + 1.4)
+  const ng = c.createGain()
+  ng.gain.setValueAtTime(0.0001, at)
+  ng.gain.exponentialRampToValueAtTime(level * 0.35, at + 0.05)
+  ng.gain.exponentialRampToValueAtTime(0.0001, at + 1.5)
+  src.connect(lp); lp.connect(ng); ng.connect(out.master)
+  src.start(at); src.stop(at + 1.6)
+}
+
+/** The deep "zzz" Stephan liked: detuned low saws, swept open only to a warm midrange, slowly. */
+export function lowChord(c: AudioContext, out: Out, at: number, freqs: number[], level = 0.06, len = 3) {
+  const f = c.createBiquadFilter()
+  f.type = 'lowpass'
+  f.Q.value = 2
+  f.frequency.setValueAtTime(140, at)
+  f.frequency.exponentialRampToValueAtTime(1400, at + 1.1)
+  f.frequency.exponentialRampToValueAtTime(260, at + len)
+  const g = c.createGain()
+  g.gain.setValueAtTime(0.0001, at)
+  g.gain.exponentialRampToValueAtTime(level, at + 0.35)
+  g.gain.exponentialRampToValueAtTime(0.0001, at + len)
+  f.connect(g); g.connect(out.master); g.connect(out.delay)
+  for (const hz of freqs) for (const det of [-11, 0, 11]) {
+    const o = c.createOscillator()
+    o.type = 'sawtooth'
+    o.frequency.value = hz
+    o.detune.value = det
+    o.connect(f)
+    o.start(at); o.stop(at + len + 0.1)
+  }
+}
+
+/** A felt-piano note, low and round: a sine and a quiet triangle an octave up, through a low-pass. */
+export function warm(c: AudioContext, out: Out, f: number, at: number, level = 0.08, ring = 2.6) {
+  const lp = c.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.value = 1300
+  const g = c.createGain()
+  g.gain.setValueAtTime(0.0001, at)
+  g.gain.exponentialRampToValueAtTime(level, at + 0.03)
+  g.gain.exponentialRampToValueAtTime(0.0001, at + ring)
+  lp.connect(g); g.connect(out.master); g.connect(out.delay)
+  for (const [hz, type, lv] of [[f, 'sine', 1], [f * 2, 'triangle', 0.25]] as const) {
+    const o = c.createOscillator()
+    const og = c.createGain()
+    o.type = type
+    o.frequency.value = hz
+    og.gain.value = lv
+    o.connect(og); og.connect(lp)
+    o.start(at); o.stop(at + ring + 0.1)
+  }
+}
+
+/** Air moving: noise through a low-pass that sweeps, for a rush that is felt rather than heard. */
+export function rush(c: AudioContext, out: Out, at: number, len: number, from: number, to: number, level = 0.14) {
+  const n = c.createBuffer(1, Math.floor(c.sampleRate * len), c.sampleRate)
+  const d = n.getChannelData(0)
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+  const src = c.createBufferSource()
+  src.buffer = n
+  const lp = c.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(from, at)
+  lp.frequency.exponentialRampToValueAtTime(to, at + len)
+  const g = c.createGain()
+  g.gain.setValueAtTime(0.0001, at)
+  g.gain.exponentialRampToValueAtTime(level, at + len * 0.7)
+  g.gain.exponentialRampToValueAtTime(0.0001, at + len)
+  src.connect(lp); lp.connect(g); g.connect(out.master)
+  src.start(at); src.stop(at + len)
+}
+
+/*
+ * THE TOWERS -- the portal's (Stephan's pick): the towers rise on a deep swell and a slow rush of air, the shock-ring
+ * lands as a soft boom with the low "zzz" opening under it, and the badge settles on two warm low notes.
  */
 function towersSound(c: AudioContext): boolean {
   const t0 = c.currentTime + 0.05
-  const out = bus(c, t0, t0 + 4.2, 0.5)
-  const notes = [329.63, 415.3, 493.88, 659.25, 830.61, 987.77, 1318.51, 1661.22]
-  notes.forEach((f, i) => strike(c, out, f, t0 + 0.12 + i * 0.13, 0.06, 0.35, 'square'))
-
+  const out = softBus(c, t0, t0 + 4.8)
+  pad(c, out, t0, 4.4, [82.41, 110, 164.81, 220], 0.06, 0.94)
+  rush(c, out, t0 + 0.1, 1.25, 260, 1300, 0.12)
   const hit = t0 + 1.35
-  const thump = c.createOscillator()
-  thump.type = 'sine'
-  thump.frequency.setValueAtTime(140, hit)
-  thump.frequency.exponentialRampToValueAtTime(38, hit + 0.5)
-  const tg = c.createGain()
-  tg.gain.setValueAtTime(0.0001, hit)
-  tg.gain.exponentialRampToValueAtTime(0.6, hit + 0.01)
-  tg.gain.exponentialRampToValueAtTime(0.0001, hit + 0.9)
-  thump.connect(tg); tg.connect(out.master)
-  thump.start(hit); thump.stop(hit + 1)
-
-  const sweep = c.createBiquadFilter()
-  sweep.type = 'lowpass'
-  sweep.Q.value = 6
-  sweep.frequency.setValueAtTime(300, hit)
-  sweep.frequency.exponentialRampToValueAtTime(4200, hit + 0.8)
-  sweep.frequency.exponentialRampToValueAtTime(900, hit + 2.6)
-  const cg = c.createGain()
-  cg.gain.setValueAtTime(0.0001, hit)
-  cg.gain.exponentialRampToValueAtTime(0.09, hit + 0.05)
-  cg.gain.exponentialRampToValueAtTime(0.0001, hit + 2.7)
-  sweep.connect(cg); cg.connect(out.master); cg.connect(out.delay)
-  for (const f of [164.81, 246.94, 329.63, 415.3, 493.88]) {
-    for (const detune of [-8, 8]) {
-      const o = c.createOscillator()
-      o.type = 'sawtooth'
-      o.frequency.value = f
-      o.detune.value = detune
-      o.connect(sweep)
-      o.start(hit); o.stop(hit + 2.8)
-    }
-  }
+  boom(c, out, hit, 0.5)
+  lowChord(c, out, hit, [164.81, 207.65, 246.94, 329.63], 0.05, 3.2)
+  warm(c, out, 329.63, hit + 0.35, 0.07, 2.8)
+  warm(c, out, 246.94, hit + 0.75, 0.06, 2.6)
   return true
 }

@@ -231,6 +231,13 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   press). A reload plays nothing. `/opening` replays any of the three, no sign-in. **Plays `flight` until Stephan
   picks** (`RAPTOR_OPENING_DEFAULT`). New `public/brand/raptor-words-light.png` = the lockup's words alone.
   e2e raptor-openings 12 (sign-in plays it, break-tested; each draws wing and name).
+- **THE OPENING SOUNDS, DEEP AND SOFT (30 Oct: "It sounds like a video game. Just epic, deeper, softer, soothing ...
+  the high pitched things is too high pitched"; he liked the "deep ... zzz" undertone)**: Raptor's three and the
+  portal's towers rebuilt from new soft pieces in portalSound.ts (softBus with a dark long echo and a 2.4 kHz ceiling,
+  pad, boom, lowChord = the low detuned saws he liked, warm felt-piano notes <= A4, rush). No bells, chimes or square
+  waves. Body kept at ~75-330 Hz because an iPad's speakers play almost nothing lower. The portal's circle and coast
+  (not in use) keep their old sounds. e2e opening-sounds 16: each is RENDERED (OfflineAudioContext) and measured --
+  average pitch 140-400 Hz (now 156-229; the chimed ones were 535-1 560, which fails it), no clipping, not silent.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
