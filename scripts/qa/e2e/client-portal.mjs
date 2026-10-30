@@ -201,6 +201,17 @@ try {
   t.ok('every ring slice is a Bredell Ferreira colour', fills.length > 0 && fills.every((f) => ['#203B60', '#C69F54', '#97B4CC', '#46607B', '#32404D', '#525D66', '#B4BFCC', '#D5E1EB'].includes(f)))
   t.ok('...and each legend dot is its slice\'s colour', (await page.locator('[data-legend]').evaluateAll((ds) => ds.map((d) => getComputedStyle(d).backgroundColor))).length === fills.length)
   t.ok('the figures carry a trend drawn from the months sent', await page.getByTestId('portal-figures').locator('svg path').count() >= 4)
+  /* LEAN (Stephan, 30 Oct: "way too big and bulky"): on an iPad on its side, the four in one row and short. */
+  {
+    const vp = page.viewportSize()
+    await page.setViewportSize({ width: 1180, height: 820 }); await page.waitForTimeout(600)
+    const boxes = await page.getByTestId('portal-figure').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top), h: r.height, fits: e.scrollWidth <= e.clientWidth + 1 } }))
+    t.ok('on an iPad the four figures sit in one row', boxes.length === 4 && new Set(boxes.map((b) => b.top)).size === 1)
+    t.ok('...each lean (no taller than 120 px), and no figure cut off', boxes.every((b) => b.h <= 120 && b.fits))
+    t.ok('...and no label cut short', await page.getByTestId('portal-figure-label').evaluateAll((els) => els.length === 4 && els.every((e) => e.scrollWidth <= e.clientWidth + 1)))
+    await t.shot(page, 'client-portal-dashboard-ipad')
+    await page.setViewportSize(vp); await page.waitForTimeout(400)
+  }
   t.ok('the sidebar counts the open tickets', (await page.getByTestId('portal-tickets-count').innerText()).trim() === '2')
   /* S16: the company dashboard's ring, white cuts between the slices (Stephan: "use this type of pie chart"). */
   t.check('the open accounts are drawn on the cut ring, a slice per position', await page.getByTestId('portal-open-ring').locator('circle[data-slice]').count(), 2)

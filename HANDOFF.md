@@ -215,6 +215,9 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
 - **PORTAL SIDEBAR FOOT: LINES, NO PHOTOGRAPH (30 Oct: "the picture ... a little bit too much ... keep the line ... or
   a circle")**: SVG only -- the gold sweep plus a faint second one, and two open rings in the BF circle's shape;
   `portal-sidebar.webp` deleted (supersedes the note above about it).
+- **PORTAL FIGURE TILES MADE LEAN (30 Oct: "way too big and bulky. Make smaller and leaner")**: icon small beside the
+  label, figure a size down, thin trend, four across from `lg` (an iPad on its side) instead of 2x2 until 2xl; arrow
+  only from 2xl so the labels fit. e2e client-portal 99 (one row, <= 120 px tall, no figure or label cut).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

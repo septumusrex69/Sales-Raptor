@@ -121,14 +121,14 @@ export function PortalDashboard({ token, onSignedOut, onOpen, onAsk }: {
       */}
       <DashboardPanes layoutKey="raptor.portal.dashboard.layout" initial="wide" panes={[
         { id: 'figures', kind: 'full', node: (
-          <section className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4" data-testid="portal-figures">
-            <Tile icon={<Landmark size={19} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`}
+          <section className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="portal-figures">
+            <Tile icon={<Landmark size={14} />} label="Capital handed over" value={rand(f.capitalHandedOver)} note={`${d.accounts} accounts`}
               trend={trends.handedCumulative} onOpen={() => onOpen('accounts')} />
-            <Tile icon={<BarChart3 size={19} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`}
+            <Tile icon={<BarChart3 size={14} />} label="Collected to date" value={rand(f.collectedToDate)} note={`${pct(f.collectedToDate, f.capitalHandedOver)} of capital`}
               trend={trends.collectedCumulative} invert onOpen={() => onOpen('reports')} />
-            <Tile icon={<CalendarDays size={19} />} label="Collected this month" value={rand(f.collectedThisMonth)} note={`${pct(f.collectedThisMonth, f.capitalHandedOver)} of capital`}
+            <Tile icon={<CalendarDays size={14} />} label="Collected this month" value={rand(f.collectedThisMonth)} note={`${pct(f.collectedThisMonth, f.capitalHandedOver)} of capital`}
               trend={trends.collectedMonthly} onOpen={() => onOpen('reports')} />
-            <Tile icon={<Clock3 size={19} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`}
+            <Tile icon={<Clock3 size={14} />} label="Capital outstanding" value={rand(f.capitalOutstanding)} note={`On ${d.open} open accounts`}
               share={f.capitalHandedOver > 0 ? f.capitalOutstanding / f.capitalHandedOver : null} onOpen={() => onOpen('accounts')} />
           </section>
         ) },
@@ -226,21 +226,29 @@ function Tile({ icon, label, value, note, invert = false, trend, share, onOpen }
   icon: ReactNode; label: string; value: string; note?: string; invert?: boolean
   trend?: number[]; share?: number | null; onOpen: () => void
 }) {
+  /*
+   * LEAN (30 Oct; Stephan, circling the four on the iPad: "way too big and bulky. Make smaller and leaner"). The
+   * icon in its own 40-px block above the label, a 30-px figure and 56 px of foot for the trend made each tile as
+   * tall as a card. Now the icon sits small beside the label, the figure is a size down, the trend is a thin line,
+   * and the four go across from a laptop or an iPad on its side instead of two by two.
+   */
   return (
-    <button type="button" onClick={onOpen}
-      className={`group relative overflow-hidden text-left rounded-2xl px-6 pt-5 pb-14 transition-shadow hover:shadow-lg min-w-0 ${invert
-        ? 'bg-[#101F2C] text-white border-t-[3px] border-t-[#C69F54] shadow-[0_8px_24px_-12px_rgba(16,31,44,0.5)]' : 'card'}`}>
-      <div className="flex items-center justify-between">
-        <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${invert ? 'bg-white/10 text-[#C69F54]' : 'bg-[#D5E1EB]/60 text-[#46607B]'}`}>{icon}</span>
-        <ArrowRight size={17} className="text-[#C69F54] transition-transform group-hover:translate-x-0.5" />
+    <button type="button" onClick={onOpen} data-testid="portal-figure"
+      className={`group relative overflow-hidden text-left rounded-xl px-4 pt-3 pb-7 transition-shadow hover:shadow-md min-w-0 ${invert
+        ? 'bg-[#101F2C] text-white border-t-2 border-t-[#C69F54] shadow-[0_6px_18px_-12px_rgba(16,31,44,0.5)]' : 'card'}`}>
+      <div className="flex items-center gap-1.5">
+        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${invert ? 'bg-white/10 text-[#C69F54]' : 'bg-[#D5E1EB]/60 text-[#46607B]'}`}>{icon}</span>
+        {/* Tracked tighter than a section label, so "Capital outstanding" fits beside its icon at iPad width. The arrow
+            only where there is room for it: the whole tile is the button, and the label matters more. */}
+        <p className={`bf-label text-[10px] !tracking-[0.04em] truncate ${invert ? 'text-[#C69F54]' : 'text-[#46607B]'}`} data-testid="portal-figure-label">{label}</p>
+        <ArrowRight size={14} className="hidden 2xl:block ml-auto shrink-0 text-[#C69F54] transition-transform group-hover:translate-x-0.5" />
       </div>
-      <p className={`bf-label text-[11px] mt-4 ${invert ? 'text-[#C69F54]' : 'text-[#46607B]'}`}>{label}</p>
-      <p className={`bf-figure text-[clamp(1.5rem,2.1vw,1.85rem)] leading-tight tabular-nums mt-1 whitespace-nowrap ${invert ? 'text-white' : 'text-[#101F2C]'}`}>{value}</p>
-      {note && <p className={`text-[12.5px] mt-1 ${invert ? 'text-[#B4BFCC]' : 'text-[#525D66]'}`}>{note}</p>}
+      <p className={`bf-figure text-[clamp(1.05rem,1.45vw,1.35rem)] leading-tight tabular-nums mt-2 whitespace-nowrap ${invert ? 'text-white' : 'text-[#101F2C]'}`}>{value}</p>
+      {note && <p className={`text-[11.5px] mt-0.5 ${invert ? 'text-[#B4BFCC]' : 'text-[#525D66]'}`}>{note}</p>}
       {trend && <Spark values={trend} invert={invert} />}
       {share !== undefined && share !== null && (
-        <div className="absolute left-6 right-6 bottom-6" title={`${Math.round(share * 1000) / 10}% of the capital handed over is still out`} data-testid="portal-outstanding-share">
-          <div className="h-1.5 rounded-full bg-[#ECECEC] overflow-hidden"><div className="h-full rounded-full bg-[#97B4CC]" style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} /></div>
+        <div className="absolute left-4 right-4 bottom-3.5" title={`${Math.round(share * 1000) / 10}% of the capital handed over is still out`} data-testid="portal-outstanding-share">
+          <div className="h-1 rounded-full bg-[#ECECEC] overflow-hidden"><div className="h-full rounded-full bg-[#97B4CC]" style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} /></div>
         </div>
       )}
     </button>
@@ -256,7 +264,7 @@ function Spark({ values, invert }: { values: number[]; invert: boolean }) {
   const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
   const tone = invert ? BF.gold : BF.blue
   return (
-    <svg aria-hidden className="absolute left-0 right-0 bottom-0 h-10 w-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    <svg aria-hidden className="absolute left-0 right-0 bottom-0 h-6 w-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
       <path d={`${line} L${w} ${h} L0 ${h} Z`} fill={tone} fillOpacity={invert ? 0.18 : 0.22} />
       <path d={line} stroke={tone} strokeOpacity="0.85" strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
     </svg>
