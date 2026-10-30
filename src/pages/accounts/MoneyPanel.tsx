@@ -27,7 +27,10 @@ import { fetchMoneyPosition, previewPayment, type MoneyPosition, type Preview } 
  * raised above the items 1-7 ceiling or since cancelled, and -- for receipt fees, which sit
  * outside that cap -- only a cancellation.
  */
-export function MoneyPanel({ accountId }: { accountId: string }) {
+/* `refreshKey` is anything that changes when the account's ledgers are re-read (R-15): a cost loaded
+   on the account moved "Costs · items 1-7" only after the person changed tab and came back, because
+   the figures were fetched once per account and never again. */
+export function MoneyPanel({ accountId, refreshKey }: { accountId: string; refreshKey?: unknown }) {
   const { currentUser } = useAuth()
   const [pos, setPos] = useState<MoneyPosition | null>(null)
   const [loading, setLoading] = useState(true)
@@ -40,12 +43,11 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
 
   const load = useCallback(async () => {
     if (!maySee) { setLoading(false); return }
-    setLoading(true)
     try {
       const rows = await fetchMoneyPosition(accountId)
       setPos(rows[0] ?? null)
     } finally { setLoading(false) }
-  }, [accountId, maySee])
+  }, [accountId, maySee, refreshKey])
 
   useEffect(() => { void load() }, [load])
 
