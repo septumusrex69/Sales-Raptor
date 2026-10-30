@@ -197,6 +197,13 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   a line WITH interest (break-tested).
 - **PORTAL REPORTS: CHOOSE PDF OR EXCEL, THEN OPEN OR DOWNLOAD (30 Oct)**: `FormatFiles` in PortalReports.tsx, on the
   progress report and every advice -- replaces the two labelled Open/Download pairs. e2e client-portal 93.
+- **THE LOCKUP ON THE REMITTANCE ADVICE AND CLIENT REPORT (30 Oct: "the Bredell Ferreira logo is not ... correct")**:
+  `public/brand/bf-lockup.jpg` had the wordmark tucked into the gold circle's gap, touching the B. Rebuilt from
+  `icon-dark.svg` + `wordmark-dark.svg` at the portal's own spacing (icon 80 : gap 14 : wordmark 18), 2400 x 600 --
+  still 4:1, which `remittancePdf`'s `logo()` and `clientReportPdf` assume. Rendered a test advice to confirm.
+  Already-sent PDFs keep the old one (they are stored exactly as sent).
+- **MAIL: "ALL" IS NOW "INBOX" (30 Oct)**: the label only; the tab id stays `all` (URLs and the remembered tab). e2e
+  mail 150.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

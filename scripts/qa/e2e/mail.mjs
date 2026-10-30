@@ -706,7 +706,7 @@ try {
    * six inches away was carrying unread. So the assertion is not "All shows a number": it is
    * that All and the sidebar show THE SAME number, because they are one question.
    */
-  t.check('All counts what has not been read', await tabBadge('All'), 5)
+  t.check('Inbox counts what has not been read', await tabBadge('Inbox'), 5)
   t.check('...and the sidebar says the same, because it is the same question', await navBadge(), 5)
 
   /*
@@ -738,7 +738,7 @@ try {
    * badges working, for exactly as long as the numbers match.
    */
   t.ok('...which is not the same number as Junk, or the two are answering each other\u2019s question',
-    (await tabBadge('Junk')) !== (await tabBadge('All')))
+    (await tabBadge('Junk')) !== (await tabBadge('Inbox')))
 
   /*
    * READING ONE TAKES THE BADGE DOWN WITH IT, without a reload.
@@ -749,7 +749,7 @@ try {
    */
   await page.getByText('Debt collection enquiry').first().click()
   await page.waitForTimeout(800)
-  t.check('reading a message takes All down by one', await tabBadge('All'), 4)
+  t.check('reading a message takes Inbox down by one', await tabBadge('Inbox'), 4)
   t.check('...and leaves Junk alone, because it was not a junk message',
     await tabBadge('Junk'), 1)
 
@@ -825,7 +825,7 @@ try {
   await page.waitForTimeout(700)
   await page.getByLabel('Search your mailbox').fill('')
   await page.waitForTimeout(700)
-  await page.getByRole('button', { name: /^All/ }).click()
+  await page.getByRole('button', { name: /^Inbox/ }).click()
   await page.waitForTimeout(700)
 
   /* ---------- select all, with the reading pane up ---------- */

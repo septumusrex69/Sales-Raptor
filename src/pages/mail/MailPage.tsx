@@ -133,7 +133,9 @@ type Pane = MailFilter | 'blocked'
  * folder. Blocked is not a filter at all -- it is the blocklist, shown in the same place.
  */
 const TABS: { id: Pane; label: string; hint: string }[] = [
-  { id: 'all', label: 'All', hint: 'Your inbox: everything not yet done, junk aside' },
+  /* LABELLED "INBOX" (Stephan, 30 Oct: "instead of all, say inbox"); the id stays 'all' -- it is what the URL and
+     the saved tab carry, and renaming it would send everybody's remembered tab nowhere. */
+  { id: 'all', label: 'Inbox', hint: 'Your inbox: everything not yet done, junk aside' },
   /*
    * DONE, BESIDE ALL (S16, Raptor · Handover 15). Stephan, of the staff: "if an email has been dealt with
    * ... that it's archived ... they want their inboxes to show that it's empty ... that's how they used to
@@ -4699,7 +4701,7 @@ function MoveModal({ mail, mayRematch, actor, onClose, onDone }: {
        * where to look and found an empty list. With the queues gone the question is nearly
        * trivial: junk is the one place that is not the mailbox.
        */
-      const landsIn = mail.isJunk ? 'Junk' : 'All'
+      const landsIn = mail.isJunk ? 'Junk' : 'Inbox'
       onDone(
         `Unmatched from ${was}. You will find it under ${landsIn}.`
         + (removeContact ? ` ${mail.fromAddress} is off their contacts, so it can be blocked now.` : ''),
@@ -4741,7 +4743,7 @@ function MoveModal({ mail, mayRematch, actor, onClose, onDone }: {
       <div className="mt-4 rounded-xl border border-gold-200 bg-gold-50/60 p-4">
         <p className="text-sm font-semibold text-navy-950">Take it off {was}</p>
         <p className="text-[13px] text-slate-500 mt-1">
-          It stays in your mailbox under <strong className="font-medium text-slate-600">All</strong>,
+          It stays in your mailbox under <strong className="font-medium text-slate-600">Inbox</strong>,
           on nobody&rsquo;s file. Match it to the right account whenever you work out which one that
           is &mdash; or leave it, which is now a perfectly good answer.
         </p>

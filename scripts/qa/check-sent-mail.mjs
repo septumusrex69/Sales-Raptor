@@ -216,7 +216,7 @@ ok('the unmatch names the tab it actually lands in', /You will find it under \$\
 ok('...and knows junk goes to Junk', /mail\.isJunk \? 'Junk'/.test(page))
 /* AND THERE ARE ONLY TWO ANSWERS NOW. It once had to choose between three queues; with Needs
    matching and Open mail gone, junk is the one place that is not the mailbox. */
-ok('...and everything else goes back to All', /mail\.isJunk \? 'Junk' : 'All'/.test(page))
+ok('...and everything else goes back to the Inbox', /mail\.isJunk \? 'Junk' : 'Inbox'/.test(page))
 
 /* ---------- replying to everybody ---------- */
 
