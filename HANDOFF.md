@@ -91,6 +91,13 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   Raptor only: nothing moves on the mail server (sync is one-way). The selection's own "Done" button now says
   Cancel. `check-mail-done` (55, break-tested), e2e mail +done (145). Built by a helper agent in a worktree and
   re-run here. **Open choices:** replying does not mark done; the Done tab orders by arrival, not by when done.
+- **THE SIGN-IN PAGE WEARS THE BROWSER'S OWN SKIN (30 Oct, reversing 23 Oct)** (Stephan: "everyone who picks a
+  different skin ... will see their own login page the next time they come in"). AuthShell no longer forces
+  DEFAULT_THEME; ThemeProvider / index.html put on the remembered skin, and a browser that never chose gets Africa.
+  Glass mountain's door is see-through onto its mountains, so there the lockup is the light one and the words go
+  white (`onPhoto` in AuthShell, `.login-on-photo` in glass-mountain.css). The 23 Oct reason (a first sign-in on a
+  shared office laptop meets the last person's skin) is now accepted by Stephan's decision. e2e login-reset 26 (each
+  skin -> itself and its own photograph; forcing the default back seen failing).
 - **DONE IS NOW "ARCHIVE", RIGHT OF DRAFTS (30 Oct)** (Stephan: "instead of done, just say archive and just put it to
   the right of drafts. Still don't know how to archive something."). Tabs read All | Junk | Sent | Blocked | Drafts |
   Archive (`order` on the strip; the id stays 'done', the column done_at). Buttons: **Archive** / **Move to inbox**

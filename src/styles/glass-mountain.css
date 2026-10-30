@@ -539,6 +539,9 @@ html[data-theme='glass-mountain'] .h-dvh.w-full.flex {
 html[data-theme='glass-mountain'] .login-photo {
   background: transparent !important;
 }
+/* The sign-in's own words over the photograph (S16: the door now wears this skin, so they must read on the sky). */
+html[data-theme='glass-mountain'] .login-on-photo { color: rgba(255, 255, 255, 0.78) !important; }
+html[data-theme='glass-mountain'] .login-on-photo-strong { color: #ffffff !important; }
 
 /* The right-side form card — frosted glass */
 html[data-theme='glass-mountain'] [class*='rounded-2xl'][class*='bg-white'],

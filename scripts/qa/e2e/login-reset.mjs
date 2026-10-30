@@ -34,20 +34,22 @@ try {
   await t.shot(page, 'login-reset-sent')
   await context.close()
 
-  /* THE DOOR WEARS THE FIRM'S DEFAULT -- AFRICA since 29 Oct (Stephan: "make the default one there. Africa one. So I
-     have the same for the login page"): a browser that remembers somebody else's skin still shows it at sign-in, and
-     a browser on Africa sees no change at the door. */
-  for (const skin of ['glass-mountain', 'desert', 'ocean', 'original', 'raptor', 'africa']) {
+  /* THE DOOR WEARS THE BROWSER'S OWN SKIN (Stephan, 30 Oct: "everyone who picks a different skin ... will see their own
+     login page the next time they come in"). Each skin's own photograph, or for glass mountain its backdrop through a
+     see-through page; never the default forced over somebody's choice. */
+  const PHOTO = { desert: /desert-hero/, ocean: /ocean-hero/, original: /raptor-login/, raptor: /raptor-login/, africa: /africa-hero/, forest: /forest-hero/ }
+  for (const skin of ['glass-mountain', 'desert', 'ocean', 'original', 'raptor', 'africa', 'forest']) {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     await c.addInitScript((s) => { try { localStorage.setItem('crm.theme', s) } catch { /* ignore */ } }, skin)
     const p = await c.newPage()
     await stubSupabase(p, [])
     await p.goto(`http://localhost:${PORT}/login`)
     await p.getByRole('button', { name: 'Sign In' }).waitFor()
-    t.check(`a browser on ${skin}: sign-in wears Africa`, await p.evaluate(() => document.documentElement.getAttribute('data-theme')), 'africa')
-    t.ok(`a browser on ${skin}: the Africa photograph`, /africa-hero/.test(await p.evaluate(() =>
-      getComputedStyle(document.querySelector('.login-photo')).backgroundImage)))
-    t.check(`a browser on ${skin}: its own choice is still remembered for after sign-in`, await p.evaluate(() => localStorage.getItem('crm.theme')), skin)
+    t.check(`a browser on ${skin}: sign-in wears ${skin}`, await p.evaluate(() => document.documentElement.getAttribute('data-theme') ?? 'original'), skin)
+    if (PHOTO[skin]) {
+      t.ok(`a browser on ${skin}: its own photograph`, PHOTO[skin].test(await p.evaluate(() =>
+        getComputedStyle(document.querySelector('.login-photo')).backgroundImage)))
+    }
     /* AND NOTHING DRAWN OVER IT: a fixed backdrop paints above an unpositioned page, so the shell
        has to make its own stacking layer above z-index auto. */
     t.ok(`a browser on ${skin}: the page sits above any skin backdrop`, await p.evaluate(() => {
@@ -55,7 +57,7 @@ try {
       return shell.position !== 'static' && Number(shell.zIndex) >= 1
     }))
     if (skin === 'glass-mountain') await t.shot(p, 'login-on-glass-mountain')
-    if (skin === 'africa') await t.shot(p, 'login-africa')
+    if (skin === 'forest') await t.shot(p, 'login-forest')
     await c.close()
   }
   /* A browser that has never chosen: Africa at the door and Africa inside (the default). */

@@ -78,10 +78,10 @@ export function LoginPage() {
         <>
           <div className="mt-7 flex items-center gap-4">
             <span className="h-px flex-1 bg-slate-200" />
-            <p className="text-[13px] font-medium text-slate-600 whitespace-nowrap">Don't have an account?</p>
+            <p className="text-[13px] font-medium text-slate-600 whitespace-nowrap login-on-photo-strong">Don't have an account?</p>
             <span className="h-px flex-1 bg-slate-200" />
           </div>
-          <p className="mt-2 text-center text-[13px] text-slate-400">Ask your administrator to invite you.</p>
+          <p className="mt-2 text-center text-[13px] text-slate-400 login-on-photo">Ask your administrator to invite you.</p>
         </>
       }
     >

@@ -143,10 +143,10 @@ export const THEMES: ThemeDefinition[] = [
 /**
  * What someone gets before they've ever chosen a skin -- and what the sign-in page wears for everybody.
  *
- * AFRICA (S16, Raptor · Handover 15). Stephan, 29 Oct: "When I log out and I log back into Raptor ... make the default
- * one there. Africa one. So I have the same for the login page ... because when you log in, it chooses another skin."
- * The door wears the firm's default for everybody (AuthShell, 23 Oct -- nobody is known there yet), so with Raptor
- * as the default and Africa as his own skin, he met one skin at the door and another inside. The default is now his.
+ * AFRICA (S16, Raptor · Handover 15). Stephan, 29 Oct: "make the default one there. Africa one. So I have the same for
+ * the login page". And 30 Oct, of everybody else: "everyone who picks a different skin ... will see their own login
+ * page the next time they come in" -- so the sign-in page wears the browser's own skin (AuthShell), and this
+ * default is what a browser that has never chosen sees, at the door and inside.
  * index.html's pre-paint script repeats it, and check-themes holds the two together.
  *
  * Kept separate from BASE_THEME below, because the two answer different questions and the app

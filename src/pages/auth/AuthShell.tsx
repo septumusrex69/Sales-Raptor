@@ -1,5 +1,5 @@
-import { useLayoutEffect, type ReactNode } from 'react'
-import { applyTheme, DEFAULT_THEME } from '../../lib/themes'
+import type { ReactNode } from 'react'
+import { useTheme } from '../../store/ThemeContext'
 
 /**
  * The frame every signed-out page sits in.
@@ -32,24 +32,16 @@ export function AuthShell({ title, subtitle, children, footer }: {
   footer?: ReactNode
 }) {
   /*
-   * THE DOOR ALWAYS WEARS THE FIRM'S DEFAULT (23 Oct; the default is Africa since 29 Oct, see DEFAULT_THEME). The firm, at Alianna's first sign-in on an office laptop:
-   * "it doesn't show the picture from Raptor for the initial sign-in ... Nicole got that one though,
-   * but Aliana didn't." A skin is remembered PER BROWSER, not per person -- so this page wore
-   * whatever skin the last person on that machine chose (glass mountain draws no photograph here
-   * at all), and somebody signing in for the first time met somebody else's taste. Nobody is known
-   * yet on this page, so it wears the firm's default; the remembered skin comes back the moment
-   * they are through. Layout effect, so the wrong photograph never paints first.
+   * THE DOOR WEARS THIS BROWSER'S OWN SKIN (S16, 30 Oct). From 23 Oct it wore the firm's default for everybody --
+   * Alianna, signing in for the first time on an office laptop, had met the last person's skin -- and Stephan, with
+   * Africa as both his skin and the default, still said: "everyone who picks a different skin ... will see their
+   * own login page the next time they come in." So nothing is forced here: ThemeProvider (and index.html, before
+   * the first paint) put on whatever this browser chose, and a browser that never chose gets the default, Africa.
+   *
+   * ONE SKIN DRAWS THE WHOLE DOOR AS A PHOTOGRAPH: glass mountain makes the page see-through onto its mountains,
+   * so there the dark lockup and the grey words go light, or they are unreadable on the sky.
    */
-  useLayoutEffect(() => {
-    const root = document.documentElement
-    const before = root.getAttribute('data-theme')
-    applyTheme(DEFAULT_THEME)
-    return () => {
-      if (before === null) root.removeAttribute('data-theme')
-      else root.setAttribute('data-theme', before)
-    }
-  }, [])
-
+  const onPhoto = useTheme().themeId === 'glass-mountain'
   return (
     /* ABOVE THE GLASS-MOUNTAIN BACKDROP. ThemeProvider still holds the remembered skin and draws
        that skin's photograph as a position:fixed layer; a fixed layer paints over any page that is
@@ -96,13 +88,13 @@ export function AuthShell({ title, subtitle, children, footer }: {
                 centre on purpose: the wing is light gold and the wordmark is dark and heavy, so
                 measured centring reads as sitting right of centre. The eye balances mass. */}
             <img
-              src="/brand/raptor-lockup-navy.png"
+              src={onPhoto ? '/brand/raptor-lockup-light.png' : '/brand/raptor-lockup-navy.png'}
               alt="Raptor by Bredell Ferreira"
               className="w-[290px] max-w-full h-auto mt-1 -translate-x-[8px]"
             />
 
-            <h1 className="mt-9 text-[13px] font-semibold uppercase tracking-[0.22em] text-[#12233a] pl-[0.22em]">{title}</h1>
-            <p className="mt-2 text-sm text-slate-400">{subtitle}</p>
+            <h1 className={`mt-9 text-[13px] font-semibold uppercase tracking-[0.22em] pl-[0.22em] ${onPhoto ? 'text-white' : 'text-[#12233a]'}`}>{title}</h1>
+            <p className={`mt-2 text-sm ${onPhoto ? 'text-white/80' : 'text-slate-400'}`}>{subtitle}</p>
           </div>
 
           <div className="mt-7 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_12px_30px_rgba(15,23,42,0.06)]">
@@ -112,9 +104,9 @@ export function AuthShell({ title, subtitle, children, footer }: {
           {footer}
 
           <div className="mt-12 flex flex-col items-center">
-            <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-slate-400 pl-[0.28em]">Bredell Ferreira</p>
+            <p className={`text-[11px] font-medium uppercase tracking-[0.28em] pl-[0.28em] ${onPhoto ? 'text-white/80' : 'text-slate-400'}`}>Bredell Ferreira</p>
             <span className="mt-2.5 h-px w-10 bg-[#d8b56f]" />
-            <p className="mt-3 text-[10px] font-medium uppercase tracking-[0.22em] text-slate-400 pl-[0.22em]">People &nbsp;|&nbsp; Process &nbsp;|&nbsp; Performance</p>
+            <p className={`mt-3 text-[10px] font-medium uppercase tracking-[0.22em] pl-[0.22em] ${onPhoto ? 'text-white/75' : 'text-slate-400'}`}>People &nbsp;|&nbsp; Process &nbsp;|&nbsp; Performance</p>
           </div>
         </div>
       </div>
