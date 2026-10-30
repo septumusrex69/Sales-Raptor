@@ -11,7 +11,7 @@
  */
 let ctx: AudioContext | null = null
 
-function context(): AudioContext | null {
+export function context(): AudioContext | null {
   if (ctx) return ctx
   try {
     const C = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
@@ -112,8 +112,8 @@ export function playSplashSound(variant: 'circle' | 'coast' | 'towers' = 'circle
   return true
 }
 
-/* The master level and the echo every opening shares: in over `attack`, held, out by `end`. */
-function bus(c: AudioContext, t0: number, end: number, peak = 0.55) {
+/* The master level and the echo every opening shares (Raptor's own openings too, raptorSound.ts): in over `attack`, held, out by `end`. */
+export function bus(c: AudioContext, t0: number, end: number, peak = 0.55) {
   const master = c.createGain()
   master.gain.setValueAtTime(0.0001, t0)
   master.gain.exponentialRampToValueAtTime(peak, t0 + 0.3)
@@ -132,7 +132,7 @@ function bus(c: AudioContext, t0: number, end: number, peak = 0.55) {
 }
 
 /* One struck note: a quick attack and a long ring, into the master and the echo. */
-function strike(c: AudioContext, out: { master: GainNode; delay: DelayNode }, f: number, at: number, level: number, ring: number, type: OscillatorType = 'sine') {
+export function strike(c: AudioContext, out: { master: GainNode; delay: DelayNode }, f: number, at: number, level: number, ring: number, type: OscillatorType = 'sine') {
   for (const detune of [-4, 4]) {
     const o = c.createOscillator()
     o.type = type

@@ -58,7 +58,7 @@ const PROJECT_REF = new URL(SUPABASE_URL).hostname.split('.')[0]
  * server-side, and there is no server here. So an unsigned token with the right claims is enough
  * to get past the auth gate and onto the screen under test.
  */
-function fakeSession(userId, email, nowMs = Date.now()) {
+export function fakeSession(userId, email, nowMs = Date.now()) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
   /*
    * AN HOUR FROM THE BROWSER'S CLOCK, WHICH IS NOT ALWAYS THE REAL ONE. A test that pins the date

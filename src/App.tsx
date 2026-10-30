@@ -12,8 +12,10 @@ import { LoginPage } from './pages/auth/LoginPage'
 const SignPage = lazy(() => import('./pages/sign/SignPage'))
 const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
 const OptInPage = lazy(() => import('./pages/news/OptInPage'))
+import { SignInOpening } from './components/opening/SignInOpening'
 const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
 const PortalOpeningPage = lazy(() => import('./pages/portal/PortalOpeningPage'))
+const OpeningPage = lazy(() => import('./pages/OpeningPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -131,6 +133,8 @@ function App() {
           <NewVersionWatcher />
           {/* A lazily-loaded route needs a boundary; the fallback is deliberately nothing, so a
               fast chunk does not flash a spinner on its way in. */}
+          {/* Raptor's opening after a sign-in, above the routes so the page changing under it never restarts it. */}
+          <SignInOpening />
           <Suspense fallback={null}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -157,6 +161,8 @@ function App() {
             <Route path="/portal" element={<PortalPage />} />
             {/* The portal's opening animations, replayable on demand (S16, 30 Oct). No data, so no sign-in. */}
             <Route path="/portal/opening" element={<PortalOpeningPage />} />
+            {/* Raptor's own openings, replayable (S16, 30 Oct). No data, so no sign-in. */}
+            <Route path="/opening" element={<OpeningPage />} />
             <Route
               element={
                 <RequireAuth>

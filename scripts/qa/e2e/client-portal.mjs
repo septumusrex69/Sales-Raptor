@@ -149,8 +149,8 @@ try {
   /* S16, Stephan: "make it linger a little bit longer ... our logo ... some sort of epic cool animation ...
      PlayStation 2 vibes." The first opening in a tab is the full one, and it lingers, then the portal. */
   await page.getByTestId('portal-splash').waitFor({ timeout: 5000 })
-  t.ok('the portal opens on the full opening, the logo and the drawn ring', await page.locator('[data-splash="full"]').count() === 1
-    && await page.locator('.portal-splash-ring').count() === 1)
+  t.ok('the portal opens on the full opening -- the towers, Stephan\'s pick of the three', await page.locator('[data-splash="full"]').count() === 1
+    && await page.locator('.portal-splash[data-variant="towers"]').count() === 1 && await page.locator('.ps2-tower').count() > 0)
   await page.waitForTimeout(1700)
   await t.shot(page, 'client-portal-opening-1')
   t.ok('...and lingers: at 1.7 s it still covers the portal', await page.getByTestId('portal-splash').isVisible())

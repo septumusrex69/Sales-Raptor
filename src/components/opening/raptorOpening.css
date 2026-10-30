@@ -1,0 +1,131 @@
+/*
+ * RAPTOR'S OPENING (RaptorOpening.tsx). Raptor's navy and the wing's gold, whatever skin is worn. One clock for all
+ * three: the action until ~1.25 s, the impact there, the name from ~1.4 s, settled by ~2.5 s, held, then the fade.
+ */
+.raptor-opening {
+  position: fixed; inset: 0; z-index: 200; overflow: hidden; cursor: default;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 50%, #1d2c3a 0%, #111e2d 50%, #070d15 100%);
+  transition: opacity 0.55s ease;
+}
+.raptor-opening.is-leaving { opacity: 0; }
+.ro-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+
+.ro-lockup { position: relative; display: flex; align-items: center; gap: clamp(14px, 2vw, 22px); }
+.ro-wing-box { position: relative; height: clamp(76px, 11vw, 112px); aspect-ratio: 268 / 360; }
+.ro-wing { width: 100%; height: 100%; display: block; }
+.ro-words { position: relative; overflow: hidden; }
+.ro-words-img { display: block; height: clamp(46px, 6.6vw, 68px); width: auto; }
+
+/* ---------------- 1. FLIGHT ---------------- */
+.ro-wisp {
+  position: absolute; left: 100%; height: 26px; border-radius: 999px; filter: blur(12px);
+  background: rgba(207, 224, 239, 0.12); animation: ro-pass linear infinite;
+}
+.ro-streak {
+  position: absolute; left: 100%; height: 1.5px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(207, 224, 239, 0) 0%, rgba(207, 224, 239, 0.75) 100%);
+  animation: ro-pass linear 3;
+}
+.ro-streak.is-gold { background: linear-gradient(90deg, rgba(216, 181, 111, 0) 0%, rgba(236, 210, 150, 0.95) 100%); height: 2px; }
+@keyframes ro-pass { from { transform: translateX(0); } to { transform: translateX(-240vw); } }
+.is-flight .ro-wing {
+  opacity: 0; transform: translate(-70vw, 14vh) rotate(-16deg) scale(0.55); filter: blur(8px);
+  animation: ro-strike 1.15s cubic-bezier(.15, .85, .25, 1.12) 0.1s forwards;
+}
+@keyframes ro-strike {
+  60% { opacity: 1; filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: drop-shadow(0 0 0 rgba(216, 181, 111, 0)); }
+}
+.ro-tipflare {
+  position: absolute; right: -8%; top: 36%; width: 12px; height: 12px; border-radius: 999px; transform: translate(50%, -50%) scale(0);
+  background: radial-gradient(circle, rgba(255, 246, 225, 1) 0%, rgba(216, 181, 111, 0.6) 35%, rgba(216, 181, 111, 0) 70%);
+  animation: ro-flare 1.2s ease-out 1.15s forwards;
+}
+@keyframes ro-flare { 0% { transform: translate(50%, -50%) scale(0); opacity: 1; } 30% { opacity: 1; } 100% { transform: translate(50%, -50%) scale(70); opacity: 0; } }
+.is-flight .ro-words-img { clip-path: inset(0 100% 0 0); transform: translateX(-24px); animation: ro-slide 0.85s cubic-bezier(.3, .8, .2, 1) 1.35s forwards; }
+@keyframes ro-slide { to { clip-path: inset(0 0 0 0); transform: none; } }
+.ro-sweep-light {
+  position: absolute; top: -20%; bottom: -20%; width: 30%; left: -40%; mix-blend-mode: screen;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0) 0%, rgba(255, 236, 196, 0.9) 50%, rgba(255, 255, 255, 0) 100%);
+  animation: ro-sweep 0.9s ease-in-out 2.25s forwards;
+}
+@keyframes ro-sweep { to { left: 115%; } }
+
+/* ---------------- 2. ASCENT ---------------- */
+.raptor-opening.is-ascent { background: linear-gradient(180deg, #070d15 0%, #111e2d 35%, #283d50 70%, #4a4636 100%); }
+.is-ascent .ro-lockup { flex-direction: column; gap: 22px; }
+.ro-sun {
+  position: absolute; left: 50%; top: 34%; width: 60vmax; height: 60vmax; transform: translate(-50%, -50%) scale(0.3); opacity: 0;
+  background: radial-gradient(circle, rgba(236, 210, 150, 0.35) 0%, rgba(198, 159, 84, 0.12) 30%, rgba(17, 30, 45, 0) 60%);
+  animation: ro-sun 2s ease-out 0.4s forwards;
+}
+@keyframes ro-sun { to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.ro-cloud {
+  position: absolute; left: -20%; width: 140%; height: 22vh; border-radius: 50%; filter: blur(28px);
+  background: radial-gradient(ellipse at 50% 50%, rgba(220, 230, 240, 1) 0%, rgba(220, 230, 240, 0) 70%);
+  animation: ro-rise-past 3.4s cubic-bezier(.4, .1, .3, 1) forwards;
+}
+@keyframes ro-rise-past { from { transform: translateY(-30vh); } to { transform: translateY(80vh); } }
+.is-ascent .ro-wing { opacity: 0; transform: translateY(45vh) scale(0.8); filter: blur(6px); animation: ro-up 1.3s cubic-bezier(.2, .8, .2, 1) 0.1s forwards; }
+@keyframes ro-up { 70% { opacity: 1; filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+/* A light that runs along the feathers: masked by the wing itself, so it never spills off it. */
+.ro-glint {
+  position: absolute; inset: 0; opacity: 0;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0) 30%, rgba(255, 250, 235, 0.95) 50%, rgba(255, 255, 255, 0) 70%) -150% 0 / 300% 100% no-repeat;
+  -webkit-mask: url('/brand/raptor-mark.png') center / contain no-repeat; mask: url('/brand/raptor-mark.png') center / contain no-repeat;
+  animation: ro-glint 1s ease-in-out 1.3s forwards;
+}
+@keyframes ro-glint { 0% { opacity: 1; background-position: -150% 0; } 100% { opacity: 1; background-position: 150% 0; } }
+.is-ascent .ro-words-img { opacity: 0; filter: blur(10px); transform: scaleX(1.25); animation: ro-focus 1s cubic-bezier(.2, .8, .2, 1) 1.55s forwards; }
+@keyframes ro-focus { to { opacity: 1; filter: none; transform: none; } }
+
+/* ---------------- 3. LOCK ---------------- */
+.raptor-opening.is-lock { background: radial-gradient(ellipse at 50% 50%, #142538 0%, #0b1622 60%, #04080e 100%); }
+.ro-grid {
+  position: absolute; inset: 0; opacity: 0; animation: ro-in 0.6s ease forwards;
+  background-image: linear-gradient(rgba(198, 159, 84, 0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(198, 159, 84, 0.10) 1px, transparent 1px);
+  background-size: 48px 48px; background-position: center;
+}
+.ro-scan { position: absolute; inset: 0; background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px); }
+.ro-radar { position: absolute; left: 50%; top: 50%; width: min(70vmin, 560px); aspect-ratio: 1; transform: translate(-50%, -50%); animation: ro-out 0.5s ease 1.3s forwards; }
+.ro-ring { position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(198, 159, 84, 0.35); }
+.ro-ring.is-2 { inset: 18%; }
+.ro-ring.is-3 { inset: 36%; border-color: rgba(198, 159, 84, 0.5); }
+.ro-sweep {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(216, 181, 111, 0.45), rgba(216, 181, 111, 0) 70deg, rgba(216, 181, 111, 0) 360deg);
+  animation: ro-spin 0.9s linear infinite;
+}
+@keyframes ro-spin { to { transform: rotate(360deg); } }
+.ro-bracket { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; border-color: #D8B56F; border-style: solid; border-width: 0; filter: drop-shadow(0 0 6px rgba(216, 181, 111, 0.7)); }
+.ro-bracket.is-tl { border-top-width: 2px; border-left-width: 2px; --to: translate(-260px, -110px); transform: translate(-46vw, -46vh); }
+.ro-bracket.is-tr { border-top-width: 2px; border-right-width: 2px; --to: translate(226px, -110px); transform: translate(46vw, -46vh); }
+.ro-bracket.is-bl { border-bottom-width: 2px; border-left-width: 2px; --to: translate(-260px, 76px); transform: translate(-46vw, 46vh); }
+.ro-bracket.is-br { border-bottom-width: 2px; border-right-width: 2px; --to: translate(226px, 76px); transform: translate(46vw, 46vh); }
+.ro-bracket { animation: ro-close 1.05s steps(6, end) 0.15s forwards, ro-blink 0.16s step-end 1.2s 3; }
+@keyframes ro-close { to { transform: var(--to); } }
+@keyframes ro-blink { 50% { opacity: 0; } }
+.ro-flash { position: absolute; inset: 0; background: #fff6e1; opacity: 0; animation: ro-flash 0.5s ease-out 1.25s forwards; }
+@keyframes ro-flash { 0% { opacity: 0.55; } 100% { opacity: 0; } }
+.is-lock .ro-wing { opacity: 0; animation: ro-glitch 0.5s steps(2, end) 1.25s forwards; }
+@keyframes ro-glitch {
+  0% { opacity: 1; transform: translateX(-6px); filter: drop-shadow(4px 0 0 rgba(151, 180, 204, 0.8)); }
+  40% { transform: translateX(5px); }
+  70% { transform: translateX(-2px); }
+  100% { opacity: 1; transform: none; filter: none; }
+}
+.is-lock .ro-words-img { clip-path: inset(0 100% 0 0); animation: ro-slide 0.9s steps(14, end) 1.55s forwards; }
+.ro-readout {
+  position: relative; margin-top: 22px; font: 600 11px/1 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  letter-spacing: 0.4em; text-transform: uppercase; color: #D8B56F; opacity: 0; animation: ro-in 0.3s steps(3, end) 2.5s forwards;
+}
+@keyframes ro-in { to { opacity: 1; } }
+@keyframes ro-out { to { opacity: 0; } }
+
+/* ---------------- still (reduced motion) ---------------- */
+.is-still .ro-lockup { animation: ro-in 0.3s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .raptor-opening.is-still * { animation: none !important; }
+}

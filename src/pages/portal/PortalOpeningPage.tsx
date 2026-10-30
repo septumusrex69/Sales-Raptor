@@ -14,9 +14,9 @@ import './portal.css'
  * press primes the audio, then the opening plays with it. A tap during the opening skips it, as in the portal.
  */
 const OPENINGS: { id: SplashVariant; name: string; line: string }[] = [
-  { id: 'circle', name: '1 · The circle', line: 'The one the portal plays now. Lights and pillars, the gold ring draws, a flare, a bell chord.' },
+  { id: 'circle', name: '1 · The circle', line: 'The first one. Lights and pillars, the gold ring draws, a flare, a bell chord.' },
   { id: 'coast', name: '2 · The coast', line: 'Dusk over the sea. A gold horizon, the monogram rising out of it, the swell, a soft piano.' },
-  { id: 'towers', name: '3 · The towers', line: 'Closest to the PlayStation 2. A gold grid floor, towers of light, a shock-ring, a chrome turn.' },
+  { id: 'towers', name: '3 · The towers', line: 'The one the portal plays. A gold grid floor, towers of light, a shock-ring, a chrome turn.' },
 ]
 
 export default function PortalOpeningPage() {

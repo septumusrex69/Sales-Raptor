@@ -12,9 +12,9 @@ import { playSplashSound } from './portalSound'
  * (portalSound.ts) is timed to it.
  *
  * THREE TO CHOOSE FROM (30 Oct: "give me a link where I can replay it ... and just make two different ones as
- * well"). `circle` is the one above and the one the portal plays; `coast` and `towers` are the alternatives, on the
- * same three-and-a-half-second clock with their own sound, and /portal/opening plays any of them on demand. Until
- * Stephan picks, the portal keeps `circle`.
+ * well"). `circle` is the one above, `coast` and `towers` the two made after it, on the
+ * same three-and-a-half-second clock with their own sound, and /portal/opening plays any of them on demand. The portal
+ * plays `towers` (Stephan, 30 Oct: "Do number three").
  *
  * ON EVERY SIGN-IN, AND NEVER IN THE WAY. The full opening plays whenever somebody signs in (`fresh`), and the first
  * time a tab opens the portal; a reload of a portal already signed in is a short fade and no sound, because a ritual

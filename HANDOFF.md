@@ -222,6 +222,15 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   short fade, and he tested all day in one Safari tab. `PortalSplash fresh` (set by SignIn's onSignedIn) plays it in
   full on every sign-in; a reload already signed in is still the short fade. An iPad with Reduce Motion on gets the
   still logo by design. e2e client-portal 100 (break-tested).
+- **THE PORTAL PLAYS THE TOWERS (30 Oct: "Do number three")**: `PortalSplash variant="towers"` in PortalPage.
+- **RAPTOR'S OWN OPENING AFTER SIGN-IN, THREE TO CHOOSE FROM (30 Oct: "for the Raptor login, let's also ... make three
+  type of ones when it's loading and opening ... with the Raptor theme")**: `src/components/opening/` -- RaptorOpening
+  (flight / ascent / lock-on, Raptor navy and the gold wing whatever the skin), raptorSound (shares portalSound's bus,
+  echo and struck note, now exported), SignInOpening mounted ABOVE <Routes> in App so the page changing under it never
+  restarts it, and openingQueue (LoginPage calls queueRaptorOpening after a good password, priming the audio in the
+  press). A reload plays nothing. `/opening` replays any of the three, no sign-in. **Plays `flight` until Stephan
+  picks** (`RAPTOR_OPENING_DEFAULT`). New `public/brand/raptor-words-light.png` = the lockup's words alone.
+  e2e raptor-openings 12 (sign-in plays it, break-tested; each draws wing and name).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
