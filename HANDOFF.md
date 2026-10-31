@@ -277,6 +277,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   credit "Photo: Byron Breytenbach on Unsplash" sits in a corner of the sign-in and the band. The remittance advice PDF
   still uses remittance-cover.jpg (its photo is embedded from a file at build time; changing it is a separate step).
   e2e client-portal 103. Not seen by S16 itself (Unsplash images are blocked from the container): Stephan to look.
+- **...AND NOW IT IS OUR OWN COPY (31 Oct: "Didn't we download it? ... It's a safer way")**: Stephan downloaded the
+  photo and sent it (it arrived 2576 x 1717 -- the chat reduces uploads; enough for the iPad's tall panel without
+  stretching). `public/brand/portal-photo.webp` is the portal's photograph everywhere (sign-in 38% across, band 46%
+  down, the blurred room); `remittance-cover.jpg` is now a band cut from the same photo (old in git history; advices
+  already sent keep theirs). portal-signin.webp and portal-hero.webp deleted. No Unsplash link remains; the credit
+  stays. e2e client-portal 104 (the photo is the app's own and at least 2500 x 1600).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

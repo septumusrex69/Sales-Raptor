@@ -166,17 +166,15 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
       style={{ fontFamily: BODY, background: C.off }}>
       {/* THE ROOM AROUND THE FRAME: the same coastline, softened -- a background, so a phone never fetches it twice. */}
       <div aria-hidden className="hidden lg:block absolute inset-0 scale-110 blur-2xl opacity-60"
-        style={{ background: portalPhotoLayer(1200) }} />
+        style={{ background: portalPhotoLayer() }} />
       <div className="relative w-full min-h-screen lg:max-w-[1360px] lg:min-h-[640px] lg:h-[min(860px,calc(100vh-4rem))] lg:rounded-[24px] lg:overflow-hidden
         lg:shadow-[0_30px_80px_-20px_rgba(16,31,44,0.45)] lg:ring-1 lg:ring-white/40 flex flex-col lg:grid lg:grid-cols-[58fr_42fr] bg-[#FBFAF7]">
-        {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. Its own tall cut, portal-signin.webp (S16, 30 Oct; Stephan on the
-            iPad: "the same picture that is on the remittance advices. Why are you using low quality one?"). It IS the same
-            photograph, and the same file was the problem: remittance-cover.jpg is a 1672 x 609 strip, right for the
-            advice's wide band, and this panel is taller than it is wide -- so the browser cut a 600-pixel-wide piece out of
-            it and stretched that about four times over. The cut here is from the 7680-px copy, made for this shape. */}
+        {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. The portal's own full-resolution photograph (portalPhoto.ts): the
+            old remittance strip was 1672 x 609 and this panel is taller than it is wide, so it was stretched about four
+            times over -- "Why are you using low quality one?" (Stephan, 30 Oct), until a real photograph replaced it. */}
         <div className="relative text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14 min-h-[300px] sm:min-h-[380px] lg:min-h-0"
           data-testid="portal-sign-in-photo"
-          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), ${portalPhotoLayer(3200)}` }}>
+          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), ${portalPhotoLayer('38% center')}` }}>
           <div className="flex items-center gap-3.5" data-testid="portal-sign-in-logo">
             <img src="/brand/icon-light.svg" alt="" className="h-14 w-14 sm:h-20 sm:w-20" />
             <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 sm:h-[18px] w-auto" />
@@ -487,12 +485,12 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           */}
           {/*
             CLEARER, AND THE WORDS IN THE MIDDLE (S16, 30 Oct; Stephan on the iPad: "the picture ... looks vague. It's like
-            dark ... the script is not centered in the middle"). A 3000 px copy of the coastline sharpened for the iPad's
-            screen (portal-hero.webp; the advice keeps its own), the navy only as a soft shade behind the words so the cliffs,
-            the sea and the light stay bright, and the words and the button centred on the band's height.
+            dark ... the script is not centered in the middle"). The portal's own photograph (portalPhoto.ts), framed on the
+            bay, the navy only as a soft shade behind the words so the sea and the light stay bright, and the words and the
+            button centred on the band's height.
           */}
           <header className="relative overflow-hidden rounded-[18px] text-white min-h-[188px] flex" data-testid="portal-hero"
-            style={{ background: `linear-gradient(90deg, rgba(16,31,44,0.82) 0%, rgba(16,31,44,0.55) 30%, rgba(16,31,44,0.12) 58%, rgba(16,31,44,0) 80%), ${portalPhotoLayer(3200, 'center 55%', '/brand/portal-hero.webp')}` }}>
+            style={{ background: `linear-gradient(90deg, rgba(16,31,44,0.82) 0%, rgba(16,31,44,0.55) 30%, rgba(16,31,44,0.12) 58%, rgba(16,31,44,0) 80%), ${portalPhotoLayer('center 46%')}` }}>
             <div className="w-full px-6 sm:px-10 py-7 flex flex-wrap items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="bf-label text-[11.5px] text-[#C69F54]">{me.client}</p>

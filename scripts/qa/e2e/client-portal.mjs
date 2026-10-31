@@ -104,12 +104,15 @@ try {
   await t.shot(page, 'client-portal-sign-in')
   t.ok('the sign-in carries the BF circle and the wordmark over the coastline', await page.getByTestId('portal-sign-in-logo').locator('img').count() === 2)
   // The panel is taller than it is wide: the remittance strip (1672 x 609) stretched four times over there (S16, 30 Oct).
-  /* THE PHOTOGRAPH IS A REAL HIGH-RESOLUTION ONE (Stephan, 31 Oct, the third time), from Unsplash at 3 200 px, the old cut
-     underneath in case it cannot load -- and its photographer is credited, as Unsplash asks. */
+  /* THE PHOTOGRAPH IS A REAL HIGH-RESOLUTION ONE, AND OURS (Stephan, 31 Oct: the third time he raised the quality, then
+     "Didn't we download it? ... It's a safer way"): the app's own copy, never a link to Unsplash, credited. */
   {
     const bg = await page.getByTestId('portal-sign-in-photo').evaluate((e) => e.style.background)
-    t.ok('the sign-in photograph is the full-resolution Unsplash one, with the old cut beneath it', /images\.unsplash\.com\/photo-1583654646893-b89ba9d3849c[^)]*w=3200/.test(bg) && /portal-signin\.webp/.test(bg)
-      && !/remittance-cover/.test(bg))
+    t.ok('the sign-in photograph is the app\'s own full-resolution copy, not a link to Unsplash or the old strip', /portal-photo\.webp/.test(bg)
+      && !/unsplash\.com|remittance-cover|portal-signin/.test(bg))
+    t.ok('...and it is big enough for the iPad\'s tall panel without stretching', await page.evaluate(() => new Promise((ok) => {
+      const i = new Image(); i.onload = () => ok(i.naturalWidth >= 2500 && i.naturalHeight >= 1600); i.onerror = () => ok(false); i.src = '/brand/portal-photo.webp'
+    })))
     t.ok('...and the photographer is credited', /Byron Breytenbach/.test(await page.getByTestId('portal-sign-in-photo').getByTestId('portal-photo-credit').innerText()))
   }
   t.ok('...says it is the secure client portal, and offers no Microsoft sign-in', /secure client portal/i.test(await page.getByTestId('portal-page').innerText())
@@ -185,7 +188,7 @@ try {
   t.ok('...and says a ticket is waiting on the client', /1 ticket is waiting on you/.test(await page.getByTestId('portal-waiting').innerText()))
   t.ok('...with no fee, commission or interest anywhere on it', !/fee|commission|interest/i.test(await page.getByTestId('portal-dashboard').innerText()))
   /* S16: Raptor's shape in the firm's colours (Stephan: "make it look and feel like Raptor ... more like Bredell"). */
-  t.ok('the band is Raptor\'s, over the full-resolution coastline', /images\.unsplash\.com\/photo-1583654646893/.test(await page.getByTestId('portal-hero').evaluate((e) => e.style.background))
+  t.ok('the band is Raptor\'s, over the full-resolution coastline', /portal-photo\.webp/.test(await page.getByTestId('portal-hero').evaluate((e) => e.style.background))
     && /Dashboard/.test(await page.getByTestId('portal-hero').innerText()))
   t.check('the sidebar carries the BF circle beside the wordmark', await page.getByTestId('portal-logo').locator('img').count(), 2)
   const chart = page.getByTestId('portal-handovers')
