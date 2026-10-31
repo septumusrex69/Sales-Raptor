@@ -6,6 +6,7 @@ import { credentialsKeyProblem, hashPassword, keyedHash, passwordMatches, sameHe
 import { sendAsUser } from './email/sendAsUser.js'
 import { EMAIL_IN_KIND, receivedEmailNote } from '../../src/lib/emailRules.js'
 import { can } from '../../src/lib/capabilities.js'
+import { johannesburgToday, photoOfTheDay, portalPhotoProbe } from '../../src/lib/portalPhotos.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_PASSWORD_FAILURES, PORTAL_PASSWORD_LOCK_MINUTES, PORTAL_PASSWORD_WRONG,
@@ -286,6 +287,48 @@ async function ring(admin: SupabaseClient, to: string[], type: string, message: 
   if (to.length === 0) return
   const { error } = await admin.from('notifications').insert(to.map((userId) => ({ user_id: userId, type, message, link })))
   if (error) console.error(`[portal] notification not made (${type}): ${error.message}`)
+}
+
+/*
+ * IS TODAY'S PORTAL PHOTOGRAPH REACHING PEOPLE? (S16, 31 Oct; Stephan: "ping me and tell me when Unsplash is off ... a
+ * notification ... any administrator's dashboard".) Two ways in: a client's browser that could not load it
+ * (`photo-failed`), and the morning check (`photo-check`, a Vercel cron) so the firm hears before any client notices.
+ * Either way THE SERVER LOOKS FOR ITSELF -- a client on a bad connection is not an outage -- and rings every active
+ * Administrator AT MOST ONCE A DAY, however many browsers report it. The portal already shows Llandudno meanwhile.
+ */
+async function unsplashServes(): Promise<{ ok: boolean; why: string }> {
+  const photo = photoOfTheDay(johannesburgToday(new Date()))
+  try {
+    const r = await fetch(portalPhotoProbe(photo), { signal: AbortSignal.timeout(8000) })
+    return r.ok ? { ok: true, why: '' } : { ok: false, why: `Unsplash answered ${r.status}` }
+  } catch (e) {
+    return { ok: false, why: e instanceof Error && e.name === 'TimeoutError' ? 'Unsplash did not answer within 8 seconds' : 'Unsplash could not be reached' }
+  }
+}
+
+const PHOTO_ALARM = 'portal_photo'
+
+async function photoAlarm(admin: SupabaseClient): Promise<boolean> {
+  const check = await unsplashServes()
+  if (check.ok) return false
+  const since = new Date(`${johannesburgToday(new Date())}T00:00:00+02:00`).toISOString()
+  const { count } = await admin.from('notifications').select('id', { count: 'exact', head: true }).eq('type', PHOTO_ALARM).gte('created_at', since)
+  if ((count ?? 0) > 0) return true
+  const { data: admins } = await admin.from('profiles').select('id').eq('role', 'Administrator').eq('status', 'Active')
+  const photo = photoOfTheDay(johannesburgToday(new Date()))
+  await ring(admin, (admins ?? []).map((p) => p.id as string), PHOTO_ALARM,
+    `The client portal's photo of the day ("${photo.title}") is not loading from Unsplash: ${check.why}. Clients are seeing Llandudno instead.`, '/')
+  return true
+}
+
+const photoFailed: Handler = async (_req, res, admin) => {
+  res.status(200).json({ ok: true, down: await photoAlarm(admin) })
+}
+
+const photoCheck: Handler = async (req, res, admin) => {
+  const cronSecret = process.env.CRON_SECRET
+  if (!(cronSecret && req.headers.authorization === `Bearer ${cronSecret}`)) { res.status(401).json({ error: 'Unauthorized' }); return }
+  res.status(200).json({ ok: true, down: await photoAlarm(admin) })
 }
 
 /** The ticket behind a number, if -- and only if -- it is this client's and of a kind they may see. */
@@ -804,6 +847,8 @@ export const PORTAL_ROUTES: Record<string, Handler> = {
   'staff-list': staffList,
   'staff-invite': staffInvite,
   'staff-set-active': staffSetActive,
+  'photo-failed': photoFailed,
+  'photo-check': photoCheck,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -811,7 +856,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   /* hasOwnProperty, as in api/email: `?action=constructor` must not find Object.prototype's. */
   const route = Object.prototype.hasOwnProperty.call(PORTAL_ROUTES, action) ? PORTAL_ROUTES[action] : undefined
   if (!route) { res.status(404).json({ error: `Unknown portal route: ${action || '(none)'}` }); return }
-  if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return }
+  /* Vercel's cron calls with GET; it is the only route that may, and it carries the cron secret. */
+  if (req.method !== 'POST' && !(action === 'photo-check' && req.method === 'GET')) { res.status(405).json({ error: 'Method not allowed' }); return }
   const admin = adminClient()
   if (!admin) { res.status(500).json({ error: 'Server is missing Supabase configuration.' }); return }
   const keyProblem = credentialsKeyProblem()

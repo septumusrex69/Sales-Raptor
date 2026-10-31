@@ -41,6 +41,9 @@ export const verifyPortalCode = (email: string, code: string, reset = false, rem
 export const portalSignInWithPassword = (email: string, password: string, remember = true) =>
   call<{ token: string; expiresAt: string }>('sign-in', { email, password, remember })
 export const setPortalPassword = (token: string, password: string) => call<{ ok: boolean }>('set-password', { password }, token)
+/* S16: the day's photograph did not load in this browser. No session needed -- it may happen on the sign-in page --
+   and the server does not take the browser's word for it: it checks Unsplash itself before telling anybody. */
+export const reportPortalPhotoFailure = (photoId: string) => call<{ ok: boolean; down: boolean }>('photo-failed', { photoId })
 
 export interface PortalMe { name: string; email: string; client: string }
 export const fetchPortalMe = (token: string) => call<PortalMe>('me', {}, token)

@@ -3,6 +3,7 @@ import { ChevronDown, Check } from 'lucide-react'
 import { Dashboard } from './Dashboard'
 import { CommunicationsDashboard } from './CommunicationsDashboard'
 import { useTitleSlot } from '../components/layout/TitleSlot'
+import { PortalPhotoAlert } from '../components/dashboard/PortalPhotoAlert'
 
 /*
  * NO "OVERVIEW" ANY MORE (the firm, 18 Oct: "there's a communications area in the sales thing. I don't
@@ -46,9 +47,10 @@ export function AdminOverview() {
   // the title rather than among the filters inside the page.
   useTitleSlot(<ViewMenu view={view} onChange={setView} />, [view])
 
-  if (view === 'communications') return <CommunicationsDashboard layoutKey={ADMIN_LAYOUT_KEY} />
+  /* Unsplash down for the client portal's photo: said here too, to Administrators only (PortalPhotoAlert). */
+  if (view === 'communications') return <><PortalPhotoAlert /><CommunicationsDashboard layoutKey={ADMIN_LAYOUT_KEY} /></>
 
-  return <Dashboard layoutKey={ADMIN_LAYOUT_KEY} />
+  return <><PortalPhotoAlert /><Dashboard layoutKey={ADMIN_LAYOUT_KEY} /></>
 }
 
 function ViewMenu({ view, onChange }: { view: View; onChange: (v: View) => void }) {

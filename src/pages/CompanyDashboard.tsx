@@ -12,6 +12,7 @@ import { MonthControls } from '../components/collections/MonthControls'
 import { MonthProgress } from '../components/collections/MonthProgress'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
+import { PortalPhotoAlert } from '../components/dashboard/PortalPhotoAlert'
 import { useCollectionsMonth } from '../hooks/useCollectionsMonth'
 import { bookSlices, intakeBars, intakeComparison, intakeMonthBars, spansMonths, intakeSplit, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
 import { getPreviousSalesMonth } from '../lib/salesMonth'
@@ -124,6 +125,8 @@ export function CompanyDashboard() {
 
   return (
     <div className="space-y-4">
+      {/* Administrators only, and only when Unsplash cannot serve the client portal's photo of the day. */}
+      <PortalPhotoAlert />
       <CollectionsHero
         figures={month.figures}
         filters={<MonthControls month={month} />}

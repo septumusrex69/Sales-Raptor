@@ -79,8 +79,11 @@ try {
   const city = await page.getByTestId('photo-candidate').count()
   await page.getByTestId('photos-people').click()
   const people = await page.getByTestId('photo-candidate').count()
-  t.ok(`the photo board shows ${total}: mostly nature (${nature}), some city (${city}) and people (${people})`, total >= 12 && nature + city + people === total
-    && nature / total >= 0.6 && city > 0 && people > 0)
+  /* Stephan's mix (31 Oct): "nature to 40 ... 35 [people] ... twenty-five city". */
+  t.ok(`the photo board shows ${total}: about 40% nature (${nature}), a third people (${people}), a quarter city (${city})`, total >= 20 && nature + city + people === total
+    && Math.abs(nature / total - 0.40) <= 0.05 && Math.abs(people / total - 0.35) <= 0.05 && Math.abs(city / total - 0.25) <= 0.05)
+  await page.getByTestId('photos-all').click()
+  t.check('today\'s photograph is marked', await page.getByTestId('photo-today').count(), 1)
   await page.getByTestId('photos-all').click()
   await page.goto(`http://localhost:${PORT}/portal/opening`)
   await page.getByTestId('portal-openings').waitFor()

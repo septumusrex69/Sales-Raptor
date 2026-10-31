@@ -58,6 +58,8 @@ const PROJECT_REF = new URL(SUPABASE_URL).hostname.split('.')[0]
  * server-side, and there is no server here. So an unsigned token with the right claims is enough
  * to get past the auth gate and onto the screen under test.
  */
+const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+
 export function fakeSession(userId, email, nowMs = Date.now()) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
   /*
@@ -126,6 +128,13 @@ export function stopServer(server) {
  * the cause.
  */
 export async function stubSupabase(page, handlers, seen) {
+  /*
+   * UNSPLASH ANSWERS, unless a test says otherwise (S16). The client portal's photo of the day loads from
+   * images.unsplash.com, and an Administrator's dashboard warns when it cannot (PortalPhotoAlert). The test browser has no
+   * route out, so without this every Administrator page would wear that warning. A test about the outage aborts the
+   * route itself (page.route registered later wins).
+   */
+  await page.route('**/images.unsplash.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: TINY_PNG }))
   await page.route('**/*.supabase.co/**', async (route) => {
     const req = route.request()
     const url = req.url()

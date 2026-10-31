@@ -57,6 +57,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/portal/photo-check",
+      "schedule": "37 4 * * *"
+    },
+    {
       "path": "/api/workflow/run",
       "schedule": "0 6 * * *"
     },

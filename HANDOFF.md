@@ -289,6 +289,19 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   page keeps nothing); the pick gets downloaded into the app as Llandudno was -- register it with
   `mcp__Unsplash__download_asset` (ids are in PortalPhotosPage.tsx), then he sends the file or the network allows
   images.unsplash.com. e2e portal-openings 20. **Waiting on his number.**
+- **A NEW SOUTH AFRICAN PHOTOGRAPH EVERY DAY, WITH A LINE (31 Oct)**: `src/lib/portalPhotos.ts` (moved from
+  src/pages/portal/portalPhoto.ts) -- 24 photos, his mix "nature 40 ... 35 [people] ... 25 city" (10/8/6), spread so the
+  kinds alternate, `photoOfTheDay(johannesburgToday())` from 31 Oct = the elephant (his pick for day one). Each has a
+  `line`: a quote ON GOOD AUTHORITY (Mandela, Einstein, Musk, Marcus Aurelius, Roosevelt, Tolkien, Kolisi, the anthem
+  -- no misattributed internet quotes) or a firm's own line, facts checked; nothing political, at his instruction. Shown
+  on the sign-in panel, under the dashboard band's title and on /portal/photos (today's marked). Photos other than
+  Llandudno load from Unsplash (container can't download them); Llandudno is always the layer beneath.
+- **UNSPLASH DOWN IS SAID OUT LOUD (31 Oct: "ping me ... when Unsplash is off ... any administrator's dashboard")**:
+  (1) `PortalPhotoAlert` on the company dashboard and /dashboard/admin, Administrators only, only when this browser
+  cannot load today's photo; (2) the portal reports a failed load to `photo-failed`, and the server CHECKS UNSPLASH
+  ITSELF before ringing every active Administrator, at most once a day (type `portal_photo`); (3) a morning cron
+  `/api/portal/photo-check` 04:37 UTC (needs CRON_SECRET, as the others). The e2e harness answers images.unsplash.com
+  with a 1x1 png so no other test wears the warning. e2e company-dashboard 56, client-portal, portal-openings 21.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

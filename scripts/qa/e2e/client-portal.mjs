@@ -108,12 +108,15 @@ try {
      "Didn't we download it? ... It's a safer way"): the app's own copy, never a link to Unsplash, credited. */
   {
     const bg = await page.getByTestId('portal-sign-in-photo').evaluate((e) => e.style.background)
-    t.ok('the sign-in photograph is the app\'s own full-resolution copy, not a link to Unsplash or the old strip', /portal-photo\.webp/.test(bg)
-      && !/unsplash\.com|remittance-cover|portal-signin/.test(bg))
+    /* A NEW PHOTOGRAPH EVERY DAY (31 Oct): today's, from Unsplash unless it is Llandudno's day -- and Llandudno, the app's
+       own copy, always underneath, so a day Unsplash fails is never a blank panel. Never the old strip. */
+    t.ok('the sign-in photograph is today\'s, with the app\'s own copy always beneath it, never the old strip', /portal-photo\.webp/.test(bg)
+      && !/remittance-cover|portal-signin/.test(bg))
+    t.ok('...with the day\'s line beside it', (await page.getByTestId('portal-sign-in-photo').getByTestId('portal-day-line').innerText()).length > 20)
     t.ok('...and it is big enough for the iPad\'s tall panel without stretching', await page.evaluate(() => new Promise((ok) => {
       const i = new Image(); i.onload = () => ok(i.naturalWidth >= 2500 && i.naturalHeight >= 1600); i.onerror = () => ok(false); i.src = '/brand/portal-photo.webp'
     })))
-    t.ok('...and the photographer is credited', /Byron Breytenbach/.test(await page.getByTestId('portal-sign-in-photo').getByTestId('portal-photo-credit').innerText()))
+    t.ok('...and the photographer is credited', /Photo: \S+.* on Unsplash/.test(await page.getByTestId('portal-sign-in-photo').getByTestId('portal-photo-credit').innerText()))
   }
   t.ok('...says it is the secure client portal, and offers no Microsoft sign-in', /secure client portal/i.test(await page.getByTestId('portal-page').innerText())
     && !/microsoft/i.test(await page.getByTestId('portal-page').innerText()))

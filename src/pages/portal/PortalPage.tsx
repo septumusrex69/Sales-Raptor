@@ -5,7 +5,7 @@ import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosi
 import { PORTAL_PASSWORD_MIN, portalPasswordProblem, type PortalTopic } from '../../lib/clientPortal'
 import {
   PortalSignedOut, fetchPortalBook, fetchPortalMe, fetchPortalTickets, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
-  savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
+  reportPortalPhotoFailure, savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
 import { PortalTickets } from './PortalTickets'
 import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
@@ -15,7 +15,8 @@ import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
 import './portal.css'
 import { PortalSplash } from './PortalSplash'
-import { PORTAL_PHOTO, portalPhotoLayer } from './portalPhoto'
+import { photoCredit, photoOfTheDay, johannesburgToday, portalPhotoLayer, portalPhotoProbe, type PortalPhoto } from '../../lib/portalPhotos'
+import { clockNow } from '../../lib/clock'
 import { primeSplashAudio } from './portalSound'
 import '@fontsource-variable/raleway'
 import '@fontsource-variable/open-sans'
@@ -41,6 +42,9 @@ export default function PortalPage() {
 
   const signedOut = useCallback(() => { savePortalToken(null); setToken(null); setMe(null) }, [])
 
+  /* Is today's photograph reaching people? Asked once per tab, signed in or not (probeTodaysPhoto). */
+  useEffect(() => { probeTodaysPhoto() }, [])
+
   useEffect(() => {
     if (!token) return
     let live = true
@@ -60,12 +64,47 @@ export default function PortalPage() {
   </>
 }
 
-/* The photographer's credit, as Unsplash asks (portalPhoto.ts): small, in a corner of the photograph, never in the way. */
+/* TODAY'S PHOTOGRAPH (portalPhotos.ts): a new one of South Africa each day, the same for every client that day. */
+const todaysPhoto = (): PortalPhoto => photoOfTheDay(johannesburgToday(clockNow()))
+
+/*
+ * IF UNSPLASH CANNOT SERVE IT, SAY SO (Stephan, 31 Oct: "ping me and tell me when Unsplash is off ... a notification
+ * ... any administrator's dashboard"). The portal already falls back to Llandudno by itself; this is so somebody KNOWS.
+ * Once per tab, a tiny copy of the day's photograph is asked for; if it does not come, the server is told, checks for
+ * itself and rings every Administrator -- once a day, however many clients notice.
+ */
+let photoProbed = false
+function probeTodaysPhoto() {
+  if (photoProbed || typeof Image === 'undefined') return
+  photoProbed = true
+  const p = todaysPhoto()
+  const img = new Image()
+  const timer = setTimeout(() => { img.src = ''; report() }, 10_000)
+  function report() { void reportPortalPhotoFailure(p.id).catch(() => {}) }
+  img.onload = () => clearTimeout(timer)
+  img.onerror = () => { clearTimeout(timer); report() }
+  img.src = portalPhotoProbe(p)
+}
+
+/* THE DAY'S LINE, with the day's photograph (portalPhotos.ts): a quote from somebody worth quoting, or a line of the
+   firm's own about the place in the picture. Quiet: a thin gold rule, italic, smaller than the words around it. */
+function DayLine({ className = '', compact = false }: { className?: string; compact?: boolean }) {
+  const p = todaysPhoto()
+  return (
+    <figure className={`${className} border-l-2 border-[#C69F54] pl-3`} data-testid="portal-day-line">
+      <blockquote className={`italic text-white/90 [text-shadow:0_1px_8px_rgba(16,31,44,0.55)] ${compact ? 'text-[13px]' : 'text-[15px]'}`}>“{p.line}”</blockquote>
+      {p.who && <figcaption className={`mt-1 text-[#C69F54] ${compact ? 'text-[11px]' : 'text-xs'}`}>{p.who}</figcaption>}
+    </figure>
+  )
+}
+
+/* The photographer's credit (Unsplash asks for it): small, in a corner of the photograph, never in the way. */
 function PhotoCredit({ className = 'absolute right-3 bottom-2' }: { className?: string }) {
+  const credit = photoCredit(todaysPhoto())
   return (
     <p className={`${className} text-[10px] text-white/55`} data-testid="portal-photo-credit">
-      Photo: <a href={PORTAL_PHOTO.credit.profile} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">{PORTAL_PHOTO.credit.name}</a>
-      {' '}on <a href={PORTAL_PHOTO.credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">Unsplash</a>
+      Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">{credit.name}</a>
+      {' '}on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">Unsplash</a>
     </p>
   )
 }
@@ -166,7 +205,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
       style={{ fontFamily: BODY, background: C.off }}>
       {/* THE ROOM AROUND THE FRAME: the same coastline, softened -- a background, so a phone never fetches it twice. */}
       <div aria-hidden className="hidden lg:block absolute inset-0 scale-110 blur-2xl opacity-60"
-        style={{ background: portalPhotoLayer() }} />
+        style={{ background: portalPhotoLayer(todaysPhoto(), 1200) }} />
       <div className="relative w-full min-h-screen lg:max-w-[1360px] lg:min-h-[640px] lg:h-[min(860px,calc(100vh-4rem))] lg:rounded-[24px] lg:overflow-hidden
         lg:shadow-[0_30px_80px_-20px_rgba(16,31,44,0.45)] lg:ring-1 lg:ring-white/40 flex flex-col lg:grid lg:grid-cols-[58fr_42fr] bg-[#FBFAF7]">
         {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. The portal's own full-resolution photograph (portalPhoto.ts): the
@@ -174,7 +213,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
             times over -- "Why are you using low quality one?" (Stephan, 30 Oct), until a real photograph replaced it. */}
         <div className="relative text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14 min-h-[300px] sm:min-h-[380px] lg:min-h-0"
           data-testid="portal-sign-in-photo"
-          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), ${portalPhotoLayer('38% center')}` }}>
+          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), ${portalPhotoLayer(todaysPhoto(), 3200)}` }}>
           <div className="flex items-center gap-3.5" data-testid="portal-sign-in-logo">
             <img src="/brand/icon-light.svg" alt="" className="h-14 w-14 sm:h-20 sm:w-20" />
             <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 sm:h-[18px] w-auto" />
@@ -188,6 +227,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
             <p className="mt-5 text-[15px] sm:text-base leading-relaxed text-white/85 max-w-lg">
               Every account you have handed over, what has been collected, your reports and your tickets — all in one place.
             </p>
+            <DayLine className="mt-8 max-w-lg" />
           </div>
           <PhotoCredit />
         </div>
@@ -490,12 +530,13 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
             button centred on the band's height.
           */}
           <header className="relative overflow-hidden rounded-[18px] text-white min-h-[188px] flex" data-testid="portal-hero"
-            style={{ background: `linear-gradient(90deg, rgba(16,31,44,0.82) 0%, rgba(16,31,44,0.55) 30%, rgba(16,31,44,0.12) 58%, rgba(16,31,44,0) 80%), ${portalPhotoLayer('center 46%')}` }}>
+            style={{ background: `linear-gradient(90deg, rgba(16,31,44,0.82) 0%, rgba(16,31,44,0.55) 30%, rgba(16,31,44,0.12) 58%, rgba(16,31,44,0) 80%), ${portalPhotoLayer(todaysPhoto(), 3200, todaysPhoto().band ?? 'center')}` }}>
             <div className="w-full px-6 sm:px-10 py-7 flex flex-wrap items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="bf-label text-[11.5px] text-[#C69F54]">{me.client}</p>
                 <h1 className="text-[30px] sm:text-[36px] leading-tight mt-1.5 [text-shadow:0_1px_12px_rgba(16,31,44,0.45)]">{here.title}</h1>
                 <p className="text-[15px] text-white/90 mt-1 [text-shadow:0_1px_8px_rgba(16,31,44,0.5)]">{section === 'dashboard' ? 'Your book, where it stands, whenever you want to look.' : here.blurb}</p>
+                {section === 'dashboard' && <DayLine className="mt-3 max-w-xl" compact />}
               </div>
               <button type="button" onClick={() => { setDone(null); setAsking({ about: null }) }} data-testid="portal-hero-call"
                 className="inline-flex items-center gap-2 rounded-[10px] bg-[#101F2C]/45 hover:bg-[#101F2C]/65 border border-white/25 px-4 py-2.5 text-sm font-semibold backdrop-blur-md">

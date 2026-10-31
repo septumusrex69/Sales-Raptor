@@ -223,6 +223,22 @@ try {
   await page.getByTestId('awaiting-first-handover').scrollIntoViewIfNeeded()
   await t.shot(page, 'communications-awaiting')
 
+  /* UNSPLASH UP: no warning. UNSPLASH DOWN: the Administrator is told, on this dashboard (Stephan, 31 Oct: "ping me ...
+     when Unsplash is off ... any administrator's dashboard"). The harness answers Unsplash; here it is cut off. */
+  t.check('with Unsplash serving, no photo warning on the dashboard', await page.getByTestId('portal-photo-alert').count(), 0)
+  {
+    const down = await signedInPage(browser, ADMIN, handlers, seen, { now: '2026-10-18T10:00:00+02:00' })
+    await down.page.route('**/images.unsplash.com/**', (route) => route.abort())
+    for (let i = 0; i < 60; i += 1) {
+      try { await down.page.goto(`http://localhost:${PORT}/`, { timeout: 2000 }); break }
+      catch { await new Promise((r) => setTimeout(r, 500)) }
+    }
+    await down.page.getByTestId('portal-photo-alert').waitFor({ timeout: 15000 }).catch(() => {})
+    const said = await down.page.getByTestId('portal-photo-alert').innerText().catch(() => '')
+    t.ok('with Unsplash down, the Administrator sees it, saying clients see Llandudno meanwhile', /Unsplash is not serving/.test(said) && /Llandudno/.test(said))
+    await t.shot(down.page, 'company-dashboard-photo-alert')
+    await down.context.close()
+  }
   await context.close()
 } finally {
   if (browser) await browser.close()

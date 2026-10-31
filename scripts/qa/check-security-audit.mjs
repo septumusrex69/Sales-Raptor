@@ -38,8 +38,9 @@ ok('...the camera and location are off', /camera=\(\)/.test(h['Permissions-Polic
 ok('...but NOT the microphone: dictation uses it', !/microphone/.test(h['Permissions-Policy'] ?? ''))
 ok('the CSP is report-only until its reports are read', Boolean(h['Content-Security-Policy-Report-Only']) && !h['Content-Security-Policy'])
 ok('...and names frame-ancestors none', /frame-ancestors 'none'/.test(h['Content-Security-Policy-Report-Only'] ?? ''))
-/* 4 crons since S14: the morning run for campaign follow-ups and results emails (/api/email/marketing-daily). */
-ok('the rewrites and crons were kept', vercel.rewrites?.length === 1 && vercel.crons?.length === 4)
+/* 4 crons since S14: the morning run for campaign follow-ups and results emails (/api/email/marketing-daily).
+   5 since S16 (31 Oct): the morning check that Unsplash serves the client portal's photo of the day (/api/portal/photo-check). */
+ok('the rewrites and crons were kept', vercel.rewrites?.length === 1 && vercel.crons?.length === 5)
 
 /* ---------- C-04 ---------- */
 const project = 'https://kvkajxpremantdkhmjvb.supabase.co'
