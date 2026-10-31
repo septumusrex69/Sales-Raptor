@@ -140,3 +140,89 @@ export function johannesburgToday(now: Date): string {
 export function portalPhotoProbe(p: PortalPhoto): string {
   return portalPhotoUrl({ ...p, local: undefined }, 64)
 }
+
+/*
+ * THE DAY'S LOOK, APPROVED A MONTH AT A TIME (S16, 31 Oct). Stephan, at the elephant: "as the picture changes, we're
+ * going to have to move the script ... pre-choose everything and approve it ... exactly how it's going to look ... for
+ * the month" -- "any administrator can approve it". A look is a photograph PLUS how it is shown: where it is framed in
+ * the wide band and in the tall sign-in panel, which side the words sit, how dark the shade is under them, and the line.
+ * The table is public.portal_day_looks; the screen is /portal-looks.
+ *
+ * ONLY AN APPROVED LOOK IS SHOWN. A day with no approved row gets LLANDUDNO_LOOK -- the app's own photograph, whose
+ * framing is known -- so nothing unchecked reaches a client. lookFromRow is the one place that decides it, for the
+ * portal (through its server), the Bredell Ferreira skin and the dashboards' warning alike.
+ */
+export interface DayLookRow {
+  day: string
+  photo_id: string
+  band_x: number
+  band_y: number
+  signin_x: number
+  signin_y: number
+  text_side: 'left' | 'right'
+  shade: number
+  line: string | null
+  who: string | null
+  approved_at: string | null
+  approved_by?: string | null
+}
+
+export interface DayLook {
+  photo: PortalPhoto
+  band: { x: number; y: number }
+  signin: { x: number; y: number }
+  side: 'left' | 'right'
+  shade: number
+  line: string
+  who?: string
+  approved: boolean
+}
+
+export const LLANDUDNO = PORTAL_PHOTOS.find((p) => p.id === 'eU6Da03AsUQ') as PortalPhoto
+
+export const LLANDUDNO_LOOK: DayLook = {
+  photo: LLANDUDNO, band: { x: 50, y: 46 }, signin: { x: 38, y: 50 }, side: 'left', shade: 0.82,
+  line: LLANDUDNO.line, who: LLANDUDNO.who, approved: false,
+}
+
+export function photoById(id: string): PortalPhoto | undefined {
+  return PORTAL_PHOTOS.find((p) => p.id === id)
+}
+
+/** The look a day shows: its row if that row is APPROVED and names a photograph we have, Llandudno otherwise. */
+export function lookFromRow(row: DayLookRow | null | undefined): DayLook {
+  if (!row || !row.approved_at) return LLANDUDNO_LOOK
+  const photo = photoById(row.photo_id)
+  if (!photo) return LLANDUDNO_LOOK
+  return {
+    photo,
+    band: { x: Number(row.band_x), y: Number(row.band_y) },
+    signin: { x: Number(row.signin_x), y: Number(row.signin_y) },
+    side: row.text_side === 'right' ? 'right' : 'left',
+    shade: Math.min(1, Math.max(0, Number(row.shade))),
+    line: row.line?.trim() || photo.line,
+    who: row.line?.trim() ? (row.who?.trim() || undefined) : photo.who,
+    approved: true,
+  }
+}
+
+/** A fresh, unapproved row for a day: the rotation's photograph for it, framed in the middle, words on the left. */
+export function draftRowFor(day: string): DayLookRow {
+  const p = photoOfTheDay(day)
+  return { day, photo_id: p.id, band_x: 50, band_y: 50, signin_x: 50, signin_y: 50, text_side: 'left', shade: 0.8, line: null, who: null, approved_at: null }
+}
+
+/** The wide band's background: a shade from the words' side, the photograph framed where it was approved. */
+export function bandBackground(look: DayLook, width = 3200): string {
+  const a = look.shade
+  const toward = look.side === 'left' ? '90deg' : '270deg'
+  const shade = `linear-gradient(${toward}, rgba(16,31,44,${a}) 0%, rgba(16,31,44,${(a * 0.66).toFixed(2)}) 30%, rgba(16,31,44,${(a * 0.15).toFixed(2)}) 58%, rgba(16,31,44,0) 80%)`
+  return `${shade}, ${portalPhotoLayer(look.photo, width, `${look.band.x}% ${look.band.y}%`)}`
+}
+
+/** The tall sign-in panel's background: darker towards the foot, where its words are. */
+export function signinBackground(look: DayLook, width = 2400): string {
+  const a = look.shade
+  const shade = `linear-gradient(180deg, rgba(16,31,44,${(a * 0.36).toFixed(2)}) 0%, rgba(16,31,44,${(a * 0.12).toFixed(2)}) 35%, rgba(16,31,44,${(a * 0.95).toFixed(2)}) 78%, rgba(16,31,44,${Math.min(1, a * 1.12).toFixed(2)}) 100%)`
+  return `${shade}, ${portalPhotoLayer(look.photo, width, `${look.signin.x}% ${look.signin.y}%`)}`
+}

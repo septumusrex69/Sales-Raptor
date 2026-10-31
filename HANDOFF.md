@@ -312,6 +312,22 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   CollectionsHero, base skin only). Tests that knew Africa's "our roots" now look for "The sky is only"; login-reset's
   new-browser door is the BF skin with the day photo. The day photo is set on load and on skin change -- a tab left open
   past midnight keeps yesterday's until reloaded (fine; noted).
+- **THE PHOTOGRAPH OF THE DAY IS APPROVED A MONTH AT A TIME (31 Oct: "as the picture changes, we're going to have to move
+  the script ... pre-choose everything and approve it ... for the month"; "any administrator can approve it")**:
+  table `public.portal_day_looks` (staging; mirrored) -- a row per day: photo_id, band_x/y and signin_x/y framing (0-100),
+  text_side left|right, shade 0-1, optional line/who, approved_at/by. RLS: authenticated read all, anon read APPROVED
+  only (the sign-in page), write = current_user_role() 'Administrator'. `lookFromRow` (portalPhotos.ts) is the one
+  decider: an approved row, else LLANDUDNO_LOOK -- an unapproved day shows Llandudno, never a guess. Screen
+  `/portal-looks` (PortalLooksPage): month of day cards drawn as the band + sign-in, sliders, words side, shade, line,
+  Approve / Withdraw / Save without approving; a change to an approved day un-approves it; "Fill the empty days from the
+  rotation" drafts unapproved rows. The portal gets today's look from `day-look` (no session); the Bredell Ferreira skin
+  gets it in ThemeContext into `dayLookState.ts` (pure, so themes.ts stays importable by the checks) and applyDayPhoto
+  frames the company hero with --day-photo-position. PortalPhotoAlert now also says how many of the next 7 days are
+  unapproved, with a link; the Unsplash check only runs when today's approved photo is an Unsplash one. /portal/photos
+  is now the library. **Nothing is approved yet: every day shows Llandudno until an Administrator approves.**
+  e2e portal-looks 8 (fill drafts unapproved; approve writes side + approver; edit un-approves; non-admin read-only),
+  client-portal 106 (draws the approved elephant at 30% 40%, words right), company-dashboard 59.
+  NOTE for whoever runs e2e: a killed run can leave `vite --port 5199` servers behind; `pkill -f "vite --port 5199"`.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

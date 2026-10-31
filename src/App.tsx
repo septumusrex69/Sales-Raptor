@@ -17,6 +17,7 @@ const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
 const PortalOpeningPage = lazy(() => import('./pages/portal/PortalOpeningPage'))
 const PortalPhotosPage = lazy(() => import('./pages/portal/PortalPhotosPage'))
 const OpeningPage = lazy(() => import('./pages/OpeningPage'))
+const PortalLooksPage = lazy(() => import('./pages/PortalLooksPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -188,6 +189,8 @@ function App() {
               <Route path="/dashboard/sales" element={<Dashboard />} handle={{ title: 'Sales' }} />
               <Route path="/dashboard/communications" element={<CommunicationsDashboard />} handle={{ title: 'Communications' }} />
               <Route path="/dashboard/admin" element={<AdminOverview />} handle={{ title: 'Administration' }} />
+              {/* The client portal's photograph of the day, approved a month at a time (S16, 31 Oct). */}
+              <Route path="/portal-looks" element={<PortalLooksPage />} handle={{ title: 'Portal photographs' }} />
               <Route path="/leads" element={<LeadsList />} handle={{ title: 'Leads' }} />
               <Route path="/leads/:id" element={<LeadDetail />} handle={{ title: 'Lead Details' }} />
               <Route path="/deals" element={<DealsBoard />} handle={{ title: 'Deals' }} />

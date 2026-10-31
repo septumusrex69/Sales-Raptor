@@ -18,6 +18,8 @@ const LINES = [
 ]
 
 /* Phase 2a (S15): one ticket waiting on the client, one closed. */
+const DAY_LOOK = { day: '2026-10-31', photo_id: 'W0tOuiKeyXU', band_x: 30, band_y: 40, signin_x: 25, signin_y: 50, text_side: 'right', shade: 0.7,
+  line: null, who: null, approved_at: '2026-10-30T08:00:00Z' }
 const TICKETS = [
   /* Newest, and with the firm: listed first by the server, it must still come BELOW the one waiting on the client. */
   { ticketNo: 52, kind: 'client', status: 'open', stage: 'liaison', description: 'Please confirm the balance.',
@@ -73,6 +75,9 @@ try {
     /* S16: the password, set after the first code and used every visit after. */
     if (action === 'sign-in') return body.password === 'tafelberg sunrise' ? json(200, { token: TOKEN, expiresAt: '2026-11-27T08:00:00Z' }) : json(400, { error: 'That email address and password do not match.' })
     if (action === 'set-password') return token === TOKEN ? json(200, { ok: true }) : json(401, { error: 'Please sign in again.' })
+    /* Today's look as an Administrator approved it at /portal-looks: the elephant, framed, words on the RIGHT. No
+       session, as on the real server -- the sign-in page shows it too. */
+    if (action === 'day-look') return json(200, { row: DAY_LOOK })
     if (token !== TOKEN) return json(401, { error: 'Please sign in again.' })
     if (action === 'me') return json(200, { name: 'Jan Pharma', email: 'jan@alianna.co.za', client: 'Alianna Pharmacy' })
     if (action === 'book') {
@@ -191,6 +196,12 @@ try {
   t.ok('...and says a ticket is waiting on the client', /1 ticket is waiting on you/.test(await page.getByTestId('portal-waiting').innerText()))
   t.ok('...with no fee, commission or interest anywhere on it', !/fee|commission|interest/i.test(await page.getByTestId('portal-dashboard').innerText()))
   /* S16: Raptor's shape in the firm's colours (Stephan: "make it look and feel like Raptor ... more like Bredell"). */
+  /* THE APPROVED LOOK, EXACTLY (Stephan, 31 Oct: "pre-choose everything and approve it ... exactly how it's going to
+     look"): the approved photograph, framed where it was approved, the words on the side it was approved with. */
+  {
+    const band = await page.getByTestId('portal-hero').evaluate((e) => ({ bg: e.style.background, side: e.getAttribute('data-side') }))
+    t.ok('the band wears today\'s approved look: the elephant, framed at 30% 40%, words on the right', /photo-1570003448157/.test(band.bg) && /30% 40%/.test(band.bg) && band.side === 'right')
+  }
   t.ok('the band is Raptor\'s, over the full-resolution coastline', /portal-photo\.webp/.test(await page.getByTestId('portal-hero').evaluate((e) => e.style.background))
     && /Dashboard/.test(await page.getByTestId('portal-hero').innerText()))
   t.check('the sidebar carries the BF circle beside the wordmark', await page.getByTestId('portal-logo').locator('img').count(), 2)

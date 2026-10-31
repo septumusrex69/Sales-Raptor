@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { Phone } from 'lucide-react'
-import { PORTAL_ROTATION, johannesburgToday, photoOfTheDay, portalPhotoUrl, type PortalPhoto, type PortalPhotoKind } from '../../lib/portalPhotos'
-import { clockNow } from '../../lib/clock'
+import { PORTAL_ROTATION, portalPhotoUrl, type PortalPhoto, type PortalPhotoKind } from '../../lib/portalPhotos'
 import './portal.css'
 
 /**
- * /portal/photos -- THE PORTAL'S PHOTOGRAPHS, IN THEIR DAILY ORDER (S16, 31 Oct; the list is portalPhotos.ts). Stephan, of the Llandudno band: "the hero bar ... I
+ * /portal/photos -- THE PORTAL'S PHOTOGRAPH LIBRARY (S16, 31 Oct; the list is portalPhotos.ts, the days /portal-looks). Stephan, of the Llandudno band: "the hero bar ... I
  * don't know if it completely works with this one. Get some other examples ... something that could be South Africa
  * ... more to be home ... nature, people, and like city type of vibes. So like Johannesburg, Sandton ... 60 or 70
  * nature, and then 15 city and 15 people."
@@ -24,16 +23,16 @@ export default function PortalPhotosPage() {
   const [kind, setKind] = useState<Kind | 'All'>('All')
   const shown = CANDIDATES.map((c, i) => ({ ...c, n: i + 1 })).filter((c) => kind === 'All' || c.kind === kind)
   const count = (k: Kind) => CANDIDATES.filter((c) => c.kind === k).length
-  const today = photoOfTheDay(johannesburgToday(clockNow()))
 
   return (
     <div className="portal-brand min-h-dvh bg-[#F4F4F4] px-4 sm:px-8 py-8" data-testid="portal-photos">
       <div className="max-w-[1180px] mx-auto">
         <p className="bf-label text-[11px] text-[#C69F54]">Bredell Ferreira · Client portal</p>
-        <h1 className="text-[28px] sm:text-[34px] text-[#101F2C] mt-1">The portal's photograph of the day</h1>
+        <h1 className="text-[28px] sm:text-[34px] text-[#101F2C] mt-1">The portal's photographs</h1>
         <p className="text-[15px] text-[#525D66] mt-2 max-w-[68ch]">
-          A new photograph of South Africa every day, in this order and then round again: about 40% nature, a third people,
-          a quarter city. Each is shown as the dashboard's band and as the tall sign-in panel; today's is marked.
+          The library the photograph of the day is chosen from: about 40% nature, a third people, a quarter city, each shown
+          as the dashboard's band and the tall sign-in panel. Which one shows on which day, and exactly how, is approved a
+          month at a time by an Administrator in Raptor, under Portal photographs.
         </p>
         <div className="mt-5 flex flex-wrap gap-2" role="tablist" aria-label="Which photographs">
           {(['All', 'Nature', 'City', 'People'] as const).map((k) => (
@@ -69,7 +68,6 @@ export default function PortalPhotosPage() {
               <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
                 <span className="text-[22px] font-bold text-[#101F2C] tabular-nums" style={{ fontFamily: "'Raleway Variable', 'Raleway', sans-serif" }}>{c.n}</span>
                 <span className="text-[15px] font-semibold text-[#101F2C]">{c.title}</span>
-                {c.id === today.id && <span className="rounded-full px-2 py-0.5 bg-[#C69F54] text-white text-[11px] font-semibold" data-testid="photo-today">Today</span>}
                 <span className="basis-full text-[13.5px] italic text-[#32404D]">“{c.line}”{c.who && <span className="not-italic text-[#46607B]"> — {c.who}</span>}</span>
                 <span className="text-[13px] text-[#525D66]">{c.place}</span>
                 <span className="ml-auto flex items-center gap-2 text-[12px] text-[#525D66]">

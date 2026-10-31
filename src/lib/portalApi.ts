@@ -20,6 +20,8 @@ export function savePortalToken(token: string | null, remember = true): void {
   } catch { /* signed in for this tab only */ }
 }
 
+import type { DayLookRow } from './portalPhotos'
+
 export class PortalSignedOut extends Error {}
 
 async function call<T>(action: string, body: Record<string, unknown> = {}, token: string | null = null): Promise<T> {
@@ -43,6 +45,8 @@ export const portalSignInWithPassword = (email: string, password: string, rememb
 export const setPortalPassword = (token: string, password: string) => call<{ ok: boolean }>('set-password', { password }, token)
 /* S16: the day's photograph did not load in this browser. No session needed -- it may happen on the sign-in page --
    and the server does not take the browser's word for it: it checks Unsplash itself before telling anybody. */
+/* S16: today's approved look for the portal's photograph (null where today was not approved: Llandudno). No session. */
+export const fetchPortalDayLook = () => call<{ row: DayLookRow | null }>('day-look')
 export const reportPortalPhotoFailure = (photoId: string) => call<{ ok: boolean; down: boolean }>('photo-failed', { photoId })
 
 export interface PortalMe { name: string; email: string; client: string }

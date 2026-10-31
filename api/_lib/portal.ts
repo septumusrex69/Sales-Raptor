@@ -6,7 +6,7 @@ import { credentialsKeyProblem, hashPassword, keyedHash, passwordMatches, sameHe
 import { sendAsUser } from './email/sendAsUser.js'
 import { EMAIL_IN_KIND, receivedEmailNote } from '../../src/lib/emailRules.js'
 import { can } from '../../src/lib/capabilities.js'
-import { johannesburgToday, photoOfTheDay, portalPhotoProbe } from '../../src/lib/portalPhotos.js'
+import { johannesburgToday, lookFromRow, portalPhotoProbe, type DayLook, type DayLookRow } from '../../src/lib/portalPhotos.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import {
   CODE_SENT_MESSAGE, PORTAL_CODE_MESSAGE, PORTAL_PASSWORD_FAILURES, PORTAL_PASSWORD_LOCK_MINUTES, PORTAL_PASSWORD_WRONG,
@@ -296,28 +296,43 @@ async function ring(admin: SupabaseClient, to: string[], type: string, message: 
  * Either way THE SERVER LOOKS FOR ITSELF -- a client on a bad connection is not an outage -- and rings every active
  * Administrator AT MOST ONCE A DAY, however many browsers report it. The portal already shows Llandudno meanwhile.
  */
-async function unsplashServes(): Promise<{ ok: boolean; why: string }> {
-  const photo = photoOfTheDay(johannesburgToday(new Date()))
+/* TODAY'S APPROVED LOOK (portal_day_looks), or Llandudno where today was not approved -- lookFromRow decides. */
+async function todaysLook(admin: SupabaseClient): Promise<{ row: DayLookRow | null; look: DayLook }> {
+  const { data } = await admin.from('portal_day_looks').select('*').eq('day', johannesburgToday(new Date())).maybeSingle()
+  const row = (data as DayLookRow | null) ?? null
+  return { row: row?.approved_at ? row : null, look: lookFromRow(row) }
+}
+
+/* The portal's sign-in page and dashboard ask for today's look here: no session, because the sign-in shows it too. */
+const dayLook: Handler = async (_req, res, admin) => {
+  const { row } = await todaysLook(admin)
+  res.status(200).json({ row })
+}
+
+async function unsplashServes(admin: SupabaseClient): Promise<{ ok: boolean; why: string; title: string }> {
+  const { look } = await todaysLook(admin)
+  const photo = look.photo
+  /* The app's own copy needs nobody's server. */
+  if (photo.local) return { ok: true, why: '', title: photo.title }
   try {
     const r = await fetch(portalPhotoProbe(photo), { signal: AbortSignal.timeout(8000) })
-    return r.ok ? { ok: true, why: '' } : { ok: false, why: `Unsplash answered ${r.status}` }
+    return r.ok ? { ok: true, why: '', title: photo.title } : { ok: false, why: `Unsplash answered ${r.status}`, title: photo.title }
   } catch (e) {
-    return { ok: false, why: e instanceof Error && e.name === 'TimeoutError' ? 'Unsplash did not answer within 8 seconds' : 'Unsplash could not be reached' }
+    return { ok: false, why: e instanceof Error && e.name === 'TimeoutError' ? 'Unsplash did not answer within 8 seconds' : 'Unsplash could not be reached', title: photo.title }
   }
 }
 
 const PHOTO_ALARM = 'portal_photo'
 
 async function photoAlarm(admin: SupabaseClient): Promise<boolean> {
-  const check = await unsplashServes()
+  const check = await unsplashServes(admin)
   if (check.ok) return false
   const since = new Date(`${johannesburgToday(new Date())}T00:00:00+02:00`).toISOString()
   const { count } = await admin.from('notifications').select('id', { count: 'exact', head: true }).eq('type', PHOTO_ALARM).gte('created_at', since)
   if ((count ?? 0) > 0) return true
   const { data: admins } = await admin.from('profiles').select('id').eq('role', 'Administrator').eq('status', 'Active')
-  const photo = photoOfTheDay(johannesburgToday(new Date()))
   await ring(admin, (admins ?? []).map((p) => p.id as string), PHOTO_ALARM,
-    `The client portal's photo of the day ("${photo.title}") is not loading from Unsplash: ${check.why}. Clients are seeing Llandudno instead.`, '/')
+    `The client portal's photo of the day ("${check.title}") is not loading from Unsplash: ${check.why}. Clients are seeing Llandudno instead.`, '/portal-looks')
   return true
 }
 
@@ -848,6 +863,7 @@ export const PORTAL_ROUTES: Record<string, Handler> = {
   'staff-invite': staffInvite,
   'staff-set-active': staffSetActive,
   'photo-failed': photoFailed,
+  'day-look': dayLook,
   'photo-check': photoCheck,
 }
 

@@ -158,6 +158,11 @@ try {
   /* THE BREDELL FERREIRA SKIN, the default since 31 Oct, wears the client portal's photograph of the day and its line. */
   t.ok('the default skin\'s hero carries the day\'s line and its photographer', /Photo: .+ on Unsplash/.test(await page.getByTestId('hero-day-line').innerText().catch(() => '')))
   t.ok('...over the day\'s photograph, Llandudno beneath it', /portal-photo\.webp/.test(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--skin-collections-hero-image'))))
+  /* DAYS NOBODY APPROVED (Stephan, 31 Oct: "pre-choose everything and approve it ... for the month"): nothing approved
+     for the coming week here, so the Administrator is told, with the way to /portal-looks. */
+  t.ok('days with no approved portal photograph are named, with a link to approve them',
+    /7 days in the next week/.test(await page.getByTestId('portal-looks-alert').innerText().catch(() => ''))
+    && (await page.getByTestId('portal-looks-alert-link').getAttribute('href')) === '/portal-looks')
 
   await page.setViewportSize({ width: 1300, height: 900 })
   await t.shot(page, 'company-dashboard')
@@ -230,7 +235,10 @@ try {
      when Unsplash is off ... any administrator's dashboard"). The harness answers Unsplash; here it is cut off. */
   t.check('with Unsplash serving, no photo warning on the dashboard', await page.getByTestId('portal-photo-alert').count(), 0)
   {
-    const down = await signedInPage(browser, ADMIN, handlers, seen, { now: '2026-10-18T10:00:00+02:00' })
+    /* Only an APPROVED day loads from Unsplash (an unapproved one is Llandudno, the app's own copy, which cannot fail):
+       so this day is approved -- the elephant -- and Unsplash cut off. */
+    const ELEPHANT_DAY = { day: '2026-10-18', photo_id: 'W0tOuiKeyXU', band_x: 50, band_y: 50, signin_x: 50, signin_y: 50, text_side: 'left', shade: 0.8, line: null, who: null, approved_at: '2026-10-17T08:00:00Z' }
+    const down = await signedInPage(browser, ADMIN, [[(u) => /\/rest\/v1\/portal_day_looks/.test(u), () => ({ body: [ELEPHANT_DAY] })], ...handlers], seen, { now: '2026-10-18T10:00:00+02:00' })
     await down.page.route('**/images.unsplash.com/**', (route) => route.abort())
     for (let i = 0; i < 60; i += 1) {
       try { await down.page.goto(`http://localhost:${PORT}/`, { timeout: 2000 }); break }

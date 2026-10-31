@@ -53896,3 +53896,42 @@ as $$
 $$;
 revoke all on function public.portal_collected_by_month(uuid, date) from public, anon, authenticated;
 grant execute on function public.portal_collected_by_month(uuid, date) to service_role;
+
+-- ==== s16_portal_day_looks (applied to staging 31 Oct 2026) ====
+-- S16, Raptor · Handover 15 (31 Oct): THE PORTAL'S PHOTOGRAPH OF THE DAY, APPROVED A MONTH AT A TIME.
+-- Stephan, looking at the elephant under the band's words: "as the picture changes, we're going to have to move the
+-- script ... pre-choose everything and approve it ... exactly how it's going to look ... for the month"; and "any
+-- administrator can approve it". One row per day: which photograph (an id in src/lib/portalPhotos.ts), how it is framed
+-- in the dashboard band and in the tall sign-in panel, which side the words sit, how dark the shade under them is, and
+-- the line. ONLY AN APPROVED ROW IS SHOWN: a day nobody approved shows Llandudno, the app's own photograph, so nothing
+-- unchecked reaches a client. Everyone may read (the sign-in page reads it before anybody is signed in, approved rows
+-- only); only an Administrator writes.
+create table if not exists public.portal_day_looks (
+  day date primary key,
+  photo_id text not null,
+  band_x numeric not null default 50 check (band_x between 0 and 100),
+  band_y numeric not null default 50 check (band_y between 0 and 100),
+  signin_x numeric not null default 50 check (signin_x between 0 and 100),
+  signin_y numeric not null default 50 check (signin_y between 0 and 100),
+  text_side text not null default 'left' check (text_side in ('left', 'right')),
+  shade numeric not null default 0.8 check (shade between 0 and 1),
+  line text,
+  who text,
+  approved_at timestamptz,
+  approved_by uuid references public.profiles (id),
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles (id)
+);
+alter table public.portal_day_looks enable row level security;
+
+create policy portal_day_looks_read on public.portal_day_looks
+  for select to authenticated using (auth.uid() is not null);
+create policy portal_day_looks_read_approved on public.portal_day_looks
+  for select to anon using (approved_at is not null);
+create policy portal_day_looks_write on public.portal_day_looks
+  for all to authenticated
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
+
+grant select on public.portal_day_looks to anon, authenticated;
+grant insert, update on public.portal_day_looks to authenticated;

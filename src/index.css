@@ -481,7 +481,8 @@ select:autofill {
   background-color: var(--skin-collections-hero-ground);
   background-image: var(--skin-collections-hero-image);
   background-size: cover;
-  background-position: center;
+  /* --day-photo-position: the Bredell Ferreira skin's photograph framed as it was approved (themes.ts applyDayPhoto). */
+  background-position: var(--day-photo-position, center);
 }
 
 /*

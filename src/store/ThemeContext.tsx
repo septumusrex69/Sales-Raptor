@@ -1,5 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { applyTheme, readStoredTheme, storeTheme, themeById, type ThemeDefinition, type ThemeId } from '../lib/themes'
+import { supabase } from '../lib/supabase'
+import { clockNow } from '../lib/clock'
+import { johannesburgToday, lookFromRow, type DayLookRow } from '../lib/portalPhotos'
+import { setDayLook } from '../lib/dayLookState'
+import { applyDayPhoto, applyTheme, readStoredTheme, storeTheme, themeById, type ThemeDefinition, type ThemeId } from '../lib/themes'
 
 interface ThemeContextValue {
   themeId: ThemeId
@@ -30,6 +34,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.title = themeById(themeId).productName
   }, [themeId])
+
+  /* TODAY'S APPROVED LOOK FOR THE BREDELL FERREIRA SKIN (S16, 31 Oct): the same approval as the client portal's
+     photograph. Read once (approved rows are readable before sign-in, so the sign-in page wears it too) and the skin
+     re-applied; nothing approved for today leaves Llandudno, which is already on. */
+  useEffect(() => {
+    let live = true
+    supabase.from('portal_day_looks').select('*').eq('day', johannesburgToday(clockNow())).maybeSingle()
+      .then(({ data }) => {
+        if (!live) return
+        setDayLook(lookFromRow(data as DayLookRow | null))
+        applyDayPhoto(readStoredTheme())
+      })
+    return () => { live = false }
+  }, [])
 
   // A second tab is the same person: changing the skin in one should carry to the others
   // rather than leaving them looking like a different product.

@@ -7,7 +7,9 @@ import { greetingLine } from '../../lib/greeting.ts'
 import { formatCurrency } from '../../data/mockData'
 import { clockNow } from '../../lib/clock.ts'
 import { BASE_THEME } from '../../lib/themes.ts'
-import { johannesburgToday, photoCredit, photoOfTheDay } from '../../lib/portalPhotos.ts'
+import { photoCredit } from '../../lib/portalPhotos.ts'
+import { currentDayLook, subscribeDayLook } from '../../lib/dayLookState.ts'
+import { useSyncExternalStore } from 'react'
 
 /**
  * The hero, to the firm's own design — and it belongs to the COMPANY dashboard.
@@ -317,7 +319,9 @@ const signedPct = (v: number): string => `${v >= 0 ? '+' : '−'}${Math.abs(Math
 
 /* The day's line and the photographer's credit, for the Bredell Ferreira skin, whose photograph changes daily. */
 function DayLine() {
-  const photo = photoOfTheDay(johannesburgToday(clockNow()))
+  /* Today's APPROVED look (dayLookState.ts) -- the same one the client portal shows; Llandudno where none was approved. */
+  const look = useSyncExternalStore(subscribeDayLook, currentDayLook, currentDayLook)
+  const photo = { ...look.photo, line: look.line, who: look.who }
   const credit = photoCredit(photo)
   return (
     <figure className="mt-5 max-w-xl border-l-2 border-[var(--ch-gold)] pl-3" data-testid="hero-day-line">

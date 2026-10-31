@@ -427,7 +427,8 @@ ok('the scrim is declared off a token',
 const scrim = css.match(/--skin-collections-scrim:([\s\S]*?);\n/)?.[1] ?? ''
 ok('there is a scrim to read', scrim.length > 200)
 const darkest = Math.max(...[...scrim.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1])))
-ok('the whole valley is in frame', /background-position: center;/.test(css))
+/* S16: centred unless the Bredell Ferreira skin's approved framing says otherwise (--day-photo-position, themes.ts). */
+ok('the whole valley is in frame', /background-position: (var\(--day-photo-position, )?center\)?;/.test(css))
 
 /*
  * AND THE TWO PASSES COMPOUND, which is the trap this has fallen into twice. At 0.86 across and

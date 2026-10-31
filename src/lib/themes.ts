@@ -1,5 +1,5 @@
-import { clockNow } from './clock.ts'
-import { johannesburgToday, photoOfTheDay, portalPhotoUrl } from './portalPhotos.ts'
+import { bandBackground, portalPhotoUrl } from './portalPhotos.ts'
+import { currentDayLook } from './dayLookState.ts'
 /**
  * The visual skins available to the application.
  *
@@ -231,13 +231,15 @@ export function applyTheme(id: ThemeId) {
  */
 const DAY_PHOTO_VARS = ['--skin-collections-hero-image', '--skin-hero-background', '--day-photo-login'] as const
 
-export function applyDayPhoto(id: ThemeId, now: Date = clockNow()) {
+export function applyDayPhoto(id: ThemeId) {
   const root = document.documentElement
-  if (id !== BASE_THEME) { for (const v of DAY_PHOTO_VARS) root.style.removeProperty(v); return }
-  const photo = photoOfTheDay(johannesburgToday(now))
-  const at = (w: number) => `url('${portalPhotoUrl(photo, w)}'), url('/brand/portal-photo.webp')`
+  if (id !== BASE_THEME) { for (const v of [...DAY_PHOTO_VARS, '--day-photo-position'] as const) root.style.removeProperty(v); return }
+  /* TODAY'S APPROVED LOOK (dayLookState.ts, fetched by ThemeContext) -- the same one the client portal shows, framed
+     as an Administrator approved it at /portal-looks; Llandudno where today was not approved. */
+  const look = currentDayLook()
+  const at = (w: number) => `url('${portalPhotoUrl(look.photo, w)}'), url('/brand/portal-photo.webp')`
   root.style.setProperty('--skin-collections-hero-image', at(3200))
+  root.style.setProperty('--day-photo-position', `${look.band.x}% ${look.band.y}%`)
   root.style.setProperty('--day-photo-login', at(2400))
-  root.style.setProperty('--skin-hero-background',
-    `linear-gradient(90deg, rgba(18,33,47,0.86) 0%, rgba(18,33,47,0.55) 38%, rgba(18,33,47,0.12) 75%), url('${portalPhotoUrl(photo, 2400)}') ${photo.band ?? 'center'} / cover no-repeat, url('/brand/portal-photo.webp') center / cover no-repeat, #12212f`)
+  root.style.setProperty('--skin-hero-background', `${bandBackground(look, 2400)}, #12212f`)
 }

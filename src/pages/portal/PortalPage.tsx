@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, Headphones, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
 import { PORTAL_PASSWORD_MIN, portalPasswordProblem, type PortalTopic } from '../../lib/clientPortal'
 import {
   PortalSignedOut, fetchPortalBook, fetchPortalMe, fetchPortalTickets, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
-  reportPortalPhotoFailure, savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
+  fetchPortalDayLook, reportPortalPhotoFailure, savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
 import { PortalTickets } from './PortalTickets'
 import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
@@ -15,8 +15,7 @@ import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
 import './portal.css'
 import { PortalSplash } from './PortalSplash'
-import { photoCredit, photoOfTheDay, johannesburgToday, portalPhotoLayer, portalPhotoProbe, type PortalPhoto } from '../../lib/portalPhotos'
-import { clockNow } from '../../lib/clock'
+import { LLANDUDNO_LOOK, bandBackground, lookFromRow, photoCredit, portalPhotoLayer, portalPhotoProbe, signinBackground, type DayLook } from '../../lib/portalPhotos'
 import { primeSplashAudio } from './portalSound'
 import '@fontsource-variable/raleway'
 import '@fontsource-variable/open-sans'
@@ -42,8 +41,9 @@ export default function PortalPage() {
 
   const signedOut = useCallback(() => { savePortalToken(null); setToken(null); setMe(null) }, [])
 
-  /* Is today's photograph reaching people? Asked once per tab, signed in or not (probeTodaysPhoto). */
-  useEffect(() => { probeTodaysPhoto() }, [])
+  /* Today's APPROVED look (portalPhotos.ts / portal_day_looks), asked for once per tab, signed in or not; until it
+     arrives -- or where today was not approved -- Llandudno. Then: is its photograph reaching people? */
+  useEffect(() => { loadPortalLook() }, [])
 
   useEffect(() => {
     if (!token) return
@@ -64,8 +64,24 @@ export default function PortalPage() {
   </>
 }
 
-/* TODAY'S PHOTOGRAPH (portalPhotos.ts): a new one of South Africa each day, the same for every client that day. */
-const todaysPhoto = (): PortalPhoto => photoOfTheDay(johannesburgToday(clockNow()))
+/*
+ * TODAY'S LOOK: the photograph, its framing, the side the words sit and the line -- as an Administrator approved it for
+ * today at /portal-looks (Stephan, 31 Oct: "pre-choose everything and approve it ... for the month"), or Llandudno
+ * where nobody did. Held here and shared by every part of the page that draws it.
+ */
+let currentLook: DayLook = LLANDUDNO_LOOK
+const lookListeners = new Set<() => void>()
+let lookAsked = false
+function loadPortalLook() {
+  if (lookAsked) return
+  lookAsked = true
+  fetchPortalDayLook()
+    .then(({ row }) => { currentLook = lookFromRow(row); lookListeners.forEach((f) => f()); probeTodaysPhoto() })
+    .catch(() => { /* Llandudno stays */ })
+}
+function usePortalLook(): DayLook {
+  return useSyncExternalStore((f) => { lookListeners.add(f); return () => lookListeners.delete(f) }, () => currentLook, () => currentLook)
+}
 
 /*
  * IF UNSPLASH CANNOT SERVE IT, SAY SO (Stephan, 31 Oct: "ping me and tell me when Unsplash is off ... a notification
@@ -77,7 +93,9 @@ let photoProbed = false
 function probeTodaysPhoto() {
   if (photoProbed || typeof Image === 'undefined') return
   photoProbed = true
-  const p = todaysPhoto()
+  const p = currentLook.photo
+  /* The app's own copy needs nobody's server. */
+  if (p.local) return
   const img = new Image()
   const timer = setTimeout(() => { img.src = ''; report() }, 10_000)
   function report() { void reportPortalPhotoFailure(p.id).catch(() => {}) }
@@ -89,7 +107,7 @@ function probeTodaysPhoto() {
 /* THE DAY'S LINE, with the day's photograph (portalPhotos.ts): a quote from somebody worth quoting, or a line of the
    firm's own about the place in the picture. Quiet: a thin gold rule, italic, smaller than the words around it. */
 function DayLine({ className = '', compact = false }: { className?: string; compact?: boolean }) {
-  const p = todaysPhoto()
+  const p = usePortalLook()
   return (
     <figure className={`${className} border-l-2 border-[#C69F54] pl-3`} data-testid="portal-day-line">
       <blockquote className={`italic text-white/90 [text-shadow:0_1px_8px_rgba(16,31,44,0.55)] ${compact ? 'text-[13px]' : 'text-[15px]'}`}>“{p.line}”</blockquote>
@@ -100,7 +118,7 @@ function DayLine({ className = '', compact = false }: { className?: string; comp
 
 /* The photographer's credit (Unsplash asks for it): small, in a corner of the photograph, never in the way. */
 function PhotoCredit({ className = 'absolute right-3 bottom-2' }: { className?: string }) {
-  const credit = photoCredit(todaysPhoto())
+  const credit = photoCredit(usePortalLook().photo)
   return (
     <p className={`${className} text-[10px] text-white/55`} data-testid="portal-photo-credit">
       Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">{credit.name}</a>
@@ -144,6 +162,7 @@ function Field({ icon, children }: { icon: React.ReactNode; children: React.Reac
 }
 
 function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean) => void }) {
+  const look = usePortalLook()
   const [step, setStep] = useState<Step>('password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -205,7 +224,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
       style={{ fontFamily: BODY, background: C.off }}>
       {/* THE ROOM AROUND THE FRAME: the same coastline, softened -- a background, so a phone never fetches it twice. */}
       <div aria-hidden className="hidden lg:block absolute inset-0 scale-110 blur-2xl opacity-60"
-        style={{ background: portalPhotoLayer(todaysPhoto(), 1200) }} />
+        style={{ background: portalPhotoLayer(look.photo, 1200) }} />
       <div className="relative w-full min-h-screen lg:max-w-[1360px] lg:min-h-[640px] lg:h-[min(860px,calc(100vh-4rem))] lg:rounded-[24px] lg:overflow-hidden
         lg:shadow-[0_30px_80px_-20px_rgba(16,31,44,0.45)] lg:ring-1 lg:ring-white/40 flex flex-col lg:grid lg:grid-cols-[58fr_42fr] bg-[#FBFAF7]">
         {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. The portal's own full-resolution photograph (portalPhoto.ts): the
@@ -213,7 +232,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
             times over -- "Why are you using low quality one?" (Stephan, 30 Oct), until a real photograph replaced it. */}
         <div className="relative text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14 min-h-[300px] sm:min-h-[380px] lg:min-h-0"
           data-testid="portal-sign-in-photo"
-          style={{ background: `linear-gradient(180deg, rgba(16,31,44,0.30) 0%, rgba(16,31,44,0.10) 35%, rgba(16,31,44,0.78) 78%, rgba(16,31,44,0.92) 100%), ${portalPhotoLayer(todaysPhoto(), 3200)}` }}>
+          style={{ background: signinBackground(look) }}>
           <div className="flex items-center gap-3.5" data-testid="portal-sign-in-logo">
             <img src="/brand/icon-light.svg" alt="" className="h-14 w-14 sm:h-20 sm:w-20" />
             <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 sm:h-[18px] w-auto" />
@@ -357,6 +376,7 @@ function useFold(): [boolean, () => void] {
 }
 
 function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: PortalMe; onSignedOut: () => void; onExpired: () => void }) {
+  const look = usePortalLook()
   const [section, setSection] = useState<Section>('dashboard')
   const [asking, setAsking] = useState<{ about: AskAbout | null; mode?: AskMode; topic?: PortalTopic } | null>(null)
   const [done, setDone] = useState<string | null>(null)
@@ -530,8 +550,9 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
             button centred on the band's height.
           */}
           <header className="relative overflow-hidden rounded-[18px] text-white min-h-[188px] flex" data-testid="portal-hero"
-            style={{ background: `linear-gradient(90deg, rgba(16,31,44,0.82) 0%, rgba(16,31,44,0.55) 30%, rgba(16,31,44,0.12) 58%, rgba(16,31,44,0) 80%), ${portalPhotoLayer(todaysPhoto(), 3200, todaysPhoto().band ?? 'center')}` }}>
-            <div className="w-full px-6 sm:px-10 py-7 flex flex-wrap items-center justify-between gap-4">
+            data-side={look.side} style={{ background: bandBackground(look) }}>
+            {/* The words sit on the side the day's look was approved with, so they are on the quiet part of the photograph. */}
+            <div className={`w-full px-6 sm:px-10 py-7 flex flex-wrap items-center justify-between gap-4 ${look.side === 'right' ? 'flex-row-reverse text-right' : ''}`}>
               <div className="min-w-0">
                 <p className="bf-label text-[11.5px] text-[#C69F54]">{me.client}</p>
                 <h1 className="text-[30px] sm:text-[36px] leading-tight mt-1.5 [text-shadow:0_1px_12px_rgba(16,31,44,0.45)]">{here.title}</h1>
