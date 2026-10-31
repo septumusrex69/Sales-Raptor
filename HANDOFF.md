@@ -243,6 +243,11 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   centre so they never cross the name), five open rings in the BF circle's shape draw out around the mark and turn
   against each other; soft sound `arcsSound`. On /portal/opening as number 4. **The portal still plays the towers**
   until Stephan says otherwise. e2e portal-openings 18, opening-sounds 20.
+- **THE ARCS, REFINED (30 Oct: "Bredell Ferreira's too close to that second golden circle ... I like the fourth one ...
+  and then with the sounds")**: every ring now turns INTO place with its gap at six o'clock (turn = 90 - 180*(1+arc)),
+  the name moved down into those gaps (margin 104 px), the sweeps' centre fade widened; the arcs now play the TOWERS'
+  sound, which he liked (arcsSound removed). e2e portal-openings 19: traces each ring's DRAWN arc and requires 10 px
+  clear of the name (break-tested: the old angles and spacing touch rings 0, 1, 2). The portal still plays the towers.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

@@ -253,8 +253,8 @@ html .portal-brand .card {
 /* The sweeps fade out around the middle, so they cross the screen but never strike through the mark or the name. */
 .arcs-sweeps {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  -webkit-mask-image: radial-gradient(ellipse 300px 190px at 50% 54%, transparent 45%, #000 100%);
-  mask-image: radial-gradient(ellipse 300px 190px at 50% 54%, transparent 45%, #000 100%);
+  -webkit-mask-image: radial-gradient(ellipse 380px 250px at 50% 54%, transparent 50%, #000 100%);
+  mask-image: radial-gradient(ellipse 380px 250px at 50% 54%, transparent 50%, #000 100%);
 }
 .arcs-sweep { stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: arcs-draw 1.5s cubic-bezier(.5, 0, .2, 1) forwards; }
 @keyframes arcs-draw { to { stroke-dashoffset: 0; } }
@@ -262,10 +262,12 @@ html .portal-brand .card {
 .arcs-rings { position: absolute; left: 50%; top: 50%; width: 900px; height: 900px; transform: translate(-50%, -50%); overflow: visible; pointer-events: none; }
 .arcs-ring { stroke-dashoffset: var(--arc); animation: arcs-ring 1.4s cubic-bezier(.4, 0, .2, 1) forwards; }
 @keyframes arcs-ring { to { stroke-dashoffset: 0; } }
-.arcs-ring-turn { animation: arcs-turn 6s linear forwards; }
-.arcs-ring-turn.is-back { animation-name: arcs-turn-back; }
-@keyframes arcs-turn { to { transform: rotate(40deg); } }
-@keyframes arcs-turn-back { to { transform: rotate(-30deg); } }
+.arcs-ring-turn { transform: rotate(-70deg); animation: arcs-settle 2.6s cubic-bezier(.2, .7, .2, 1) 0.2s forwards; }
+.arcs-ring-turn.is-back { transform: rotate(70deg); }
+/* Turning INTO place: every gap comes to rest at six o'clock, under the mark, where the name is. */
+@keyframes arcs-settle { to { transform: rotate(0deg); } }
+/* Clear of the inner rings (the second's foot is 140 px below the mark's centre; the mark's own half is 66). */
+.is-arcs .portal-splash-word { margin-top: 104px; }
 
 @media (prefers-reduced-motion: reduce) {
   .portal-splash *, .portal-splash { animation: none !important; transition: none !important; }

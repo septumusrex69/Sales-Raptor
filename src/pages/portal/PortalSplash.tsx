@@ -53,13 +53,20 @@ const SWEEPS = [
   { d: 'M 1700 120 C 1180 210, 640 470, -100 900', o: 0.55, w: 1.3, delay: 0.4 },
   { d: 'M 1700 60 C 1180 150, 640 410, -100 840', o: 0.22, w: 1, delay: 0.55 },
 ]
+/*
+ * EVERY RING COMES TO REST WITH ITS GAP AT THE BOTTOM, where the name is (Stephan, 30 Oct: "the Bredell Ferreira's
+ * too close to that second golden circle ... it just takes a little bit of attention"). A circle's stroke starts at
+ * three o'clock and runs clockwise, so an arc of `arc` leaves a gap centred at 180 * (1 + arc) degrees; turning it by
+ * 90 minus that puts the gap at six o'clock. The rings turn INTO that place (portal.css, arcs-settle) rather than
+ * drifting past it, and the name sits below the inner two and inside the gaps of the outer three.
+ */
 const RINGS = [
-  { r: 96, o: 0.9, w: 1.6, arc: 0.86, turn: -100, gold: true, delay: 0.35 },
-  { r: 140, o: 0.45, w: 1.1, arc: 0.7, turn: 40, gold: false, delay: 0.5 },
-  { r: 196, o: 0.55, w: 1.2, arc: 0.78, turn: 160, gold: true, delay: 0.65 },
-  { r: 270, o: 0.25, w: 1, arc: 0.62, turn: -30, gold: false, delay: 0.8 },
-  { r: 370, o: 0.3, w: 1, arc: 0.7, turn: 95, gold: true, delay: 0.95 },
-]
+  { r: 96, o: 0.9, w: 1.6, arc: 0.86, gold: true, delay: 0.35 },
+  { r: 140, o: 0.45, w: 1.1, arc: 0.72, gold: false, delay: 0.5 },
+  { r: 196, o: 0.55, w: 1.2, arc: 0.7, gold: true, delay: 0.65 },
+  { r: 270, o: 0.25, w: 1, arc: 0.74, gold: false, delay: 0.8 },
+  { r: 370, o: 0.3, w: 1, arc: 0.8, gold: true, delay: 0.95 },
+].map((g) => ({ ...g, turn: 90 - 180 * (1 + g.arc) }))
 const WAVES = [8, 18, 30, 44, 60].map((y, i) => ({ y, w: 30 + ((i * 23) % 40), delay: 1.0 + i * 0.12 }))
 
 function Mark({ variant }: { variant: SplashVariant }) {
@@ -81,7 +88,7 @@ function Mark({ variant }: { variant: SplashVariant }) {
       <svg aria-hidden className="arcs-rings" viewBox="-450 -450 900 900" fill="none">
         {RINGS.map((g, i) => (
           <g key={i} className={`arcs-ring-turn ${i % 2 ? 'is-back' : ''}`}>
-            <circle r={g.r} pathLength={1} transform={`rotate(${g.turn})`} stroke={g.gold ? '#C69F54' : '#97B4CC'} strokeOpacity={g.o} strokeWidth={g.w}
+            <circle r={g.r} pathLength={1} data-ring={i} transform={`rotate(${g.turn})`} stroke={g.gold ? '#C69F54' : '#97B4CC'} strokeOpacity={g.o} strokeWidth={g.w}
               strokeLinecap="round" className="arcs-ring" style={{ strokeDasharray: `${g.arc} 1`, ['--arc' as string]: g.arc, animationDelay: `${g.delay}s` }} />
           </g>
         ))}
