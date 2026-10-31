@@ -31,8 +31,8 @@ try {
     await page.getByPlaceholder('Enter your password').fill('a password')
     await page.getByRole('button', { name: 'Sign In' }).click()
     await page.getByTestId('raptor-opening').waitFor({ timeout: 5000 })
-    t.ok('a good password plays the opening, flight until Stephan picks', tokens.length === 1
-      && (await page.getByTestId('raptor-opening').getAttribute('data-variant')) === 'flight')
+    t.ok('a good password plays the opening -- lock-on, the one Stephan liked', tokens.length === 1
+      && (await page.getByTestId('raptor-opening').getAttribute('data-variant')) === 'lock')
     await page.waitForTimeout(1500)
     await t.shot(page, 'raptor-opening-signin')
     t.ok('...and it still covers the app at 1.5 s', await page.getByTestId('raptor-opening').isVisible())
@@ -51,8 +51,8 @@ try {
     await stubSupabase(page, [])
     await page.goto(`http://localhost:${PORT}/opening`)
     await page.getByTestId('raptor-openings').waitFor()
-    t.ok('no sign-in: the replay page opens straight onto the three', await page.getByTestId('raptor-opening-flight').isVisible())
-    for (const v of ['flight', 'ascent', 'lock']) {
+    t.ok('no sign-in: the replay page opens straight onto the three', await page.getByTestId('raptor-opening-lock').isVisible())
+    for (const v of ['lock', 'dive', 'summit']) {
       await page.getByTestId(`raptor-opening-${v}`).click()
       const op = page.locator(`[data-testid="raptor-opening"][data-variant="${v}"]`)
       await op.waitFor()

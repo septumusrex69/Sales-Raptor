@@ -254,6 +254,14 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   the firm wrote last -> "Write your reply…" / Send reply; the client did, or nobody has -> "Add something to this, if
   there is more…" / Send. The client's own bubbles moved from amber to the brand's pale gold. e2e client-portal 102.
 - **THE PORTAL PLAYS THE ARCS (30 Oct: "Looks awesome. You can integrate the arcs")** -- replacing the towers; same sound.
+- **RAPTOR'S OPENINGS, IN RAPTOR'S OWN COLOURS AND SOUND (30 Oct: "Raptors colors are different ... it's not like blue
+  ... I like the lock-on thing ... something like a bird ... it looks too much like Bredell Ferreira's ... other type of
+  sounds")**: palette read off raptor-login (graphite, storm, snow, ember #e8873a / copper) -- no navy. Three now:
+  LOCK-ON (hawk's-eye ember reticle; **the sign-in default**), DIVE (stoop through cloud, ember trail, feathers) and
+  SUMMIT (Raptor's own mountain photo, the sun flaring over the peak). raptorSound rewritten from Raptor-only pieces --
+  brown-noise wind, wingbeats, tuned deep drums (~100 Hz), a low horn filtered under 1 kHz; only softBus (the echo)
+  is shared with the portal. Measured 160-209 Hz (an earlier pass at 96-108 Hz failed the iPad floor). e2e
+  raptor-openings 12, opening-sounds 20.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

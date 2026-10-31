@@ -18,9 +18,9 @@ import { PORT, chromium, makeRunner, startServer, stopServer, stubSupabase } fro
 
 const t = makeRunner('opening-sounds')
 const CASES = [
-  ['Raptor flight', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'flight'],
-  ['Raptor ascent', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'ascent'],
   ['Raptor lock-on', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'lock'],
+  ['Raptor dive', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'dive'],
+  ['Raptor summit', '/src/components/opening/raptorSound.ts', 'playRaptorSound', 'summit'],
   ['portal towers', '/src/pages/portal/portalSound.ts', 'playSplashSound', 'towers'],
   ['portal arcs', '/src/pages/portal/portalSound.ts', 'playSplashSound', 'arcs'],
 ]
