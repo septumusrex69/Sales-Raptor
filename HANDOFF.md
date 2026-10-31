@@ -268,6 +268,15 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   **Summit now wears the person's own skin photograph** ("make examples with the other pictures like africa"):
   `src/components/opening/openingPhotos.ts` maps each skin to its photo and where its light is (the flare goes there);
   /opening has a photo picker under Summit. Lock-on stays the sign-in default. e2e raptor-openings 13.
+- **THE PORTAL PHOTOGRAPH IS NOW A REAL HIGH-RESOLUTION ONE (31 Oct, the third time he raised it: "there needs to be a
+  good quality picture")**: no larger original of remittance-cover.jpg (1672 x 609) exists. Unsplash connector, his
+  pick of six: Llandudno at sunset, Cape Town, 5842 x 3895, Byron Breytenbach (photo eU6Da03AsUQ; download registered).
+  **Hotlinked from images.unsplash.com, not committed** -- the container's proxy blocks Unsplash, and hotlinking is
+  Unsplash's own rule; the app's CSP already allows https images. `src/pages/portal/portalPhoto.ts` sizes it per place
+  (sign-in and band 3200 px, the room behind the card 1200) with the old cut layered beneath as a fallback, and the
+  credit "Photo: Byron Breytenbach on Unsplash" sits in a corner of the sign-in and the band. The remittance advice PDF
+  still uses remittance-cover.jpg (its photo is embedded from a file at build time; changing it is a separate step).
+  e2e client-portal 103. Not seen by S16 itself (Unsplash images are blocked from the container): Stephan to look.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
