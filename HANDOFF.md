@@ -262,6 +262,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   brown-noise wind, wingbeats, tuned deep drums (~100 Hz), a low horn filtered under 1 kHz; only softBus (the echo)
   is shared with the portal. Measured 160-209 Hz (an earlier pass at 96-108 Hz failed the iPad floor). e2e
   raptor-openings 12, opening-sounds 20.
+- **RAPTOR'S OPENINGS ARE PLATINUM (31 Oct: the ember orange was "a bit much"; off the brand board, "Platinum rocks")**:
+  black glass #09090b / #1b1c1f, brushed-silver line #c4c8cf, white light #f6f6f4, quiet #4a4d54 -- the gold wing the
+  only warm thing. Brand board (7 palettes + Platinum over each skin): https://claude.ai/artifact/61F3kLLDAC8iGG9iDqJvVD.
+  **Summit now wears the person's own skin photograph** ("make examples with the other pictures like africa"):
+  `src/components/opening/openingPhotos.ts` maps each skin to its photo and where its light is (the flare goes there);
+  /opening has a photo picker under Summit. Lock-on stays the sign-in default. e2e raptor-openings 13.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

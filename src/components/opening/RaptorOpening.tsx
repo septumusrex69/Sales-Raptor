@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { playRaptorSound } from './raptorSound'
+import { openingPhotoFor } from './openingPhotos'
 import './raptorOpening.css'
 
 /**
@@ -9,17 +10,17 @@ import './raptorOpening.css'
  *
  * NOT BREDELL FERREIRA'S COLOURS (30 Oct). The first three were the portal's navy and gold, and Stephan: "remember the
  * Raptors colors are different ... it's not like blue ... it looks too much like Bredell Ferreira's ... For the client
- * portal, it's fine ... for this one, not." Raptor's own palette is its photograph -- the mountain at dawn: graphite
- * rock, storm cloud, snow white and an ember-copper sunburst -- and its subject is the bird: "something like a bird".
- * The gold wing is the one thing they share. Each has its own sound (raptorSound.ts): wind, wingbeats, deep drums
+ * portal, it's fine ... for this one, not." Its subject is the bird ("something like a bird"), and its palette is
+ * PLATINUM -- black glass, brushed-silver lines, white light -- picked off the brand board (31 Oct: "Platinum rocks")
+ * after a first ember-orange pass was "a bit much". The gold wing is the one thing they share. Each has its own sound (raptorSound.ts): wind, wingbeats, deep drums
  * and a low horn -- nothing of the portal's.
  *
- *   lock    -- a hawk's-eye reticle in ember on graphite: ticks and rings turning, brackets closing, the lock, a
+ *   lock    -- a hawk's-eye reticle in silver on black glass: ticks and rings turning, brackets closing, the lock, a
  *              white-hot flash, the wing in the sights, the name typed out, "Raptor online". Stephan liked it.
- *   dive    -- the stoop: falling through cloud, the wing diving in from high right on an ember trail, a burst of
+ *   dive    -- the stoop: falling through cloud, the wing diving in from high right on a silver trail, a burst of
  *              feathers drifting down as it lands, the name sliding out from behind it.
- *   summit  -- Raptor's own photograph: out of the dark the sun flares over the peak, the wing glides across it, the
- *              name settles beneath.
+ *   summit  -- the person's own skin photograph (openingPhotos.ts; Raptor's mountain by default): out of the dark the
+ *              light flares, the wing glides across it, the name settles beneath.
  *
  * /opening plays any of them on demand; the sign-in plays LOCK-ON (RAPTOR_OPENING_DEFAULT). It covers the app as it
  * loads underneath and dissolves into it; a tap skips it; Reduced motion gets the still mark (unless `force`, the
@@ -41,17 +42,20 @@ const TICKS = Array.from({ length: 72 }, (_, i) => i * 5)
 function Feather() {
   return (
     <svg viewBox="-2 -8 44 16" width="44" height="16" aria-hidden>
-      <path d="M0 0 C 10 -7, 28 -7, 42 0 C 28 6, 10 6, 0 0 Z" fill="#efe6d8" fillOpacity="0.9" />
-      <path d="M0 0 L 42 0" stroke="#b07a48" strokeWidth="0.9" />
+      <path d="M0 0 C 10 -7, 28 -7, 42 0 C 28 6, 10 6, 0 0 Z" fill="#f6f6f4" fillOpacity="0.9" />
+      <path d="M0 0 L 42 0" stroke="#8b9098" strokeWidth="0.9" />
     </svg>
   )
 }
 
-export function RaptorOpening({ variant = RAPTOR_OPENING_DEFAULT, onDone, force = false }: {
+export function RaptorOpening({ variant = RAPTOR_OPENING_DEFAULT, onDone, force = false, photo }: {
   variant?: RaptorVariant
   onDone: () => void
   force?: boolean
+  /** Summit's photograph by skin id; by default the skin this browser wears. */
+  photo?: string
 }) {
+  const scene = openingPhotoFor(photo ?? (typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null))
   const reduced = !force && typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const [leaving, setLeaving] = useState(false)
   const done = useRef(false)
@@ -91,14 +95,14 @@ export function RaptorOpening({ variant = RAPTOR_OPENING_DEFAULT, onDone, force 
       )}
       {look === 'dive' && (
         <div aria-hidden className="ro-layer">
-          <span className="ro-ember-sky" />
+          <span className="ro-sky-glow" />
           {CLOUDS.map((c, i) => <span key={i} className="ro-cloud-up" style={{ left: `${c.x}%`, width: `${c.w}vw`, animationDelay: `${c.delay}s`, animationDuration: `${c.dur}s` }} />)}
         </div>
       )}
       {look === 'summit' && (
         <div aria-hidden className="ro-layer">
-          <span className="ro-photo" />
-          <span className="ro-sunflare" />
+          <span className="ro-photo" data-photo={scene.id} style={{ backgroundImage: `url('${scene.src}')` }} />
+          <span className="ro-sunflare" style={{ left: `${scene.sun[0]}%`, top: `${scene.sun[1]}%` }} />
           <span className="ro-summit-shade" />
         </div>
       )}

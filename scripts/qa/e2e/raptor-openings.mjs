@@ -73,6 +73,12 @@ try {
       t.ok(`${v}: the name is drawn by the end`, drawn.words)
       await op.waitFor({ state: 'detached', timeout: 4000 })
     }
+    /* Summit over another skin's photograph (Stephan, 31 Oct: "examples with the other pictures like africa"). */
+    await page.locator('[data-testid="raptor-opening-photos"] [data-photo="africa"]').click()
+    await page.locator('[data-testid="raptor-opening"][data-variant="summit"]').waitFor()
+    await page.waitForTimeout(2600)
+    await t.shot(page, 'raptor-opening-summit-africa')
+    t.ok('summit plays over the Africa photograph when asked', /africa-hero/.test(await page.locator('.ro-photo').evaluate((e) => e.style.backgroundImage)))
     await context.close()
   }
 } catch (e) {

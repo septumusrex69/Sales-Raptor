@@ -1,19 +1,20 @@
 /*
  * RAPTOR'S OPENING (RaptorOpening.tsx). RAPTOR'S OWN COLOURS, NOT BREDELL FERREIRA'S (Stephan, 30 Oct: "it's not like
- * blue ... it looks too much like Bredell Ferreira's"): read off Raptor's photograph, the mountain at dawn -- graphite
- * rock, storm grey, snow white and the ember-copper sunburst. No navy anywhere. One clock for all three: the action
+ * blue ... it looks too much like Bredell Ferreira's"). PLATINUM, his pick off the brand board (31 Oct: "Platinum
+ * rocks") after the ember orange was "a bit much": black glass, brushed-silver lines and white light, so the gold wing
+ * is the only warm thing on screen. No navy anywhere. One clock for all three: the action
  * until ~1.25 s, the arrival there, the name from ~1.4 s, settled by ~2.5 s, held, then the fade.
  */
 .raptor-opening {
-  --ro-rock: #0d0e10;
-  --ro-stone: #1c1e22;
-  --ro-storm: #3a3d44;
-  --ro-ember: #e8873a;
-  --ro-copper: #cf9f6e;
-  --ro-snow: #f3eee6;
+  --ro-rock: #09090b;
+  --ro-stone: #1b1c1f;
+  --ro-storm: #4a4d54;
+  --ro-line: #c4c8cf;
+  --ro-silver: #8b9098;
+  --ro-snow: #f6f6f4;
   position: fixed; inset: 0; z-index: 200; overflow: hidden; cursor: default;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at 50% 45%, var(--ro-stone) 0%, #121316 55%, #060708 100%);
+  background: radial-gradient(ellipse at 50% 45%, var(--ro-stone) 0%, #111214 55%, #050506 100%);
   transition: opacity 0.55s ease;
 }
 .raptor-opening.is-leaving { opacity: 0; }
@@ -25,23 +26,23 @@
 .ro-words { position: relative; overflow: hidden; }
 .ro-words-img { display: block; height: clamp(46px, 6.6vw, 68px); width: auto; }
 
-/* ---------------- 1. LOCK-ON: a hawk's-eye reticle in ember on graphite ---------------- */
+/* ---------------- 1. LOCK-ON: a hawk's-eye reticle in silver on black glass ---------------- */
 .ro-contours {
   position: absolute; inset: -10%; opacity: 0; animation: ro-in 0.8s ease forwards;
-  background: repeating-radial-gradient(ellipse at 30% 70%, rgba(232, 135, 58, 0.07) 0 1px, transparent 1px 34px),
+  background: repeating-radial-gradient(ellipse at 30% 70%, rgba(196, 200, 207, 0.07) 0 1px, transparent 1px 34px),
               repeating-radial-gradient(ellipse at 75% 25%, rgba(243, 238, 230, 0.04) 0 1px, transparent 1px 46px);
 }
 .ro-scan { position: absolute; inset: 0; background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px); }
 .ro-reticle { position: absolute; left: 50%; top: 50%; width: min(78vmin, 620px); height: min(78vmin, 620px); transform: translate(-50%, -50%); }
-.ro-ticks line { stroke: var(--ro-ember); stroke-opacity: 0.55; stroke-width: 1.4; }
+.ro-ticks line { stroke: var(--ro-line); stroke-opacity: 0.55; stroke-width: 1.4; }
 .ro-ticks { transform-origin: 0 0; animation: ro-turn 1.25s cubic-bezier(.3, .7, .2, 1) forwards, ro-dim 0.6s ease 1.35s forwards; }
 @keyframes ro-turn { from { transform: rotate(-90deg); opacity: 0; } to { transform: rotate(0deg); opacity: 1; } }
 .ro-ret-ring { stroke: var(--ro-snow); stroke-opacity: 0.18; stroke-width: 1; stroke-dasharray: 6 10; }
-.ro-ret-ring.is-2 { stroke: var(--ro-ember); stroke-opacity: 0.35; stroke-dasharray: 2 6; transform-origin: 0 0; animation: ro-turn-back 3.4s linear forwards; }
+.ro-ret-ring.is-2 { stroke: var(--ro-line); stroke-opacity: 0.35; stroke-dasharray: 2 6; transform-origin: 0 0; animation: ro-turn-back 3.4s linear forwards; }
 @keyframes ro-turn-back { to { transform: rotate(-45deg); } }
-.ro-crosshair { stroke: var(--ro-ember); stroke-opacity: 0.6; stroke-width: 1.2; animation: ro-dim 0.6s ease 1.35s forwards; }
+.ro-crosshair { stroke: var(--ro-line); stroke-opacity: 0.6; stroke-width: 1.2; animation: ro-dim 0.6s ease 1.35s forwards; }
 @keyframes ro-dim { to { opacity: 0.25; } }
-.ro-bracket { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; border-color: var(--ro-ember); border-style: solid; border-width: 0; filter: drop-shadow(0 0 6px rgba(232, 135, 58, 0.75)); }
+.ro-bracket { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; border-color: var(--ro-line); border-style: solid; border-width: 0; filter: drop-shadow(0 0 6px rgba(196, 200, 207, 0.75)); }
 .ro-bracket.is-tl { border-top-width: 2px; border-left-width: 2px; --to: translate(-260px, -110px); transform: translate(-46vw, -46vh); }
 .ro-bracket.is-tr { border-top-width: 2px; border-right-width: 2px; --to: translate(226px, -110px); transform: translate(46vw, -46vh); }
 .ro-bracket.is-bl { border-bottom-width: 2px; border-left-width: 2px; --to: translate(-260px, 76px); transform: translate(-46vw, 46vh); }
@@ -49,11 +50,11 @@
 .ro-bracket { animation: ro-close 1.05s steps(6, end) 0.15s forwards, ro-blink 0.16s step-end 1.2s 3; }
 @keyframes ro-close { to { transform: var(--to); } }
 @keyframes ro-blink { 50% { opacity: 0; } }
-.ro-flash { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, #fff4e6 0%, rgba(232, 135, 58, 0.5) 40%, rgba(0, 0, 0, 0) 75%); opacity: 0; animation: ro-flash 0.6s ease-out 1.25s forwards; }
+.ro-flash { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, #ffffff 0%, rgba(196, 200, 207, 0.5) 40%, rgba(0, 0, 0, 0) 75%); opacity: 0; animation: ro-flash 0.6s ease-out 1.25s forwards; }
 @keyframes ro-flash { 0% { opacity: 0.8; } 100% { opacity: 0; } }
 .is-lock .ro-wing { opacity: 0; animation: ro-glitch 0.5s steps(2, end) 1.25s forwards; }
 @keyframes ro-glitch {
-  0% { opacity: 1; transform: translateX(-6px); filter: drop-shadow(5px 0 0 rgba(232, 135, 58, 0.85)); }
+  0% { opacity: 1; transform: translateX(-6px); filter: drop-shadow(5px 0 0 rgba(196, 200, 207, 0.85)); }
   40% { transform: translateX(5px); }
   70% { transform: translateX(-2px); }
   100% { opacity: 1; transform: none; filter: none; }
@@ -61,12 +62,12 @@
 .is-lock .ro-words-img { clip-path: inset(0 100% 0 0); animation: ro-slide 0.9s steps(14, end) 1.55s forwards; }
 .ro-readout {
   position: relative; margin-top: 22px; font: 600 11px/1 ui-monospace, 'SFMono-Regular', Menlo, monospace;
-  letter-spacing: 0.4em; text-transform: uppercase; color: var(--ro-ember); opacity: 0; animation: ro-in 0.3s steps(3, end) 2.5s forwards;
+  letter-spacing: 0.4em; text-transform: uppercase; color: var(--ro-line); opacity: 0; animation: ro-in 0.3s steps(3, end) 2.5s forwards;
 }
 
-/* ---------------- 2. DIVE: the stoop through cloud, an ember trail, feathers ---------------- */
-.raptor-opening.is-dive { background: linear-gradient(200deg, #2a2420 0%, #16171a 40%, #0a0b0c 100%); }
-.ro-ember-sky { position: absolute; right: -20%; top: -30%; width: 90vmax; height: 90vmax; border-radius: 50%; background: radial-gradient(circle, rgba(232, 135, 58, 0.28) 0%, rgba(207, 159, 110, 0.1) 35%, rgba(0, 0, 0, 0) 65%); }
+/* ---------------- 2. DIVE: the stoop through cloud, a silver trail, feathers ---------------- */
+.raptor-opening.is-dive { background: linear-gradient(200deg, #232428 0%, #141518 40%, #09090b 100%); }
+.ro-sky-glow { position: absolute; right: -20%; top: -30%; width: 90vmax; height: 90vmax; border-radius: 50%; background: radial-gradient(circle, rgba(196, 200, 207, 0.28) 0%, rgba(196, 200, 207, 0.1) 35%, rgba(0, 0, 0, 0) 65%); }
 .ro-cloud-up {
   position: absolute; top: 100%; height: 18vh; border-radius: 50%; filter: blur(22px);
   background: radial-gradient(ellipse, rgba(243, 238, 230, 0.22) 0%, rgba(243, 238, 230, 0) 70%);
@@ -75,11 +76,11 @@
 @keyframes ro-cloud-rise { to { transform: translateY(-140vh); } }
 .is-dive .ro-wing { opacity: 0; transform: translate(55vw, -60vh) rotate(38deg) scale(0.5); filter: blur(6px); animation: ro-stoop 1.15s cubic-bezier(.55, .05, .2, 1) 0.1s forwards; }
 @keyframes ro-stoop { 55% { opacity: 1; filter: blur(3px); } 88% { transform: translate(-4px, 6px) rotate(-4deg) scale(1.04); } to { opacity: 1; transform: none; filter: none; } }
-/* The ember trail: drawn from the wing back up the line it came down, then gone. */
+/* The silver trail: drawn from the wing back up the line it came down, then gone. */
 .ro-trail {
   position: absolute; left: 50%; top: 50%; width: 70vw; height: 3px; transform-origin: 0 50%; transform: rotate(-48deg) scaleX(0);
-  background: linear-gradient(90deg, rgba(232, 135, 58, 0.95) 0%, rgba(232, 135, 58, 0.35) 30%, rgba(232, 135, 58, 0) 100%);
-  filter: blur(1px) drop-shadow(0 0 8px rgba(232, 135, 58, 0.8));
+  background: linear-gradient(90deg, rgba(196, 200, 207, 0.95) 0%, rgba(196, 200, 207, 0.35) 30%, rgba(196, 200, 207, 0) 100%);
+  filter: blur(1px) drop-shadow(0 0 8px rgba(196, 200, 207, 0.8));
   animation: ro-trail 1.6s ease-out 0.15s forwards;
 }
 @keyframes ro-trail { 0% { transform: rotate(-48deg) scaleX(1); opacity: 0; } 15% { opacity: 1; } 70% { opacity: 0.8; } 100% { transform: rotate(-48deg) scaleX(0.2); opacity: 0; } }
@@ -95,15 +96,16 @@
 /* ---------------- 3. SUMMIT: Raptor's own photograph, the sun over the peak ---------------- */
 .raptor-opening.is-summit { background: #060708; }
 .ro-photo {
-  position: absolute; inset: 0; background: url('/brand/raptor-login.webp') 42% 32% / cover;
-  transform: scale(1.18); filter: brightness(0.12) saturate(0.6);
+  /* The photograph comes from the skin (openingPhotos.ts); a cool, silvered grade keeps it Platinum. */
+  position: absolute; inset: 0; background: center / cover no-repeat;
+  transform: scale(1.18); filter: brightness(0.12) saturate(0.5);
   animation: ro-dawn 3.4s cubic-bezier(.25, .6, .2, 1) forwards;
 }
-@keyframes ro-dawn { 45% { filter: brightness(0.75) saturate(1.05); } to { transform: scale(1); filter: brightness(0.62) saturate(1); } }
-/* The sun sits at about 41% across and 28% down in the photograph. */
+@keyframes ro-dawn { 45% { filter: brightness(0.78) saturate(0.85); } to { transform: scale(1); filter: brightness(0.64) saturate(0.78); } }
+/* Placed on each photograph's own light (openingPhotos.ts `sun`). */
 .ro-sunflare {
-  position: absolute; left: 41%; top: 28%; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%) scale(0); opacity: 0;
-  background: radial-gradient(circle, rgba(255, 248, 232, 1) 0%, rgba(232, 135, 58, 0.55) 30%, rgba(232, 135, 58, 0) 70%);
+  position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%) scale(0); opacity: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 1) 0%, rgba(196, 200, 207, 0.55) 30%, rgba(196, 200, 207, 0) 70%);
   animation: ro-sun 1.6s ease-out 0.9s forwards;
 }
 @keyframes ro-sun { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0); } 35% { opacity: 1; } 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(55); } }
