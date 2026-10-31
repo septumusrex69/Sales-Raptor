@@ -378,6 +378,15 @@ try {
   await page.waitForTimeout(500)
   const reply = calls.filter((c) => c.action === 'ticket-reply').pop()
   t.ok('a reply goes on the right ticket', reply?.body?.ticketNo === 41 && reply?.body?.message === 'Attached is the proof.')
+  /* A REPLY ONLY TO SOMETHING (Stephan, 30 Oct): the firm wrote last on 41, so it is a reply; on 52 nobody has, so the
+     client is adding to their own question and is not told to "reply". */
+  t.ok('where the firm wrote last, the box asks for a reply', (await page.getByTestId('portal-reply').first().getAttribute('placeholder')) === 'Write your reply…'
+    && /Send reply/.test(await page.getByTestId('portal-reply-send').first().innerText()))
+  await page.getByTestId('portal-ticket').nth(1).locator('button').first().click()
+  await page.waitForTimeout(500)
+  const own = page.getByTestId('portal-ticket').nth(1)
+  t.ok('where nobody has answered yet, it asks them to add to it, not to reply', /^Add something/.test(await own.getByTestId('portal-reply').getAttribute('placeholder'))
+    && (await own.getByTestId('portal-reply-send').innerText()).trim() === 'Send')
   await page.getByTestId('portal-ticket-view-closed').click()
   t.ok('the Closed button shows the closed ones, and only them', await page.getByTestId('portal-ticket').count() === 1
     && /Closed/.test(await page.getByTestId('portal-ticket').first().innerText()))

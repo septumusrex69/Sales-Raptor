@@ -250,6 +250,9 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   the name moved down into those gaps (margin 104 px), the sweeps' centre fade widened; the arcs now play the TOWERS'
   sound, which he liked (arcsSound removed). e2e portal-openings 19: traces each ring's DRAWN arc and requires 10 px
   clear of the name (break-tested: the old angles and spacing touch rings 0, 1, 2). The portal still plays the towers.
+- **PORTAL TICKET BOX: "REPLY" ONLY WHEN THERE IS SOMETHING TO REPLY TO (30 Oct: "a reply is a reply to something")**:
+  the firm wrote last -> "Write your reply…" / Send reply; the client did, or nobody has -> "Add something to this, if
+  there is more…" / Send. The client's own bubbles moved from amber to the brand's pale gold. e2e client-portal 102.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

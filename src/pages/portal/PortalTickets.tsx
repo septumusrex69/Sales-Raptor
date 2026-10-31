@@ -183,6 +183,7 @@ function Thread({ token, ticket, onSignedOut, onReplied }: {
     } finally { setBusy(false) }
   }
 
+  const answering = !!messages?.length && messages[messages.length - 1].direction === 'out'
   return (
     <div className="border-t border-slate-100 p-4 space-y-3" data-testid="portal-thread">
       {/* WHAT WAS ASKED, first: the ticket's own words, which no message repeats -- except on the client's own
@@ -194,7 +195,7 @@ function Thread({ token, ticket, onSignedOut, onReplied }: {
         : messages.length === 0 ? <p className="text-sm text-slate-500">Nothing has been written on this ticket yet.</p>
           : messages.map((m, i) => (
             <div key={i} className={`rounded-xl p-3 text-sm max-w-[90%] ${m.direction === 'out'
-              ? 'bg-navy-900/5 border border-navy-900/10' : 'bg-amber-50 border border-amber-100 ml-auto'}`} data-testid="portal-message">
+              ? 'bg-navy-900/5 border border-navy-900/10' : 'bg-[#FBF6EC] border border-[#C69F54]/25 ml-auto'}`} data-testid="portal-message">
               <p className="text-xs text-slate-500 mb-1">
                 {m.direction === 'out' ? (m.from ?? 'Bredell Ferreira') : 'You'} · {formatDate(m.at)}
               </p>
@@ -204,14 +205,19 @@ function Thread({ token, ticket, onSignedOut, onReplied }: {
               )}
             </div>
           ))}
+      {/*
+        A REPLY ONLY WHEN THERE IS SOMETHING TO REPLY TO (Stephan, 30 Oct, under his own two messages: "didn't say write
+        your reply because if you want to follow up ... a reply is a reply to something"). When the firm wrote last the
+        box asks for a reply; when the client did -- or nobody has -- it is adding to what they asked.
+      */}
       {ticket.status === 'open' ? (
-        <form onSubmit={send} className="space-y-2">
+        <form onSubmit={send} className="space-y-2" data-answering={answering ? 'yes' : 'no'}>
           <textarea value={draft} onChange={(e) => { setDraft(e.target.value); setSent(false) }} rows={3} maxLength={PORTAL_MESSAGE_MAX}
-            placeholder="Write your reply…" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" data-testid="portal-reply" />
+            placeholder={answering ? 'Write your reply…' : 'Add something to this, if there is more…'} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" data-testid="portal-reply" />
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-slate-500">{sent ? 'Sent. Your liaison has been told.' : 'Your liaison at the firm is told the moment you send.'}</p>
             <button type="submit" disabled={busy || !draft.trim()} data-testid="portal-reply-send"
-              className="rounded-lg bg-navy-900 text-white px-4 py-1.5 text-sm disabled:opacity-50">Send reply</button>
+              className="rounded-lg bg-navy-900 text-white px-4 py-1.5 text-sm disabled:opacity-50">{answering ? 'Send reply' : 'Send'}</button>
           </div>
         </form>
       ) : (
