@@ -233,7 +233,7 @@ const DAY_PHOTO_VARS = ['--skin-collections-hero-image', '--skin-hero-background
 
 export function applyDayPhoto(id: ThemeId) {
   const root = document.documentElement
-  if (id !== BASE_THEME) { for (const v of [...DAY_PHOTO_VARS, '--day-photo-position'] as const) root.style.removeProperty(v); return }
+  if (id !== BASE_THEME) { for (const v of [...DAY_PHOTO_VARS, '--day-photo-position', '--day-photo-login-position'] as const) root.style.removeProperty(v); return }
   /* TODAY'S APPROVED LOOK (dayLookState.ts, fetched by ThemeContext) -- the same one the client portal shows, framed
      as an Administrator approved it at /portal-looks; Llandudno where today was not approved. */
   const look = currentDayLook()
@@ -241,5 +241,6 @@ export function applyDayPhoto(id: ThemeId) {
   root.style.setProperty('--skin-collections-hero-image', at(3200))
   root.style.setProperty('--day-photo-position', `${look.band.x}% ${look.band.y}%`)
   root.style.setProperty('--day-photo-login', at(2400))
+  root.style.setProperty('--day-photo-login-position', `${look.signin.x}% ${look.signin.y}%`)
   root.style.setProperty('--skin-hero-background', `${bandBackground(look, 2400)}, #12212f`)
 }

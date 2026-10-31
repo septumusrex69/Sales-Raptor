@@ -104,7 +104,7 @@ export default function PortalLooksPage() {
       </div>
       {error && <p className="text-sm text-negative-700">{error}</p>}
       {loading ? <p className="text-sm text-slate-400">Reading the month…</p> : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-4">
           {days.map((d) => (
             <DayCard key={d} day={d} row={rows[d] ?? null} isToday={d === today} canEdit={canEdit} onSave={save} />
           ))}
@@ -138,22 +138,24 @@ function DayCard({ day, row, isToday, canEdit, onSave }: {
           : <span className="text-xs text-slate-500">{row ? (changed ? 'Changed, not approved' : 'Not approved: clients see Llandudno') : 'Not chosen: clients see Llandudno'}</span>}
       </div>
 
-      <div className="flex gap-2">
-        {/* As the dashboard band. */}
-        <div className="relative flex-1 min-w-0 overflow-hidden rounded-xl text-white h-[120px] flex items-center" style={{ background: bandBackground(look, 1200) }}
-          data-testid="portal-look-band">
-          <div className={`w-full px-4 ${look.side === 'right' ? 'text-right' : ''}`}>
-            <p className="text-[18px] font-bold leading-tight">Dashboard</p>
-            <p className="text-[11px] text-white/90">Your book, where it stands.</p>
-            <p className={`mt-1.5 text-[10.5px] italic text-white/90 max-w-[60%] ${look.side === 'right' ? 'ml-auto' : ''}`}>“{look.line}”{look.who && <span className="not-italic text-[#C69F54]"> {look.who}</span>}</p>
+      {/*
+        THE SIGN-IN PANEL FIRST, AND AT A SIZE THAT CAN BE JUDGED (Stephan, 31 Oct: "the problem is not ... the hero banner
+        ... The problem is the login page ... that part on the left"). It is the panel with the most on it -- the mark,
+        the heading, the paragraph and the line, all over the photograph -- and it is taller than it is wide, so it is
+        where a photograph's framing matters most. Drawn as the real panel is, in proportion; the banner beside it.
+      */}
+      <div className="flex flex-col md:flex-row gap-3">
+        <SigninPreview look={look} />
+        <div className="flex-1 min-w-0 space-y-3">
+          {/* As the dashboard band. */}
+          <div className="relative overflow-hidden rounded-xl text-white h-[120px] flex items-center" style={{ background: bandBackground(look, 1200) }}
+            data-testid="portal-look-band">
+            <div className={`w-full px-4 ${look.side === 'right' ? 'text-right' : ''}`}>
+              <p className="text-[18px] font-bold leading-tight">Dashboard</p>
+              <p className="text-[11px] text-white/90">Your book, where it stands.</p>
+              <p className={`mt-1.5 text-[10.5px] italic text-white/90 max-w-[60%] ${look.side === 'right' ? 'ml-auto' : ''}`}>“{look.line}”{look.who && <span className="not-italic text-[#C69F54]"> {look.who}</span>}</p>
+            </div>
           </div>
-        </div>
-        {/* As the tall sign-in panel. */}
-        <div className="relative w-[84px] shrink-0 overflow-hidden rounded-xl text-white flex items-end" style={{ background: signinBackground(look, 600) }}>
-          <p className="p-1.5 text-[9px] font-bold leading-tight">Your book, where it stands.</p>
-        </div>
-      </div>
-
       {canEdit && (
         <div className="grid gap-2 text-xs text-slate-600">
           <label className="flex items-center gap-2">
@@ -163,12 +165,12 @@ function DayCard({ day, row, isToday, canEdit, onSave }: {
               {PORTAL_PHOTOS.map((p) => <option key={p.id} value={p.id}>{p.kind} · {p.title}</option>)}
             </select>
           </label>
-          <Slider label="Band ↔" value={draft.band_x} onChange={(v) => set({ band_x: v })} testId="portal-look-band-x" />
-          <Slider label="Band ↕" value={draft.band_y} onChange={(v) => set({ band_y: v })} testId="portal-look-band-y" />
-          <Slider label="Sign-in ↔" value={draft.signin_x} onChange={(v) => set({ signin_x: v })} />
-          <Slider label="Sign-in ↕" value={draft.signin_y} onChange={(v) => set({ signin_y: v })} />
+          <Slider label="Sign-in ↔" value={draft.signin_x} onChange={(v) => set({ signin_x: v })} testId="portal-look-signin-x" />
+          <Slider label="Sign-in ↕" value={draft.signin_y} onChange={(v) => set({ signin_y: v })} testId="portal-look-signin-y" />
+          <Slider label="Banner ↔" value={draft.band_x} onChange={(v) => set({ band_x: v })} testId="portal-look-band-x" />
+          <Slider label="Banner ↕" value={draft.band_y} onChange={(v) => set({ band_y: v })} testId="portal-look-band-y" />
           <div className="flex items-center gap-2">
-            <span className="w-20 shrink-0">Words</span>
+            <span className="w-20 shrink-0">Banner words</span>
             {(['left', 'right'] as const).map((side) => (
               <button key={side} type="button" onClick={() => set({ text_side: side })} aria-pressed={draft.text_side === side} data-testid={`portal-look-side-${side}`}
                 className={`rounded-md px-2.5 py-1 border ${draft.text_side === side ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200'}`}>
@@ -201,6 +203,8 @@ function DayCard({ day, row, isToday, canEdit, onSave }: {
           </div>
         </div>
       )}
+        </div>
+      </div>
     </article>
   )
 }
@@ -218,5 +222,32 @@ function Slider({ label, value, onChange, testId }: { label: string; value: numb
       <input type="range" min={0} max={100} value={Number(value)} onChange={(e) => onChange(Number(e.target.value))} data-testid={testId} className="flex-1" />
       <span className="w-8 text-right tabular-nums">{Math.round(Number(value))}</span>
     </label>
+  )
+}
+
+/*
+ * THE CLIENT PORTAL'S SIGN-IN PANEL, IN MINIATURE AND IN PROPORTION (taller than wide, as on an iPad): the mark at the
+ * top, then at the foot the label, the heading, the gold rule, the paragraph and the day's line -- the same words in
+ * the same places as PortalPage's SignIn, so what is approved here is what a client sees.
+ */
+function SigninPreview({ look }: { look: ReturnType<typeof lookFromRow> }) {
+  return (
+    <div className="relative w-full md:w-[270px] shrink-0 aspect-[0.86] max-w-full overflow-hidden rounded-xl text-white flex flex-col justify-between p-4"
+      style={{ background: signinBackground(look, 1200) }} data-testid="portal-look-signin">
+      <div className="flex items-center gap-2">
+        <img src="/brand/icon-light.svg" alt="" className="h-8 w-8" />
+        <img src="/brand/wordmark-light.svg" alt="" className="h-2 w-auto" />
+      </div>
+      <div>
+        <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#C69F54]">Client portal</p>
+        <p className="mt-1 text-[17px] font-bold leading-[1.12]">Your book, where it stands, whenever you want to look.</p>
+        <div className="mt-2 h-[1.5px] w-8 rounded bg-[#C69F54]" />
+        <p className="mt-2 text-[9px] leading-snug text-white/85">Every account you have handed over, what has been collected, your reports and your tickets.</p>
+        <div className="mt-2.5 border-l border-[#C69F54] pl-2">
+          <p className="text-[9px] italic text-white/90">“{look.line}”</p>
+          {look.who && <p className="text-[8px] text-[#C69F54]">{look.who}</p>}
+        </div>
+      </div>
+    </div>
   )
 }

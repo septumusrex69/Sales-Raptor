@@ -327,6 +327,10 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   is now the library. **Nothing is approved yet: every day shows Llandudno until an Administrator approves.**
   e2e portal-looks 8 (fill drafts unapproved; approve writes side + approver; edit un-approves; non-admin read-only),
   client-portal 106 (draws the approved elephant at 30% 40%, words right), company-dashboard 59.
+  THE SIGN-IN PANEL IS THE MAIN PREVIEW (31 Oct: "the problem is ... the login page ... that part on the left"; "I need
+  to see where the letters are going to be"): each card leads with the sign-in panel in proportion, carrying the real
+  words in their places (SigninPreview), its framing sliders first; Raptor's own sign-in in the Bredell Ferreira skin
+  is framed by the approved signin_x/y too (--day-photo-login-position). e2e portal-looks 10.
   NOTE for whoever runs e2e: a killed run can leave `vite --port 5199` servers behind; `pkill -f "vite --port 5199"`.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.

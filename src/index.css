@@ -435,7 +435,8 @@ select:autofill {
   /* --day-photo-login: the Bredell Ferreira skin's photograph of the day (themes.ts applyDayPhoto); unset, Raptor's. */
   background-image: var(--day-photo-login, url('/brand/raptor-login.webp'));
   background-size: cover;
-  background-position: 32% center;
+  /* Framed as the day's look was approved (/portal-looks), for the Bredell Ferreira skin; otherwise Raptor's own. */
+  background-position: var(--day-photo-login-position, 32% center);
 }
 @media (min-resolution: 2dppx) {
   .login-photo {

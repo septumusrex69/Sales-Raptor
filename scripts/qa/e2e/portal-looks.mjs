@@ -45,6 +45,13 @@ try {
 
     const first = page.getByTestId('portal-look-day').first()
     await first.getByTestId('portal-look-side-right').click()
+    /* WHERE THE LETTERS FALL (Stephan, 31 Oct: "I need to see where the letters are going to be"): the sign-in preview
+       carries the real panel's words in their places, over the photograph framed as chosen. */
+    const signin = first.getByTestId('portal-look-signin')
+    t.ok('the sign-in preview carries the real words in their places', /Client portal/i.test(await signin.innerText())
+      && /Your book, where it stands, whenever you want to look/.test(await signin.innerText()))
+    await first.getByTestId('portal-look-signin-x').fill('20')
+    t.ok('...and framing it moves the photograph under them', /20% 50%/.test(await signin.evaluate((e) => e.style.background)))
     t.ok('a change shows at once in the preview, before anything is saved', /text-right/.test(await first.getByTestId('portal-look-band').innerHTML()))
     await first.getByTestId('portal-look-approve').click()
     await page.waitForTimeout(400)
