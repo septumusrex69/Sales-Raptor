@@ -154,7 +154,10 @@ try {
 
   /* ---------- the promise the screen was agreed under ---------- */
   t.ok('no commission on the screen', !/commission/i.test(text.replace(/Commission and Annexure B income are deliberately not on[\s\S]*?audience\./, '')))
-  t.ok('the hero is still the company hero', /our roots/i.test(text))
+  t.ok('the hero is still the company hero', /the sky is only/i.test(text))
+  /* THE BREDELL FERREIRA SKIN, the default since 31 Oct, wears the client portal's photograph of the day and its line. */
+  t.ok('the default skin\'s hero carries the day\'s line and its photographer', /Photo: .+ on Unsplash/.test(await page.getByTestId('hero-day-line').innerText().catch(() => '')))
+  t.ok('...over the day\'s photograph, Llandudno beneath it', /portal-photo\.webp/.test(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--skin-collections-hero-image'))))
 
   await page.setViewportSize({ width: 1300, height: 900 })
   await t.shot(page, 'company-dashboard')

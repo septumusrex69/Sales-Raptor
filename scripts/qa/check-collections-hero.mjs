@@ -369,7 +369,9 @@ ok('...as one plain url, never an image-set', !/image-set/.test(baseImage))
 /* Over the CODE, for the reason given where cssCode is built. */
 ok('image-set is not used anywhere in the stylesheet', !/image-set\(/.test(cssCode))
 ok('...including the sign-in photograph, which had the same bug',
-  /\.login-photo \{[\s\S]{0,200}background-image: url\('\/brand\/raptor-login\.webp'\);/.test(css))
+  /* S16: the Bredell Ferreira skin's photograph of the day arrives through --day-photo-login; the fallback is still a
+     plain url(), which is the point. */
+  /\.login-photo \{[\s\S]{0,300}background-image: (var\(--day-photo-login, )?url\('\/brand\/raptor-login\.webp'\)\)?;/.test(css))
 /* The dense-screen file survives as a resolution query, which is two conditions rather than two
    alternatives for one property, and therefore nothing a minifier can collapse. */
 ok('...and the 2x file is still only fetched by a screen that needs it',

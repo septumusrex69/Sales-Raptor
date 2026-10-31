@@ -1,3 +1,5 @@
+import { clockNow } from './clock.ts'
+import { johannesburgToday, photoOfTheDay, portalPhotoUrl } from './portalPhotos.ts'
 /**
  * The visual skins available to the application.
  *
@@ -39,10 +41,18 @@ export interface ThemeDefinition {
 
 export const THEMES: ThemeDefinition[] = [
   {
+    /*
+     * BREDELL FERREIRA: THE FIRST SKIN, AND THE DEFAULT (S16, 31 Oct). Stephan: "the first theme ... make this a Bredell
+     * Ferreira theme, and ... implement the same things to that. So the same photos ... for the day, for Bredell
+     * Ferreira. And it will change every day ... This will be the first default skin." The firm's own navy and gold,
+     * wearing the client portal's photograph of South Africa for the day (portalPhotos.ts) on the sign-in, the company
+     * dashboard and every dashboard band, with the day's line -- applyDayPhoto, below, puts it there. It was "Current",
+     * selling itself as Romulus, the product's name before it was Raptor.
+     */
     id: 'original',
-    name: 'Current',
-    description: 'The original Bredell Ferreira appearance.',
-    productName: 'Romulus',
+    name: 'Bredell Ferreira',
+    description: 'The firm\'s navy and gold, with a new photograph of South Africa and a new line every day.',
+    productName: 'Raptor',
     lockupLight: '/brand/wordmark-light.svg',
     swatch: { ground: '#0f161d', surface: '#f4f6fb', accent: '#c69f54' },
     heroLine: { first: 'The sky is only', second: 'the beginning.' },
@@ -153,7 +163,7 @@ export const THEMES: ThemeDefinition[] = [
  * now gives them different answers: this one is a product decision, that one is a fact about
  * where the stylesheet keeps its tokens.
  */
-export const DEFAULT_THEME: ThemeId = 'africa'
+export const DEFAULT_THEME: ThemeId = 'original'
 
 /**
  * The skin the stylesheet renders with no attribute set.
@@ -210,4 +220,24 @@ export function applyTheme(id: ThemeId) {
   const root = document.documentElement
   if (id === BASE_THEME) root.removeAttribute('data-theme')
   else root.setAttribute('data-theme', id)
+  applyDayPhoto(id)
+}
+
+/*
+ * THE BREDELL FERREIRA SKIN'S PHOTOGRAPH OF THE DAY. The base skin stamps no data-theme, so no stylesheet can single it
+ * out; instead its photograph tokens are set on the root element itself while it is worn (an inline custom property
+ * beats the :root rule) and removed the moment another skin is put on. Every slot gets today's photograph with
+ * Llandudno, the app's own copy, beneath it -- a day Unsplash fails shows Llandudno, never an empty panel.
+ */
+const DAY_PHOTO_VARS = ['--skin-collections-hero-image', '--skin-hero-background', '--day-photo-login'] as const
+
+export function applyDayPhoto(id: ThemeId, now: Date = clockNow()) {
+  const root = document.documentElement
+  if (id !== BASE_THEME) { for (const v of DAY_PHOTO_VARS) root.style.removeProperty(v); return }
+  const photo = photoOfTheDay(johannesburgToday(now))
+  const at = (w: number) => `url('${portalPhotoUrl(photo, w)}'), url('/brand/portal-photo.webp')`
+  root.style.setProperty('--skin-collections-hero-image', at(3200))
+  root.style.setProperty('--day-photo-login', at(2400))
+  root.style.setProperty('--skin-hero-background',
+    `linear-gradient(90deg, rgba(18,33,47,0.86) 0%, rgba(18,33,47,0.55) 38%, rgba(18,33,47,0.12) 75%), url('${portalPhotoUrl(photo, 2400)}') ${photo.band ?? 'center'} / cover no-repeat, url('/brand/portal-photo.webp') center / cover no-repeat, #12212f`)
 }

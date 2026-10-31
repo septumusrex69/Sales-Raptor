@@ -302,6 +302,16 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   ITSELF before ringing every active Administrator, at most once a day (type `portal_photo`); (3) a morning cron
   `/api/portal/photo-check` 04:37 UTC (needs CRON_SECRET, as the others). The e2e harness answers images.unsplash.com
   with a 1x1 png so no other test wears the warning. e2e company-dashboard 56, client-portal, portal-openings 21.
+- **THE FIRST SKIN IS NOW "BREDELL FERREIRA", AND IT IS THE DEFAULT (31 Oct: "make this a Bredell Ferreira theme ... the
+  same photos ... for the day ... This will be the first default skin")**: `original` renamed (was "Current", product
+  "Romulus"; now product "Raptor"), `DEFAULT_THEME = 'original'` and index.html's pre-paint with it (Africa was default
+  29-31 Oct). The base skin stamps no data-theme, so `applyDayPhoto` (themes.ts, called from applyTheme) sets its photo
+  tokens INLINE on <html> while it is worn and removes them on any other skin: --skin-collections-hero-image (company
+  hero), --skin-hero-background (every DashboardHero band), --day-photo-login (sign-in; .login-photo falls back to
+  raptor-login). Today's portal photo, Llandudno beneath. The company hero shows the day's line + credit (DayLine in
+  CollectionsHero, base skin only). Tests that knew Africa's "our roots" now look for "The sky is only"; login-reset's
+  new-browser door is the BF skin with the day photo. The day photo is set on load and on skin change -- a tab left open
+  past midnight keeps yesterday's until reloaded (fine; noted).
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 

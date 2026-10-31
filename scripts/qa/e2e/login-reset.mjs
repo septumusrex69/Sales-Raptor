@@ -37,7 +37,7 @@ try {
   /* THE DOOR WEARS THE BROWSER'S OWN SKIN (Stephan, 30 Oct: "everyone who picks a different skin ... will see their own
      login page the next time they come in"). Each skin's own photograph, or for glass mountain its backdrop through a
      see-through page; never the default forced over somebody's choice. */
-  const PHOTO = { desert: /desert-hero/, ocean: /ocean-hero/, original: /raptor-login/, raptor: /raptor-login/, africa: /africa-hero/, forest: /forest-hero/ }
+  const PHOTO = { desert: /desert-hero/, ocean: /ocean-hero/, original: /portal-photo\.webp/, raptor: /raptor-login/, africa: /africa-hero/, forest: /forest-hero/ }
   for (const skin of ['glass-mountain', 'desert', 'ocean', 'original', 'raptor', 'africa', 'forest']) {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     await c.addInitScript((s) => { try { localStorage.setItem('crm.theme', s) } catch { /* ignore */ } }, skin)
@@ -60,14 +60,16 @@ try {
     if (skin === 'forest') await t.shot(p, 'login-forest')
     await c.close()
   }
-  /* A browser that has never chosen: Africa at the door and Africa inside (the default). */
+  /* A browser that has never chosen: the Bredell Ferreira skin at the door (the default since 31 Oct), wearing the day's
+     photograph of South Africa -- the app's own Llandudno always beneath it. */
   {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     const p = await c.newPage()
     await stubSupabase(p, [])
     await p.goto(`http://localhost:${PORT}/login`)
     await p.getByRole('button', { name: 'Sign In' }).waitFor()
-    t.check('a new browser: the door wears Africa', await p.evaluate(() => document.documentElement.getAttribute('data-theme')), 'africa')
+    t.check('a new browser: the door wears the Bredell Ferreira skin', await p.evaluate(() => document.documentElement.getAttribute('data-theme') ?? 'original'), 'original')
+    t.ok('...with the day\'s photograph on it', /portal-photo\.webp/.test(await p.evaluate(() => getComputedStyle(document.querySelector('.login-photo')).backgroundImage)))
     await c.close()
   }
 } finally {

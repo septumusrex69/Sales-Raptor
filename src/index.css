@@ -432,13 +432,14 @@ select:autofill {
  * because the two rules are not alternatives for one property, they are different conditions.
  */
 .login-photo {
-  background-image: url('/brand/raptor-login.webp');
+  /* --day-photo-login: the Bredell Ferreira skin's photograph of the day (themes.ts applyDayPhoto); unset, Raptor's. */
+  background-image: var(--day-photo-login, url('/brand/raptor-login.webp'));
   background-size: cover;
   background-position: 32% center;
 }
 @media (min-resolution: 2dppx) {
   .login-photo {
-    background-image: url('/brand/raptor-login@2x.webp');
+    background-image: var(--day-photo-login, url('/brand/raptor-login@2x.webp'));
   }
 }
 

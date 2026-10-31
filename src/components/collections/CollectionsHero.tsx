@@ -6,6 +6,8 @@ import { targetLaps } from '../../lib/collectionPace.ts'
 import { greetingLine } from '../../lib/greeting.ts'
 import { formatCurrency } from '../../data/mockData'
 import { clockNow } from '../../lib/clock.ts'
+import { BASE_THEME } from '../../lib/themes.ts'
+import { johannesburgToday, photoCredit, photoOfTheDay } from '../../lib/portalPhotos.ts'
 
 /**
  * The hero, to the firm's own design — and it belongs to the COMPANY dashboard.
@@ -146,6 +148,8 @@ export function CollectionsHero({ figures, filters, action, progress }: {
             <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
               Discipline drives results
             </p>
+            {/* THE BREDELL FERREIRA SKIN'S LINE OF THE DAY, with its photograph (themes.ts applyDayPhoto; S16, 31 Oct). */}
+            {theme.id === BASE_THEME && <DayLine />}
           </div>
           {/*
             The rail of small caps, right-aligned the way the firm drew it. Hidden on a phone
@@ -310,3 +314,18 @@ const money = formatCurrency
 
 const pct = (v: number | null): string => (v === null ? '—' : `${Math.round(v * 100)}%`)
 const signedPct = (v: number): string => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v * 100))}%`
+
+/* The day's line and the photographer's credit, for the Bredell Ferreira skin, whose photograph changes daily. */
+function DayLine() {
+  const photo = photoOfTheDay(johannesburgToday(clockNow()))
+  const credit = photoCredit(photo)
+  return (
+    <figure className="mt-5 max-w-xl border-l-2 border-[var(--ch-gold)] pl-3" data-testid="hero-day-line">
+      <blockquote className="text-[15px] italic text-white/90">“{photo.line}”</blockquote>
+      {photo.who && <figcaption className="mt-1 text-xs text-[var(--ch-champagne)]">{photo.who}</figcaption>}
+      <p className="mt-2 text-[10px] text-white/55">
+        {photo.title}, {photo.place}. Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">{credit.name}</a> on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">Unsplash</a>
+      </p>
+    </figure>
+  )
+}
