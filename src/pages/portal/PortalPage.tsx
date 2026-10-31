@@ -51,9 +51,10 @@ export default function PortalPage() {
   /* THE OPENING plays while the portal reads who this is, and a little longer (PortalSplash) -- ON TOP of the
      portal once it is there, so its fade dissolves into the dashboard rather than into an empty page. */
   /* One element in one place, so the opening is never remounted (and restarted) when the portal arrives. */
-  /* THE TOWERS (Stephan, 30 Oct, after replaying the three at /portal/opening: "Do number three"). */
+  /* THE ARCS (Stephan, 30 Oct, after the rings were moved clear of the name: "Looks awesome. You can integrate the
+     arcs"). The towers before that, his first pick ("Do number three"). */
   return <>
-    {!opened && <PortalSplash variant="towers" ready={!!me} fresh={fresh} onDone={() => { setOpened(true); setFresh(false) }} />}
+    {!opened && <PortalSplash variant="arcs" ready={!!me} fresh={fresh} onDone={() => { setOpened(true); setFresh(false) }} />}
     {me && <Signed token={token} me={me} onSignedOut={() => { portalSignOut(token).catch(() => {}); signedOut() }} onExpired={signedOut} />}
   </>
 }

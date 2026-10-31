@@ -253,6 +253,7 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
 - **PORTAL TICKET BOX: "REPLY" ONLY WHEN THERE IS SOMETHING TO REPLY TO (30 Oct: "a reply is a reply to something")**:
   the firm wrote last -> "Write your reply…" / Send reply; the client did, or nobody has -> "Add something to this, if
   there is more…" / Send. The client's own bubbles moved from amber to the brand's pale gold. e2e client-portal 102.
+- **THE PORTAL PLAYS THE ARCS (30 Oct: "Looks awesome. You can integrate the arcs")** -- replacing the towers; same sound.
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
