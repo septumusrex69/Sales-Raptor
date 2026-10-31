@@ -69,6 +69,21 @@ try {
     t.ok(`${v}: then it gives the page back, with the replay mark on it`, await page.getByTestId(`opening-${v}`).isVisible())
   }
 
+  /* /portal/photos: Stephan's South African candidates, each drawn as the band and the sign-in panel, filterable. */
+  await page.goto(`http://localhost:${PORT}/portal/photos`)
+  await page.getByTestId('portal-photos').waitFor()
+  const total = await page.getByTestId('photo-candidate').count()
+  await page.getByTestId('photos-nature').click()
+  const nature = await page.getByTestId('photo-candidate').count()
+  await page.getByTestId('photos-city').click()
+  const city = await page.getByTestId('photo-candidate').count()
+  await page.getByTestId('photos-people').click()
+  const people = await page.getByTestId('photo-candidate').count()
+  t.ok(`the photo board shows ${total}: mostly nature (${nature}), some city (${city}) and people (${people})`, total >= 12 && nature + city + people === total
+    && nature / total >= 0.6 && city > 0 && people > 0)
+  await page.getByTestId('photos-all').click()
+  await page.goto(`http://localhost:${PORT}/portal/opening`)
+  await page.getByTestId('portal-openings').waitFor()
   await page.getByTestId('opening-coast').click()
   await page.locator('.portal-splash[data-variant="coast"]').waitFor()
   t.ok('a second play of the same one plays it in full again', (await page.locator('.portal-splash').getAttribute('data-splash')) === 'full')

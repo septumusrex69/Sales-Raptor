@@ -15,6 +15,7 @@ const OptInPage = lazy(() => import('./pages/news/OptInPage'))
 import { SignInOpening } from './components/opening/SignInOpening'
 const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
 const PortalOpeningPage = lazy(() => import('./pages/portal/PortalOpeningPage'))
+const PortalPhotosPage = lazy(() => import('./pages/portal/PortalPhotosPage'))
 const OpeningPage = lazy(() => import('./pages/OpeningPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
@@ -161,6 +162,8 @@ function App() {
             <Route path="/portal" element={<PortalPage />} />
             {/* The portal's opening animations, replayable on demand (S16, 30 Oct). No data, so no sign-in. */}
             <Route path="/portal/opening" element={<PortalOpeningPage />} />
+            {/* Choosing the portal's photograph (S16, 31 Oct). No data, so no sign-in. */}
+            <Route path="/portal/photos" element={<PortalPhotosPage />} />
             {/* Raptor's own openings, replayable (S16, 30 Oct). No data, so no sign-in. */}
             <Route path="/opening" element={<OpeningPage />} />
             <Route

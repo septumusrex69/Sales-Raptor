@@ -283,6 +283,12 @@ Started from Handover 15 on a container that had checked out `Main`; the branch 
   down, the blurred room); `remittance-cover.jpg` is now a band cut from the same photo (old in git history; advices
   already sent keep theirs). portal-signin.webp and portal-hero.webp deleted. No Unsplash link remains; the credit
   stays. e2e client-portal 104 (the photo is the app's own and at least 2500 x 1600).
+- **CHOOSING THE PORTAL'S PHOTOGRAPH: /portal/photos (31 Oct: the band "I don't know if it completely works ... more to
+  be home ... 60 or 70 nature, then 15 city and 15 people")**: 19 South African Unsplash candidates (13 nature, 3 city,
+  3 people), each drawn as the dashboard band and the tall sign-in panel, filterable. Hotlinked at preview size (this
+  page keeps nothing); the pick gets downloaded into the app as Llandudno was -- register it with
+  `mcp__Unsplash__download_asset` (ids are in PortalPhotosPage.tsx), then he sends the file or the network allows
+  images.unsplash.com. e2e portal-openings 20. **Waiting on his number.**
 - **Asked, not understood yet:** Stephan wrote "all email junk sent drafts blocked." -- put to him.
 - **AT GO-LIVE:** add `portal_handovers_by_day`, `portal_passwords`, `user_emails_done` and `portal_collected_by_month` after `portal_handovers` in the S15 list below. The test history is staging-only.
 
