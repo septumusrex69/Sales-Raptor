@@ -10,6 +10,8 @@
 Started from Handover 15 on a container that had checked out `Main`; the branch was moved onto
 `claude/s15-side-panel` and the preview merged in. **Not yet on the preview** (asked Stephan; waiting).
 
+- **R-15 (builder, 30 Oct): "What is left to take" on an account re-reads when the account's ledgers are re-read** -- `MoneyPanel` fetched once per account id, so a cost loaded on the account showed only after changing tab and back. `AccountDetail` now passes `refreshKey={ledgers}`; the refetch is silent (no spinner flash). Check: `check-money-panel-refresh.mjs` (broken once, seen failing).
+- **R-14 (builder, 30 Oct): To sort > Needs an account has a Reference box and a tick beside each receipt** -- type the reference, press the tick (or Enter) and the receipt is placed through the same `place_bank_line` as the pop-up. Only an EXACT match on case number, account number or client reference, and only when it is exactly one account; none or several says so and places nothing (`src/lib/receiptReference.ts`, `check-receipt-reference`, seen failing with a partial match). Place it / Split it / Move to suspense are unchanged. Browser tests for the page pass; no new browser test.
 - **R-12 (builder, 29 Oct): an email to the client sent from a ticket now also lands on the client's Emails tab** -- it was filed on the ticket and the account only (`QueryDetail` onSent), never as an Email activity. Written only when it went to the client; no extra charge. `check-ticket-client-email` (seen failing before the fix).
 - **`portal_handovers` applied on staging** (see the S15 entry below for how and the md5).
 - **TWO YEARS OF HISTORY ON STEPHAN'S TEST CLIENT (staging, `07574f60-...`)**, Stephan: "add like a lot of data

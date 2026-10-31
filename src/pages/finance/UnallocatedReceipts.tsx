@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Check, Loader2, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
-import { Modal, inputClass } from '../../components/ui/Modal'
+import { Modal, inputClass, controlClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import { matchReference } from '../../lib/receiptReference'
 import { SplitReceiptModal } from './SplitReceiptModal'
 import { lineNature } from '../../lib/bankLineAllocation.ts'
 import { ReturnedReceiptPicker } from '../../components/finance/ReturnedReceiptPicker'
@@ -52,6 +53,9 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   const [placing, setPlacing] = useState<UnallocatedReceipt | null>(null)
   const [splitting, setSplitting] = useState<UnallocatedReceipt | null>(null)
   const [tying, setTying] = useState<string | null>(null)
+  /* THE REFERENCE TYPED BESIDE EACH RECEIPT (R-14), by line, and what went wrong with it. */
+  const [typed, setTyped] = useState<Record<string, string>>({})
+  const [typedError, setTypedError] = useState<Record<string, string>>({})
   /*
    * THE OTHER HALF OF SUSPENSE, and it is a different kind of thing from the list above.
    *
@@ -128,6 +132,30 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
     } finally { setTying(null) }
   }
 
+  /*
+   * PLACED FROM THE BOX BESIDE THE RECEIPT (R-14). Only an exact match on exactly one account places it;
+   * anything else says why and leaves the receipt where it is.
+   */
+  async function placeTyped(r: UnallocatedReceipt) {
+    const ref = (typed[r.id] ?? '').trim()
+    const fail = (m: string) => setTypedError((e) => ({ ...e, [r.id]: m }))
+    if (!ref) { fail('Type the reference first.'); return }
+    setTying(r.id); setTypedError((e) => { const n = { ...e }; delete n[r.id]; return n })
+    try {
+      /* NOT A SECOND DEBTOR SEARCH: this only fetches the candidates for matchReference, which accepts
+         an exact reference on exactly one account and nothing else. Finding a debtor is still PlaceModal. */
+      const found = await fetchAccounts({ countRows: false, pageSize: 25, search: ref })
+      const m = matchReference(ref, found.accounts)
+      if (m.kind === 'none') { fail(`No account has the reference ${ref}. Use Place it to search.`); return }
+      if (m.kind === 'many') { fail(`${ref} is on ${m.count} accounts. Use Place it to choose.`); return }
+      await placeBankLine(r.id, m.account.id)
+      setTyped((t) => { const n = { ...t }; delete n[r.id]; return n })
+      await load(); onPlaced()
+    } catch (e) {
+      fail(e instanceof Error ? e.message : 'That receipt could not be placed.')
+    } finally { setTying(null) }
+  }
+
   const waiting = rows.reduce((n, r) => n + r.amount, 0)
 
   return (
@@ -184,6 +212,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                 <th className="px-4 py-2 text-left font-medium">Received</th>
                 <th className="px-3 py-2 text-right font-medium">Amount</th>
                 <th className="px-3 py-2 text-left font-medium">What the bank said</th>
+                <th className="px-3 py-2 text-left font-medium">Reference</th>
                 <th className="px-3 py-2" />
               </tr>
             </thead>
@@ -203,6 +232,27 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                     {r.hadReference && (
                       <span className="ml-2 text-[11px] text-amber-700">
                         {r.reference} matched more than one account
+                      </span>
+                    )}
+                  </td>
+                  {/* R-14: type the reference here and press the tick, instead of the pop-up. */}
+                  <td className="px-3 py-2">
+                    {lineNature(r.description, 'credit') !== 'bank_interest' && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <input value={typed[r.id] ?? ''} data-testid="receipt-reference" aria-label="Account reference"
+                          onChange={(e) => setTyped((t) => ({ ...t, [r.id]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') void placeTyped(r) }}
+                          placeholder="Reference" className={`${controlClass} w-36 py-1 text-[13px]`} />
+                        <button type="button" disabled={tying === r.id || !(typed[r.id] ?? '').trim()}
+                          onClick={() => void placeTyped(r)} data-testid="place-by-reference" title="Book to the typed reference"
+                          className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-brand-600 text-white disabled:opacity-40">
+                          {tying === r.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                        </button>
+                      </span>
+                    )}
+                    {typedError[r.id] && (
+                      <span className="block max-w-[260px] whitespace-normal text-[11px] text-negative-700" data-testid="reference-error">
+                        {typedError[r.id]}
                       </span>
                     )}
                   </td>

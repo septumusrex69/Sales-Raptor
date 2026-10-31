@@ -1298,7 +1298,7 @@ function AccountPage() {
         ledgers because it is about the figure the ledgers produce.
       */}
       <SwordfishGapPanel account={account} breakdown={statement?.breakdown ?? null} />
-      <MoneyPanel accountId={account.id} />
+      <MoneyPanel accountId={account.id} refreshKey={ledgers} />
       <LedgerPanel accountId={account.id} />
       {/* SENDING SOMETHING OUT TO BE SIGNED. With the money because that is what the firm is
           signing ABOUT -- an acknowledgement of debt is an admission of a balance, and whoever
