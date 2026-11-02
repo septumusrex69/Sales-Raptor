@@ -1,14 +1,49 @@
-# Raptor · Handover 15 — where Raptor stands
+# Raptor · Handover 16 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 15**, written by S15, which started from Raptor Handover 14. The next session is S16 and writes
-> Handover 16. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
+> **Raptor Handover 16**, written by S16, which started from Raptor Handover 15. The next session is S17 and writes
+> Handover 17; its commits start `Raptor H16: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
 > and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
 
-## S16 -- IN PROGRESS (Raptor · Handover 15 -> 16, 29 Oct; branch `claude/beautiful-curie-f7deq7`)
+## S16 -- WHERE IT STANDS, AND WHERE S17 STARTS (Raptor · Handover 16, 29 Oct - 2 Nov; branch `claude/beautiful-curie-f7deq7`)
 
-Started from Handover 15 on a container that had checked out `Main`; the branch was moved onto
-`claude/s15-side-panel` and the preview merged in. **Not yet on the preview** (asked Stephan; waiting).
+Everything below is pushed to the session branch AND fast-forwarded onto the preview
+(`claude/sales-raptor-review-p1pzx2`, https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app).
+Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); fast suite green after the last commit.
+
+### START HERE (S17)
+
+**Live and working (staging/preview):**
+- **Client portal** (`/portal`): password sign-in (code first time / reset), Bredell Ferreira palette, lean KPI tiles,
+  tickets with views (Open / Waiting on you / With the firm, Closed behind a button), reports as PDF|Excel then
+  Open/Download, opening animation **"the arcs"** with the towers sound, replayable at `/portal/opening`.
+- **The portal's photograph of the day, APPROVED A MONTH AT A TIME** at `/portal-looks` (any Administrator; table
+  `portal_day_looks`). **Nothing is approved yet -- every day shows Llandudno until somebody approves.** Library of 24
+  South African photos (40% nature / 35% people / 25% city) with lines, at `/portal/photos`.
+- **Raptor's own opening after sign-in** (`/opening`): Platinum palette, Lock-on is the default; brand board artifact
+  https://claude.ai/artifact/61F3kLLDAC8iGG9iDqJvVD (private to Stephan).
+- **The first skin is now "Bredell Ferreira" and the DEFAULT** (was Africa), wearing the approved photo of the day.
+- **Unsplash-down alarm**: Administrators' dashboards + one bell notification a day; morning cron
+  `/api/portal/photo-check` (needs `CRON_SECRET` on Vercel, as the other crons).
+
+**Waiting on Stephan (ask, don't guess):**
+- Approve the first month at `/portal-looks` (or say who should).
+- `images.unsplash.com` in the environment's Allowed domains, so S17 can store every library photo in the app (only
+  Llandudno is ours; the rest load from Unsplash with Llandudno beneath). Until then, a new photo needs him to send it.
+- Which Raptor opening plays at sign-in (Lock-on now; Dive / Summit offered).
+- Older open questions, unchanged: monthly progress email on/off + day + sender; debtor pay-page details; what "early
+  collections" means; R13 on portal messages; a portal@ fallback mailbox; "all email junk sent drafts blocked."
+
+**Gotchas met this session:**
+- The container's proxy blocks Unsplash, Wikimedia, Pexels, Pixabay, Flickr AND supabase.co -- files come in through
+  the chat (uploads are shrunk to ~2576 px) or the Unsplash MCP (search + register only; it does not hand over bytes).
+- A killed e2e run leaves `vite --port 5199` behind; clean with `pkill -f "[v]ite --port 5199"` (the bracket stops the
+  command matching its own line -- without it the pkill kills the shell running it, exit 144).
+- `check-staging-clock`: only clock.ts may read the machine's clock -- pass `clockNow()` in the browser, `new Date()` on
+  the server. `check-security-audit` counts crons (now 5). Files imported by checks must use `.ts` import specifiers.
+- The e2e harness answers `images.unsplash.com` with a 1x1 PNG (screenshots show a flat tint where photos would be).
+
+### WHAT S16 DID, IN ORDER (newest last)
 
 - **R-15 (builder, 30 Oct): "What is left to take" on an account re-reads when the account's ledgers are re-read** -- `MoneyPanel` fetched once per account id, so a cost loaded on the account showed only after changing tab and back. `AccountDetail` now passes `refreshKey={ledgers}`; the refetch is silent (no spinner flash). Check: `check-money-panel-refresh.mjs` (broken once, seen failing).
 - **R-14 (builder, 30 Oct): To sort > Needs an account has a Reference box and a tick beside each receipt** -- type the reference, press the tick (or Enter) and the receipt is placed through the same `place_bank_line` as the pop-up. Only an EXACT match on case number, account number or client reference, and only when it is exactly one account; none or several says so and places nothing (`src/lib/receiptReference.ts`, `check-receipt-reference`, seen failing with a partial match). Place it / Split it / Move to suspense are unchanged. Browser tests for the page pass; no new browser test.
