@@ -72,7 +72,11 @@ export function PortalAccessCard({ company }: { company: Company }) {
 
   return (
     <Card>
-      <CardHeader title="Client portal" subtitle="The client’s people who may sign in and see their accounts: one line per debtor, capital and payments, where each stands. Included, no charge." />
+      {/* AS MANY PEOPLE AS THE CLIENT WANTS, AND SAID SO (request #19, Nicole, 30 Oct: "We should be able to
+          allow multiple people from a specific client to have access to their portal"). It always could --
+          every Invite adds a login of its own -- but a card reading "Nobody ... can sign in yet" over one
+          email box looks like a slot for one person, and that is what the request was about. */}
+      <CardHeader title="Client portal" subtitle="The client’s people who may sign in and see their accounts: one line per debtor, capital and payments, where each stands. Invite as many as the client wants — each signs in with their own email and password. Included, no charge." />
       <div data-testid="portal-access">
         {contacts === null ? <p className="text-sm text-slate-400 mt-3">Reading…</p>
           : contacts.length === 0 ? <p className="text-sm text-slate-500 mt-3">Nobody at {company.name} can sign in yet.</p>
@@ -104,7 +108,9 @@ export function PortalAccessCard({ company }: { company: Company }) {
             className="flex-1 min-w-[8rem] rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address"
             className="flex-[2] min-w-[12rem] rounded-lg border border-slate-300 px-3 py-1.5 text-sm" data-testid="portal-invite-email" />
-          <button type="submit" disabled={busy || !email} className="rounded-lg bg-navy-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">Invite</button>
+          <button type="submit" disabled={busy || !email} className="rounded-lg bg-navy-900 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+            {contacts && contacts.length > 0 ? 'Invite another person' : 'Invite'}
+          </button>
         </form>
         {note && <p className="text-sm text-emerald-700 mt-2">{note}</p>}
         {error && <p className="text-sm text-red-700 mt-2">{error}</p>}

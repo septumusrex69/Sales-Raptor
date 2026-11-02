@@ -525,3 +525,42 @@ export async function fetchTrustBankStatement(from: string | null, to: string | 
     runId: (r.run_id as string | null) ?? null, runInvoice: (r.run_invoice as string | null) ?? null,
   }))
 }
+
+/* ---------- FIND A PAYMENT (request #18) ---------- */
+
+/** One answer to "where did this money go": a payment in any state, or a credit line nobody placed. */
+export interface FoundPayment {
+  kind: 'payment' | 'bank line'
+  id: string
+  onDay: string
+  amount: number
+  depositor: string | null
+  reference: string | null
+  bankWords: string | null
+  /** Where the money is now, in the firm's words -- worked out in find_payments, not here. */
+  state: string
+  accountId: string | null
+  caseNumber: string | null
+  accountNumber: string | null
+  debtor: string | null
+  client: string | null
+  movedToAccountId: string | null
+  movedToCase: string | null
+}
+
+export async function findPayments(q: { amount: number | null; from: string | null; to: string | null; words: string | null }): Promise<FoundPayment[]> {
+  const { data, error } = await supabase.rpc('find_payments', {
+    p_amount: q.amount, p_from: q.from, p_to: q.to, p_words: q.words,
+  })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    kind: r.kind === 'bank line' ? 'bank line' : 'payment',
+    id: String(r.id), onDay: String(r.on_day), amount: n(r.amount),
+    depositor: (r.depositor as string | null) ?? null, reference: (r.reference as string | null) ?? null,
+    bankWords: (r.bank_words as string | null) ?? null, state: String(r.state ?? ''),
+    accountId: (r.account_id as string | null) ?? null, caseNumber: (r.case_number as string | null) ?? null,
+    accountNumber: (r.account_number as string | null) ?? null, debtor: (r.debtor as string | null) ?? null,
+    client: (r.client as string | null) ?? null,
+    movedToAccountId: (r.moved_to_account_id as string | null) ?? null, movedToCase: (r.moved_to_case as string | null) ?? null,
+  }))
+}

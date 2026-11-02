@@ -65,6 +65,7 @@ const TrustPaymentsOut = lazy(() => import('./pages/trust/TrustPaymentsOut').the
 const TrustToSort = lazy(() => import('./pages/trust/TrustToSort').then((m) => ({ default: m.TrustToSort })))
 const ClientsOweUs = lazy(() => import('./pages/trust/ClientsOweUs').then((m) => ({ default: m.ClientsOweUs })))
 const TrustBankStatement = lazy(() => import('./pages/trust/TrustBankStatement').then((m) => ({ default: m.TrustBankStatement })))
+const FindPayment = lazy(() => import('./pages/trust/FindPayment').then((m) => ({ default: m.FindPayment })))
 const TrustUnaccounted = lazy(() => import('./pages/trust/TrustUnaccounted').then((m) => ({ default: m.TrustUnaccounted })))
 const TrustOverpayments = lazy(() => import('./pages/trust/TrustOverpayments').then((m) => ({ default: m.TrustOverpayments })))
 const BroughtForward = lazy(() => import('./pages/trust/BroughtForward').then((m) => ({ default: m.BroughtForward })))
@@ -242,6 +243,8 @@ function App() {
                 {/* Overpayments live on To sort now (S7); the address still opens the page itself, for links already sent. */}
                 <Route path="overpayments" element={<TrustOverpayments />} handle={{ title: 'Overpayments' }} />
                 <Route path="statement" element={<TrustBankStatement />} handle={{ title: 'Bank statement' }} />
+                {/* Request #18: every payment in every state, found by what the proof of payment says. */}
+                <Route path="find" element={<FindPayment />} handle={{ title: 'Find a payment' }} />
                 {/* Every item behind the overview's "Not accounted for" (S7), opened from that figure. */}
                 <Route path="unaccounted" element={<TrustUnaccounted />} handle={{ title: 'Not accounted for' }} />
                 <Route path="ledger" element={<TrustLedger />} handle={{ title: 'Trust ledger' }} />

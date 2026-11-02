@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Landmark, Users, Scale, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Landmark, Users, Scale, Search, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -41,6 +41,8 @@ const ITEMS: RailItem[] = [
   { to: '/trust/clients', label: 'Clients owe us', icon: Users },
   /* "Every single transaction somewhere ... so we don't need to go into the bank" (13 Oct). */
   { to: '/trust/statement', label: 'Bank statement', icon: Landmark },
+  /* Request #18: where did this payment go? Beside the statement, which answers the same question for bank lines only. */
+  { to: '/trust/find', label: 'Find a payment', icon: Search },
   { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
 ]
 

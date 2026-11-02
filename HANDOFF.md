@@ -31,6 +31,13 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   (`open_interest` subtracts `to_costs` taken): R100 of fees paid on ALP00012 (R120 capital) had left R103,77 of
   interest recoverable on top. 0 staging accounts were in that state. Migration `h16_in_duplum_left_to_take`,
   open_interest prosrc md5 `0f953549...` = file. check-in-duplum 67 (4 sabotages, each red).
+- **#18 BUILT: TRUST > FIND A PAYMENT (S17, 2 Nov; Camille)**: `/trust/find`, beside Bank statement. Amount (read the
+  way a POP writes it -- `parseRandAmount`: "R 1 500,00", "1,500.00", "1.500"), days, any words. `find_payments` (finance.view,
+  nothing without a criterion, 200 max) searches every payment in every state plus unplaced credit lines and says where
+  each is now; a moved payment names the account it went to. md5 `5544ced6...` = file. check-find-payment 33, e2e
+  find-payment 9 (3 sabotages, each red).
+- **#19 ANSWERED: several people per client on the portal ALREADY WORKED** -- each Invite adds a login. The card read like a
+  slot for one, so it now says "Invite as many as the client wants" and offers "Invite another person". check-portal-many-people.
 - **The first skin is now "Bredell Ferreira" and the DEFAULT** (was Africa), wearing the approved photo of the day.
 - **Unsplash-down alarm**: Administrators' dashboards + one bell notification a day; morning cron
   `/api/portal/photo-check` (needs `CRON_SECRET` on Vercel, as the other crons).

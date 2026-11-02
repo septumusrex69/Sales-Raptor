@@ -54285,3 +54285,96 @@ select d.id as account_id,
   left join cost_buckets cb on cb.account_id = d.id
   left join interest i on i.account_id = d.id
   left join allocated al on al.account_id = d.id;
+
+-- ============================================================================================
+-- Raptor H16 (2 Nov) -- FIND A PAYMENT: WHERE DID THIS MONEY GO? (request #18, Finance)
+--
+-- "We need a function where we can search where a payment was loaded. For instance, a month later we
+-- receive a POP, the debtor used the wrong reference. Where / how do we check where the payment went as
+-- it won't be in suspense." The bank statement page searches imported lines by their words, but a POP
+-- usually gives an AMOUNT and a day, and a payment captured by hand was never a statement line at all.
+--
+-- ONE SEARCH OVER EVERY PAYMENT RAPTOR HOLDS, in every state -- allocated, waiting, in suspense,
+-- reversed, rejected, moved -- plus the trust account's credit lines nobody has placed yet, because
+-- "it never reached an account" is an answer too. Each row says where the money is NOW in the firm's
+-- words, and a payment moved to another account names that account, which is the case the request
+-- describes: loaded on the wrong debtor, found a month later.
+--
+-- NOTHING UNLESS ASKED SOMETHING. With no amount, no day and no words it returns no rows rather than the
+-- whole book; behind finance.view like the statement it sits beside.
+-- ============================================================================================
+create or replace function public.find_payments(
+  p_amount numeric default null, p_from date default null, p_to date default null, p_words text default null)
+returns table (
+  kind text, id uuid, on_day date, amount numeric, depositor text, reference text, bank_words text,
+  state text, account_id uuid, case_number text, account_number text, debtor text, client text,
+  moved_to_account_id uuid, moved_to_case text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with q as (
+    select nullif(btrim(coalesce(p_words, '')), '') as w,
+           '%' || replace(replace(replace(lower(btrim(coalesce(p_words, ''))), '\', '\\'), '%', '\%'), '_', '\_') || '%' as pat
+  ),
+  pays as (
+    select 'payment'::text as kind, p.id,
+           (p.received_at at time zone 'Africa/Johannesburg')::date as on_day,
+           p.amount, p.depositor_name as depositor, p.reference, l.description as bank_words,
+           /* WHERE THE MONEY IS NOW, most final first: a payment can be suspended and later reversed. */
+           case
+             when p.rejected_at is not null then 'Rejected'
+             when p.reversed_at is not null and mv.id is not null then 'Moved to another account'
+             when p.reversed_at is not null and (p.returned_unpaid_on is not null
+                  or coalesce(p.reversal_reason, '') ilike 'Returned unpaid%') then 'Returned unpaid'
+             when p.reversed_at is not null then 'Reversed'
+             when p.suspended_at is not null then 'In suspense'
+             when p.approved_at is null then 'Waiting for approval'
+             when p.paid_to_client then 'Paid to the client direct'
+             else 'On the account'
+           end as state,
+           a.id as account_id, a.case_number, a.account_number,
+           public.debtor_full_name(a.debtor_first_name, a.debtor_second_name, a.debtor_surname) as debtor,
+           c.name as client,
+           mv.account_id as moved_to_account_id, ma.case_number as moved_to_case,
+           concat_ws(' ', p.reference, p.depositor_name, p.details, p.method, l.description, l.reference,
+             a.case_number, a.account_number, a.client_reference,
+             public.debtor_full_name(a.debtor_first_name, a.debtor_second_name, a.debtor_surname), c.name) as hay
+      from public.account_payments p
+      join public.debtor_accounts a on a.id = p.account_id
+      left join public.companies c on c.id = a.company_id
+      left join public.bank_statement_lines l on l.id = p.bank_line_id
+      left join lateral (select x.id, x.account_id from public.account_payments x
+                          where x.replaces_payment_id = p.id order by x.created_at desc limit 1) mv on true
+      left join public.debtor_accounts ma on ma.id = mv.account_id
+  ),
+  lines as (
+    /* A credit on the statement no payment row came from: still on To sort, or set aside. */
+    select 'bank line'::text, l.id, l.txn_date, l.amount, null::text, l.reference, l.description,
+           case when l.status = 'excluded' then 'Set aside on the statement' else 'Not on any account yet (To sort)' end,
+           null::uuid, null::text, null::text, null::text, null::text, null::uuid, null::text,
+           concat_ws(' ', l.reference, l.description)
+      from public.bank_statement_lines l
+     where l.direction = 'credit' and l.status <> 'allocated' and l.payment_id is null and l.account_id is null
+       and not exists (select 1 from public.account_payments p where p.bank_line_id = l.id)
+  )
+  select r.kind, r.id, r.on_day, r.amount, r.depositor, r.reference, r.bank_words, r.state,
+         r.account_id, r.case_number, r.account_number, r.debtor, r.client, r.moved_to_account_id, r.moved_to_case
+    from (select * from pays union all select * from lines) r, q
+   where public.has_capability('finance.view')
+     and (p_amount is not null or p_from is not null or p_to is not null or q.w is not null)
+     and (p_amount is null or abs(r.amount - p_amount) < 0.005)
+     and (p_from is null or r.on_day >= p_from)
+     and (p_to is null or r.on_day <= p_to)
+     and (q.w is null or lower(r.hay) like q.pat)
+   order by r.on_day desc, r.amount desc
+   limit 200
+$$;
+
+comment on function public.find_payments(numeric, date, date, text) is
+  'Request #18: every payment in every state, and the unplaced credit lines, matched on amount, day and '
+  'words, each with where the money is now. Nothing without a criterion; finance.view only.';
+
+revoke all on function public.find_payments(numeric, date, date, text) from public, anon;
+grant execute on function public.find_payments(numeric, date, date, text) to authenticated;
