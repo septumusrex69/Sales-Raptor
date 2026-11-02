@@ -12,7 +12,6 @@ import { LoginPage } from './pages/auth/LoginPage'
 const SignPage = lazy(() => import('./pages/sign/SignPage'))
 const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
 const OptInPage = lazy(() => import('./pages/news/OptInPage'))
-import { SignInOpening } from './components/opening/SignInOpening'
 const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
 const PortalOpeningPage = lazy(() => import('./pages/portal/PortalOpeningPage'))
 const PortalPhotosPage = lazy(() => import('./pages/portal/PortalPhotosPage'))
@@ -135,8 +134,6 @@ function App() {
           <NewVersionWatcher />
           {/* A lazily-loaded route needs a boundary; the fallback is deliberately nothing, so a
               fast chunk does not flash a spinner on its way in. */}
-          {/* Raptor's opening after a sign-in, above the routes so the page changing under it never restarts it. */}
-          <SignInOpening />
           <Suspense fallback={null}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
