@@ -535,9 +535,9 @@ export async function keepInstalment(p: PromiseToPay, byId: string | null): Prom
 /**
  * Closing a promise.
  *
- * A person does this, not a rule. Matching a promise against an incoming payment is the
- * collections engine's job and it does not exist yet — and a promise quietly marked kept by
- * logic nobody can see is worse than one somebody closed by hand.
+ * A person can always do this, and since Raptor H16 the morning run does it too (request #17:
+ * kept when approved money covers the promise, missed two working days after the due date --
+ * src/lib/promiseSettle.ts). It is not quiet: every move it makes leaves a note on the account.
  */
 export async function resolvePromise(
   id: string,

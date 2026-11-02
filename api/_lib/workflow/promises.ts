@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { settlePromise, type SettlePayment, type SettlePromise } from '../../../src/lib/promiseSettle.js'
 
 /**
  * THE 48 HOURS RUNNING OUT.
@@ -73,6 +74,94 @@ export async function expireDefaultedPromises(
       .eq('id', row.id)
       .eq('status', 'defaulted')
     if (!bad) out.push({ promiseId: row.id, accountId: row.account_id })
+  }
+  return out
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * KEPT OR MISSED, EVERY MORNING (request #17, Raptor H16).
+ *
+ * The call centre opened forty accounts a day to press Kept or Payment missed. settlePromise
+ * (src/lib/promiseSettle.ts) decides; this reads the rows and writes the answer, exactly as the
+ * buttons would -- the same columns, so the same triggers fire: a kept instalment starts the
+ * receipt, a miss starts the notice of default and its 48 hours, which expireDefaultedPromises
+ * then ends as it always has. Nothing here sends anything itself.
+ *
+ * RUN BEFORE expireDefaultedPromises, so a payment that landed inside the 48 hours revives the
+ * arrangement before the window is checked -- the firm's notice promises exactly that.
+ *
+ * EACH WRITE IS GUARDED ON WHAT WAS READ (status and due date). A clerk who pressed the button
+ * between the read and the write has decided already, and their decision stands.
+ * ------------------------------------------------------------------------------------------- */
+
+export interface Settled { promiseId: string; accountId: string; action: 'keep' | 'miss' }
+
+const rand = (n: number) => `R${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split(String.fromCharCode(0xa0)).join(' ')}`
+
+export async function settleDuePromises(
+  admin: SupabaseClient, accounts: string[] | undefined, today: string, now: Date = new Date(),
+): Promise<Settled[]> {
+  let query = admin
+    .from('promises_to_pay')
+    .select('id, account_id, status, amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, instalments_kept, created_at, counted_after')
+    .in('status', ['open', 'defaulted'])
+    .order('due_on')
+    .limit(500)
+  if (accounts?.length) query = query.in('account_id', accounts)
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+
+  const out: Settled[] = []
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const p: SettlePromise = {
+      id: String(r.id), accountId: String(r.account_id), status: r.status === 'defaulted' ? 'defaulted' : 'open',
+      amount: Number(r.amount), dueOn: String(r.due_on),
+      arrangement: (r.arrangement as SettlePromise['arrangement']) ?? 'once_off',
+      dayOfMonth: (r.day_of_month as number | null) ?? null, onLastDay: !!r.on_last_day,
+      dayOfWeek: (r.day_of_week as number | null) ?? null, instalmentsKept: Number(r.instalments_kept ?? 0),
+      createdAt: String(r.created_at), countedAfter: (r.counted_after as string | null) ?? null,
+    }
+    const { data: pays, error: payErr } = await admin
+      .from('account_payments')
+      .select('id, amount, received_at, approved_at, reversed_at, rejected_at')
+      .eq('account_id', p.accountId)
+      .gte('received_at', new Date(new Date(p.createdAt).getTime() - 86_400_000).toISOString())
+    if (payErr) continue
+    const payments: SettlePayment[] = ((pays ?? []) as Record<string, unknown>[]).map((x) => ({
+      id: String(x.id), amount: Number(x.amount), receivedAt: String(x.received_at),
+      approved: !!x.approved_at, undone: !!x.reversed_at || !!x.rejected_at,
+    }))
+
+    const s = settlePromise(p, payments, today)
+    if (s.action === 'wait') continue
+
+    let note: string
+    let write: Record<string, unknown>
+    if (s.action === 'keep') {
+      write = s.finished
+        ? { status: 'kept', resolved_at: now.toISOString(), resolved_by: null, payment_id: s.paymentId, counted_after: s.countedAfter,
+            instalments_kept: p.instalmentsKept + s.instalments }
+        /* An arrangement carries on: the count goes up and the due date moves -- keepInstalment's two columns.
+           A defaulted one is put back to open by revive_promise_on_payment, on the count going up. */
+        : { instalments_kept: p.instalmentsKept + s.instalments, due_on: s.nextDueOn, counted_after: s.countedAfter }
+      note = s.finished
+        ? `Raptor marked the promise to pay of ${rand(p.amount)} due ${p.dueOn} as kept: ${rand(s.paid)} approved since it was made.`
+        : `Raptor marked ${s.instalments === 1 ? 'an instalment' : `${s.instalments} instalments`} of ${rand(p.amount)} as paid (${rand(s.paid)} approved). Next due ${s.nextDueOn}.`
+    } else {
+      write = { status: 'defaulted' }
+      note = `Raptor marked the promise to pay of ${rand(p.amount)} due ${p.dueOn} as missed: ${s.seen > 0 ? `only ${rand(s.seen)}` : 'nothing'} received by ${s.graceEnded}, two working days after it was due.`
+    }
+
+    const { data: done, error: bad } = await admin
+      .from('promises_to_pay')
+      .update(write)
+      .eq('id', p.id)
+      .eq('status', p.status)
+      .eq('due_on', p.dueOn)
+      .select('id')
+    if (bad || !done?.length) continue
+    await admin.from('account_notes').insert({ account_id: p.accountId, body: note, source: 'system', author_name: 'Raptor' })
+    out.push({ promiseId: p.id, accountId: p.accountId, action: s.action })
   }
   return out
 }

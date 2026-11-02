@@ -54378,3 +54378,18 @@ comment on function public.find_payments(numeric, date, date, text) is
 
 revoke all on function public.find_payments(numeric, date, date, text) from public, anon;
 grant execute on function public.find_payments(numeric, date, date, text) to authenticated;
+
+-- ============================================================================================
+-- Raptor H16 (2 Nov) -- PROMISES SETTLED BY THE MORNING RUN (request #17, call centre).
+--
+-- "When a ptp is made the clerk needs to click on PTP Kept or Broken. Can we make this automated as it
+-- will take extra time for the clerks to open 40 accounts." Stephan, 2 Nov: kept when approved money
+-- covers it, missed two working days after the due date. api/_lib/workflow/promises.ts does it.
+--
+-- `counted_after` IS WHERE THE NEXT INSTALMENT STARTS COUNTING: the received_at of the last payment
+-- already used to keep one. Without it a monthly arrangement's first payment would keep every
+-- instalment after it, one morning at a time. Null means "from the day the promise was made".
+-- ============================================================================================
+alter table public.promises_to_pay add column if not exists counted_after timestamptz;
+comment on column public.promises_to_pay.counted_after is
+  'Request #17: payments received after this count toward the promise''s current instalment. Set by the morning run when it keeps one; null = from the day the promise was made.';

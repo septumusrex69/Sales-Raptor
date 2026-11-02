@@ -31,6 +31,17 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   (`open_interest` subtracts `to_costs` taken): R100 of fees paid on ALP00012 (R120 capital) had left R103,77 of
   interest recoverable on top. 0 staging accounts were in that state. Migration `h16_in_duplum_left_to_take`,
   open_interest prosrc md5 `0f953549...` = file. check-in-duplum 67 (4 sabotages, each red).
+- **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
+  days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
+  first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last
+  instalment counted -- new column `promises_to_pay.counted_after`); several instalments at once; a defaulted promise
+  revived by money. MISSED the morning after due + 2 working days, counting ANY receipt not rejected/reversed (so money
+  waiting for approval never triggers a charged notice of default). Only promises due on/after 2 Nov 2026
+  (`SETTLED_BY_RAPTOR_FROM`) -- older ones stay with a person, so production's Swordfish book is not swept into notices.
+  Same columns as the buttons, so the same triggers send the receipt / notice; a note on the account each time
+  (author "Raptor"). CRON_SECRET is set (prod + preview); Vercel crons only fire on production, so on the preview it runs
+  on nudges and staging-clock jumps. check-promise-settle 21 (5 sabotages, each red). NOT DONE: a kept once-off still
+  does not end its promise_due run or release a section 129 hold (same as the manual button today).
 - **#18 BUILT: TRUST > FIND A PAYMENT (S17, 2 Nov; Camille)**: `/trust/find`, beside Bank statement. Amount (read the
   way a POP writes it -- `parseRandAmount`: "R 1 500,00", "1,500.00", "1.500"), days, any words. `find_payments` (finance.view,
   nothing without a criterion, 200 max) searches every payment in every state plus unplaced credit lines and says where

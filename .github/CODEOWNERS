@@ -53,6 +53,11 @@
 /src/lib/simplePay.ts                   @septumusrex69
 /src/lib/storedBalance.ts               @septumusrex69
 /src/lib/trust*.ts                      @septumusrex69
+# Request #18: reads the amount a payment search matches to the cent (Raptor H16).
+/src/lib/findPaymentAmount.ts           @septumusrex69
+# Request #17: decides kept or missed, and a miss sends a notice of default charged to the debtor (Raptor H16).
+/src/lib/promiseSettle.ts               @septumusrex69
+/api/_lib/workflow/promises.ts          @septumusrex69
 /src/lib/firmSettings*.ts               @septumusrex69
 
 # WHAT A MONEY CHANGE COULD HIDE BEHIND.

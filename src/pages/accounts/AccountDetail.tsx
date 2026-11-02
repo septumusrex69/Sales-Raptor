@@ -3439,8 +3439,9 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * Promises to pay.
  *
  * The one thing a collector actually produces on a call. It is a claim about the future, so it
- * never touches a balance — it is kept or it is broken, and a person says which. Matching one
- * against an incoming payment is the collections engine's job, and that does not exist yet.
+ * never touches a balance — it is kept or it is broken. The morning run now says which on its own
+ * (request #17, Raptor H16: kept on approved money, missed two working days after the due date, a
+ * note on the account either way); these buttons stay for the person who knows sooner.
  */
 function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation, section129, onStarted, closed = false }: {
   /**

@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { adminClient, requireCaller } from '../auth.js'
 import { firmClock } from './clock.js'
 import { planUnplannedRuns, redateResumedRuns } from './plan.js'
-import { expireDefaultedPromises } from './promises.js'
+import { settleDuePromises, expireDefaultedPromises } from './promises.js'
 import { runOneStep, type DueStep } from './step.js'
 import { remindUnallocatedBatches } from './handoutReminder.js'
 
@@ -180,6 +180,11 @@ export async function sweep(admin: SupabaseClient, options: SweepOptions) {
    * next morning's sweep would find four notices overdue and send them at once -- which is the
    * failure the pause exists to prevent.
    */
+  /*
+   * KEPT OR MISSED FIRST (request #17): the money is looked at before the 48 hours are, so a payment
+   * that landed inside the window revives the arrangement instead of the window breaking it.
+   */
+  const settled = await settleDuePromises(admin, accountIds, today, now)
   const expired = await expireDefaultedPromises(admin, accountIds, now)
 
   /*
@@ -320,6 +325,8 @@ export async function sweep(admin: SupabaseClient, options: SweepOptions) {
        statutory sequence go again, and "whose 48 hours ran out on Tuesday" is a question asked
        long afterwards by somebody holding a file. */
     expired: expired.length,
+    promisesKept: settled.filter((x) => x.action === 'keep').length,
+    promisesMissed: settled.filter((x) => x.action === 'miss').length,
     /* REPORTED, because a pause moving dates is a thing somebody will be asked about. "Nine
        steps moved on Tuesday" is the answer to "why did the reminder go out in November". */
     redated: redated.reduce((n, r) => n + r.moved, 0),
