@@ -20,8 +20,10 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
 - **The portal's photograph of the day, APPROVED A MONTH AT A TIME** at `/portal-looks` (any Administrator; table
   `portal_day_looks`). **Nothing is approved yet -- every day shows Llandudno until somebody approves.** Library of 24
   South African photos (40% nature / 35% people / 25% city) with lines, at `/portal/photos`.
-- **Raptor's own opening after sign-in** (`/opening`): Platinum palette, Lock-on is the default; brand board artifact
-  https://claude.ai/artifact/61F3kLLDAC8iGG9iDqJvVD (private to Stephan).
+- **NO opening after a Raptor sign-in (S17, 2 Nov: "remove that animation when you log into Raptor. I don't like
+  that")**: a good password goes straight to the app. SignInOpening and openingQueue are deleted; the three openings
+  are still replayable at `/opening` (Platinum; brand board https://claude.ai/artifact/61F3kLLDAC8iGG9iDqJvVD). The
+  client PORTAL's opening (the arcs) is untouched. e2e raptor-openings 11 (sign-in plays nothing, break-tested).
 - **The first skin is now "Bredell Ferreira" and the DEFAULT** (was Africa), wearing the approved photo of the day.
 - **Unsplash-down alarm**: Administrators' dashboards + one bell notification a day; morning cron
   `/api/portal/photo-check` (needs `CRON_SECRET` on Vercel, as the other crons).
@@ -30,7 +32,6 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
 - Approve the first month at `/portal-looks` (or say who should).
 - `images.unsplash.com` in the environment's Allowed domains, so S17 can store every library photo in the app (only
   Llandudno is ours; the rest load from Unsplash with Llandudno beneath). Until then, a new photo needs him to send it.
-- Which Raptor opening plays at sign-in (Lock-on now; Dive / Summit offered).
 - Older open questions, unchanged: monthly progress email on/off + day + sender; debtor pay-page details; what "early
   collections" means; R13 on portal messages; a portal@ fallback mailbox; "all email junk sent drafts blocked."
 

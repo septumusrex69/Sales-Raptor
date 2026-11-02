@@ -4,8 +4,6 @@ import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { useAuth } from '../../store/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { AuthShell, authFieldClass } from './AuthShell'
-import { queueRaptorOpening } from '../../components/opening/openingQueue'
-import { primeSplashAudio } from '../portal/portalSound'
 
 /**
  * WHY AN EMAILED LINK FAILED, SAID ON THE PAGE IT LANDS ON (23 Oct).
@@ -54,12 +52,11 @@ export function LoginPage() {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
-    /* The press is what lets the opening's sound play on an iPad, so the audio is woken here, inside it. */
-    primeSplashAudio()
+    /* No opening animation after a sign-in (2 Nov, Stephan: "remove that animation when you log into Raptor. I don't
+       like that"). A good password goes straight to the app; /opening still replays them on demand. */
     const { error: signInError } = await signIn(email, password)
     setSubmitting(false)
     if (signInError) setError(signInError)
-    else queueRaptorOpening()
   }
 
   async function handleForgotPassword() {

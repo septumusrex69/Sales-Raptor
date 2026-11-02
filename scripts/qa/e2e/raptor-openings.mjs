@@ -2,8 +2,8 @@
  * RAPTOR'S OWN OPENING, AFTER A SIGN-IN, AND ON DEMAND (S16, 30 Oct).
  *
  * Stephan: "for the Raptor login, let's also try and make three type of ones when it's loading and opening ... with
- * the Raptor theme." Two things are proved in the real app: that pressing Sign In with a good password actually plays
- * an opening over the app (a component nothing mounts is invisible to every source check), and that each of the three
+ * the Raptor theme." Then, 2 Nov: "remove that animation when you log into Raptor. I don't like that." Two things are
+ * proved in the real app: that pressing Sign In with a good password plays NO opening and lands in the app, and that each of the three
  * on /opening finishes with the wing and the name drawn -- a base rule hiding one of them looks fine in the code.
  *
  * Run: node scripts/qa/e2e/raptor-openings.mjs
@@ -15,7 +15,7 @@ const t = makeRunner('raptor-openings')
 const server = await startServer()
 const browser = await chromium.launch()
 try {
-  /* ---------------- the sign-in plays it ---------------- */
+  /* ---------------- the sign-in plays NOTHING (2 Nov) ---------------- */
   {
     const context = await browser.newContext({ viewport: { width: 1180, height: 820 } })
     const page = await context.newPage()
@@ -30,17 +30,12 @@ try {
     await page.getByPlaceholder('Enter your email address').fill(PROFILE.email)
     await page.getByPlaceholder('Enter your password').fill('a password')
     await page.getByRole('button', { name: 'Sign In' }).click()
-    await page.getByTestId('raptor-opening').waitFor({ timeout: 5000 })
-    t.ok('a good password plays the opening -- lock-on, the one Stephan liked', tokens.length === 1
-      && (await page.getByTestId('raptor-opening').getAttribute('data-variant')) === 'lock')
+    await page.waitForURL((u) => !/\/login/.test(u.pathname), { timeout: 5000 })
     await page.waitForTimeout(1500)
-    await t.shot(page, 'raptor-opening-signin')
-    t.ok('...and it still covers the app at 1.5 s', await page.getByTestId('raptor-opening').isVisible())
-    await page.getByTestId('raptor-opening').waitFor({ state: 'detached', timeout: 6000 })
-    t.ok('...then gives the app back, signed in', !/\/login/.test(page.url()))
-    await page.reload()
-    await page.waitForTimeout(800)
-    t.check('a reload, already signed in, plays nothing', await page.getByTestId('raptor-opening').count(), 0)
+    t.ok('a good password goes straight to the app, signed in', tokens.length === 1 && !/\/login/.test(page.url()))
+    t.check('...and plays no opening (2 Nov: "remove that animation when you log into Raptor")',
+      await page.getByTestId('raptor-opening').count(), 0)
+    await t.shot(page, 'raptor-signin-no-opening')
     await context.close()
   }
 
