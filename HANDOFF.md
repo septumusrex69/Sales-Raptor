@@ -24,6 +24,13 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   that")**: a good password goes straight to the app. SignInOpening and openingQueue are deleted; the three openings
   are still replayable at `/opening` (Platinum; brand board https://claude.ai/artifact/61F3kLLDAC8iGG9iDqJvVD). The
   client PORTAL's opening (the arcs) is untouched. e2e raptor-openings 11 (sign-in plays nothing, break-tested).
+- **#16 FIXED: "WHAT IS LEFT TO TAKE" OBEYS IN DUPLUM (S17, 2 Nov; Camille)**: the panel showed R204,14 of costs left
+  on ALP00010's R177,50 ceiling. `account_money_position` now fits the fees into the room interest leaves (oldest
+  first); the rest is "Cannot take". 4 staging accounts were over and came off. Stephan confirmed the order: interest
+  first (no VAT), pushing fees out as it runs. **And interest no longer lands on top of fees already PAID**
+  (`open_interest` subtracts `to_costs` taken): R100 of fees paid on ALP00012 (R120 capital) had left R103,77 of
+  interest recoverable on top. 0 staging accounts were in that state. Migration `h16_in_duplum_left_to_take`,
+  open_interest prosrc md5 `0f953549...` = file. check-in-duplum 67 (4 sabotages, each red).
 - **The first skin is now "Bredell Ferreira" and the DEFAULT** (was Africa), wearing the approved photo of the day.
 - **Unsplash-down alarm**: Administrators' dashboards + one bell notification a day; morning cron
   `/api/portal/photo-check` (needs `CRON_SECRET` on Vercel, as the other crons).

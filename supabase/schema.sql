@@ -53935,3 +53935,353 @@ create policy portal_day_looks_write on public.portal_day_looks
 
 grant select on public.portal_day_looks to anon, authenticated;
 grant insert, update on public.portal_day_looks to authenticated;
+
+
+-- ============================================================================================
+-- Raptor H16 (2 Nov) -- IN DUPLUM ON "WHAT IS LEFT TO TAKE", AND INTEREST NEVER ON TOP OF PAID FEES.
+--
+-- Request #16 (Camille, Finance): the panel showed R204,14 of items 1-7 costs left to take on
+-- ALP00010, whose in duplum ceiling is R177,50. The engine and the account summary already clip
+-- fees to what interest leaves; the view only ever moved CANCELLED fees into "cannot take".
+-- `c17_cant` / `i9_cant` now mean "cancelled, unbilled, or pushed out by in duplum" -- `incl -
+-- within` is the whole fee on an unrecoverable row, so the old meaning is a special case of it.
+--
+-- And the gap found on the way: open_interest measured new interest against interest alone, so
+-- fees PAID before interest arrived did not count. Stephan, 2 Nov: build it so interest keeps
+-- running and pushes the costs out -- which it already did for fees still owed, and now stops
+-- short of fees already taken. 0 of 214 staging accounts were over the line when this was applied.
+-- ============================================================================================
+
+create or replace function public.open_interest(
+  p_account uuid, p_as_at date, p_exclude_payment uuid default null)
+returns table (
+  from_day date, days integer, opening_balance numeric,
+  accrued numeric, recoverable numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+  v_covered date;
+  v_from date;
+  v_monthly numeric;
+  v_opening numeric;
+  v_balance numeric;
+  v_accrued numeric := 0;
+  v_month numeric;
+  v_cursor date;
+  v_seg_end date;
+  v_month_end date;
+  v_dim integer;
+  v_day date;
+  v_posted numeric;
+  v_posted_recoverable numeric;
+  v_ceiling numeric;
+  v_recoverable numeric;
+  v_costs_taken numeric;
+  v_days date[];
+  v_deltas numeric[];
+  v_i integer := 1;
+  v_n integer;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then return; end if;
+
+  /* A RATE OF NOUGHT IS THE CLIENT'S DECISION AND NOT OURS TO OVERRIDE. The firm: "whether or not
+     they charge the interest is up to them. So we will not ask Raptor to calculate this." */
+  if coalesce(v_acct.interest_rate_annual, 0) <= 0 then return; end if;
+
+  /* INTEREST RUNS ON A WRITTEN-OFF ACCOUNT AND STOPS AT PRESCRIPTION (the firm, 12 Oct: "sometimes
+     we write off accounts and then we ... revisit them ... interest should stop running ... after
+     prescription"). A write-off is the firm deciding to stop chasing, not the debt ending; a
+     prescribed debt may not be collected at all (NCA s126B), so nothing accrues past that day.
+     computeBalance reads the same two columns (balanceInput.ts) -- one rule, two engines. */
+  if v_acct.prescribed or (v_acct.prescription_date is not null and v_acct.prescription_date < p_as_at) then
+    if v_acct.prescription_date is null then return; end if;
+    p_as_at := least(p_as_at, v_acct.prescription_date);
+  end if;
+  /* A FILE THAT HAS ENDED STOPS ON THE DAY IT ENDED: withdrawn (the client took it back), paid up,
+     settled (the rest waived). A WRITE-OFF IS NOT ONE OF THEM, on the firm's instruction above. */
+  if v_acct.ended_as in ('withdrawn', 'paid_up', 'settled') and v_acct.ended_on is not null then
+    p_as_at := least(p_as_at, v_acct.ended_on);
+  end if;
+
+  /* WHERE THE CLOCK PICKS UP: the last day a posted accrual covers, or -- with nothing posted --
+     the day BEFORE the handover, so that the handover day itself is the first day that accrues.
+     `days` is Swordfish's EXCLUSIVE offset, so accrued_on + days is the last covered day. */
+  select max(accrued_on + a.days) into v_covered
+    from public.account_interest_accruals a where a.account_id = p_account;
+  if v_covered is null then v_covered := v_acct.handover_date - 1; end if;
+  /* Neither a posted accrual nor a handover date: no day the firm can point at as the day the debt
+     became theirs, so nothing accrues rather than something dated from the row's creation. */
+  if v_covered is null then return; end if;
+
+  v_from := v_covered + 1;
+  if v_from > p_as_at then return; end if;
+
+  /* WHAT THE PERIOD OPENS ON. Capital, plus every accrual already posted, plus every movement
+     dated on or before the anchor. What falls AFTER the anchor is not in here -- it lands during
+     the period, on its own day, which is the whole point. */
+  select coalesce(sum(a.amount_accrued), 0) into v_posted
+    from public.account_interest_accruals a where a.account_id = p_account;
+  /* WHAT INTEREST HAS ALREADY CLAIMED AGAINST THE CEILING, which is a different figure from what
+     the debt earned: a period posted while the account was capped carries a smaller recoverable
+     than accrued, and it is the recoverable half that has used the ceiling up. */
+  select coalesce(sum(a.amount_recoverable), 0) into v_posted_recoverable
+    from public.account_interest_accruals a where a.account_id = p_account;
+  v_balance := greatest(coalesce(v_acct.capital_handed_over, 0), 0) + v_posted;
+  select v_balance + coalesce(sum(m.delta), 0) into v_balance
+    from public.account_movements(p_account, p_exclude_payment) m where m.on_day <= v_covered;
+  v_opening := round(v_balance, 2);
+  v_balance := v_opening;
+
+  /* The movements inside the period, one entry per day, in order. Read once into arrays: asking
+     the view again on each of five hundred days is the same answer five hundred times. */
+  select array_agg(x.on_day order by x.on_day), array_agg(x.delta order by x.on_day)
+    into v_days, v_deltas
+    from (select m.on_day, sum(m.delta) as delta
+            from public.account_movements(p_account, p_exclude_payment) m
+           where m.on_day >= v_from and m.on_day <= p_as_at
+           group by m.on_day) x;
+  v_n := coalesce(array_length(v_days, 1), 0);
+
+  v_monthly := v_acct.interest_rate_annual / 100.0 / 12.0;
+
+  v_cursor := v_from;
+  while v_cursor <= p_as_at loop
+    v_month_end := (date_trunc('month', v_cursor) + interval '1 month - 1 day')::date;
+    v_seg_end := least(v_month_end, p_as_at);
+    v_dim := extract(day from v_month_end)::integer;
+    /* The month's interest is accumulated and joined to the balance ONCE, at the close. Adding it
+       day by day would compound within the month, which the posted history does not do -- the book
+       has always charged a flat 2% of the running balance per month. */
+    v_month := 0;
+    v_day := v_cursor;
+    while v_day <= v_seg_end loop
+      -- Everything dated today lands before today earns anything.
+      while v_i <= v_n and v_days[v_i] <= v_day loop
+        v_balance := v_balance + v_deltas[v_i];
+        v_i := v_i + 1;
+      end loop;
+      -- Guarded above zero because an overpaid account must not earn the debtor interest.
+      if v_balance > 0 then
+        v_month := v_month + v_balance * v_monthly / v_dim;
+      end if;
+      v_day := v_day + 1;
+    end loop;
+    v_accrued := v_accrued + v_month;
+    v_balance := v_balance + v_month;
+    v_cursor := v_seg_end + 1;
+  end loop;
+
+  v_accrued := round(v_accrued, 2);
+  if v_accrued <= 0 then return; end if;
+
+  /* IN DUPLUM. Non-capital may not pass the capital handed over, and the ceiling is fixed there
+     rather than recalculated as the balance falls. `recoverable` is what may actually be collected
+     and `accrued` is what the debt earned: they diverge on a capped account and both are returned,
+     because the client is owed an honest account of what was written off rather than a quietly
+     smaller number. engine_balances counts the recoverable half, so that is the half a split may
+     take. */
+  /* AND IT IS NOT GATED ON A COLUMN ANY MORE. `debtor_accounts.in_duplum` is Swordfish's own "In
+     Duplum" column -- Yes or No, meaning THIS ACCOUNT HAS REACHED THE CEILING -- and it was read
+     here as "this account is SUBJECT to the rule", which is a different question whose answer is
+     yes on every account. Everything Raptor created carried false, so no ceiling engaged.
+     In duplum at common law binds every debt; NCA s103(5) is the wider version and binds credit
+     agreements. Raptor applies the wider one to everything, which on a debt the NCA does not reach
+     under-recovers rather than over-recovers. accountBalance.ts holds the browser's half of this
+     and the whole of the argument. */
+  /*
+   * AND INTEREST FILLS THE CEILING BEFORE THE ANNEXURE B FEES DO.
+   *
+   * THE FIRM: "because interest doesn't charge VAT, it would be beneficial for us if the interest
+   * continues to run, and if the interest runs, it takes interest rather than the Annexure B fees.
+   * So the Annexure B fees is pushed out and the interest comes in. The more interest there is, the
+   * more money we make... interest precedes Annexure B fees in an in duplum scenario."
+   *
+   * THIS LINE USED TO DO THE OPPOSITE. It clipped the new accrual by `ceiling - (fees + posted)`,
+   * so on an account whose fees had already reached the ceiling every month posted
+   * `amount_recoverable = 0` -- and once posted that is a financial record and the interest is gone
+   * for good. RRC00005 was in exactly that state: R437,01 of fees against a R380,00 ceiling, and an
+   * accrual due to be written off to nought.
+   *
+   * THE TOTAL IS UNCHANGED EITHER WAY -- the ceiling is the capital. What changes is WHICH charge
+   * fills it, and that is worth the VAT: a rand of fee is 87 cents to the firm and 13 to SARS, a
+   * rand of interest is a whole rand. engine_balances carries the other half of this, clipping the
+   * COSTS by what interest leaves, so the two cannot add up to more than the ceiling between them.
+   *
+   * MEASURED INCLUDING VAT STILL, which the firm settled in the same breath: "whether or not
+   * there's VAT or not, in duplum reached is in duplum reached."
+   */
+  v_ceiling := greatest(coalesce(v_acct.capital_handed_over, 0), 0);
+  /*
+   * LESS THE FEES ALREADY TAKEN (Raptor H16, 2 Nov). Interest pushes the Annexure B fees out of the
+   * ceiling -- but only fees still OWED. A fee the debtor has already paid is collected money and a
+   * financial record; it cannot be pushed back out. Before this, an account whose fees were paid
+   * first could post interest as recoverable on top of them, and fees taken plus interest would
+   * pass the capital handed over: an in duplum breach the debtor would be asked to pay. Stephan,
+   * agreeing the fix: interest still comes first; it only fills the room the paid fees left.
+   * Excludes the same payment account_movements excludes, so a dry run measures what it will post.
+   */
+  select coalesce(sum(a.to_costs), 0) into v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment);
+  v_recoverable := greatest(0, least(v_accrued, v_ceiling - v_posted_recoverable - v_costs_taken));
+
+  /* `days` IS THE EXCLUSIVE OFFSET, so from_day + days is the last day covered -- p_as_at. The
+     convention is Swordfish's and `accrualEnd` holds the browser's half of it. */
+  from_day := v_from;
+  days := (p_as_at - v_from);
+  opening_balance := v_opening;
+  accrued := v_accrued;
+  recoverable := v_recoverable;
+  return next;
+end $$;
+
+create or replace view public.account_money_position as
+with fee_rows as (
+  select f.account_id,
+         f.id,
+         f.incurred_at,
+         f.counts_toward_fee_cap,
+         f.annexure_item,
+         f.amount_excl_vat,
+         f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+         (f.cancelled_at is not null or f.billed is false) as unrecoverable
+    from public.account_fees_net f
+),
+/* What was already settled by the time this fee's turn came, oldest first. */
+ordered as (
+  select r.*,
+         coalesce(sum(case when r.unrecoverable then 0 else r.incl end)
+           over (partition by r.account_id order by r.incurred_at, r.id
+                 rows between unbounded preceding and 1 preceding), 0) as settled_before
+    from fee_rows r
+),
+pool as (
+  select a.account_id, coalesce(sum(a.to_costs), 0) as taken
+    from public.payment_allocations a where a.status <> 'reversed' group by a.account_id
+),
+/* IN DUPLUM'S ROOM FOR FEES (Raptor H16, 2 Nov; request #16): the capital handed over less the
+   interest posted as recoverable. Interest fills the ceiling first -- the firm's decision, because
+   interest carries no VAT -- and the fees share what is left, oldest first, so the newest fee is
+   the first one pushed out. This is in_duplum_cost_room's arithmetic over the whole book at once.
+   The panel used to leave it out: Camille's ALP00010 showed R204,14 of costs "left to take" on a
+   R177,50 ceiling, R26,64 more than the law lets anybody ask a debtor for. */
+room as (
+  select d.id as account_id,
+         greatest(0, greatest(coalesce(d.capital_handed_over, 0), 0)
+           - coalesce((select sum(x.amount_recoverable) from public.account_interest_accruals x
+                        where x.account_id = d.id), 0)) as room
+    from public.debtor_accounts d
+),
+fees as (
+  select o.account_id,
+         o.counts_toward_fee_cap,
+         o.annexure_item,
+         o.unrecoverable,
+         o.incl,
+         o.amount_excl_vat,
+         case when o.unrecoverable then 0
+              else least(greatest(coalesce(p.taken, 0) - o.settled_before, 0), o.incl) end as taken,
+         /* How much of this fee fits under the ceiling once interest and every older fee have had theirs. */
+         case when o.unrecoverable then 0
+              else least(greatest(coalesce(rm.room, 0) - o.settled_before, 0), o.incl) end as within
+    from ordered o
+    left join pool p on p.account_id = o.account_id
+    left join room rm on rm.account_id = o.account_id
+),
+cost_buckets as (
+  select account_id,
+         sum(incl) filter (where counts_toward_fee_cap)                   as c17_charged,
+         sum(incl - within) filter (where counts_toward_fee_cap)          as c17_cant,
+         sum(taken) filter (where counts_toward_fee_cap)                  as c17_taken,
+         sum(amount_excl_vat) filter (where counts_toward_fee_cap and not unrecoverable) as c17_excl_recoverable,
+         sum(incl) filter (where not counts_toward_fee_cap)                   as i9_charged,
+         sum(incl - within) filter (where not counts_toward_fee_cap)          as i9_cant,
+         sum(taken) filter (where not counts_toward_fee_cap)                  as i9_taken
+    from fees group by account_id
+),
+interest as (
+  select account_id,
+         coalesce(sum(amount_accrued), 0) as accrued,
+         coalesce(sum(amount_recoverable), 0) as recoverable
+    from public.account_interest_accruals group by account_id
+),
+allocated as (
+  select account_id,
+         coalesce(sum(to_interest), 0) as interest_taken,
+         coalesce(sum(to_capital), 0) as capital_taken,
+         coalesce(sum(commission), 0) as commission_earned,
+         coalesce(sum(commission_vat), 0) as commission_vat_earned,
+         coalesce(sum(payment_amount), 0) as payments_allocated,
+         coalesce(sum(excess_credit), 0) as excess_credit
+    from public.payment_allocations where status <> 'reversed' group by account_id
+)
+select d.id as account_id,
+       d.company_id,
+       d.case_number,
+       d.account_number,
+       d.assigned_to,
+       d.status,
+       d.capital_handed_over,
+       coalesce(d.capital_outstanding, 0) as capital_outstanding,
+       coalesce(al.capital_taken, 0) as capital_taken,
+
+       coalesce(i.accrued, 0) as interest_charged,
+       coalesce(al.interest_taken, 0) as interest_taken,
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0) as interest_left,
+       greatest(coalesce(i.accrued, 0) - coalesce(i.recoverable, 0), 0) as interest_cant_take,
+
+       coalesce(cb.c17_charged, 0) as costs_charged,
+       coalesce(cb.c17_taken, 0) as costs_taken,
+       greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0) as costs_left,
+       coalesce(cb.c17_cant, 0) as costs_cant_take,
+
+       coalesce(cb.i9_charged, 0) as receipt_fees_charged,
+       coalesce(cb.i9_taken, 0) as receipt_fees_taken,
+       greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0) as receipt_fees_left,
+       coalesce(cb.i9_cant, 0) as receipt_fees_cant_take,
+
+       /* COMMISSION: earned when capital comes in, so it has no "left" -- only a potential. */
+       coalesce(al.commission_earned, 0) + coalesce(al.commission_vat_earned, 0) as commission_earned,
+       round(coalesce(d.capital_outstanding, 0)
+             * coalesce(d.commission_rate, c.commission_rate, 0)
+             * (1 + coalesce(fs.vat_rate, 0.15)), 2) as commission_potential,
+       coalesce(d.commission_rate, c.commission_rate) as commission_rate,
+
+       /* THE ITEMS 1-7 CEILING: the capital handed over or R1 225, whichever is the lesser, and
+          measured EXCLUDING VAT -- which is the unit annexureB.ts's feeCeiling already works in
+          and the unit the gazette sets the figure in. */
+       least(coalesce(d.capital_handed_over, 0), 1225.00) as cost_cap,
+       coalesce(cb.c17_excl_recoverable, 0) as cost_cap_used,
+       greatest(least(coalesce(d.capital_handed_over, 0), 1225.00) - coalesce(cb.c17_excl_recoverable, 0), 0) as cost_cap_headroom,
+
+       /* IN DUPLUM (NCA s103(5)): interest + costs still to take may not pass the ceiling.
+          DERIVED, NOT ECHOED. This read `coalesce(d.in_duplum, false)` -- Swordfish's own "In
+          Duplum" column, which is false on everything Raptor ever created -- while the chip it
+          draws says "non-capital has reached the capital handed over". So the panel said "In
+          duplum ceiling R380,00" on an account whose non-capital was R441,91. The rule itself is
+          in open_interest and applies to every account; this is only the reading of it, and
+          in_duplum_reached is the one place it is worked out. */
+       public.in_duplum_reached(d.id) as in_duplum,
+       coalesce(d.in_duplum_ceiling, 0) as in_duplum_ceiling,
+
+       coalesce(al.excess_credit, 0) as excess_credit,
+       coalesce(al.payments_allocated, 0) as payments_allocated,
+
+       /* WHAT BF STILL HAS TO COME. Commission is not in it: it is not a debt the debtor owes. */
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0)
+         + greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0)
+         + greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0)
+         as bf_left_to_take
+  from public.debtor_accounts d
+  join public.companies c on c.id = d.company_id
+  cross join (select vat_rate from public.firm_settings limit 1) fs
+  left join cost_buckets cb on cb.account_id = d.id
+  left join interest i on i.account_id = d.id
+  left join allocated al on al.account_id = d.id;

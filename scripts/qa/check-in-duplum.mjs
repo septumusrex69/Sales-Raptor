@@ -253,7 +253,21 @@ for (const [what, file] of [
 const openInterest = lastFunction('open_interest')
 ok('open_interest is found in the file at all', openInterest.length > 0)
 ok('...and applies the ceiling',
-  /v_recoverable := greatest\(0, least\(v_accrued, v_ceiling - v_posted_recoverable\)\)/.test(openInterest))
+  /v_recoverable := greatest\(0, least\(v_accrued, v_ceiling - v_posted_recoverable - v_costs_taken\)\)/.test(openInterest))
+/*
+ * LESS THE FEES ALREADY TAKEN (Raptor H16, 2 Nov). Interest pushes fees out of the ceiling, but a fee
+ * the debtor has PAID is collected money and cannot be pushed back out -- so without this, fees paid
+ * first plus interest posted after passed the capital: R100 of fees paid on ALP00012 (R120 capital)
+ * left R103,77 of interest recoverable on top, R203,77 against R120. The sum has to be the same
+ * allocations the engine nets (not reversed) and must leave out the payment a dry run is re-doing,
+ * or the preview and the posting disagree.
+ */
+const costsTakenAt = openInterest.indexOf('into v_costs_taken')
+const costsTaken = costsTakenAt < 0 ? '' : openInterest.slice(costsTakenAt, openInterest.indexOf(';', costsTakenAt))
+ok('...less the fees already taken, summed from the allocations',
+  /sum\(a\.to_costs\), 0\) into v_costs_taken/.test(openInterest) && /from public\.payment_allocations a/.test(costsTaken))
+ok('...leaving out reversed ones', /a\.status <> 'reversed'/.test(costsTaken))
+ok('...and the payment a dry run is re-doing', /a\.payment_id <> p_exclude_payment/.test(costsTaken))
 ok('...at the capital handed over, not at twice it',
   /v_ceiling := greatest\(coalesce\(v_acct\.capital_handed_over, 0\), 0\)/.test(openInterest))
 ok('...without asking a column first', !/if v_acct\.in_duplum then/.test(openInterest))
@@ -355,6 +369,19 @@ const viewAt = schema.lastIndexOf('create or replace view public.account_money_p
 const view = schema.slice(viewAt)
 ok('the money view derives the reading', /public\.in_duplum_reached\(d\.id\) as in_duplum/.test(view))
 ok('...rather than echoing the column', !/coalesce\(d\.in_duplum, false\) as in_duplum/.test(view))
+/*
+ * AND "WHAT IS LEFT TO TAKE" OBEYS IT (Raptor H16, request #16). The view moved only cancelled fees
+ * into "cannot take", so ALP00010 read R204,14 of costs left on a R177,50 ceiling. The fees now share
+ * the room interest leaves, oldest first; the rest is "cannot take". Asserted on the statements, not
+ * the prose above them.
+ */
+ok('the money view measures the room interest leaves',
+  /room as \(\s*select d\.id as account_id,\s*greatest\(0, greatest\(coalesce\(d\.capital_handed_over, 0\), 0\)\s*- coalesce\(\(select sum\(x\.amount_recoverable\)/.test(view))
+ok('...fits each fee into it oldest first',
+  /least\(greatest\(coalesce\(rm\.room, 0\) - o\.settled_before, 0\), o\.incl\) end as within/.test(view))
+ok('...and what does not fit cannot be taken, costs and receipt fees alike',
+  /sum\(incl - within\) filter \(where counts_toward_fee_cap\)\s+as c17_cant/.test(view)
+  && /sum\(incl - within\) filter \(where not counts_toward_fee_cap\)\s+as i9_cant/.test(view))
 
 /*
  * AND THE TRIGGER ONLY EVER SETS IT.

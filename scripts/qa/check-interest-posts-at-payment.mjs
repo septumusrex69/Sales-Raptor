@@ -395,7 +395,8 @@ ok('...at the capital handed over, not at twice it',
  * gone for good. See check-in-duplum, which holds the whole of the rule.
  */
 ok('...never below nothing',
-  /greatest\(0, least\(v_accrued, v_ceiling - v_posted_recoverable\)\)/.test(accrue))
+  /* Less the fees already taken since Raptor H16 -- check-in-duplum holds why. */
+  /greatest\(0, least\(v_accrued, v_ceiling - v_posted_recoverable - v_costs_taken\)\)/.test(accrue))
 /* BOTH FIGURES SURVIVE THE HANDOVER BETWEEN THE TWO FUNCTIONS: open_interest returns them and
    accrue_interest_to writes them into their own columns. Returning only the recoverable half would
    lose what the debt actually earned, which is what the client is owed an account of. */
