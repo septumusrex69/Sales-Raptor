@@ -13,6 +13,7 @@ const SignPage = lazy(() => import('./pages/sign/SignPage'))
 const UnsubscribePage = lazy(() => import('./pages/news/UnsubscribePage'))
 const OptInPage = lazy(() => import('./pages/news/OptInPage'))
 const PortalPage = lazy(() => import('./pages/portal/PortalPage'))
+const DebtorPortalPage = lazy(() => import('./pages/debtor/DebtorPortalPage'))
 const PortalOpeningPage = lazy(() => import('./pages/portal/PortalOpeningPage'))
 const PortalPhotosPage = lazy(() => import('./pages/portal/PortalPhotosPage'))
 const OpeningPage = lazy(() => import('./pages/OpeningPage'))
@@ -159,6 +160,8 @@ function App() {
             {/* THE FOURTH (S14, 28 Oct): the CLIENT PORTAL. A client signs in with an emailed code and is
                 never a Supabase user, so it sits outside RequireAuth like the rest -- see clientPortal.ts. */}
             <Route path="/portal" element={<PortalPage />} />
+            {/* THE DEBTOR PORTAL (Raptor H16): a debtor, signed in by case number and a code -- never staff, never a Supabase user. */}
+            <Route path="/my-account" element={<DebtorPortalPage />} />
             {/* The portal's opening animations, replayable on demand (S16, 30 Oct). No data, so no sign-in. */}
             <Route path="/portal/opening" element={<PortalOpeningPage />} />
             {/* Choosing the portal's photograph (S16, 31 Oct). No data, so no sign-in. */}

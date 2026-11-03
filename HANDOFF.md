@@ -31,6 +31,17 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   (`open_interest` subtracts `to_costs` taken): R100 of fees paid on ALP00012 (R120 capital) had left R103,77 of
   interest recoverable on top. 0 staging accounts were in that state. Migration `h16_in_duplum_left_to_take`,
   open_interest prosrc md5 `0f953549...` = file. check-in-duplum 67 (4 sabotages, each red).
+- **THE DEBTOR PORTAL, PART 1 (S17, 3 Nov; Stephan chose case number + code; scope: balance & statement, pay,
+  arrangement, dispute)**: `/my-account`. Case number (typed any way -- `normaliseCaseNumber`) + a six-digit code sent
+  to the account's OWN primary email (else mobile, by SMS, free to the debtor; never a contact the caller types); the
+  same answer whether or not the case exists. Then: what they owe today and to settle today (computeBalance on the
+  server over the account page's ledgers, in duplum explained), the breakdown, approved payments, and the TRUST
+  account's details with the case number as reference. Tables `debtor_portal_codes` / `debtor_portal_sessions` (RLS on,
+  NO policies; cascade added by an assembled-word do block), server `api/_lib/debtorPortal.ts` + `api/debtor/[action].ts`
+  (service role only), session in sessionStorage, 7 days max. A sign-in writes a note on the account for the collector.
+  check-debtor-portal 36, e2e debtor-portal 15 (6 sabotages, each red). **Next: part 2 (statement PDF + proof of
+  payment upload), part 3 (propose an arrangement -> collector approves), part 4 (dispute / question -> ticket).**
+  Not yet tried end to end against staging with a real code (it would email a real address).
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

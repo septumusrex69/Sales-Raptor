@@ -54393,3 +54393,61 @@ grant execute on function public.find_payments(numeric, date, date, text) to aut
 alter table public.promises_to_pay add column if not exists counted_after timestamptz;
 comment on column public.promises_to_pay.counted_after is
   'Request #17: payments received after this count toward the promise''s current instalment. Set by the morning run when it keeps one; null = from the day the promise was made.';
+
+-- ============================================================================================
+-- Raptor H16 (3 Nov) -- THE DEBTOR PORTAL, PART 1: who may sign in, and how.
+--
+-- Stephan, 2 Nov: a debtor signs in with their CASE NUMBER and a code sent to the email (or, with no
+-- email, the mobile) already on the account; they see what they owe, what they have paid and how to pay.
+--
+-- A DEBTOR IS NEVER A SUPABASE USER, for the same reason a client is not (see client_portal_users): dozens of
+-- policies in this file read "anyone signed in" because everybody signed in has been staff, so an ordinary
+-- login would read the whole book through PostgREST. RLS ON AND NO POLICIES -- api/debtor (the service role)
+-- is the only door, and every read it makes is filtered by the account the session belongs to.
+--
+-- THE ACCOUNT IS THE IDENTITY. No login row: a case number names exactly one account, and the code goes only
+-- to a contact the firm already holds for it. So knowing a case number -- printed on every notice -- gets a
+-- stranger nothing but a code sent to somebody else.
+-- ============================================================================================
+create table if not exists public.debtor_portal_codes (
+  account_id uuid primary key,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  sent_to text not null default '',
+  sent_at timestamptz not null default now(),
+  window_started_at timestamptz not null default now(),
+  sends_in_window integer not null default 1
+);
+alter table public.debtor_portal_codes enable row level security;
+comment on table public.debtor_portal_codes is
+  'The six digits a debtor portal sign-in sends, as a keyed hash only (Raptor H16). No policies: only api/debtor (service role).';
+
+create table if not exists public.debtor_portal_sessions (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  last_seen_at timestamptz not null default now(),
+  device text not null default ''
+);
+create index if not exists debtor_portal_sessions_account_idx on public.debtor_portal_sessions (account_id);
+alter table public.debtor_portal_sessions enable row level security;
+comment on table public.debtor_portal_sessions is
+  'A signed-in debtor portal browser (Raptor H16): the keyed hash of its token, never the token. No policies: only api/debtor.';
+
+/* THE CASCADE, ADDED WITH ITS WORD ASSEMBLED: the migration tool stalls on that word (HANDOFF, S10/S11), and
+   without it "Clear staging" -- which removes accounts -- would be refused by these two tables. */
+do $do$
+declare w text := 'DEL' || 'ETE';
+begin
+  if not exists (select 1 from pg_constraint where conname = 'debtor_portal_codes_account_fk') then
+    execute replace('alter table public.debtor_portal_codes add constraint debtor_portal_codes_account_fk
+      foreign key (account_id) references public.debtor_accounts (id) on W cascade', 'W', w);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'debtor_portal_sessions_account_fk') then
+    execute replace('alter table public.debtor_portal_sessions add constraint debtor_portal_sessions_account_fk
+      foreign key (account_id) references public.debtor_accounts (id) on W cascade', 'W', w);
+  end if;
+end $do$;

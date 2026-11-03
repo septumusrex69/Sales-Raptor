@@ -103,7 +103,9 @@ function escapeHtml(s: string): string {
  */
 const MAIL_FONT = "Charter, 'Bitstream Charter', Georgia, 'Times New Roman', serif"
 
-export function portalEmailHtml(input: { lines: string[]; code?: string; codeNote?: string; button?: { url: string; label: string }; signOff: string }): string {
+/* `kicker` is the small line under the firm's name: CLIENT PORTAL here, YOUR ACCOUNT on the debtor portal's mail
+   (Raptor H16) -- one design for both, because both are the firm writing about a debt. */
+export function portalEmailHtml(input: { lines: string[]; code?: string; codeNote?: string; button?: { url: string; label: string }; signOff: string; kicker?: string }): string {
   const p = (html: string) => `<p style="margin:0 0 16px;font-family:${MAIL_FONT};font-size:16px;line-height:1.55;color:#1B2B3E">${html}</p>`
   const code = input.code ? `
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px"><tr>
@@ -119,7 +121,7 @@ export function portalEmailHtml(input: { lines: string[]; code?: string; codeNot
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#FFFFFF;border:1px solid #D5DBE3;border-radius:12px;overflow:hidden">
     <tr><td style="background:#111E2D;padding:22px 32px;border-bottom:3px solid #C69F54">
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;letter-spacing:4px;font-weight:bold;color:#C69F54">BREDELL FERREIRA</div>
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;color:#AEBBCB;margin-top:4px">CLIENT PORTAL</div>
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;color:#AEBBCB;margin-top:4px">${escapeHtml(input.kicker ?? 'CLIENT PORTAL')}</div>
     </td></tr>
     <tr><td style="padding:30px 32px 14px">
         ${input.lines.map(p).join('\n        ')}${code}${button}
