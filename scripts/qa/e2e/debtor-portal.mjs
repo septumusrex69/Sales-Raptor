@@ -39,7 +39,7 @@ try {
     asked.push([action, body, route.request().headers()['x-debtor-token'] ?? null])
     if (action === 'request-code') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: 'If that case number is one of ours, a code is on its way to the email address (or cellphone) we have for you. It lasts 10 minutes.' }) })
     if (action === 'verify') return body.code === '123456'
-      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: TOKEN, expiresAt: '2026-11-18T00:00:00Z' }) })
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: TOKEN, expiresAt: '2026-11-18T00:00:00Z', needsPassword: true }) })
       : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That code is not right. Check it, or ask for a new one.' }) })
     if (action === 'account') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(offered
       ? { ...ACCOUNT, proposal: { status: 'pending', arrangement: offered.arrangement, amount: Number(offered.amount), firstDueOn: offered.firstDueOn, declineReason: null, createdAt: '2026-11-11T08:00:00Z' } }
@@ -48,13 +48,22 @@ try {
     if (action === 'propose') { offered = body; return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }) }
     if (action === 'statement') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ fileName: 'Statement RAP-125318 2026-11-11.pdf', pdf: Buffer.from('%PDF-1.7 test').toString('base64') }) })
     if (action === 'proof-of-payment') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+    if (action === 'set-password') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+    if (action === 'sign-in') return body.password === 'a good password'
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: TOKEN, expiresAt: '2026-12-11T00:00:00Z' }) })
+      : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That case number and password do not match. First time here, or forgot your password? Send yourself a code.' }) })
     if (action === 'sign-out') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     return route.fulfill({ status: 404, body: '{}' })
   })
 
   await page.goto(`http://127.0.0.1:${PORT}/my-account`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('debtor-ask').waitFor({ timeout: 20000 })
+  /* A RETURNING DEBTOR'S PAGE FIRST: case number and password (Stephan, 3 Nov: a code "not every single time"). */
+  await page.getByTestId('debtor-password').waitFor({ timeout: 20000 })
   t.ok('no staff menu around it -- a debtor never sees Raptor', await page.getByRole('navigation').count() === 0 && !/Dashboard|Diary|Trust/.test(await page.locator('body').innerText()))
+  t.ok('it opens on case number and password, with the code one press away for a first visit', await page.getByLabel('Password').isVisible()
+    && /First time here, or forgot your password\? Send me a code/.test(await page.getByTestId('debtor-first-time').innerText()))
+  await page.getByTestId('debtor-first-time').click()
+  await page.getByTestId('debtor-ask').waitFor()
 
   await page.getByLabel('Case number').fill('blah')
   await page.getByRole('button', { name: 'Send me a code' }).click()
@@ -67,13 +76,19 @@ try {
   t.ok('...and the answer never says whether the case exists', /If that case number is one of ours/.test(await page.getByTestId('debtor-code-sent').innerText()))
 
   await page.getByLabel('Code').fill('000000')
-  await page.getByRole('button', { name: 'Open my account' }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
   await page.getByTestId('debtor-error').waitFor()
   t.ok('a wrong code is said', /That code is not right/.test(await page.getByTestId('debtor-error').innerText()))
 
   await page.getByLabel('Code').fill('123456')
-  await page.getByRole('button', { name: 'Open my account' }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
+  /* THE CODE ONCE, THEN A PASSWORD. */
+  await page.getByTestId('debtor-choose-password').waitFor({ timeout: 10000 })
+  t.ok('after the first code the debtor chooses a password, and is told it replaces the code', /next time you sign in with your case number and this password, and no code/.test(await page.getByTestId('debtor-choose-password').innerText()))
+  await page.getByLabel('New password').fill('a good password')
+  await page.getByRole('button', { name: 'Save my password and open my account' }).click()
   await page.getByTestId('debtor-account').waitFor({ timeout: 10000 })
+  t.ok('...the password is saved with the session the code opened', asked.some(([a, b, tok]) => a === 'set-password' && b.password === 'a good password' && tok === TOKEN))
   t.ok('the account is read with the session token', asked.some(([a, , tok]) => a === 'account' && tok === TOKEN))
   const view = plain(await page.getByTestId('debtor-account').innerText())
   t.ok('who and whose: name, case, the client and their reference', /Tumelo Patience Molefe/.test(view) && /Case RAP-125318 · on behalf of Alianna Pharmacy \(their reference ALIANNAPH\/30182\)/.test(view))
@@ -152,8 +167,22 @@ try {
   await t.shot(page, 'debtor-portal-part4')
 
   await page.getByRole('button', { name: 'Sign out' }).click()
-  await page.getByTestId('debtor-ask').waitFor()
-  t.ok('signing out forgets the session in this browser', (await page.evaluate(() => sessionStorage.getItem('raptor.debtor.token'))) === null)
+  await page.getByTestId('debtor-password').waitFor()
+  t.ok('signing out forgets the session in this browser', (await page.evaluate(() => sessionStorage.getItem('raptor.debtor.token') ?? localStorage.getItem('raptor.debtor.token'))) === null)
+
+  /* ---------- the next visit: case number and password, NO code ---------- */
+  const codesBefore = asked.filter(([a]) => a === 'request-code').length
+  await page.getByLabel('Case number').fill('RAP-125318')
+  await page.getByLabel('Password').fill('wrong one')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByTestId('debtor-error').waitFor()
+  t.ok('a wrong password is said the same way whatever the reason', /case number and password do not match/.test(await page.getByTestId('debtor-error').innerText()))
+  await page.getByLabel('Password').fill('a good password')
+  await page.getByLabel('Keep me signed in on this device').check()
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByTestId('debtor-account').waitFor({ timeout: 10000 })
+  t.ok('the next visit signs in with the password -- no code asked for', asked.filter(([a]) => a === 'request-code').length === codesBefore)
+  t.ok('..."keep me signed in" keeps it in this browser, past the tab', (await page.evaluate(() => localStorage.getItem('raptor.debtor.token'))) === TOKEN)
   await context.close()
 } catch (e) {
   try { const pg = browser.contexts().flatMap((c) => c.pages())[0]; if (pg) await t.shot(pg, 'debtor-portal-where-it-stopped') } catch { /* */ }

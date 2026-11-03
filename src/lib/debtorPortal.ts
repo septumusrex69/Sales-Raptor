@@ -229,3 +229,41 @@ export function debtorQuestion(input: { text?: unknown }): { ok: true; text: str
 
 /** A ticket as the debtor sees it: what, when, and whether it is still open -- never who holds it inside the firm. */
 export interface DebtorTicket { no: number | null; kind: 'dispute' | 'question'; raisedOn: string; open: boolean; about: string }
+
+/* ---------------------------------------------------------------- a code once, a password after */
+
+/**
+ * THE SAME ANSWER for a case number that is not ours, a login with no password yet and a wrong password -- so the
+ * sign-in cannot be used to learn whose case is whose (DEBTOR_CODE_SENT's rule, for the password half).
+ */
+export const DEBTOR_PASSWORD_WRONG = 'That case number and password do not match. First time here, or forgot your password? Send yourself a code.'
+/** "Keep me signed in on this device": a month. Without it, the session ends with the day (and the tab). */
+export const DEBTOR_REMEMBER_DAYS = 30
+
+/**
+ * THE INVITATION A COLLECTOR SENDS (Stephan, 3 Nov: "I don't know how to invite someone to that"). The link carries the
+ * case number, so the debtor arrives with it already typed and only has to ask for their first code. No code and no
+ * password in the email: the link is not a key, it is directions.
+ */
+export function debtorInviteEmail(input: { name: string; caseNumber: string; client: string; url: string; from: string }): { subject: string; html: string } {
+  const first = (input.name.trim().split(' ')[0] || '').replace(/[<>&"]/g, '')
+  const esc = (s: string) => s.replace(/[<>&"]/g, '')
+  return {
+    subject: `Your account ${input.caseNumber} online`,
+    html: portalEmailHtml({
+      kicker: 'YOUR ACCOUNT',
+      lines: [
+        first ? `Dear ${first},` : 'Good day,',
+        `You can now see your account ${input.caseNumber}${input.client ? ` (on behalf of ${esc(input.client)})` : ''} online, whenever it suits you: what you owe, what you have paid and how to pay. You can also download your statement, send us a proof of payment, offer a payment arrangement or ask us a question.`,
+        'The first time, we will send you a code to confirm it is you, and you choose a password. After that you sign in with your case number and that password.',
+      ],
+      button: { url: input.url, label: 'Open my account' },
+      signOff: `Kind regards<br>${esc(input.from)}<br>Bredell Ferreira`,
+    }),
+  }
+}
+
+/** The link an invitation carries: the portal, with the case number filled in. */
+export function debtorPortalLink(origin: string, caseNumber: string): string {
+  return `${origin.replace(/\/+$/, '')}/my-account?case=${encodeURIComponent(caseNumber)}`
+}

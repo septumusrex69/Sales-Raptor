@@ -1,12 +1,12 @@
 import crypto from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { adminClient } from './auth.js'
-import { credentialsKeyProblem, keyedHash, sameHex } from './crypto.js'
+import { adminClient, requireCaller } from './auth.js'
+import { credentialsKeyProblem, hashPassword, keyedHash, passwordMatches, sameHex } from './crypto.js'
 import { sendAsUser } from './email/sendAsUser.js'
 import { sendSms } from './sms/connectMobile.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
-import { portalCodeCheck, PORTAL_CODE_MESSAGE } from '../../src/lib/clientPortal.js'
+import { portalCodeCheck, portalPasswordProblem, PORTAL_CODE_MESSAGE, PORTAL_PASSWORD_FAILURES, PORTAL_PASSWORD_LOCK_MINUTES } from '../../src/lib/clientPortal.js'
 import { computeBalance, type BalanceBreakdown } from '../../src/lib/accountBalance.js'
 import { needsApplication, proposalProblem, proposalSummary } from '../../src/lib/debtorArrangement.js'
 import { debtorLetterValues, debtorStatement, unfilledFields, type DebtorLetterInput, type DebtorStatementAccount } from '../../src/lib/debtorStatement.js'
@@ -24,6 +24,7 @@ import {
   DEBTOR_CODE_MINUTES, DEBTOR_CODE_SENT, DEBTOR_SESSION_DAYS, DEBTOR_TOKEN_HEADER, codeDestination, debtorCodeEmail,
   debtorCodeSms, debtorPayments, debtorSummary, normaliseCaseNumber, type ContactRow,
   DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote, debtorDispute, debtorQuestion, type DebtorTicket,
+  DEBTOR_PASSWORD_WRONG, DEBTOR_REMEMBER_DAYS, debtorInviteEmail, debtorPortalLink,
 } from '../../src/lib/debtorPortal.js'
 import { sweep } from './workflow/run.js'
 import { chargeItemWith } from '../../src/lib/chargeEngine.js'
@@ -36,8 +37,10 @@ import { CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_
  * not a client. The account comes off the session row, so a debtor who edits a request can only ask about their
  * own debt. The tables behind it have RLS on and no policies, so this is the only door.
  *
- *   anonymous   request-code, verify       (the code, sent to a contact the firm holds, is the authority)
- *   debtor      account, statement, proof-of-payment, propose, dispute, ask, sign-out   (x-debtor-token)
+ *   anonymous   request-code, verify, sign-in   (the code, sent to a contact the firm holds, is the authority -- ONCE;
+ *                                               after it, the password the debtor chose)
+ *   staff       invite                     (a Raptor session: email the debtor the link to their account)
+ *   debtor      account, statement, proof-of-payment, propose, dispute, ask, set-password, sign-out   (x-debtor-token)
  */
 
 type Handler = (req: VercelRequest, res: VercelResponse, admin: SupabaseClient) => Promise<void>
@@ -137,18 +140,126 @@ const verify: Handler = async (req, res, admin) => {
   /* Spent the moment it matches, so the same six digits cannot open a second browser. */
   await admin.from('debtor_portal_codes').delete().eq('account_id', acct!.id)
 
+  /*
+   * A CODE IS THE FIRST VISIT OR THE RESET (Stephan, 3 Nov: "do one ... confirm your email address ... But not every
+   * single time"). It confirms the debtor holds the account's contact, clears any lock, and the page asks for a
+   * password next -- always where there is none yet, and when they came here because they forgot it.
+   */
+  const { data: login } = await admin.from('debtor_portal_logins').select('password_hash').eq('account_id', acct!.id).maybeSingle()
+  await admin.from('debtor_portal_logins').upsert({
+    account_id: acct!.id, confirmed_at: new Date(t).toISOString(), password_failures: 0, password_locked_until: null,
+  }, { onConflict: 'account_id' })
+  const session = await openDebtorSession(admin, req, acct!.id, t, body.remember === true, 'code')
+  if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
+  res.status(200).json({ ...session, needsPassword: !login?.password_hash || body.reset === true })
+}
+
+/**
+ * A NEW SIGNED-IN BROWSER: the token goes to it once, only its keyed hash is kept. "Keep me signed in on this device"
+ * is a month; without it, a day -- and the page keeps it for the tab only, because a debtor is as likely to be on a
+ * borrowed phone as their own. The collector sees the sign-in on the timeline (a debtor looking today is worth a call).
+ */
+async function openDebtorSession(admin: SupabaseClient, req: VercelRequest, accountId: string, t: number, remember: boolean, how: 'code' | 'password'): Promise<{ token: string; expiresAt: string } | null> {
   const token = crypto.randomBytes(32).toString('hex')
-  const expiresAt = new Date(t + DEBTOR_SESSION_DAYS * 86_400_000).toISOString()
+  const expiresAt = new Date(t + (remember ? DEBTOR_REMEMBER_DAYS : 1) * 86_400_000).toISOString()
   const { error } = await admin.from('debtor_portal_sessions').insert({
-    account_id: acct!.id, token_hash: keyedHash('debtor-session', token), expires_at: expiresAt,
+    account_id: accountId, token_hash: keyedHash('debtor-session', token), expires_at: expiresAt,
     device: deviceLabel(req.headers['user-agent'] as string | undefined),
   })
-  if (error) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
-  /* THE COLLECTOR SEES IT: a debtor who looked at their account this morning is a debtor worth calling today. */
+  if (error) return null
+  await admin.from('debtor_portal_logins').update({ last_login_at: new Date(t).toISOString() }).eq('account_id', accountId)
   await admin.from('account_notes').insert({
-    account_id: acct!.id, body: 'The debtor signed in to their account online (debtor portal).', source: 'system', author_name: 'Debtor portal',
+    account_id: accountId, source: 'system', author_name: 'Debtor portal',
+    body: how === 'code' ? 'The debtor confirmed their email (or cellphone) and signed in to their account online (debtor portal).' : 'The debtor signed in to their account online (debtor portal).',
   })
-  res.status(200).json({ token, expiresAt })
+  return { token, expiresAt }
+}
+
+/**
+ * THE EVERYDAY SIGN-IN: case number and password. One answer for a case that is not ours, a login with no password yet
+ * and a wrong password (DEBTOR_PASSWORD_WRONG). Five wrong in a row lock it for a quarter of an hour, the client
+ * portal's numbers; the code still opens it, so a locked-out debtor is never stuck.
+ */
+const signIn: Handler = async (req, res, admin) => {
+  const body = req.body ?? {}
+  const caseNumber = normaliseCaseNumber(body.caseNumber)
+  const password = typeof body.password === 'string' ? body.password : ''
+  if (!caseNumber || !password) { res.status(400).json({ error: 'Type your case number and your password.' }); return }
+  const { data: acct } = await admin.from('debtor_accounts').select('id').eq('case_number', caseNumber).maybeSingle()
+  const { data: login } = acct
+    ? await admin.from('debtor_portal_logins').select('password_hash, password_failures, password_locked_until').eq('account_id', acct.id).maybeSingle()
+    : { data: null }
+  const t = realNow()
+  if (login?.password_locked_until && Date.parse(login.password_locked_until as string) > t) {
+    res.status(429).json({ error: `Too many wrong passwords. Try again in ${PORTAL_PASSWORD_LOCK_MINUTES} minutes, or send yourself a code.` }); return
+  }
+  if (!acct || !login?.password_hash || !passwordMatches(password, login.password_hash as string)) {
+    if (acct && login?.password_hash) {
+      const failures = Number(login.password_failures ?? 0) + 1
+      await admin.from('debtor_portal_logins').update({
+        password_failures: failures >= PORTAL_PASSWORD_FAILURES ? 0 : failures,
+        password_locked_until: failures >= PORTAL_PASSWORD_FAILURES ? new Date(t + PORTAL_PASSWORD_LOCK_MINUTES * 60_000).toISOString() : null,
+      }).eq('account_id', acct.id)
+    }
+    res.status(400).json({ error: DEBTOR_PASSWORD_WRONG }); return
+  }
+  await admin.from('debtor_portal_logins').update({ password_failures: 0, password_locked_until: null }).eq('account_id', acct.id)
+  const session = await openDebtorSession(admin, req, acct.id as string, t, body.remember === true, 'password')
+  if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
+  res.status(200).json(session)
+}
+
+/** SETTING THE PASSWORD, from a browser the code just signed in. Hashed here (scrypt), never stored as typed. */
+const setPassword: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const password = (req.body ?? {}).password
+  const problem = portalPasswordProblem(password, null)
+  if (problem) { res.status(400).json({ error: problem }); return }
+  const { error } = await admin.from('debtor_portal_logins').upsert({
+    account_id: who.accountId, password_hash: hashPassword(password as string), password_set_at: new Date().toISOString(),
+    password_failures: 0, password_locked_until: null,
+  }, { onConflict: 'account_id' })
+  if (error) { res.status(500).json({ error: 'Your password could not be saved just now. Try again.' }); return }
+  res.status(200).json({ ok: true })
+}
+
+/* ------------------------------------------------------------------ staff: invite the debtor */
+
+/**
+ * EMAIL THE DEBTOR THE LINK TO THEIR ACCOUNT (Stephan, 3 Nov: "I don't know how to invite someone to that"). From the
+ * account page, by anybody signed in to Raptor, from THEIR OWN mailbox -- the name the debtor hears from. To the
+ * account's own email (codeDestination's choice), never one typed here. The link carries the case number; it is
+ * directions, not a key. Noted on the timeline. NOT CHARGED: it is an invitation to see the account, not a
+ * communication about the debt (the same reasoning as the sign-in code) -- the firm's to change.
+ */
+const invite: Handler = async (req, res, admin) => {
+  const caller = await requireCaller(req, admin)
+  if (!caller) { res.status(401).json({ error: 'Sign in to Raptor again.' }); return }
+  const { data: me } = await admin.from('profiles').select('id, name, status').eq('id', caller.id).maybeSingle()
+  if (!me || me.status !== 'Active') { res.status(403).json({ error: 'Your Raptor login is not active.' }); return }
+  const accountId = (req.body ?? {}).accountId
+  if (typeof accountId !== 'string') { res.status(400).json({ error: 'Which account?' }); return }
+  const [{ data: a }, { data: contacts }] = await Promise.all([
+    admin.from('debtor_accounts').select('id, case_number, debtor_first_name, ended_as, companies(name)').eq('id', accountId).maybeSingle(),
+    admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', accountId),
+  ])
+  if (!a) { res.status(404).json({ error: 'That account could not be found.' }); return }
+  const dest = codeDestination((contacts ?? []) as ContactRow[])
+  if (!dest || dest.channel !== 'email') { res.status(400).json({ error: 'This account has no email address for the debtor. Add one under Contacts first, or copy the link and send it another way.' }); return }
+  const host = req.headers['x-forwarded-host'] ?? req.headers.host
+  const url = debtorPortalLink(`https://${String(host)}`, a.case_number as string)
+  const mail = debtorInviteEmail({
+    name: String(a.debtor_first_name ?? ''), caseNumber: a.case_number as string,
+    client: (a.companies as unknown as { name: string } | null)?.name ?? '', url, from: String(me.name ?? ''),
+  })
+  const sent = await sendAsUser(admin, me.id as string, { to: dest.to, subject: mail.subject, bodyHtml: mail.html })
+  if (!sent.ok) { res.status(502).json({ error: `The invitation could not be emailed: ${sent.error}`, url }); return }
+  await admin.from('account_notes').insert({
+    account_id: a.id, source: 'system', author_name: me.name ?? null, created_by: me.id,
+    body: `Invited the debtor to see their account online (debtor portal): emailed ${dest.to}.`,
+  })
+  res.status(200).json({ ok: true, to: dest.to, url })
 }
 
 /* ------------------------------------------------------------------ a signed-in debtor */
@@ -572,6 +683,9 @@ const signOut: Handler = async (req, res, admin) => {
 export const DEBTOR_ROUTES: Record<string, Handler> = {
   'request-code': requestCode,
   verify,
+  'sign-in': signIn,
+  'set-password': setPassword,
+  invite,
   account,
   statement,
   'proof-of-payment': proofOfPayment,

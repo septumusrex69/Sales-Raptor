@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs'
 import {
   normaliseCaseNumber, codeDestination, debtorCodeSms, debtorSummary, debtorPayments, DEBTOR_CODE_SENT, debtorCodeEmail,
-  debtorPopFile, debtorPopClaim, debtorPopNote,
+  debtorPopFile, debtorPopClaim, debtorPopNote, debtorPortalLink,
 } from '../../src/lib/debtorPortal.ts'
 import { stripSqlComments } from './sqlComments.mjs'
 
@@ -78,7 +78,7 @@ ok('the note says it is not yet money', /Check it against the trust account befo
 
 /* ---------- the locks ---------- */
 const schema = stripSqlComments(read('supabase/schema.sql'))
-for (const t of ['debtor_portal_codes', 'debtor_portal_sessions']) {
+for (const t of ['debtor_portal_codes', 'debtor_portal_sessions', 'debtor_portal_logins']) {
   ok(`${t} has RLS on`, schema.includes(`alter table public.${t} enable row level security;`))
   ok(`...and no policy at all -- the portal's server is the only door`, !new RegExp(`create policy[^;]* on public\\.${t}\\b`).test(schema))
 }
@@ -94,7 +94,10 @@ ok(`the code goes to the account's own contact (${bodyReads.length} read(s) of t
 ok('...and an unknown case gets the same answer as a real one',
   /if \(!acct \|\| !dest\) \{[\s\S]{0,200}res\.status\(200\)\.json\(\{ message: DEBTOR_CODE_SENT \}\)/.test(api))
 ok('only the hash of the code and of the token is stored', /code_hash: keyedHash\('debtor-code'/.test(api) && /token_hash: keyedHash\('debtor-session', token\)/.test(api))
-ok('the account read comes off the SESSION, never the request', /\.eq\('id', who\.accountId\)/.test(api) && !/req\.body[^\n]*accountId/.test(api))
+/* Everything a DEBTOR calls -- i.e. the file without the staff invite, where a collector names the account and
+   requireCaller has checked they are staff. */
+const debtorSide = api.slice(0, api.indexOf('const invite: Handler')) + api.slice(api.indexOf('/* ------------------------------------------------------------------ a signed-in debtor */'))
+ok('the account a debtor reads comes off the SESSION, never the request', /\.eq\('id', who\.accountId\)/.test(api) && !/req\.body[^\n]*accountId/.test(debtorSide))
 ok('the balance is computeBalance, over the account page\'s own ledgers', /computeBalance\(balanceInputFor\(/.test(api))
 /* AND THE ACCOUNT IS READ WITH EVERY COLUMN computeBalance NEEDS. Written out in the API (so check-select-columns can
    read it); a column ACCOUNT_SELECT gains later and this list misses would read as undefined and change the balance
@@ -103,6 +106,26 @@ const needed = (read('src/lib/storedBalance.ts').match(/export const ACCOUNT_SEL
 const acctSelect = (api.match(/from\('debtor_accounts'\)\s*(?:\/\*[\s\S]*?\*\/\s*)?\.select\('([^']+)'\)\s*\.eq\('id', who\.accountId\)/) ?? [])[1]?.split(',') ?? []
 ok(`the account is read with every column the balance needs (${needed.length} of them)`, needed.length > 5 && needed.every((c) => acctSelect.includes(c)))
 ok('how to pay is the TRUST account, with the case number as the reference', /trust_account_number/.test(api) && /reference: a\.case_number/.test(api) && !/business_bank/.test(api))
+
+/* ---------- a code once, a password after (Stephan, 3 Nov: "do one ... But not every single time") ---------- */
+const verifyStep = api.slice(api.indexOf('const verify: Handler'), api.indexOf('async function openDebtorSession('))
+ok('a code confirms the debtor once, and asks for a password where there is none (or they forgot it)',
+  /confirmed_at: new Date\(t\)\.toISOString\(\)/.test(verifyStep) && /needsPassword: !login\?\.password_hash \|\| body\.reset === true/.test(verifyStep))
+const signInStep = api.slice(api.indexOf('const signIn: Handler'), api.indexOf('const setPassword: Handler'))
+ok('the everyday sign-in is case number and password, checked against the scrypt hash', /passwordMatches\(password, login\.password_hash as string\)/.test(signInStep))
+ok('...one answer for a case that is not ours, no password yet, or a wrong one', (signInStep.match(/DEBTOR_PASSWORD_WRONG/g) ?? []).length === 1
+  && /if \(!acct \|\| !login\?\.password_hash \|\| !passwordMatches/.test(signInStep))
+ok('...and five wrong in a row lock it (the client portal\'s numbers)', /PORTAL_PASSWORD_FAILURES/.test(signInStep) && /password_locked_until/.test(signInStep))
+const setStep = api.slice(api.indexOf('const setPassword: Handler'), api.indexOf('const invite: Handler'))
+ok('a password is stored as its hash, never as typed, and only from a signed-in session', /requireDebtor\(req, admin\)/.test(setStep) && /password_hash: hashPassword\(password as string\)/.test(setStep) && /portalPasswordProblem\(password, null\)/.test(setStep))
+ok('"keep me signed in" is a month; without it, a day', /\(remember \? DEBTOR_REMEMBER_DAYS : 1\) \* 86_400_000/.test(api))
+
+/* ---------- inviting the debtor (Stephan, 3 Nov: "I don't know how to invite someone") ---------- */
+const inviteStep = api.slice(api.indexOf('const invite: Handler'), api.indexOf('/* ------------------------------------------------------------------ a signed-in debtor */'))
+ok('only somebody signed in to Raptor may invite', /const caller = await requireCaller\(req, admin\)/.test(inviteStep))
+ok('...to the email ON THE ACCOUNT, never one typed here', /const dest = codeDestination\(\(contacts \?\? \[\]\) as ContactRow\[\]\)/.test(inviteStep) && !/req\.body[^\n]*\.(email|to)\b/.test(inviteStep))
+ok('...from the inviter\'s own mailbox, noted on the timeline, not charged', /sendAsUser\(admin, me\.id as string/.test(inviteStep) && /account_notes'\)\.insert/.test(inviteStep) && !/chargeItem|account_fees/.test(inviteStep))
+check('the link carries the case number, and nothing secret', debtorPortalLink('https://x.app/', 'RAP-125318'), 'https://x.app/my-account?case=RAP-125318')
 
 console.log(`\ncheck-debtor-portal: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

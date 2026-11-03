@@ -5,7 +5,7 @@ import { saveFile } from '../../lib/fileSave'
 import { PROPOSAL_RULES, applicationNote, needsApplication, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
 import type { Arrangement } from '../../lib/arrangements'
 import {
-  DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken,
+  DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken, setDebtorPassword, signInDebtor,
   askDebtorQuestion, proposeDebtorArrangement, raiseDebtorDispute, sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
   type DebtorAccount,
 } from '../../lib/debtorPortalApi'
@@ -44,7 +44,7 @@ export default function DebtorPortalPage() {
       <main className="mx-auto max-w-[560px] px-4 py-6">
         {token
           ? <AccountView token={token} onSignedOut={() => { saveDebtorToken(null); setToken(null) }} />
-          : <SignIn onSignedIn={(t) => { saveDebtorToken(t); setToken(t) }} />}
+          : <SignIn onSignedIn={(t, remember) => { saveDebtorToken(t, remember); setToken(t) }} />}
       </main>
     </div>
   )
@@ -61,54 +61,107 @@ const button = 'w-full rounded-lg px-4 py-3 text-base font-semibold text-white d
 
 /* ------------------------------------------------------------------ signing in */
 
-function SignIn({ onSignedIn }: { onSignedIn: (token: string) => void }) {
+/**
+ * SIGNING IN: A CODE ONCE, A PASSWORD AFTER (Stephan, 3 Nov: "do one ... confirm your email address ... But not every
+ * single time"). The page opens on the case number and the password, which is what a returning debtor needs; the code
+ * is one press away for the first visit and for a forgotten password, and after it the debtor chooses a password.
+ * "Keep me signed in on this device" is offered on both, off by default -- a borrowed phone is the common case.
+ */
+function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean) => void }) {
+  const [step, setStep] = useState<'password' | 'ask' | 'verify' | 'choose'>('password')
   const [caseNumber, setCaseNumber] = useState(() => new URLSearchParams(window.location.search).get('case') ?? '')
+  const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
+  const [remember, setRemember] = useState(false)
   const [sent, setSent] = useState<string | null>(null)
+  const [fresh, setFresh] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /* Arriving from an invitation (?case=...), the debtor has never signed in: open on the code. */
+  useEffect(() => { if (new URLSearchParams(window.location.search).get('case')) setStep('ask') }, [])
 
-  async function ask(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    if (!normaliseCaseNumber(caseNumber)) { setError('Type the case number on our letter or SMS, for example RAP-123456.'); return }
-    setBusy(true)
-    try { setSent((await requestDebtorCode(caseNumber)).message) } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
-  }
-  async function verify(e: FormEvent) {
-    e.preventDefault()
-    setError(null); setBusy(true)
-    try { onSignedIn((await verifyDebtorCode(caseNumber, code)).token) } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
-  }
+  const go = async (fn: () => Promise<void>) => { setError(null); setBusy(true); try { await fn() } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) } }
+  const caseOk = () => { if (normaliseCaseNumber(caseNumber)) return true; setError('Type the case number on our letter or SMS, for example RAP-123456.'); return false }
+
+  const caseField = (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium">Case number</span>
+      <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="RAP-123456" autoComplete="username"
+        autoCapitalize="characters" aria-label="Case number" className={field} />
+    </label>
+  )
+  const keep = (
+    <label className="flex items-center gap-2 text-sm text-[#5A6B80]">
+      <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} aria-label="Keep me signed in on this device" />
+      Keep me signed in on this device
+    </label>
+  )
 
   return (
     <Card>
-      <h1 className="text-xl font-bold" style={{ color: NAVY }}>See your account</h1>
-      {!sent ? (
-        <form onSubmit={ask} className="mt-4 space-y-4" data-testid="debtor-ask">
-          <p className="text-[15px] text-[#5A6B80]">Type the case number from our letter, email or SMS. We will send a code to the email address (or cellphone) we have for you.</p>
+      <h1 className="text-xl font-bold" style={{ color: NAVY }}>{step === 'choose' ? 'Choose a password' : 'See your account'}</h1>
+
+      {step === 'password' && (
+        <form onSubmit={(e) => { e.preventDefault(); if (caseOk()) void go(async () => { onSignedIn((await signInDebtor(caseNumber, password, remember)).token, remember) }) }}
+          className="mt-4 space-y-4" data-testid="debtor-password">
+          {caseField}
           <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">Case number</span>
-            <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="RAP-123456" autoComplete="off"
-              autoCapitalize="characters" aria-label="Case number" className={field} />
+            <span className="mb-1.5 block text-sm font-medium">Password</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-label="Password" className={field} />
           </label>
+          {keep}
+          <button type="submit" disabled={busy || !password} className={button} style={{ background: NAVY }}>
+            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Sign in'}
+          </button>
+          <button type="button" onClick={() => { setStep('ask'); setError(null) }} className="w-full text-sm text-[#5A6B80] underline" data-testid="debtor-first-time">
+            First time here, or forgot your password? Send me a code
+          </button>
+        </form>
+      )}
+
+      {step === 'ask' && (
+        <form onSubmit={(e) => { e.preventDefault(); if (caseOk()) void go(async () => { setSent((await requestDebtorCode(caseNumber)).message); setStep('verify') }) }}
+          className="mt-4 space-y-4" data-testid="debtor-ask">
+          <p className="text-[15px] text-[#5A6B80]">Type the case number from our letter, email or SMS. We will send a code to the email address (or cellphone) we have for you, to confirm it is you. You only need a code the first time, or if you forget your password.</p>
+          {caseField}
           <button type="submit" disabled={busy} className={button} style={{ background: NAVY }}>
             {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Send me a code'}
           </button>
+          <button type="button" onClick={() => { setStep('password'); setError(null) }} className="w-full text-sm text-[#5A6B80] underline">I have a password</button>
         </form>
-      ) : (
-        <form onSubmit={verify} className="mt-4 space-y-4" data-testid="debtor-verify">
+      )}
+
+      {step === 'verify' && (
+        <form onSubmit={(e) => { e.preventDefault(); void go(async () => {
+          const r = await verifyDebtorCode(caseNumber, code, remember)
+          if (r.needsPassword) { setFresh(r.token); setStep('choose') } else onSignedIn(r.token, remember)
+        }) }} className="mt-4 space-y-4" data-testid="debtor-verify">
           <p className="text-[15px] text-[#5A6B80]" data-testid="debtor-code-sent">{sent}</p>
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium">The six-digit code</span>
             <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8}
               aria-label="Code" className={`${field} tracking-[0.4em] text-center text-xl`} />
           </label>
+          {keep}
           <button type="submit" disabled={busy || code.replace(/\D/g, '').length < 6} className={button} style={{ background: NAVY }}>
-            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Open my account'}
+            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Continue'}
           </button>
-          <button type="button" onClick={() => { setSent(null); setCode(''); setError(null) }} className="w-full text-sm text-[#5A6B80] underline">
+          <button type="button" onClick={() => { setStep('ask'); setCode(''); setError(null) }} className="w-full text-sm text-[#5A6B80] underline">
             Use a different case number, or send the code again
+          </button>
+        </form>
+      )}
+
+      {step === 'choose' && fresh && (
+        <form onSubmit={(e) => { e.preventDefault(); void go(async () => { await setDebtorPassword(fresh, password); onSignedIn(fresh, remember) }) }}
+          className="mt-4 space-y-4" data-testid="debtor-choose-password">
+          <p className="text-[15px] text-[#5A6B80]">Thank you, that is confirmed. Choose a password: next time you sign in with your case number and this password, and no code.</p>
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium">New password (at least 8 characters)</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" aria-label="New password" className={field} />
+          </label>
+          <button type="submit" disabled={busy || password.length < 8} className={button} style={{ background: NAVY }}>
+            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Save my password and open my account'}
           </button>
         </form>
       )}

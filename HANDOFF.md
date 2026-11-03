@@ -83,6 +83,17 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   with the collector. Both: a note, a bell, and the debtor's ticket list (open/closed). check-debtor-tickets 19, e2e
   debtor-portal 32.
 
+- **DEBTOR PORTAL: A CODE ONCE, A PASSWORD AFTER; AND THE INVITATION (S17, 3 Nov).** Stephan: "I don't know how to invite
+  someone to that" and, of codes, "do one ... But not every single time". **Invite**: a "Debtor portal" card on the
+  account page (DebtorPortalCard, side column): **Email the debtor an invitation** (`invite` action -- requireCaller,
+  the caller's own mailbox, the account's own email via codeDestination, a note, NOT charged) and **Copy link**
+  (`/my-account?case=RAP-...`, for WhatsApp/SMS). **Sign-in**: table `debtor_portal_logins` (RLS on, no policies):
+  the code confirms the contact ONCE (confirmed_at), the debtor chooses a password (scrypt, `hashPassword`), then signs in
+  with case number + password (`sign-in`; one answer for every failure; 5 wrong = 15 min lock; the code is the reset).
+  "Keep me signed in on this device": a month in localStorage; otherwise a day, this tab only. The page opens on the
+  password, or on the code when arriving from an invitation link. check-debtor-portal 58, e2e debtor-portal 38 +
+  debtor-proposal-staff 11.
+
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
   1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
      not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.

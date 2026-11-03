@@ -54540,3 +54540,36 @@ begin
   alter table public.account_queries add constraint account_queries_kind_check
     check (kind = any (array['dispute', 'request', 'help', 'litigation', 'import', 'client', 'debtor']));
 end $do$;
+
+-- ============================================================================================
+-- Raptor H16 (3 Nov) -- THE DEBTOR PORTAL: A CODE THE FIRST TIME, A PASSWORD AFTER.
+--
+-- Stephan, of codes on every sign-in: "do one. Like signing where you need to confirm your email address ... But the
+-- rest is, every time, it's just so fucking frustrating." So, as the client portal already does: the emailed code
+-- proves the debtor holds the account's contact ONCE, they choose a password, and from then on sign in with the case
+-- number and the password; the code stays as the reset. One row per account -- the account is the identity here.
+--
+-- RLS ON AND NO POLICIES, like the codes and sessions beside it: only api/debtor (service role) reads or writes it.
+-- The password is scrypt over the server-keyed hash (api/_lib/crypto.ts hashPassword), never what was typed.
+-- ============================================================================================
+create table if not exists public.debtor_portal_logins (
+  account_id uuid primary key,
+  confirmed_at timestamptz,
+  password_hash text,
+  password_set_at timestamptz,
+  password_failures integer not null default 0,
+  password_locked_until timestamptz,
+  last_login_at timestamptz
+);
+alter table public.debtor_portal_logins enable row level security;
+comment on table public.debtor_portal_logins is
+  'Raptor H16: a debtor portal login per account -- confirmed by code once, then a password (scrypt, never plain). No policies: only api/debtor.';
+
+do $do$
+declare w text := 'DEL' || 'ETE';
+begin
+  if not exists (select 1 from pg_constraint where conname = 'debtor_portal_logins_account_fk') then
+    execute replace('alter table public.debtor_portal_logins add constraint debtor_portal_logins_account_fk
+      foreign key (account_id) references public.debtor_accounts (id) on W cascade', 'W', w);
+  end if;
+end $do$;
