@@ -63,7 +63,13 @@ check('the columns are in schema.sql', ['password_hash text', 'password_set_at t
 /* The screen: the password is the door, the code the way to set it. */
 const page = strip(fs.readFileSync('src/pages/portal/PortalPage.tsx', 'utf8'))
 check('the sign-in opens on the password', /useState<Step>\('password'\)/.test(page), true)
-check('...and a code always ends by choosing a password', /verifyPortalCode\(email, code, true[,)]/.test(page), true)
+/* Raptor H16, 3 Nov -- Stephan: "they can have confirmed the email addresses once, and that's it. The rest is
+   irritating." A code used to ALWAYS end by choosing a password (reset: true on every code); now only "Forgot your
+   password?" asks for a new one, and the server still asks where there is none yet (the check above). */
+check('...a code asks for a NEW password only after "Forgot your password?"', /verifyPortalCode\(email, code, forgot, remember\)/.test(page)
+  && /onClick=\{\(\) => \{ setForgot\(true\); go\('email'\) \}\}[^>]*data-testid="portal-forgot"/.test(page)
+  && /onClick=\{\(\) => \{ setForgot\(false\); go\('email'\) \}\}[^>]*data-testid="portal-use-code"/.test(page), true)
+check('...and "Keep me signed in" is ticked from the start', /const \[remember, setRemember\] = useState\(true\)/.test(page), true)
 
 if (failures.length) {
   console.log(`${failures.length} failed:\n  ${failures.join('\n  ')}`)
