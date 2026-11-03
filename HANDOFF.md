@@ -94,6 +94,11 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   password, or on the code when arriving from an invitation link. check-debtor-portal 58, e2e debtor-portal 38 +
   debtor-proposal-staff 11.
 
+- **CLIENT PORTAL: SIGNED IN ONCE MEANS SIGNED IN (S17, 3 Nov; Stephan: "they can have confirmed the email addresses
+  once, and that's it. The rest is irritating")**. PortalPage: "Keep me signed in" is now TICKED by default (a month;
+  clients are on their own computers), and a code no longer forces a new password -- `reset` is sent only from "Forgot
+  your password?" (it was `true` on every code). e2e client-portal 108.
+
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
   1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
      not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.

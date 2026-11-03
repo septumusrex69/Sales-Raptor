@@ -169,7 +169,14 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
   const [again, setAgain] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState<string | null>(null)
-  const [remember, setRemember] = useState(false)
+  /* ON BY DEFAULT (Raptor H16, 3 Nov; Stephan: "they can have confirmed the email addresses once, and that's it. The
+     rest is irritating"). A client signs in from their own office computer, so staying signed in for the month is
+     the ordinary case; somebody on a shared machine unticks it. (The debtor portal keeps it OFF -- a debtor is often
+     on a borrowed phone.) */
+  const [remember, setRemember] = useState(true)
+  /* WHY THEY ASKED FOR A CODE: a first visit sets a password, a forgotten one resets it -- and a client who simply
+     used a code while having a password is NOT made to choose a new one, which every code used to force. */
+  const [forgot, setForgot] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   /* The session the code opened, held until the new password is saved: a client who walks away at that
      step has not been left signed in without one. */
@@ -187,8 +194,8 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
     e.preventDefault()
     primeSplashAudio()
     run(async () => {
-      /* Always asked for a password after a code: the code is the first visit or the reset. */
-      const r = await verifyPortalCode(email, code, true, remember)
+      /* A new password only where there is none yet (the server decides) or they pressed "Forgot your password?". */
+      const r = await verifyPortalCode(email, code, forgot, remember)
       if (r.needsPassword) { setPending(r.token); setStep('set') } else onSignedIn(r.token, remember)
     })
   }
@@ -288,7 +295,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
                       className="h-[18px] w-[18px] rounded border-[#B9C6D3] accent-[#101F2C]" />
                     Keep me signed in
                   </label>
-                  <button type="button" onClick={() => go('email')} className={`${link} underline`} style={{ color: C.slate }} data-testid="portal-forgot">
+                  <button type="button" onClick={() => { setForgot(true); go('email') }} className={`${link} underline`} style={{ color: C.slate }} data-testid="portal-forgot">
                     Forgot your password?
                   </button>
                 </div>
@@ -297,7 +304,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
                 </button>
                 <p className="text-center text-sm pt-2" style={{ color: C.slate }}>
                   First time here?{' '}
-                  <button type="button" onClick={() => go('email')} className={link} style={{ color: C.navy }} data-testid="portal-use-code">Email me a sign-in code</button>
+                  <button type="button" onClick={() => { setForgot(false); go('email') }} className={link} style={{ color: C.navy }} data-testid="portal-use-code">Email me a sign-in code</button>
                 </p>
               </form>
             )}
