@@ -26,8 +26,9 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm,
 /* ---------- money ---------- */
 check('amounts are read however they are typed', ['R106,000.00', '106 000', 'R 1 250.50', 'abc', ''].map(L.parseAmt), [106000, 106000, 1250.5, null, null])
 check('the rand is written with commas, never a non-breaking space', L.fmtRand(106000), 'R106,000.00')
-const tenths = { rows: Array.from({ length: 12 }, () => ({ ...L.blankRow(), amt: 'R0.10' })) }
-check('lines add up in cents, not in floating point', L.linesTotal(tenths), 1.2)
+/* R0.10 + R0.20 + R0.30 is 0.6000000000000001 in floating point; the letter must say R0.60 and mean it. */
+const cents = { rows: ['R0.10', 'R0.20', 'R0.30'].map((amt) => ({ ...L.blankRow(), amt })) }
+check('lines add up in cents, not in floating point', L.linesTotal(cents), 0.6)
 check('the amount due is the lines\' total', L.amountDue({ amount: '', rows: [{ ...L.blankRow(), amt: '100' }, { ...L.blankRow(), amt: '50.5' }] }), 150.5)
 check('...unless one is typed', L.amountDue({ amount: 'R200', rows: [{ ...L.blankRow(), amt: '100' }] }), 200)
 check('...and nothing yet is nothing, not R0.00', L.amountDue({ amount: '', rows: [L.blankRow()] }), null)

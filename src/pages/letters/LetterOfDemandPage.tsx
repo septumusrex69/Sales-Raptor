@@ -13,6 +13,7 @@ import { balanceInputFor } from '../../lib/balanceInput'
 import { isWrittenOff } from '../../lib/accountStatus'
 import { firmToday } from '../../lib/dateLabels'
 import { uploadDocument } from '../../lib/accountWorkspace'
+import { saveFile } from '../../lib/fileSave'
 import { recordSentEmail } from '../../lib/accountEmails'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
@@ -81,6 +82,8 @@ export function LetterOfDemandPage() {
   const [confirm, setConfirm] = useState<{ which: Which; missing: string[] } | null>(null)
   const [sending, setSending] = useState(false)
   const [wordingTick, setWordingTick] = useState(0)
+  /* Safari would not open the share sheet that long after the tap: one more tap, with the file in hand. */
+  const [pendingSave, setPendingSave] = useState<{ blob: Blob; name: string } | null>(null)
   /* What was last saved on the account, per sheet, so a second download of the same letter is not a second copy. */
   const saved = useRef<Record<Which, string>>({ letter: '', ack: '' })
 
@@ -192,13 +195,12 @@ export function LetterOfDemandPage() {
     try {
       const pdf = await makePdf(which)
       if (!pdf) return
-      const url = URL.createObjectURL(new Blob([pdf.bytes as BlobPart], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url; a.download = pdf.name
-      document.body.appendChild(a); a.click(); a.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+      /* fileSave.ts, the one place a file is saved: on an iPad it is the share sheet ("Save to Files"), not a tab over Raptor. */
+      const blob = new Blob([pdf.bytes as BlobPart], { type: 'application/pdf' })
+      const outcome = await saveFile(blob, pdf.name)
+      if (outcome === 'needs-tap') setPendingSave({ blob, name: pdf.name })
       const kept = await keepCopy(which, pdf).catch((e: unknown) => { setError(`Downloaded, but the copy was not kept on the account: ${e instanceof Error ? e.message : String(e)}`); return false })
-      setStatus(`${pdf.name} downloaded.${kept ? ' A copy is on the account, under Documents.' : ''}`)
+      setStatus(`${outcome === 'cancelled' ? `${pdf.name} was not saved.` : outcome === 'needs-tap' ? `${pdf.name} is ready.` : `${pdf.name} downloaded.`}${kept ? ' A copy is on the account, under Documents.' : ''}`)
     } finally { setBusy(null) }
   }
   const ask = (which: Which) => {
@@ -243,6 +245,10 @@ export function LetterOfDemandPage() {
           <ArrowLeft size={14} /> {company ? company.name : 'Clients'}
         </Link>
         <span className="ml-auto text-xs text-slate-400" aria-live="polite" data-testid="lod-status">{status}</span>
+        {pendingSave && (
+          <Button size="sm" variant="primary" icon={<Download size={14} />}
+            onClick={() => { const p = pendingSave; setPendingSave(null); void saveFile(p.blob, p.name, { fromTap: true }) }}>Save {pendingSave.name}</Button>
+        )}
         <Button size="sm" icon={<RotateCcw size={14} />} onClick={startAgain} data-testid="lod-new">New letter</Button>
         <Button size="sm" icon={<Download size={14} />} disabled={!!busy} onClick={() => ask('ack')} data-testid="lod-ack-pdf">Acknowledgement PDF</Button>
         <Button size="sm" icon={<Download size={14} />} disabled={!!busy} onClick={() => ask('letter')} data-testid="lod-pdf">Letter PDF</Button>
