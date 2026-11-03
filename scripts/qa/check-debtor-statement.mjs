@@ -9,7 +9,10 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-debtor-statement.mjs
  */
 import { readFileSync } from 'node:fs'
-import { debtorStatement, unfilledFields } from '../../src/lib/debtorStatement.ts'
+import { debtorStatement, debtorLetterValues, unfilledFields } from '../../src/lib/debtorStatement.ts'
+import { fillLetter } from '../../src/lib/letterDocument.ts'
+import { blanksFor, FILLABLE } from '../../src/lib/signingBlanks.ts'
+import { affordability } from '../letters/affordability.mjs'
 import { ledgerRowsByAccount } from '../../src/lib/storedBalance.ts'
 import { FIRM_UNSET } from '../../src/lib/firmSettingsRow.ts'
 import { A4_LETTERHEAD } from '../../src/lib/letterDocument.ts'
@@ -58,11 +61,30 @@ ok(`and it draws (${why || 'drawn'})`, bytes !== null)
 ok('...as a PDF', bytes !== null && String.fromCharCode(...bytes.slice(0, 5)) === '%PDF-')
 ok('...on an account with no identity number, which is most of the book', ACCOUNT.debtor_id_number === null && bytes !== null)
 
+/* ---------- THE AFFORDABILITY ASSESSMENT AN APPLICATION CARRIES (Stephan, 3 Nov: more than 12 months) ----------
+   Built as createAssessment builds it: the account's values, every fillable field Raptor cannot answer plus the
+   offer's three terms left as boxes. What must not happen is a {{field}} left on the page that is NOT one of the
+   boxes -- the debtor would see braces they cannot fill. Both kinds of debtor, because the forms differ. */
+for (const kind of ['individual', 'company']) {
+  const { values } = debtorLetterValues({
+    account: { ...ACCOUNT, debtor_kind: kind }, ledgers, firm: FIRM, contacts: [], collector, liaison: null,
+    clientName: 'Alianna Pharmacy', today: '2026-11-03', money: moneyZa,
+  })
+  const unanswered = FILLABLE.filter((b) => !(values[b.key] ?? '').trim()).map((b) => b.key)
+  const blanks = blanksFor([...unanswered, 'ptp_amount', 'ptp_frequency', 'ptp_date'], kind)
+  const filled = fillLetter(affordability(kind), values, blanks.map((b) => b.key))
+  const boxes = new Set(blanks.map((b) => b.key))
+  const left = [...new Set([...JSON.stringify(filled.blocks).matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/g)].map((m) => m[1]))]
+  const stray = left.filter((k) => !boxes.has(k))
+  ok(`the ${kind}'s assessment leaves only the debtor's boxes open (stray: ${stray.join(', ') || 'none'})`, stray.length === 0)
+  ok(`...and asks for the offer's terms and the money lines (${boxes.size} boxes)`, boxes.has('ptp_amount') && boxes.has('ptp_date') && boxes.size >= 6)
+}
+
 /* AND THE SERVER CALLS THIS, rather than a statement of its own. */
 const api = readFileSync(new URL('../../api/_lib/debtorPortal.ts', import.meta.url), 'utf8')
 ok('the server refuses to draw a statement with a field it cannot fill', /const gaps = unfilledFields\(doc, values\)\s*if \(gaps\.length\) \{[\s\S]{0,400}return\s*\}\s*const paper = await letterheadFor/.test(api))
 ok('the server draws the statement through debtorStatement and letterToPdf, on the letterhead',
-  /debtorStatement\(\{/.test(api) && /letterToPdf\(\{ doc, page: paper\.page, filled: true, values, letterhead: paper\.image/.test(api))
+  /debtorStatement\(input\)/.test(api) && /letterToPdf\(\{ doc, page: paper\.page, filled: true, values, letterhead: paper\.image/.test(api))
 /* AND A PROOF OF PAYMENT IS NEVER MONEY. */
 const pop = api.slice(api.indexOf('const proofOfPayment: Handler'), api.indexOf('const signOut: Handler'))
 ok('a proof of payment is kept as a document', /from\('account_documents'\)\.insert\(/.test(pop) && /kind: 'Proof of payment'/.test(pop))

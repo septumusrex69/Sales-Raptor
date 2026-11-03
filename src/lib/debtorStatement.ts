@@ -1,4 +1,4 @@
-import { buildStatement } from './accountBalance.js'
+import { buildStatement, type Statement } from './accountBalance.js'
 import { accountMergeValues, type ContactLike } from './accountMergeValues.js'
 import { statementOfAccount } from './accountSummaryLetter.js'
 import { balanceInputFor, type LedgerRows } from './balanceInput.js'
@@ -21,7 +21,7 @@ export interface DebtorStatementAccount {
   capital_handed_over: number | string | null
 }
 
-export function debtorStatement(input: {
+export interface DebtorLetterInput {
   account: DebtorStatementAccount
   ledgers: LedgerRows
   firm: FirmSettings
@@ -31,7 +31,14 @@ export function debtorStatement(input: {
   clientName: string | null
   today: string
   money: (n: number) => string
-}): { doc: LetterDocument; values: Record<string, string>; fileName: string } {
+}
+
+/**
+ * THE MERGE VALUES FOR A DOCUMENT THE PORTAL HANDS A DEBTOR -- the statement, and the affordability assessment an
+ * application carries -- built the way the morning run builds them, over the account's own statement, ONCE. Two
+ * builders would answer {{balance}} two ways on two documents the same debtor holds.
+ */
+export function debtorLetterValues(input: DebtorLetterInput): { values: Record<string, string>; statement: Statement } {
   const a = input.account as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
   const st = buildStatement(balanceInputFor({ account: balanceAccountFromRow(a), ledgers: input.ledgers, today: input.today }))
   const values = accountMergeValues({
@@ -46,7 +53,7 @@ export function debtorStatement(input: {
     },
     balance: st.breakdown.balance,
     clientName: input.clientName,
-    /* Nobody at a keyboard, as on the morning run: the collector on the account is who the statement names. */
+    /* Nobody at a keyboard, as on the morning run: the collector on the account is who the document names. */
     agent: input.collector, collector: input.collector, liaison: input.liaison,
     debtorIdNumber: a.debtor_id_number ?? null,
     contacts: input.contacts,
@@ -54,6 +61,12 @@ export function debtorStatement(input: {
     today: input.today,
     money: input.money,
   })
+  return { values, statement: st }
+}
+
+export function debtorStatement(input: DebtorLetterInput): { doc: LetterDocument; values: Record<string, string>; fileName: string } {
+  const a = input.account as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+  const { values, statement: st } = debtorLetterValues(input)
   const doc = statementOfAccount({
     breakdown: st.breakdown, handedOver: Number(a.capital_handed_over ?? 0), asAt: input.today, money: input.money, lines: st.lines, status: null,
   })

@@ -21,15 +21,25 @@ export interface DebtorProposal {
   note: string | null
   balanceThen: number | null
   createdAt: string
+  /** More than 12 months: an application, which may be accepted only once its affordability assessment is signed. */
+  needsAssessment: boolean
+  /** Where that assessment stands: 'sent' (waiting for the debtor), 'signed', or null where none could be made. */
+  assessmentState: string | null
+  assessmentToken: string | null
 }
 
 export async function fetchPendingProposal(accountId: string): Promise<DebtorProposal | null> {
   const { data, error } = await supabase.from('debtor_arrangement_proposals')
-    .select('id, arrangement, amount, first_due_on, note, balance_then, created_at')
+    .select('id, arrangement, amount, first_due_on, note, balance_then, created_at, needs_assessment, signing_token')
     .eq('account_id', accountId).eq('status', 'pending').maybeSingle()
   if (error) throw new Error(error.message)
   if (!data) return null
+  const token = (data.signing_token as string | null) ?? null
+  const { data: signing } = token
+    ? await supabase.from('signing_requests').select('state').eq('token', token).maybeSingle()
+    : { data: null }
   return {
+    needsAssessment: !!data.needs_assessment, assessmentToken: token, assessmentState: (signing?.state as string | undefined) ?? null,
     id: data.id as string, arrangement: data.arrangement as Arrangement, amount: Number(data.amount), firstDueOn: data.first_due_on as string,
     note: (data.note as string | null) ?? null, balanceThen: data.balance_then === null ? null : Number(data.balance_then), createdAt: data.created_at as string,
   }
@@ -44,6 +54,11 @@ const isoWeekday = (iso: string) => { const [y, m, d] = iso.split('-').map(Numbe
  * presses (one live promise per account) and says so, which is recoverable -- the other order is not.
  */
 export async function acceptProposal(p: DebtorProposal, accountId: string, actor: { id: string | null; name: string | null }, accessToken: string | null): Promise<ChargeResult> {
+  /* AN APPLICATION IS DECIDED ON THE ASSESSMENT (Stephan, 3 Nov), so it cannot be accepted before the debtor has signed
+     it. Here as well as on the card's button, because a button is a suggestion and this is the rule. */
+  if (p.needsAssessment && p.assessmentState !== 'signed') {
+    throw new Error('This is an application for more than 12 months: wait for the debtor to sign the affordability assessment, then accept.')
+  }
   const { promise, charge } = await recordPromise({
     accountId, amount: p.amount, dueOn: p.firstDueOn, arrangement: p.arrangement,
     /* The debtor chose a first date; the instalment day is that date's, as the collector's own form takes it. */

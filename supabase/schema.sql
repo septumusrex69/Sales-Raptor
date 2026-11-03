@@ -54505,3 +54505,20 @@ end $do$;
 
 comment on table public.debtor_arrangement_proposals is
   'Raptor H16: an arrangement a debtor offered on the debtor portal. Not a promise until a collector accepts it (recordPromise). Written by api/debtor only.';
+
+-- ============================================================================================
+-- Raptor H16 (3 Nov) -- MORE THAN 12 MONTHS IS AN APPLICATION, WITH THE AFFORDABILITY ASSESSMENT.
+--
+-- Stephan, 3 Nov: "24 months is too much. Like 12 months. Anything more than 12 months needs like an application
+-- ... they should make a proposal. And then it should be approved ... we have a document for that. They can fill in
+-- online. That request for affordability assessment." So an offer that settles in more than 12 months is still made
+-- -- it is not refused -- but it carries the firm's own affordability assessment (the signing document, filled in
+-- and signed on /sign/<token>), and a collector may accept it only once that has come back signed.
+-- ============================================================================================
+alter table public.debtor_arrangement_proposals
+  add column if not exists needs_assessment boolean not null default false,
+  add column if not exists signing_token text;
+comment on column public.debtor_arrangement_proposals.needs_assessment is
+  'Raptor H16: the offer settles in more than 12 months, so it is an application and needs the affordability assessment signed before it may be accepted.';
+comment on column public.debtor_arrangement_proposals.signing_token is
+  'The signing_requests.token of the affordability assessment created for this application.';

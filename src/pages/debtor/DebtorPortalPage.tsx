@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Copy, FileDown, Loader2, LogOut, Upload } from 'lucide-react'
 import { DEBTOR_POP_MAX_BYTES, debtorPopFile, normaliseCaseNumber } from '../../lib/debtorPortal'
 import { saveFile } from '../../lib/fileSave'
-import { PROPOSAL_RULES, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
+import { PROPOSAL_RULES, applicationNote, needsApplication, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
 import type { Arrangement } from '../../lib/arrangements'
 import {
   DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken,
@@ -379,12 +379,23 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
     )
   }
   if (account.proposal?.status === 'pending') {
+    const pr = account.proposal
+    /* AN APPLICATION WAITS ON THE FORM FIRST: until the assessment is signed there is nothing for us to decide, and the
+       debtor is the only one who can move it -- so the button to it is the first thing they see. */
+    const formOpen = pr.needsAssessment && pr.assessment && pr.assessment.state !== 'signed'
     return (
       <Card>
-        <Label>Your offer</Label>
+        <Label>{pr.needsAssessment ? 'Your application' : 'Your offer'}</Label>
         <p className="mt-1 text-[15px]" style={{ color: NAVY }} data-testid="debtor-offer-pending">
-          We have your offer of {money(account.proposal.amount)} {EVERY[account.proposal.arrangement] ?? ''} from {longDay(account.proposal.firstDueOn)}. One of our team will look at it and reply, usually within one working day.
+          We have your {pr.needsAssessment ? 'application' : 'offer'} of {money(pr.amount)} {EVERY[pr.arrangement] ?? ''} from {longDay(pr.firstDueOn)}.
+          {formOpen ? ' Please fill in and sign the affordability assessment so we can look at it.' : ' One of our team will look at it and reply, usually within one working day.'}
         </p>
+        {formOpen && (
+          <a href={pr.assessment!.link} className={`${button} mt-3 block text-center`} style={{ background: NAVY }} data-testid="debtor-assessment-link">
+            Fill in my affordability assessment
+          </a>
+        )}
+        {pr.needsAssessment && !pr.assessment && <p className="mt-2 text-sm text-[#5A6B80]">We will email you the affordability assessment to fill in.</p>}
       </Card>
     )
   }
@@ -393,6 +404,7 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
   const offer = { arrangement, amount: value, firstDueOn }
   const typed = amount.trim() !== '' && firstDueOn !== ''
   const problem = typed ? proposalProblem(offer, { balance: s.balance, settlement: s.settleToday }, today) : null
+  const application = typed && !problem && needsApplication(offer, s.settleToday)
 
   async function send(e: FormEvent) {
     e.preventDefault()
@@ -400,7 +412,12 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
     const p = proposalProblem(offer, { balance: s.balance, settlement: s.settleToday }, today)
     if (p) { setError(p); return }
     setBusy(true)
-    try { await proposeDebtorArrangement(token, { arrangement, amount, firstDueOn, note: note.trim() || undefined }); onSent() }
+    try {
+      const r = await proposeDebtorArrangement(token, { arrangement, amount, firstDueOn, note: note.trim() || undefined })
+      /* Straight on to the form, in this tab: it is the next thing they have to do, and the portal is a tap back. */
+      if (r.assessmentLink) { window.location.assign(r.assessmentLink); return }
+      onSent()
+    }
     catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
   }
 
@@ -435,11 +452,12 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} aria-label="Note" className={field} />
         </label>
         {typed && !problem && <p className="text-sm" style={{ color: NAVY }} data-testid="debtor-offer-summary">{proposalSummary(offer, s.settleToday)}.</p>}
+        {application && <p className="rounded-lg bg-[#FBF6EC] p-3 text-sm" style={{ color: NAVY }} data-testid="debtor-offer-application">{applicationNote(offer, s.settleToday)}</p>}
         {typed && problem && <p className="text-sm text-red-700" data-testid="debtor-offer-problem">{problem}</p>}
         <button type="submit" disabled={busy || !typed || !!problem} className={button} style={{ background: NAVY }}>
-          {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Send my offer'}
+          {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : application ? 'Send my application' : 'Send my offer'}
         </button>
-        <p className="text-xs text-[#5A6B80]">The first payment must be within {PROPOSAL_RULES.firstPaymentWithinDays} days, and instalments must settle the account within {PROPOSAL_RULES.longestMonths} months.</p>
+        <p className="text-xs text-[#5A6B80]">The first payment must be within {PROPOSAL_RULES.firstPaymentWithinDays} days. Instalments that take longer than {PROPOSAL_RULES.longestMonths} months to settle the account are an application, with a short form about your income and expenses.</p>
       </form>
       {error && <p className="mt-2 text-sm text-red-700" data-testid="debtor-propose-error">{error}</p>}
     </Card>

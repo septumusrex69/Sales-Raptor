@@ -60,13 +60,25 @@ export function DebtorProposalCard({ accountId, balance, settlement, onDecided }
 
   return (
     <div data-testid="debtor-proposal"><Card className="border-amber-300">
-      <CardHeader title="The debtor offered an arrangement" subtitle={`On the debtor portal, ${new Date(p.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', timeZone: 'Africa/Johannesburg' })}. Nothing is agreed until you accept.`} />
+      <CardHeader title={p.needsAssessment ? 'The debtor applied for an arrangement' : 'The debtor offered an arrangement'} subtitle={`On the debtor portal, ${new Date(p.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', timeZone: 'Africa/Johannesburg' })}. Nothing is agreed until you accept.`} />
       <p className="mt-3 text-sm font-medium text-slate-800">{proposalSummary(p, money.settlement)}.</p>
       {p.note && <p className="mt-1 text-sm text-slate-600">“{p.note}”</p>}
       {outside && <p className="mt-2 text-sm text-amber-700">Outside the portal’s rules today: {outside}</p>}
+      {p.needsAssessment && (
+        <p className="mt-2 text-sm text-slate-700" data-testid="debtor-proposal-assessment">
+          Longer than 12 months, so it is an application with the affordability assessment:{' '}
+          {p.assessmentState === 'signed'
+            ? <a href={`/sign/${p.assessmentToken}`} target="_blank" rel="noreferrer" className="font-medium text-gold-700 underline">signed — read it</a>
+            : p.assessmentState
+              ? <span className="text-amber-700">waiting for the debtor to fill it in and sign.</span>
+              : <span className="text-amber-700">it could not be made for them — send it from Sign a document on this account.</span>}
+        </p>
+      )}
       {!declining ? (
         <div className="mt-3 flex gap-2">
-          <button type="button" disabled={busy} onClick={accept} className="rounded-lg bg-navy-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">Accept</button>
+          <button type="button" disabled={busy || (p.needsAssessment && p.assessmentState !== 'signed')} onClick={accept}
+            title={p.needsAssessment && p.assessmentState !== 'signed' ? 'Accept once the affordability assessment is signed' : undefined}
+            className="rounded-lg bg-navy-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">Accept</button>
           <button type="button" disabled={busy} onClick={() => setDeclining(true)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700">Decline…</button>
         </div>
       ) : (

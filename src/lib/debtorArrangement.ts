@@ -14,9 +14,19 @@ import type { Arrangement } from './arrangements.js'
 export const PROPOSAL_RULES = {
   /** The first payment may be no further off than this. A promise for next quarter is not a promise. */
   firstPaymentWithinDays: 30,
-  /** An instalment arrangement must settle the account within this long. */
-  longestMonths: 24,
+  /**
+   * AN OFFER THAT SETTLES WITHIN THIS LONG IS AN ORDINARY OFFER; ONE THAT TAKES LONGER IS AN APPLICATION.
+   * Stephan, 3 Nov: "24 months is too much. Like 12 months. Anything more than 12 months needs like an application
+   * ... we have a document for that. They can fill in online" -- the affordability assessment. Not a refusal: the
+   * debtor still offers, fills the assessment in, and a collector decides once it is signed.
+   */
+  longestMonths: 12,
 } as const
+
+/** Does this offer need the affordability assessment? Instalments that take longer than PROPOSAL_RULES.longestMonths. */
+export function needsApplication(p: Pick<ProposalInput, 'arrangement' | 'amount'>, settlement: number): boolean {
+  return p.arrangement !== 'once_off' && p.amount > 0 && monthsToSettle(p, settlement) > PROPOSAL_RULES.longestMonths
+}
 
 export interface ProposalInput { arrangement: Arrangement; amount: number; firstDueOn: string }
 
@@ -53,14 +63,22 @@ export function proposalProblem(p: ProposalInput, money: { balance: number; sett
   if (p.arrangement === 'once_off') return null
   /* An instalment the size of the debt is a once-off settlement, not an instalment (promiseRules says the same). */
   if (p.amount >= money.settlement) return 'That pays everything at once. Choose "once-off" instead.'
-  const months = monthsToSettle(p, money.settlement)
-  if (months > PROPOSAL_RULES.longestMonths) {
-    const per = p.arrangement === 'monthly' ? PROPOSAL_RULES.longestMonths : Math.floor((PROPOSAL_RULES.longestMonths * 52) / 12)
-    const least = Math.ceil((money.settlement / per) * 100) / 100
-    return `At ${rands(p.amount)} ${p.arrangement === 'monthly' ? 'a month' : 'a week'} it would take ${months} months to settle. `
-      + `Online we can agree up to ${PROPOSAL_RULES.longestMonths} months: at least ${rands(least)} ${p.arrangement === 'monthly' ? 'a month' : 'a week'}. For anything else, please call us.`
-  }
+  /* MORE THAN 12 MONTHS IS NOT A PROBLEM, IT IS AN APPLICATION -- see needsApplication and applicationNote. */
   return null
+}
+
+/**
+ * WHAT THE DEBTOR IS TOLD WHEN THEIR OFFER IS AN APPLICATION -- before they send it, so filling in the assessment is
+ * no surprise -- with the instalment that would keep it an ordinary offer, in case they can manage that instead.
+ */
+export function applicationNote(p: Pick<ProposalInput, 'arrangement' | 'amount'>, settlement: number): string {
+  const months = monthsToSettle(p, settlement)
+  const per = p.arrangement === 'monthly' ? PROPOSAL_RULES.longestMonths : Math.floor((PROPOSAL_RULES.longestMonths * 52) / 12)
+  const least = Math.ceil((settlement / per) * 100) / 100
+  const every = p.arrangement === 'monthly' ? 'a month' : 'a week'
+  return `At ${rands(p.amount)} ${every} it would take ${months} months to settle. Anything longer than ${PROPOSAL_RULES.longestMonths} months is an application: `
+    + `after you send it we will ask you to fill in a short form about your income and expenses (an affordability assessment). `
+    + `At ${rands(least)} ${every} or more it is an ordinary offer and needs no form.`
 }
 
 /** The offer in one line, as both the debtor and the collector read it. */

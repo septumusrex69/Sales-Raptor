@@ -16,9 +16,12 @@ const OFFER = { id: 'prop-1', arrangement: 'monthly', amount: 500, first_due_on:
 const order = []
 let promiseBody = null
 let decided = null
+/* First an APPLICATION whose assessment the debtor has not signed, then an ordinary offer to accept. */
+let application = true
 const handlers = [
   [(u, req) => u.includes('/rest/v1/debtor_arrangement_proposals') && req.method() === 'PATCH', (u, req) => { order.push('offer'); decided = req.postDataJSON(); return { status: 200, body: [] } }],
-  [(u) => u.includes('/rest/v1/debtor_arrangement_proposals'), () => ({ body: decided ? [] : [OFFER] })],
+  [(u) => u.includes('/rest/v1/debtor_arrangement_proposals'), () => ({ body: decided ? [] : [application ? { ...OFFER, amount: 100, needs_assessment: true, signing_token: 'tok-1' } : OFFER] })],
+  [(u) => u.includes('/rest/v1/signing_requests'), () => ({ body: [{ state: 'sent' }] })],
   [(u, req) => u.includes('/rest/v1/promises_to_pay') && req.method() === 'POST', (u, req) => {
     order.push('promise'); promiseBody = req.postDataJSON()
     return { status: 201, body: { id: 'ptp-1', account_id: ACCOUNT.id, amount: 500, due_on: '2026-11-25', status: 'open', arrangement: 'monthly', day_of_month: 25, on_last_day: false, day_of_week: null, instalments_kept: 0, created_at: '2026-11-03T08:00:00Z' } }
@@ -44,6 +47,16 @@ try {
     try { await page.goto(`http://localhost:${PORT}/accounts/${ACCOUNT.id}`, { timeout: 2000 }); up = true }
     catch { await new Promise((r) => setTimeout(r, 500)) }
   }
+  {
+    const app = page.getByTestId('debtor-proposal')
+    await app.waitFor({ timeout: 20000 })
+    t.ok('an application says so, and that the assessment is waiting for the debtor', /applied for an arrangement/.test(await app.innerText())
+      && /waiting for the debtor to fill it in and sign/.test(await page.getByTestId('debtor-proposal-assessment').innerText()))
+    t.ok('...and cannot be accepted until it is signed', await app.getByRole('button', { name: 'Accept' }).isDisabled())
+    await t.shot(page, 'debtor-proposal-staff-application')
+  }
+  application = false
+  await page.reload()
   const card = page.getByTestId('debtor-proposal')
   await card.waitFor({ timeout: 20000 })
   t.ok('the offer is on the account page, and visible', await card.isVisible())

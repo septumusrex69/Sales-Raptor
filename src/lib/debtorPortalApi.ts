@@ -46,7 +46,12 @@ export interface DebtorAccount {
   contact: { phone: string | null; email: string | null } | null
   /** Part 3: the arrangement in force, if any, and the latest offer (pending, or how it was answered). */
   live: { arrangement: string; amount: number; dueOn: string; missed: boolean } | null
-  proposal: { status: 'pending' | 'accepted' | 'declined'; arrangement: string; amount: number; firstDueOn: string; declineReason: string | null; createdAt: string } | null
+  proposal: {
+    status: 'pending' | 'accepted' | 'declined'; arrangement: string; amount: number; firstDueOn: string; declineReason: string | null; createdAt: string
+    /** More than 12 months: an application, with the affordability assessment (its state and the debtor's link). */
+    needsAssessment: boolean
+    assessment: { state: string; link: string } | null
+  } | null
 }
 export const fetchDebtorAccount = (token: string) => call<DebtorAccount>('account', {}, token)
 export const signOutDebtor = (token: string) => call<{ ok: boolean }>('sign-out', {}, token)
@@ -58,4 +63,4 @@ export const sendDebtorProofOfPayment = (token: string, input: { fileName: strin
 
 /* Part 3: an arrangement offered. Nothing is agreed until a collector accepts it. */
 export const proposeDebtorArrangement = (token: string, input: { arrangement: string; amount: string; firstDueOn: string; note?: string }) =>
-  call<{ ok: boolean }>('propose', input, token)
+  call<{ ok: boolean; application: boolean; assessmentLink: string | null }>('propose', input, token)

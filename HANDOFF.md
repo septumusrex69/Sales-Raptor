@@ -57,7 +57,15 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   per account; a decline must carry a reason). The collector gets a bell + note, and **DebtorProposalCard** first in the
   account's side column: Accept = `recordPromise` (the collector's own press: promise row, item 5 R50, note,
   confirmation workflow) then the offer is marked accepted; Decline needs a reason the debtor reads on the portal.
-  check-debtor-arrangement 28, e2e debtor-portal 25 + debtor-proposal-staff 7 (sabotages each red).
+  check-debtor-arrangement 34, e2e debtor-portal 27 + debtor-proposal-staff 9 (sabotages each red).
+  **12 MONTHS, AND LONGER IS AN APPLICATION (Stephan, 3 Nov: "24 months is too much ... Anything more than 12 months
+  needs like an application ... That request for affordability assessment")**: `PROPOSAL_RULES.longestMonths = 12`;
+  beyond it the offer is NOT refused -- `needsApplication` -- it is saved with `needs_assessment` and the server makes
+  the firm's own affordability assessment (letter-affordability-<kind>, merged by `debtorLetterValues`, the debtor's
+  boxes + the offer's terms open, on the letterhead, no fee) as a signing request (`signing_token`); the debtor is
+  taken straight to /sign/<token>. The collector's card shows the assessment's state; **Accept is refused until it is
+  signed** (acceptProposal, not only the button). check-debtor-statement 15 (both kinds of assessment leave only the
+  debtor's boxes open).
   **Ask Stephan: should item 5 be charged on an arrangement the DEBTOR offered online?** (It is, today -- the
   collector's Accept is the same press as taking one on the phone.) **Next: part 4 (dispute / question -> ticket).**
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working

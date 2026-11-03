@@ -8,8 +8,11 @@ import { sendSms } from './sms/connectMobile.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import { portalCodeCheck, PORTAL_CODE_MESSAGE } from '../../src/lib/clientPortal.js'
 import { computeBalance, type BalanceBreakdown } from '../../src/lib/accountBalance.js'
-import { proposalProblem, proposalSummary } from '../../src/lib/debtorArrangement.js'
-import { debtorStatement, unfilledFields, type DebtorStatementAccount } from '../../src/lib/debtorStatement.js'
+import { needsApplication, proposalProblem, proposalSummary } from '../../src/lib/debtorArrangement.js'
+import { debtorLetterValues, debtorStatement, unfilledFields, type DebtorLetterInput, type DebtorStatementAccount } from '../../src/lib/debtorStatement.js'
+import { fillLetter, parseLetter } from '../../src/lib/letterDocument.js'
+import { blanksFor, FILLABLE } from '../../src/lib/signingBlanks.js'
+import { newToken } from '../../src/lib/signingRules.js'
 import { letterToPdf } from '../../src/lib/letterPdf.js'
 import { toSettings as toFirmSettings } from '../../src/lib/firmSettingsRow.js'
 import { letterheadFor } from './workflow/letterhead.js'
@@ -167,7 +170,7 @@ async function balanceOf(admin: SupabaseClient, accountRow: Record<string, unkno
 async function arrangementState(admin: SupabaseClient, accountId: string) {
   const [{ data: live }, { data: prop }] = await Promise.all([
     admin.from('promises_to_pay').select('arrangement, amount, due_on, status').eq('account_id', accountId).in('status', ['open', 'defaulted']).maybeSingle(),
-    admin.from('debtor_arrangement_proposals').select('status, arrangement, amount, first_due_on, decline_reason, created_at, decided_at')
+    admin.from('debtor_arrangement_proposals').select('status, arrangement, amount, first_due_on, decline_reason, created_at, decided_at, needs_assessment, signing_token')
       .eq('account_id', accountId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ])
   return {
@@ -175,8 +178,16 @@ async function arrangementState(admin: SupabaseClient, accountId: string) {
     proposal: prop ? {
       status: prop.status as string, arrangement: prop.arrangement as string, amount: Number(prop.amount), firstDueOn: prop.first_due_on as string,
       declineReason: (prop.decline_reason as string | null) ?? null, createdAt: prop.created_at as string,
+      needsAssessment: !!prop.needs_assessment,
+      assessment: prop.signing_token ? await assessmentOf(admin, prop.signing_token as string) : null,
     } : null,
   }
+}
+
+/** Where the application's affordability assessment stands, and the debtor's own link to it. */
+async function assessmentOf(admin: SupabaseClient, token: string): Promise<{ state: string; link: string } | null> {
+  const { data } = await admin.from('signing_requests').select('state').eq('token', token).maybeSingle()
+  return data ? { state: data.state as string, link: `/sign/${token}` } : null
 }
 
 const account: Handler = async (req, res, admin) => {
@@ -231,30 +242,49 @@ const account: Handler = async (req, res, admin) => {
  * the firm's letterhead in Charter -- so the PDF a debtor downloads and the one the collector emails are one document.
  * A second, simpler statement for the portal would one day disagree with the real one about what is owed.
  */
-const statement: Handler = async (req, res, admin) => {
-  const who = await requireDebtor(req, admin)
-  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+/**
+ * EVERYTHING A DOCUMENT FOR THE DEBTOR NEEDS -- the account, the firm, the contacts, the collector and the liaison,
+ * the ledgers and the firm's day -- read once, the way the morning run reads it. Used by the statement and by the
+ * affordability assessment an application carries, so both documents are merged from the same answers.
+ */
+async function letterInput(admin: SupabaseClient, accountId: string): Promise<(DebtorLetterInput & { debtorKind: 'individual' | 'company'; caseNumber: string; name: string }) | null> {
   const { today } = await firmNow(admin)
   const [{ data: a }, { data: firm }, { data: contacts }] = await Promise.all([
     admin.from('debtor_accounts')
       .select('id,capital_handed_over,handover_date,interest_rate_annual,status,last_action_at,ended_as,ended_on,prescribed,prescription_date,case_number,opening_as_at,listing_date,listing_reference,bureaus_listed,debtor_kind,debtor_title,debtor_first_name,debtor_surname,account_number,client_reference,capital_outstanding,preferred_language,debtor_id_number,assigned_to,companies(name,account_owner_id)')
-      .eq('id', who.accountId).maybeSingle(),
+      .eq('id', accountId).maybeSingle(),
     admin.from('firm_settings').select('*').maybeSingle(),
-    admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', who.accountId),
+    admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', accountId),
   ])
-  if (!a || !firm) { res.status(404).json({ error: 'Your statement could not be drawn just now. Please call us.' }); return }
+  if (!a || !firm) return null
   const company = a.companies as unknown as { name: string; account_owner_id: string | null } | null
-  const [{ data: collector }, { data: liaison }] = await Promise.all([
+  const [{ data: collector }, { data: liaison }, ledgers] = await Promise.all([
     a.assigned_to ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', a.assigned_to).maybeSingle() : Promise.resolve({ data: null }),
     company?.account_owner_id ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', company.account_owner_id).maybeSingle() : Promise.resolve({ data: null }),
+    fetchLedgerRows(admin, [accountId]),
   ])
+  return {
+    account: a as DebtorStatementAccount, ledgers: ledgers.get(accountId)!, firm: toFirmSettings(firm as never),
+    contacts: ((contacts ?? []) as ContactRow[]).map((c) => ({ kind: c.kind, value: c.value, isPrimary: !!c.is_primary, retiredAt: c.retired_at })),
+    collector, liaison, clientName: company?.name ?? null, today, money: moneyZa,
+    debtorKind: a.debtor_kind === 'company' ? 'company' : 'individual', caseNumber: a.case_number as string,
+    name: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' '),
+  }
+}
+
+/**
+ * THE STATEMENT OF ACCOUNT, AS THE COLLECTOR WOULD SEND IT: the same statementOfAccount, the same buildStatement over
+ * the same ledgers, the same merge values (accountMergeValues, as the morning run builds them), drawn by letterToPdf on
+ * the firm's letterhead in Charter -- so the PDF a debtor downloads and the one the collector emails are one document.
+ * A second, simpler statement for the portal would one day disagree with the real one about what is owed.
+ */
+const statement: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const input = await letterInput(admin, who.accountId)
+  if (!input) { res.status(404).json({ error: 'Your statement could not be drawn just now. Please call us.' }); return }
   try {
-    const ledgers = await fetchLedgerRows(admin, [who.accountId])
-    const { doc, values, fileName } = debtorStatement({
-      account: a as DebtorStatementAccount, ledgers: ledgers.get(who.accountId)!, firm: toFirmSettings(firm as never),
-      contacts: ((contacts ?? []) as ContactRow[]).map((c) => ({ kind: c.kind, value: c.value, isPrimary: !!c.is_primary, retiredAt: c.retired_at })),
-      collector, liaison, clientName: company?.name ?? null, today, money: moneyZa,
-    })
+    const { doc, values, fileName } = debtorStatement(input)
     const gaps = unfilledFields(doc, values)
     if (gaps.length) {
       /* Said to the firm in the log (what to fill in), and to the debtor as "call us" -- never a statement with braces. */
@@ -265,7 +295,7 @@ const statement: Handler = async (req, res, admin) => {
     const bytes = await letterToPdf({ doc, page: paper.page, filled: true, values, letterhead: paper.image, charter: await charterFor() })
     res.status(200).json({ fileName, pdf: Buffer.from(bytes).toString('base64') })
   } catch (e) {
-    /* letterToPdf refuses a document it cannot fill rather than printing {{braces}} -- said to the firm, not the debtor. */
+    /* A failure while drawing (a font, the letterhead, a character the PDF cannot print) -- said to the firm, not the debtor. */
     console.error(`[debtor] statement for ${who.accountId} not drawn: ${e instanceof Error ? e.message : e}`)
     res.status(500).json({ error: 'Your statement could not be drawn just now. Please try again later, or call us.' })
   }
@@ -324,6 +354,35 @@ const proofOfPayment: Handler = async (req, res, admin) => {
  * a conversation, and one live promise per account is the database's rule -- and while an offer is still waiting.
  * Nothing here is a promise: no promises_to_pay row, no fee, no message. The collector's Accept does all of that.
  */
+/**
+ * THE AFFORDABILITY ASSESSMENT FOR AN APPLICATION -- the firm's own signing document (letter-affordability-individual /
+ * -company), made here the way the account's Sign panel makes it: the debtor's particulars merged in, everything Raptor
+ * cannot answer plus the offer's three terms left as boxes the debtor fills (blanksFor; the terms on this document are
+ * always the debtor's -- see SigningPanel DOCUMENTS.offersTerms), frozen on the letterhead. No fee: the firm prices
+ * the acknowledgement of debt under item 4(a), not a questionnaire. Returns the token, or null if it could not be made
+ * -- the offer still stands and the collector can send the form from the account.
+ */
+async function createAssessment(admin: SupabaseClient, accountId: string): Promise<string | null> {
+  const input = await letterInput(admin, accountId)
+  if (!input) return null
+  const { data: tpl } = await admin.from('message_templates')
+    .select('name, body').eq('seed_key', `letter-affordability-${input.debtorKind}`).eq('active', true).maybeSingle()
+  const doc = tpl ? parseLetter(tpl.body as string) : null
+  if (!tpl || !doc) { console.error(`[debtor] no affordability assessment template for ${input.debtorKind}`); return null }
+  const { values } = debtorLetterValues(input)
+  const unanswered = FILLABLE.filter((b) => !(values[b.key] ?? '').trim()).map((b) => b.key)
+  const blanks = blanksFor([...unanswered, 'ptp_amount', 'ptp_frequency', 'ptp_date'], input.debtorKind)
+  const paper = await letterheadFor(admin)
+  const token = newToken()
+  const { error } = await admin.from('signing_requests').insert({
+    token, account_id: accountId, title: tpl.name as string,
+    body: fillLetter(doc, values, blanks.map((b) => b.key)).blocks,
+    page_setup: paper.page, blanks, signer_name: input.name || null,
+  })
+  if (error) { console.error(`[debtor] affordability assessment not created for ${accountId}: ${error.message}`); return null }
+  return token
+}
+
 const propose: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
   if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
@@ -349,16 +408,27 @@ const propose: Handler = async (req, res, admin) => {
   const problem = proposalProblem(offer, { balance: b.balance, settlement: b.settlement }, today)
   if (problem) { res.status(400).json({ error: problem }); return }
 
-  const { error } = await admin.from('debtor_arrangement_proposals').insert({
+  /* MORE THAN 12 MONTHS IS AN APPLICATION (Stephan, 3 Nov): the same offer, with the affordability assessment. */
+  const application = needsApplication(offer, b.settlement)
+  const { data: row, error } = await admin.from('debtor_arrangement_proposals').insert({
     account_id: who.accountId, arrangement: offer.arrangement, amount: offer.amount, first_due_on: offer.firstDueOn, note, balance_then: b.balance,
-  })
+    needs_assessment: application,
+  }).select('id').single()
   if (error) {
     /* The one-pending index: a second press got here first. */
     if (error.code === '23505') { res.status(409).json({ error: 'We already have your offer and will reply soon.' }); return }
     console.error(`[debtor] proposal not saved for ${who.accountId}: ${error.message}`)
     res.status(500).json({ error: 'Your offer could not be sent just now. Try again.' }); return
   }
-  const text = `The debtor offered an arrangement on the debtor portal: ${proposalSummary(offer, b.settlement)}.${note ? ` They wrote: "${note}"` : ''} Accept or decline it on the account.`
+  let token: string | null = null
+  if (application) {
+    token = await createAssessment(admin, who.accountId)
+    if (token) await admin.from('debtor_arrangement_proposals').update({ signing_token: token }).eq('id', row!.id)
+  }
+  const text = application
+    ? `The debtor applied for an arrangement longer than 12 months on the debtor portal: ${proposalSummary(offer, b.settlement)}.${note ? ` They wrote: "${note}"` : ''} `
+      + (token ? 'They have been sent the affordability assessment to fill in; accept or decline once it is signed.' : 'The affordability assessment could not be made for them -- send it from the account.')
+    : `The debtor offered an arrangement on the debtor portal: ${proposalSummary(offer, b.settlement)}.${note ? ` They wrote: "${note}"` : ''} Accept or decline it on the account.`
   await admin.from('account_notes').insert({ account_id: who.accountId, body: text, source: 'system', author_name: 'Debtor portal' })
   let tell: string[] = a.assigned_to ? [a.assigned_to as string] : []
   if (tell.length === 0) {
@@ -371,7 +441,8 @@ const propose: Handler = async (req, res, admin) => {
     })))
     if (bellErr) console.error(`[debtor] notification not made: ${bellErr.message}`)
   }
-  res.status(200).json({ ok: true })
+  /* The debtor goes straight on to the form; the link is theirs (they are signed in to this very account). */
+  res.status(200).json({ ok: true, application, assessmentLink: token ? `/sign/${token}` : null })
 }
 
 const signOut: Handler = async (req, res, admin) => {
