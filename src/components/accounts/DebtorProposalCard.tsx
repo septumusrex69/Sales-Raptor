@@ -45,7 +45,8 @@ export function DebtorProposalCard({ accountId, balance, settlement, onDecided }
     setBusy(true); setError(null)
     try {
       const charge = await acceptProposal(p!, accountId, actor, session?.access_token ?? null)
-      setDone(['Accepted. The promise is recorded and the debtor will get the confirmation.', chargeMessage(charge, PROMISE_ITEM_ID)].filter(Boolean).join(' '))
+      setDone(['Accepted. The promise is recorded and the debtor will get the confirmation. No arrangement fee: the debtor offered it themselves.',
+        charge ? chargeMessage(charge, PROMISE_ITEM_ID) : ''].filter(Boolean).join(' '))
       onDecided()
     } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
   }

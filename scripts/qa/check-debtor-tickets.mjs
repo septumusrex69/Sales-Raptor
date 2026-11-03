@@ -50,8 +50,11 @@ ok('a portal dispute is a WRITTEN dispute -- alleged and received today, in writ
 ok('...classified, and given to the client\'s liaison (or the collector)', /category: d\.category/.test(disp) && /const owner = liaison \?\? /.test(disp))
 ok('...its sequence planned now, and the dispute saved even if that fails', /try \{ await sweep\(admin, \{ accountIds: \[a\.id as string\]/.test(disp) && disp.indexOf("from('account_queries').insert(") < disp.indexOf('await sweep('))
 ok('...a second open dispute is answered in the debtor\'s terms', /error\?\.code === '23505'/.test(disp))
-ok('nothing here charges the debtor -- not the dispute, not the question', disp.length > 0 && ask.length > 0
-  && !/chargeItem|account_fees|actionCode|itemId/.test(disp + ask))
+/* Stephan, 3 Nov: a dispute is "correspondence received ... just charge them for the correspondence received". */
+ok('a portal dispute is charged item 6, as a debtor\'s email is -- the same constants, every cap', /chargeItemWith\(admin, \{[\s\S]{0,80}itemId: CORRESPONDENCE_ITEM_ID, actionCode: CORRESPONDENCE_ACTION_CODE/.test(disp))
+ok('...never item 3', !/itemId: '3'|actionCode: 'dispute'/.test(disp))
+ok('...and only after the ticket is saved', disp.indexOf("from('account_queries').insert(") >= 0 && disp.indexOf("from('account_queries').insert(") < disp.indexOf('chargeItemWith('))
+ok('a question raises no fee', ask.length > 0 && !/chargeItem|account_fees|actionCode|itemId/.test(ask))
 ok('a question is the debtor kind, with the collector', /kind: 'debtor'/.test(ask) && /owner_id: a\.assigned_to/.test(ask))
 
 console.log(`\ncheck-debtor-tickets: ${pass} passed, ${failures.length} failed`)

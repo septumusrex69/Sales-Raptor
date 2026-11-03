@@ -3572,7 +3572,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
            database starts the run, and this is what dates it and sends what is due. */
         accessToken: session?.access_token ?? null,
       })
-      message = [issued, chargeMessage(charge, PROMISE_ITEM_ID)].filter(Boolean).join(' ')
+      /* A collector's own promise is always charged (recordPromise's `charge` defaults on); null only on a debtor's offer. */
+      message = [issued, charge ? chargeMessage(charge, PROMISE_ITEM_ID) : ''].filter(Boolean).join(' ')
     })
     // Said after the fact rather than promised beforehand: whether item 5 has room on this
     // account depends on the ledger, and the ledger is read when the charge is made.

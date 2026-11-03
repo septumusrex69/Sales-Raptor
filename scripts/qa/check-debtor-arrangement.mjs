@@ -46,7 +46,7 @@ ok('nought is not an offer', /amount you can pay/.test(proposalProblem(P('monthl
 
 /* ---------- the server ---------- */
 const api = read('api/_lib/debtorPortal.ts')
-const prop = api.slice(api.indexOf('const propose: Handler'), api.indexOf('const signOut: Handler'))
+const prop = api.slice(api.indexOf('const propose: Handler'), api.indexOf('async function ringAbout('))
 ok('the server applies the same rules, to the same balance the page shows', /proposalProblem\(offer, \{ balance: b\.balance, settlement: b\.settlement \}, today\)/.test(prop) && /balanceOf\(admin, a, who\.accountId, today\)/.test(prop))
 ok('...refuses while an arrangement is live', /if \(state\.live\) \{ res\.status\(409\)/.test(prop))
 ok('...and while an offer is waiting', /state\.proposal\?\.status === 'pending'\) \{ res\.status\(409\)/.test(prop))
@@ -62,7 +62,10 @@ ok('...and raises no fee', assess.length > 0 && !/charge|account_fees/i.test(ass
 
 /* ---------- the collector's decision ---------- */
 const decide = read('src/lib/debtorProposals.ts')
-ok('accepting is recordPromise -- the collector\'s own press, with its fee, note and confirmation', /await recordPromise\(\{/.test(decide) && /accessToken/.test(decide))
+ok('accepting is recordPromise -- the collector\'s own press, with its note and confirmation', /await recordPromise\(\{/.test(decide) && /accessToken/.test(decide))
+/* Stephan, 3 Nov: "No, don't charge. Well, I mean, not yet." */
+ok('...WITHOUT item 5 on the debtor\'s own offer', /charge: false,/.test(decide))
+ok('...while a collector\'s own promise is still charged (the switch defaults on)', /input\.charge === false \? null : await chargeItem\(/.test(read('src/lib/accountPromises.ts')))
 ok('...and the promise comes BEFORE the offer is marked accepted', decide.indexOf('await recordPromise(') >= 0 && decide.indexOf('await recordPromise(') < decide.indexOf("status: 'accepted'"))
 ok('an application cannot be accepted until the assessment is signed -- in the rule, not only on the button',
   /if \(p\.needsAssessment && p\.assessmentState !== 'signed'\) \{\s*throw/.test(decide) && decide.indexOf("p.assessmentState !== 'signed'") < decide.indexOf('await recordPromise('))

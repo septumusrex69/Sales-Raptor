@@ -72,7 +72,7 @@ try {
   await page.getByTestId('debtor-proposal-done').waitFor({ timeout: 10000 })
   t.ok(`accepting records the promise first, then marks the offer (${order.join(' → ')})`, order.indexOf('promise') >= 0 && order.indexOf('promise') < order.indexOf('offer'))
   t.ok('...as the debtor offered it: monthly, R500, from the 25th, on the 25th', promiseBody?.arrangement === 'monthly' && Number(promiseBody?.amount) === 500 && promiseBody?.due_on === '2026-11-25' && promiseBody?.day_of_month === 25)
-  t.ok('...charged item 5, as a collector\'s own promise is', order.includes('fee'))
+  t.ok('...WITHOUT item 5 -- the debtor offered it (Stephan, 3 Nov: "don\'t charge ... not yet")', !order.includes('fee'))
   t.ok('...and the offer is marked accepted, with the promise it became', decided?.status === 'accepted' && decided?.promise_id === 'ptp-1')
 } catch (e) {
   try { const pg = browser?.contexts().flatMap((c) => c.pages())[0]; if (pg) await t.shot(pg, 'debtor-proposal-staff-where-it-stopped') } catch { /* */ }

@@ -77,9 +77,11 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   debtor-portal 32.
 
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
-  1. Item 5 (R50) is charged when a collector ACCEPTS an arrangement the debtor offered online (same press as a phone
-     promise). Keep?
-  2. Item 3 (R25) is **NOT** charged on a dispute the debtor raises online (no person in the loop). Charge it?
+  1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
+     not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.
+  2. ~~Item 3 on a portal dispute~~ -- **DECIDED 3 Nov: item 6 (R13), correspondence received**, as a debtor's email is
+     ("just charge them for the correspondence received"); chargeItemWith with emailSync's constants. **A portal
+     QUESTION is not charged yet** -- it is correspondence received too; ask whether it should be.
   3. `PROPOSAL_RULES`: first payment within 30 days; 12 months online, longer = application. Right numbers?
   4. Nobody has signed in for real yet: put your own email on a staging test account, open /my-account on the preview.
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working

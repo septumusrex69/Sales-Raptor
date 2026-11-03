@@ -26,6 +26,8 @@ import {
   DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote, debtorDispute, debtorQuestion, type DebtorTicket,
 } from '../../src/lib/debtorPortal.js'
 import { sweep } from './workflow/run.js'
+import { chargeItemWith } from '../../src/lib/chargeEngine.js'
+import { CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID } from '../../src/lib/emailRules.js'
 
 /**
  * /api/debtor/<action> -- THE DEBTOR PORTAL'S SERVER (Raptor H16). See src/lib/debtorPortal.ts.
@@ -486,8 +488,10 @@ async function ringAbout(admin: SupabaseClient, ids: (string | null)[], type: st
  * to the firm's categories. Given to the client's liaison -- a dispute's finding needs somebody with standing
  * (ESCALATION_KINDS.dispute.goesTo) -- or the collector where the client has none.
  *
- * NO ITEM 3. raiseQuery charges a dispute a collector raises; this one nobody at the firm has looked at yet, and a fee
- * raised with no person in the loop is the firm's decision to make, not this code's (asked in HANDOFF).
+ * ITEM 6, NOT ITEM 3. Stephan, 3 Nov: "If they raise a dispute, it's correspondence received ... because there will be
+ * action on that, just charge them for the correspondence received." So it is billed exactly as a debtor's email is --
+ * item 6, R13, chargeItemWith with every cap and ceiling, the same constants emailSync uses -- and never item 3, which
+ * recovers the time a collector spends raising one.
  */
 const dispute: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
@@ -515,6 +519,14 @@ const dispute: Handler = async (req, res, admin) => {
     account_id: a.id, query_id: q.id, kind: 'query', source: 'system', author_name: 'Debtor portal',
     body: `The debtor disputed the account in writing on the debtor portal (${d.category}): ${d.text}`,
   })
+  /* Wrapped like emailSync's: a fee that could not be raised must not lose the debtor's dispute. Raised once, after the
+     ticket is saved, so a failed save is never billed. */
+  try {
+    await chargeItemWith(admin, {
+      accountId: a.id as string, itemId: CORRESPONDENCE_ITEM_ID, actionCode: CORRESPONDENCE_ACTION_CODE,
+      description: CORRESPONDENCE_DESCRIPTION, createdBy: null, at: new Date(now),
+    })
+  } catch (e) { console.error(`[debtor] item 6 not raised on the dispute on ${a.id}: ${e instanceof Error ? e.message : e}`) }
   await ringAbout(admin, [owner, a.assigned_to as string | null], 'debtor.dispute',
     `${a.case_number}: the debtor disputed the account on the debtor portal (${d.category}). Collection is paused until it is answered.`, `/queries/${q.id}`)
   /*
