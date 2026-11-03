@@ -5,6 +5,49 @@
 > Handover 17; its commits start `Raptor H16: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
 > and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
 
+## RYNO · LETTER OF DEMAND BUILDER (Raptor · Handover 16, 3 Nov, branch `claude/ryno-letter-of-demand`)
+
+Ryno's session. **A pull request into `claude/sales-raptor-review-p1pzx2`, not merged.** Ryno built a "Letter of Demand
+Builder" as a page of its own (one HTML file: a form, two live A4 sheets, a PDF made from what is on screen) and asked
+for it inside Raptor: *"under clients ... a plus new letter"*; type it all in, or find the client as you type and then
+the debtor by name or reference and *"fetch all the information ... just like a double check"*; send it from Raptor
+*"from which email address"*, or download it and send it yourself; and *"micro edits"*, because the invoicing is not
+always clear.
+
+- **Where:** "+ New letter" on the Clients list (left of Add client) and on each client's page (opens with the client
+  chosen) -> `/letters/demand`, behind `RequireClientAccess` like the Clients page.
+- **His builder, kept** (`src/pages/letters/`): `demandMarkup.ts` is his two sheets and preview styles, generated from
+  his file, scoped under `.lod-island`; `demandSheet.ts` is his pagination and his print-what-is-on-screen PDF, ported
+  from jsPDF to pdf-lib (already a dependency). His letterhead and five font subsets (Noto Serif, Inter; OFL, notice
+  in `public/letter-of-demand/fonts/LICENCE.txt` -- **keep it beside the fonts**) are files under
+  `public/letter-of-demand/`. The sheets are a plain-DOM island React never re-renders (pagination inserts its own
+  nodes). A character the fonts cannot print is REFUSED and named, never swapped (the section 129 rule).
+- **From an account** (`letterFromAccount`, `src/lib/letterOfDemand.ts`): the debtor's name, **our case number as the
+  payment reference**, ONE line (the creditor's account number, handover date, client reference, capital handed over --
+  Raptor keeps no invoice lines), the debtor's primary live email, and the amount due = TODAY's balance by
+  `computeBalance`, said in a note (capital, interest, fees, paid) with "check every field". Read only: nothing writes
+  an account figure.
+- **Editable:** every field and line; and **"Edit the wording"** makes each paragraph of both sheets contenteditable
+  (the bound figures inside stay live; paste is plain text; "Back to the standard wording"). Editing draws the sheet
+  at FULL size -- a caret on a `scale()`d sheet lands beside the click (CLAUDE.md). A draft is kept in this browser
+  only (localStorage), a convenience.
+- **Download / Send:** Letter PDF and Acknowledgement PDF through `fileSave.ts` (the iPad share sheet). Send goes
+  through `/api/email/letter`: from my mailbox, the account holder's, or the firm's central mailbox (legal@,
+  `firm_mailboxes`) -- the other two need `campaign.run`, as a debtor campaign's do. With an account chosen the
+  message is then recorded by **`recordSentEmail`** -- the account's own path: `account_emails`, the timeline, and
+  **R25 under item 1(a), as every email to a debtor** (the route itself bills nothing). Without an account it is sent
+  and nothing is filed or charged, and the screen says so.
+- **The copy on the account:** each letter downloaded or sent with an account chosen is uploaded under the account's
+  Documents as kind "Letter of Demand" (no fee: the perusal fee was removed 21 Oct); the same letter twice is one copy.
+
+**For Ryno / Stephan to decide:** the letter's own words say "pay into our client's account as reflected on the
+invoices" -- Ryno's wording, kept. Debtors on Raptor's book pay into the firm's TRUST account; if these letters go
+to book debtors, the paragraph (editable) or the template should say so. Not changed without the firm's word.
+
+**Checks:** `check-letter-of-demand` (31), `e2e/letter-of-demand` (29, a real PDF opened and its fonts read). Every rule
+broken once and seen to fail; the cents check passed broken at first (12 x R0.10 happens to sum exactly) and was
+sharpened. `check-file-actions` holds downloads to `fileSave.ts`.
+
 ## S16 -- WHERE IT STANDS, AND WHERE S17 STARTS (Raptor · Handover 16, 29 Oct - 2 Nov; branch `claude/beautiful-curie-f7deq7`)
 
 Everything below is pushed to the session branch AND fast-forwarded onto the preview
