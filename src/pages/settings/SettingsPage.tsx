@@ -26,7 +26,7 @@ import { canLeadCollections } from '../../lib/permissions'
 import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
-import { THEMES } from '../../lib/themes'
+import { ACTIVE_THEMES } from '../../lib/themes'
 import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
 import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
@@ -1835,9 +1835,12 @@ function AppearanceTab() {
   const [sound, setSound] = useState(celebrationSoundEnabled)
   return (
     <Card>
-      <CardHeader title="Appearance" subtitle={`Choose how ${theme.productName} looks. This changes nothing but the styling, and applies to you only.`} />
+      <CardHeader title="Appearance" subtitle={ACTIVE_THEMES.length === 1
+        ? `${theme.productName} wears the firm's own skin, ${ACTIVE_THEMES[0].name}: a new photograph of South Africa and a new line every day.`
+        : `Choose how ${theme.productName} looks. This changes nothing but the styling, and applies to you only.`} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
-        {THEMES.map((t) => {
+        {/* Only the skins still offered -- the rest are archived (themes.ts, 3 Nov). */}
+        {ACTIVE_THEMES.map((t) => {
           const selected = t.id === themeId
           return (
             <button

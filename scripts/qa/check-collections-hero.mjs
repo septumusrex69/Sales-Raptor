@@ -161,7 +161,21 @@ ok('the controls are not captioned by a copy of themselves',
   !/Collection period: <span/.test(hero))
 
 /* The firm's own lines, which is most of why the panel exists. */
-ok('the gold line under the headline is there', /Discipline drives results/.test(hero))
+/*
+ * ONE THING SAID ON THE FIRM'S OWN SKIN, AND IT CHANGES DAILY (Raptor H16, 3 Nov). Stephan: "you've got two like things
+ * that are being said here ... just keep one ... Change the one every day ... remove that the sky is the whatever. And
+ * just use the quotes." So on Bredell Ferreira (BASE_THEME) the day's line is the headline, and the slogan and its gold
+ * tagline are drawn only for an archived skin. Asserted on the branch, because both still exist in the file.
+ */
+/* On the CODE, comments out: the note explaining the change names the very words it removed. */
+const heroBare = hero.replace(/\/\*[\s\S]*?\*\//g, '')
+const branchAt = heroBare.indexOf('{theme.id === BASE_THEME ? <DayLine /> : (')
+ok('the firm\'s skin shows the day\'s line, and nothing else, where the headline was', branchAt > 0)
+const dayLine = hero.slice(hero.indexOf('function DayLine() {'))
+ok('...the day\'s line IS the headline', /<h1[^>]*data-testid="hero-day-headline">\s*\{photo\.line\}\s*<\/h1>/.test(dayLine))
+ok('...the fixed slogan and "Discipline drives results" only in the archived branch, after it',
+  heroBare.indexOf('Discipline drives results') > branchAt && heroBare.indexOf('{theme.heroLine.first}') > branchAt)
+ok('the gold line under the slogan is kept for an archived skin', /Discipline drives results/.test(hero))
 ok('...and the rail beside it', /Higher<br \/>Performance<br \/>Closer<br \/>Tomorrow/.test(hero))
 /*
  * The line at the foot went with the redesign. The firm's reference puts the control strip there

@@ -140,18 +140,24 @@ export function CollectionsHero({ figures, filters, action, progress }: {
               right and is a separate question from the weight: capitals have no ascenders or
               descenders to give a line shape however heavily they are set.
             */}
-            <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-bold
-              leading-[1.06] text-white">
-              {/* Each LINE is its own span, which is not decoration: it makes the two halves
-                  addressable as two things, by a stylesheet and by anything reading the page. */}
-              <span>{theme.heroLine.first}</span><br />
-              <span className="text-[var(--ch-champagne)]">{theme.heroLine.second}</span>
-            </h1>
-            <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
-              Discipline drives results
-            </p>
-            {/* THE BREDELL FERREIRA SKIN'S LINE OF THE DAY, with its photograph (themes.ts applyDayPhoto; S16, 31 Oct). */}
-            {theme.id === BASE_THEME && <DayLine />}
+            {/*
+              ONE THING SAID, AND IT IS THE DAY'S (Raptor H16, 3 Nov). Stephan, circling the headline and the quote under
+              it: "you've got two like things that are being said here ... just keep one ... Change the one every day ...
+              So remove that the sky is the whatever. And just use the quotes." So on the Bredell Ferreira skin the day's
+              line IS the headline -- set where "The sky is only the beginning." was, with "Discipline drives results"
+              gone -- and the photograph's credit under it. An archived skin (themes.ts) still has its own fixed line.
+            */}
+            {theme.id === BASE_THEME ? <DayLine /> : (
+              <>
+                <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-bold leading-[1.06] text-white">
+                  <span>{theme.heroLine.first}</span><br />
+                  <span className="text-[var(--ch-champagne)]">{theme.heroLine.second}</span>
+                </h1>
+                <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
+                  Discipline drives results
+                </p>
+              </>
+            )}
           </div>
           {/*
             The rail of small caps, right-aligned the way the firm drew it. Hidden on a phone
@@ -324,10 +330,15 @@ function DayLine() {
   const photo = { ...look.photo, line: look.line, who: look.who }
   const credit = photoCredit(photo)
   return (
-    <figure className="mt-5 max-w-xl border-l-2 border-[var(--ch-gold)] pl-3" data-testid="hero-day-line">
-      <blockquote className="text-[15px] italic text-white/90">“{photo.line}”</blockquote>
-      {photo.who && <figcaption className="mt-1 text-xs text-[var(--ch-champagne)]">{photo.who}</figcaption>}
-      <p className="mt-2 text-[10px] text-white/55">
+    <figure className="mt-4 max-w-3xl" data-testid="hero-day-line">
+      {/* THE HEADLINE, in the weight the firm chose for the old one ("make the font thicker"), a size down because a
+          sentence is longer than a slogan. No quotation marks: it is the firm saying it, not somebody quoted. */}
+      <h1 className="text-[26px] sm:text-[34px] lg:text-[40px] font-bold leading-[1.15] text-white" data-testid="hero-day-headline">
+        {photo.line}
+      </h1>
+      {photo.who && <figcaption className="mt-3 text-sm text-[var(--ch-champagne)]">{photo.who}</figcaption>}
+      <span className="mt-4 block h-px w-14 bg-[var(--ch-gold)]" />
+      <p className="mt-3 text-[10px] text-white/55">
         {photo.title}, {photo.place}. Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">{credit.name}</a> on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">Unsplash</a>
       </p>
     </figure>

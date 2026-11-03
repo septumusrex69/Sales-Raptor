@@ -16,9 +16,9 @@
         var id = 'original'
         try {
           var saved = localStorage.getItem('crm.theme')
-          if (saved === 'original' || saved === 'raptor' || saved === 'desert'
-            || saved === 'glass-mountain' || saved === 'ocean' || saved === 'africa'
-            || saved === 'forest') id = saved
+          // ONLY THE SKINS STILL OFFERED (themes.ts ACTIVE_THEMES). Archived 3 Nov, so honoured by nobody now:
+          // 'raptor', 'desert', 'glass-mountain', 'ocean', 'africa', 'forest' -- a browser holding one gets the default.
+          if (saved === 'original') id = saved
         } catch (e) {
           // Storage blocked. The default is still the right answer.
         }

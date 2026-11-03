@@ -20,7 +20,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-themes.mjs
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { BASE_THEME, DEFAULT_THEME, THEMES, themeById } from '../../src/lib/themes.ts'
+import { ACTIVE_THEMES, BASE_THEME, DEFAULT_THEME, THEMES, readStoredTheme, themeById } from '../../src/lib/themes.ts'
 
 let pass = 0
 const failures = []
@@ -98,8 +98,25 @@ for (const theme of THEMES) {
 
 const preload = html.slice(html.indexOf('<script>'), html.indexOf('</script>'))
 /* EVERY ID IS KNOWN TO IT. A skin missing here renders the baseline for a frame and then snaps. */
+/* ARCHIVED SKINS ARE HONOURED BY NOBODY (3 Nov, Stephan: "make this the default skin for everyone and archive
+   everything else"), so the script compares against the ACTIVE ones only -- read off its `saved === '...'` tests, not
+   off any mention, because the comment beside them names the archived ids on purpose. */
+const honoured = [...preload.matchAll(/saved === '([a-z-]+)'/g)].map((m) => m[1])
 for (const theme of THEMES) {
-  ok(`the pre-paint script knows ${theme.id}`, preload.includes(`'${theme.id}'`))
+  if (theme.archived) ok(`the pre-paint script does NOT honour archived ${theme.id}`, !honoured.includes(theme.id))
+  else ok(`the pre-paint script knows ${theme.id}`, honoured.includes(theme.id))
+}
+check('only Bredell Ferreira is offered now', ACTIVE_THEMES.map((t) => t.id), ['original'])
+ok('...and it is the default', DEFAULT_THEME === 'original')
+/* A BROWSER THAT HAD CHOSEN AN ARCHIVED SKIN IS PUT ON THE DEFAULT, by readStoredTheme -- run against a stand-in
+   window, because that is the one place the choice is read back. */
+{
+  const store = new Map([['crm.theme', 'africa']])
+  globalThis.window = { localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) } }
+  check('a browser that had chosen an archived skin wears the default', readStoredTheme(), 'original')
+  store.set('crm.theme', 'original')
+  check('...and one that chose Bredell Ferreira keeps it', readStoredTheme(), 'original')
+  delete globalThis.window
 }
 /* THE SAME STORAGE KEY AND THE SAME DEFAULT, or the script and the module disagree about what
    the person chose -- which looks exactly like the choice not being saved. */

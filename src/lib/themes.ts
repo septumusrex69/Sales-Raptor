@@ -37,6 +37,13 @@ export interface ThemeDefinition {
    * data, and `&rsquo;` in a string is four characters a React text node would draw literally.
    */
   heroLine: { first: string; second: string }
+  /**
+   * ARCHIVED: kept in the code -- its stylesheet, its photographs, its line -- but offered to nobody, and a browser that
+   * had chosen it is put back on the default. Stephan, 3 Nov: "make this the default skin for everyone and archive
+   * everything else. Like, if I will call on that again, I will ask, but I don't think we will ever go back to that."
+   * Bringing one back is deleting this flag (and adding its id to index.html's pre-paint list).
+   */
+  archived?: boolean
 }
 
 export const THEMES: ThemeDefinition[] = [
@@ -59,6 +66,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: 'raptor',
+    archived: true, // 3 Nov: Bredell Ferreira for everyone; see ThemeDefinition.archived
     name: 'Raptor',
     description: 'Deep navy, champagne gold and atmospheric imagery.',
     productName: 'Raptor',
@@ -70,6 +78,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: 'desert',
+    archived: true, // 3 Nov: Bredell Ferreira for everyone; see ThemeDefinition.archived
     name: 'Desert',
     description: 'Warm sand, low sun and the dunes. The same Raptor, in another light.',
     /*
@@ -97,6 +106,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: 'glass-mountain',
+    archived: true, // 3 Nov: Bredell Ferreira for everyone; see ThemeDefinition.archived
     name: 'Glass Mountain',
     description: 'Cinematic alpine landscape with premium frosted glass surfaces.',
     productName: 'Raptor',
@@ -108,6 +118,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: 'ocean',
+    archived: true, // 3 Nov: Bredell Ferreira for everyone; see ThemeDefinition.archived
     name: 'Ocean',
     description: 'Deep water, a broken sky and the light on the sea. The same Raptor, at depth.',
     /* The same product name as raptor, for the desert's reason: a skin is the same brand in
@@ -127,6 +138,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: 'africa',
+    archived: true, // 3 Nov: Bredell Ferreira for everyone; see ThemeDefinition.archived
     name: 'Africa',
     description: 'Baobabs under a storm sky, and the sun going down over the bushveld.',
     /* The same product name, for the desert's reason: a skin is the same brand in another light. */
@@ -139,6 +151,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: 'forest',
+    archived: true, // 3 Nov: Bredell Ferreira for everyone; see ThemeDefinition.archived
     name: 'Forest',
     description: 'A misty pine valley at first light, seen from the moss.',
     productName: 'Raptor',
@@ -177,6 +190,9 @@ export const BASE_THEME: ThemeId = 'original'
 
 const STORAGE_KEY = 'crm.theme'
 
+/** The skins anybody may wear: everything not archived. The picker offers these; a stored choice must be one of them. */
+export const ACTIVE_THEMES: ThemeDefinition[] = THEMES.filter((t) => !t.archived)
+
 export function themeById(id: ThemeId): ThemeDefinition {
   return THEMES.find((t) => t.id === id) ?? THEMES[0]
 }
@@ -189,7 +205,8 @@ export function themeById(id: ThemeId): ThemeDefinition {
 export function readStoredTheme(): ThemeId {
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY)
-    if (saved && THEMES.some((t) => t.id === saved)) return saved as ThemeId
+    /* AN ARCHIVED SKIN IS NOT HONOURED (3 Nov): everybody who had chosen one is on the default from their next load. */
+    if (saved && ACTIVE_THEMES.some((t) => t.id === saved)) return saved as ThemeId
   } catch {
     // Storage unavailable — the default is a perfectly good answer.
   }

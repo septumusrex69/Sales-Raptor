@@ -99,6 +99,16 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   clients are on their own computers), and a code no longer forces a new password -- `reset` is sent only from "Forgot
   your password?" (it was `true` on every code). e2e client-portal 108.
 
+- **ONE SKIN, AND ONE LINE ON IT (S17, 3 Nov).** Stephan, circling the company hero: "you've got two like things that
+  are being said here ... just keep one ... remove that the sky is the whatever. And just use the quotes" and "make this
+  the default skin for everyone and archive everything else ... if I will call on that again, I will ask". So:
+  (1) CollectionsHero on Bredell Ferreira: the day's line IS the h1 (DayLine, 26/34/40px bold, credit under it); "The sky
+  is only the beginning." and "Discipline drives results" are drawn only for an archived skin. (2) themes.ts:
+  `archived: true` on raptor, desert, glass-mountain, ocean, africa, forest; `ACTIVE_THEMES` (= Bredell Ferreira) is all
+  the Settings picker offers; readStoredTheme and index.html's pre-paint honour only active ids, so everybody is on it
+  from their next load. Stylesheets, photos and lines all kept -- un-archiving is deleting the flag (+ index.html).
+  check-themes 161, check-collections-hero 97, e2e performance 124 / login-reset 19 / dashboard-landing 19.
+
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
   1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
      not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.

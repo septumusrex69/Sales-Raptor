@@ -229,8 +229,9 @@ let browser
 try {
   server = startServer()
   browser = await chromium.launch()
-  /* On the Raptor skin, deliberately: the hero checks below measure that skin's line, face and size. */
-  const { page } = await signedInPage(browser, PROFILE, handlers, seen, { skin: 'raptor' })
+  /* ON THE FIRM'S OWN SKIN, the only one offered since 3 Nov (themes.ts ACTIVE_THEMES): the hero checks below measure
+     the day's line, which IS the headline now -- with nothing approved at /portal-looks, Llandudno's. */
+  const { page } = await signedInPage(browser, PROFILE, handlers, seen)
 
   const errors = []
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
@@ -367,7 +368,7 @@ try {
    * fixture written twice is a fixture that drifts.
    */
   await page.goto(`http://localhost:${PORT}/`)
-  await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
+  await page.getByRole('heading', { name: /two oceans meet the mountains/ }).waitFor({ timeout: 20000 })
   await t.shot(page, '39-company')
 
   /*
@@ -384,10 +385,10 @@ try {
     return { image: s.backgroundImage, position: s.backgroundPosition, scrim: scrim.backgroundImage,
       height: el.getBoundingClientRect().height }
   })
-  t.ok(`the photograph is actually attached (${hero.image.slice(0, 48)})`,
-    /collections-hero/.test(hero.image))
-  /* getComputedStyle resolves the keyword: `center` reads back as `50% 50%`. */
-  t.ok(`...centred, which is the whole valley (${hero.position})`, /^50% 50%$/.test(hero.position))
+  /* THE DAY'S PHOTOGRAPH on the firm's skin (themes.ts applyDayPhoto), with Llandudno -- the app's own copy -- beneath
+     it, so a day Unsplash fails still shows a picture. The Raptor skin's valley, and its centring, are archived. */
+  t.ok(`the day's photograph is actually attached, with Llandudno beneath it (${hero.image.slice(0, 48)})`,
+    /portal-photo\.webp/.test(hero.image))
   t.ok('...with a scrim over it', /gradient/.test(hero.scrim))
   t.ok(`the panel has real height (${Math.round(hero.height)}px)`, hero.height > 320)
 
@@ -451,16 +452,17 @@ try {
    * capitals — which is the assertion worth making. Reading textContent instead would return
    * the sentence-case source and pass whether the transform applied or not.
    */
-  /* THE RAPTOR SKIN'S line -- each skin carries its own, and this browser is put on raptor above (signedInPage skin). */
-  t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
+  /* THE DAY'S LINE IS THE HEADLINE (3 Nov, Stephan: "remove that the sky is the whatever. And just use the quotes"). */
+  t.ok(`the title is the day's line (${heading.text.replace(/\s+/g, ' ').trim().slice(0, 50)}...)`,
+    /^Where two oceans meet the mountains, the day ends in gold\./.test(heading.text.replace(/\s+/g, ' ').trim()))
   /*
    * SIZED TO THE BRIEF, at both ends. "Do NOT make the headline enormous" is half the instruction
    * and 48-56px is the other half, so a lower bound alone would pass on the 72px version this
    * replaced.
    */
-  t.ok(`...set between 48 and 56px (${heading.size})`,
-    parseFloat(heading.size) >= 48 && parseFloat(heading.size) <= 56)
+  /* A SENTENCE, NOT A SLOGAN: a size down from the old 48-56px line, so a whole day's line fits the panel's width. */
+  t.ok(`...set between 36 and 44px (${heading.size})`,
+    parseFloat(heading.size) >= 36 && parseFloat(heading.size) <= 44)
   /*
    * BOLD, AND MEASURED AS THE WEIGHT THE BROWSER RESOLVED rather than read off the class. A
    * font-bold class on a family that ships no bold cut renders synthesised or at 400 and looks
@@ -521,32 +523,10 @@ try {
   t.ok(`...under the name the stylesheet asks for (${family})`,
     font.faces.some((f) => f.split('|')[0] === family))
   /*
-   * TWO TONES, BROKEN BY HAND. The firm's reference sets the first half white and the second in
-   * champagne, on two lines — which only works as a deliberate break: left to wrap, the break
-   * lands wherever the window happens to be wide and the colour change falls mid-phrase.
-   *
-   * innerText renders the <br> as a newline, so this reads the rendered break rather than the
-   * presence of a tag.
+   * ONE SENTENCE, ONE COLOUR. The old slogan was two halves in two tones broken by hand; the day's line is a single
+   * sentence the firm wrote for the photograph, set whole in white -- so there are no halves to find.
    */
-  t.check('...broken across two lines where the firm breaks it',
-    heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
-    'The sky is only | the beginning.')
-  /*
-   * Each line is its own span, so the two halves are addressable as two things. They were not at
-   * first — the stressed words are spans too, and a bare `h1 span` matched three elements, which
-   * Playwright refused rather than quietly picking one.
-   */
-  const halves = await page.evaluate(() =>
-    [...document.querySelectorAll('.collections-hero h1 > span')].map((el) => ({
-      text: el.innerText.replace(/\s+/g, ' ').trim(), colour: getComputedStyle(el).color,
-    })))
-  /* Joined, not compared as arrays: this harness's check() uses Object.is, so two arrays with
-     identical contents are never equal and the failure prints two lines that look the same. */
-  t.check('the line is in two halves', halves.map((l) => l.text).join(' | '),
-    'The sky is only | the beginning.')
-  t.ok(`...the first in white (${halves[0]?.colour})`, /255, 255, 255/.test(halves[0]?.colour ?? ''))
-  t.ok(`...and the second in champagne (${halves[1]?.colour})`,
-    !/255, 255, 255/.test(halves[1]?.colour ?? '') && halves[1]?.colour !== halves[0]?.colour)
+  t.ok('the day\'s line is one sentence, not two halves', await page.locator('.collections-hero h1 > span').count() === 0)
 
   /*
    * ORDINARY SENTENCE CASE, MEASURED AS RENDERED. The line has been set in full capitals, then
@@ -642,8 +622,10 @@ try {
   /* The firm's own lines, which is most of why they asked for the panel. */
   t.ok('the greeting is on it',
     await heroBox.getByText(/Good (morning|afternoon|evening), /).isVisible())
-  t.ok('...and the gold line under the headline',
-    await heroBox.getByText('Discipline drives results').isVisible())
+  /* "Discipline drives results" went with the slogan (3 Nov: "just keep one"); what is under the day's line now is the
+     photograph's credit. Asserted absent too, because it is exactly the sort of line that creeps back. */
+  t.ok('...the day\'s line credits its photograph', /Photo: .* on Unsplash/.test(await page.getByTestId('hero-day-line').innerText()))
+  t.ok('...and "Discipline drives results" is not said beside it', !(await heroBox.innerText()).includes('DISCIPLINE DRIVES RESULTS') && !(await heroBox.innerText()).includes('Discipline drives results'))
   t.ok('...and the rail beside it',
     await heroBox.getByText(/Higher\s*Performance\s*Closer\s*Tomorrow/).isVisible())
   /*
