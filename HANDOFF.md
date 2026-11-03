@@ -48,8 +48,18 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   debtor is told to call rather than handed {{braces}}. **Send us your proof of payment** -- PDF/photo <= 3 MB, optional
   amount and date; kept in account_documents (kind 'Proof of payment', bucket account-documents), a note on the account,
   the collector's bell (Administrators' if nobody holds it). It touches NO ledger: a slip is not money. check-debtor-
-  statement 11 (draws a real PDF), e2e 20. **Next: part 3 (propose an arrangement -> collector approves), part 4
-  (dispute / question -> ticket).**
+  statement 11 (draws a real PDF), e2e 20.
+- **DEBTOR PORTAL, PART 3 (S17, 3 Nov): A DEBTOR OFFERS AN ARRANGEMENT, A COLLECTOR DECIDES.** Portal: once-off /
+  weekly / monthly, amount, first date, note; checked as they type and again on the server by `proposalProblem`
+  (src/lib/debtorArrangement.ts -- `PROPOSAL_RULES`: first payment within 30 days, instalments settle within 24 months;
+  **Stephan's to move**). Refused while a promise is live or an offer waits. Table `debtor_arrangement_proposals`
+  (written by api/debtor only -- no insert policy; staff may only move a PENDING one to accepted/declined; one pending
+  per account; a decline must carry a reason). The collector gets a bell + note, and **DebtorProposalCard** first in the
+  account's side column: Accept = `recordPromise` (the collector's own press: promise row, item 5 R50, note,
+  confirmation workflow) then the offer is marked accepted; Decline needs a reason the debtor reads on the portal.
+  check-debtor-arrangement 28, e2e debtor-portal 25 + debtor-proposal-staff 7 (sabotages each red).
+  **Ask Stephan: should item 5 be charged on an arrangement the DEBTOR offered online?** (It is, today -- the
+  collector's Accept is the same press as taking one on the phone.) **Next: part 4 (dispute / question -> ticket).**
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

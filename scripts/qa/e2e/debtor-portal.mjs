@@ -20,7 +20,10 @@ const ACCOUNT = {
   payments: [{ on: '2026-10-23', amount: 100 }],
   pay: { accountName: 'Bredell Ferreira Attorneys Trust Account', bank: 'FNB', branchCode: '250655', accountNumber: '62000000000', accountType: 'Trust', reference: 'RAP-125318' },
   contact: { phone: '012 000 0000', email: 'collections@bredellferreira.co.za' },
+  live: null,
+  proposal: null,
 }
+let offered = null
 
 const server = await startServer()
 const browser = await chromium.launch()
@@ -36,7 +39,10 @@ try {
     if (action === 'verify') return body.code === '123456'
       ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: TOKEN, expiresAt: '2026-11-18T00:00:00Z' }) })
       : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That code is not right. Check it, or ask for a new one.' }) })
-    if (action === 'account') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACCOUNT) })
+    if (action === 'account') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(offered
+      ? { ...ACCOUNT, proposal: { status: 'pending', arrangement: offered.arrangement, amount: Number(offered.amount), firstDueOn: offered.firstDueOn, declineReason: null, createdAt: '2026-11-11T08:00:00Z' } }
+      : ACCOUNT) })
+    if (action === 'propose') { offered = body; return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }) }
     if (action === 'statement') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ fileName: 'Statement RAP-125318 2026-11-11.pdf', pdf: Buffer.from('%PDF-1.7 test').toString('base64') }) })
     if (action === 'proof-of-payment') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     if (action === 'sign-out') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
@@ -97,6 +103,22 @@ try {
     && sentPop[1].amount === '500' && sentPop[1].paidOn === '2026-11-10' && sentPop[2] === TOKEN)
   t.ok('...and the debtor is told it is not yet a payment', /check it against our bank account/.test(await page.getByTestId('debtor-pop-done').innerText()))
   await t.shot(page, 'debtor-portal-part2')
+
+  /* ---------- part 3: an arrangement, offered ---------- */
+  await page.getByTestId('debtor-propose').waitFor()
+  await page.getByRole('radio', { name: 'Monthly' }).click()
+  await page.getByLabel('Amount you can pay').fill('10')
+  await page.getByLabel('First payment date').fill('2026-11-25')
+  const tooSmall = plain(await page.getByTestId('debtor-offer-problem').innerText())
+  t.ok(`an offer outside the rules is explained before Send, with what would do (${tooSmall.slice(0, 70)}...)`, /months to settle/.test(tooSmall) && /at least R 11[.,]69 a month/.test(tooSmall))
+  t.ok('...and cannot be sent', await page.getByRole('button', { name: 'Send my offer' }).isDisabled())
+  await page.getByLabel('Amount you can pay').fill('50')
+  t.ok('a good offer says how many payments it takes', /R 50[.,]00 a month from 25 November 2026: about 6 payments to settle/.test(plain(await page.getByTestId('debtor-offer-summary').innerText())))
+  await page.getByRole('button', { name: 'Send my offer' }).click()
+  await page.getByTestId('debtor-offer-pending').waitFor()
+  t.check('the offer goes to the server as chosen', JSON.stringify(offered), JSON.stringify({ arrangement: 'monthly', amount: '50', firstDueOn: '2026-11-25' }))
+  t.ok('...and the page then says it is waiting for us, not agreed', /We have your offer of R 50[.,]00 a month/.test(plain(await page.getByTestId('debtor-offer-pending').innerText())))
+  await t.shot(page, 'debtor-portal-part3')
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByTestId('debtor-ask').waitFor()

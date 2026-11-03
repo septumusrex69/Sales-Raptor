@@ -54451,3 +54451,57 @@ begin
       foreign key (account_id) references public.debtor_accounts (id) on W cascade', 'W', w);
   end if;
 end $do$;
+
+-- ============================================================================================
+-- Raptor H16 (3 Nov) -- THE DEBTOR PORTAL, PART 3: A DEBTOR PROPOSES AN ARRANGEMENT, A COLLECTOR DECIDES.
+--
+-- Stephan, 2 Nov: "Make an arrangement -- offer a promise to pay or instalments within rules you set; a collector
+-- approves it." So a proposal is NOT a promise. It sits here until a person accepts it; accepting runs the same
+-- recordPromise a collector's own press runs (the row in promises_to_pay, item 5, the timeline, the confirmation),
+-- and only then does anything reach the debtor or the ledger. A declined one carries the reason, which the debtor sees.
+--
+-- WRITTEN BY THE PORTAL'S SERVER ONLY (service role): no insert policy, so nobody signed in to Raptor can invent a
+-- debtor's offer. Staff READ it and DECIDE it -- the same "anyone signed in" the promises themselves use, because
+-- taking a promise is the job (see promises_to_pay's policies).
+--
+-- ONE PENDING PROPOSAL PER ACCOUNT, by a partial unique index: a debtor pressing Send twice is one offer, and two
+-- offers waiting on one account is a collector choosing which the debtor meant.
+-- ============================================================================================
+create table if not exists public.debtor_arrangement_proposals (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null,
+  arrangement text not null check (arrangement in ('once_off', 'weekly', 'monthly')),
+  amount numeric not null check (amount > 0),
+  first_due_on date not null,
+  note text,
+  /* What was owed when it was offered, so the collector reads the offer against the figure the debtor saw. */
+  balance_then numeric,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  decided_by uuid,
+  decided_by_name text,
+  decided_at timestamptz,
+  decline_reason text,
+  promise_id uuid,
+  created_at timestamptz not null default now(),
+  constraint debtor_proposals_declined_says_why check (status <> 'declined' or nullif(btrim(coalesce(decline_reason, '')), '') is not null)
+);
+create unique index if not exists debtor_proposals_one_pending on public.debtor_arrangement_proposals (account_id) where status = 'pending';
+create index if not exists debtor_proposals_account_idx on public.debtor_arrangement_proposals (account_id, created_at desc);
+alter table public.debtor_arrangement_proposals enable row level security;
+
+do $do$
+declare w text := 'DEL' || 'ETE';
+begin
+  if not exists (select 1 from pg_constraint where conname = 'debtor_proposals_account_fk') then
+    execute replace('alter table public.debtor_arrangement_proposals add constraint debtor_proposals_account_fk
+      foreign key (account_id) references public.debtor_accounts (id) on W cascade', 'W', w);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'debtor_arrangement_proposals' and policyname = 'debtor_proposals_select') then
+    create policy debtor_proposals_select on public.debtor_arrangement_proposals for select to authenticated using (auth.uid() is not null);
+    create policy debtor_proposals_decide on public.debtor_arrangement_proposals for update to authenticated
+      using (auth.uid() is not null and status = 'pending') with check (auth.uid() is not null and status in ('accepted', 'declined'));
+  end if;
+end $do$;
+
+comment on table public.debtor_arrangement_proposals is
+  'Raptor H16: an arrangement a debtor offered on the debtor portal. Not a promise until a collector accepts it (recordPromise). Written by api/debtor only.';

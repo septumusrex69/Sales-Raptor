@@ -2,17 +2,19 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Copy, FileDown, Loader2, LogOut, Upload } from 'lucide-react'
 import { DEBTOR_POP_MAX_BYTES, debtorPopFile, normaliseCaseNumber } from '../../lib/debtorPortal'
 import { saveFile } from '../../lib/fileSave'
+import { PROPOSAL_RULES, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
+import type { Arrangement } from '../../lib/arrangements'
 import {
   DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken,
-  sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
+  proposeDebtorArrangement, sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
   type DebtorAccount,
 } from '../../lib/debtorPortalApi'
 
 /**
  * /my-account -- THE DEBTOR PORTAL (Raptor H16, part 1). Stephan, 2 Nov: a debtor signs in with their case number
  * and a code sent to the email or cellphone the firm already has, and sees what they owe, what they have paid and
- * how to pay; part 2 adds the statement PDF and a proof-of-payment upload. Arrangements and disputes come next;
- * nothing here offers them before they exist.
+ * how to pay; part 2 adds the statement PDF and a proof-of-payment upload; part 3 lets them OFFER an arrangement,
+ * which a collector accepts or declines. Disputes come next; nothing here offers them before they exist.
  *
  * PHONE FIRST. A debtor opens this from an SMS more often than from a desk, so it is one narrow column at every
  * width, large type for the number that matters, and nothing that needs a hover.
@@ -120,6 +122,7 @@ function AccountView({ token, onSignedOut }: { token: string; onSignedOut: () =>
   const [a, setA] = useState<DebtorAccount | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [round, setRound] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -127,7 +130,7 @@ function AccountView({ token, onSignedOut }: { token: string; onSignedOut: () =>
       .then((r) => { if (live) setA(r) })
       .catch((x) => { if (!live) return; if (x instanceof DebtorSignedOut) onSignedOut(); else setError(x instanceof Error ? x.message : String(x)) })
     return () => { live = false }
-  }, [token, onSignedOut])
+  }, [token, onSignedOut, round])
 
   async function signOut() {
     try { await signOutDebtor(token) } catch { /* signed out here either way */ }
@@ -197,6 +200,8 @@ function AccountView({ token, onSignedOut }: { token: string; onSignedOut: () =>
           </dl>
         </Card>
       )}
+
+      {!a.closed && s.balance > 0 && <ArrangementSection token={token} account={a} onSent={() => setRound((n) => n + 1)} />}
 
       {!a.closed && s.balance > 0 && <ProofOfPayment token={token} />}
 
@@ -337,6 +342,106 @@ function ProofOfPayment({ token }: { token: string }) {
         </button>
       </form>
       {error && <p className="mt-2 text-sm text-red-700" data-testid="debtor-pop-error">{error}</p>}
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------ part 3 */
+
+const EVERY: Record<string, string> = { once_off: 'once-off', weekly: 'a week', monthly: 'a month' }
+
+/**
+ * MAKE AN ARRANGEMENT. Four states, and the page shows exactly one: an arrangement in force (say it, and how to
+ * change it -- by calling), an offer waiting (say so), an offer declined (say why, and let them offer again), or
+ * nothing yet (the form). The rules are checked as they type, with the same proposalProblem the server applies, so a
+ * debtor learns "at least R 410 a month" before pressing Send rather than after.
+ */
+function ArrangementSection({ token, account, onSent }: { token: string; account: DebtorAccount; onSent: () => void }) {
+  const [arrangement, setArrangement] = useState<Arrangement>('monthly')
+  const [amount, setAmount] = useState('')
+  const [firstDueOn, setFirstDueOn] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const s = account.summary
+  const today = account.asAt
+
+  if (account.live) {
+    return (
+      <Card>
+        <Label>Your arrangement</Label>
+        <p className="mt-1 text-[15px]" style={{ color: NAVY }} data-testid="debtor-live-arrangement">
+          {money(account.live.amount)} {EVERY[account.live.arrangement] ?? ''}, next payment due {longDay(account.live.dueOn)}.
+        </p>
+        {account.live.missed && <p className="mt-2 text-sm text-red-700">A payment was missed. Please pay it now, or call us.</p>}
+        <p className="mt-2 text-sm text-[#5A6B80]">To change your arrangement, please call us.</p>
+      </Card>
+    )
+  }
+  if (account.proposal?.status === 'pending') {
+    return (
+      <Card>
+        <Label>Your offer</Label>
+        <p className="mt-1 text-[15px]" style={{ color: NAVY }} data-testid="debtor-offer-pending">
+          We have your offer of {money(account.proposal.amount)} {EVERY[account.proposal.arrangement] ?? ''} from {longDay(account.proposal.firstDueOn)}. One of our team will look at it and reply, usually within one working day.
+        </p>
+      </Card>
+    )
+  }
+
+  const value = Number(amount.replace(/[^\d.,]/g, '').replace(',', '.'))
+  const offer = { arrangement, amount: value, firstDueOn }
+  const typed = amount.trim() !== '' && firstDueOn !== ''
+  const problem = typed ? proposalProblem(offer, { balance: s.balance, settlement: s.settleToday }, today) : null
+
+  async function send(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const p = proposalProblem(offer, { balance: s.balance, settlement: s.settleToday }, today)
+    if (p) { setError(p); return }
+    setBusy(true)
+    try { await proposeDebtorArrangement(token, { arrangement, amount, firstDueOn, note: note.trim() || undefined }); onSent() }
+    catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+  }
+
+  return (
+    <Card>
+      <Label>Make an arrangement</Label>
+      {account.proposal?.status === 'declined' && (
+        <p className="mt-2 rounded-lg bg-[#FBF6EC] p-3 text-sm" style={{ color: NAVY }} data-testid="debtor-offer-declined">
+          We could not accept your last offer: {account.proposal.declineReason}. You can make another below, or call us.
+        </p>
+      )}
+      <p className="mt-1 text-[15px] text-[#5A6B80]">Tell us what you can pay. One of our team will look at it and reply; nothing is agreed until we do.</p>
+      <form onSubmit={send} className="mt-3 space-y-3" data-testid="debtor-propose">
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-[#F2F5F8] p-1" role="radiogroup" aria-label="How often">
+          {(['once_off', 'weekly', 'monthly'] as const).map((k) => (
+            <button key={k} type="button" role="radio" aria-checked={arrangement === k} onClick={() => setArrangement(k)}
+              className={`rounded-md px-2 py-2 text-sm font-medium ${arrangement === k ? 'bg-white shadow-sm' : 'text-[#5A6B80]'}`}
+              style={arrangement === k ? { color: NAVY } : undefined}>
+              {k === 'once_off' ? 'Once-off' : k === 'weekly' ? 'Weekly' : 'Monthly'}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">{arrangement === 'once_off' ? 'Amount' : arrangement === 'weekly' ? 'Each week' : 'Each month'}</span>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="500" aria-label="Amount you can pay" className={field} />
+          </label>
+          <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">{arrangement === 'once_off' ? 'On' : 'First payment'}</span>
+            <input type="date" value={firstDueOn} onChange={(e) => setFirstDueOn(e.target.value)} min={today} aria-label="First payment date" className={field} />
+          </label>
+        </div>
+        <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">Anything we should know (optional)</span>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} aria-label="Note" className={field} />
+        </label>
+        {typed && !problem && <p className="text-sm" style={{ color: NAVY }} data-testid="debtor-offer-summary">{proposalSummary(offer, s.settleToday)}.</p>}
+        {typed && problem && <p className="text-sm text-red-700" data-testid="debtor-offer-problem">{problem}</p>}
+        <button type="submit" disabled={busy || !typed || !!problem} className={button} style={{ background: NAVY }}>
+          {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Send my offer'}
+        </button>
+        <p className="text-xs text-[#5A6B80]">The first payment must be within {PROPOSAL_RULES.firstPaymentWithinDays} days, and instalments must settle the account within {PROPOSAL_RULES.longestMonths} months.</p>
+      </form>
+      {error && <p className="mt-2 text-sm text-red-700" data-testid="debtor-propose-error">{error}</p>}
     </Card>
   )
 }

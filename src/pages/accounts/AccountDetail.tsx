@@ -45,6 +45,7 @@ import { SettlementPanel } from '../../components/accounts/SettlementPanel'
 import { fetchStatusChanges } from '../../lib/accountEndingApi'
 import type { StatusChange } from '../../lib/accountTimeline'
 import { ENDING_LABEL, ENDING_SHORT } from '../../lib/accountEnding'
+import { DebtorProposalCard } from '../../components/accounts/DebtorProposalCard'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -1541,6 +1542,10 @@ function AccountPage() {
       onChange={reload}
     />
   )
+  /* A DEBTOR'S ARRANGEMENT OFFER FROM THE DEBTOR PORTAL (Raptor H16), first in the side column while one waits. */
+  const proposalPanel = account.book === 'closed' ? null : (
+    <DebtorProposalCard accountId={account.id} balance={b?.balance} settlement={b?.settlement} onDecided={reload} />
+  )
   const promisePanel = (
     <PromisePanel
       accountId={account.id}
@@ -2189,7 +2194,7 @@ function AccountPage() {
            * by and a dispute is the thing that stops it; the workflow is a record of what has
            * already gone out by itself, which is worth seeing and never the first thing to act on.
            */
-          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel, settlementPanel,
+          side={[proposalPanel, clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel, settlementPanel,
             disputesPanel, workflowNowPanel, testClockPanel, positionPanel]}
           /*
            * THE TRACE, THE DIRECTORS AND THE JUDGMENTS, under the timeline where the firm asked

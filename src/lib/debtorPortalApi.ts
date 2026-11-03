@@ -44,6 +44,9 @@ export interface DebtorAccount {
   payments: DebtorPayment[]
   pay: { accountName: string; bank: string | null; branchCode: string | null; accountNumber: string | null; accountType: string | null; reference: string } | null
   contact: { phone: string | null; email: string | null } | null
+  /** Part 3: the arrangement in force, if any, and the latest offer (pending, or how it was answered). */
+  live: { arrangement: string; amount: number; dueOn: string; missed: boolean } | null
+  proposal: { status: 'pending' | 'accepted' | 'declined'; arrangement: string; amount: number; firstDueOn: string; declineReason: string | null; createdAt: string } | null
 }
 export const fetchDebtorAccount = (token: string) => call<DebtorAccount>('account', {}, token)
 export const signOutDebtor = (token: string) => call<{ ok: boolean }>('sign-out', {}, token)
@@ -52,3 +55,7 @@ export const signOutDebtor = (token: string) => call<{ ok: boolean }>('sign-out'
 export const fetchDebtorStatement = (token: string) => call<{ fileName: string; pdf: string }>('statement', {}, token)
 export const sendDebtorProofOfPayment = (token: string, input: { fileName: string; data: string; amount?: string; paidOn?: string }) =>
   call<{ ok: boolean }>('proof-of-payment', input, token)
+
+/* Part 3: an arrangement offered. Nothing is agreed until a collector accepts it. */
+export const proposeDebtorArrangement = (token: string, input: { arrangement: string; amount: string; firstDueOn: string; note?: string }) =>
+  call<{ ok: boolean }>('propose', input, token)

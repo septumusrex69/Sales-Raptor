@@ -7,7 +7,8 @@ import { sendAsUser } from './email/sendAsUser.js'
 import { sendSms } from './sms/connectMobile.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import { portalCodeCheck, PORTAL_CODE_MESSAGE } from '../../src/lib/clientPortal.js'
-import { computeBalance } from '../../src/lib/accountBalance.js'
+import { computeBalance, type BalanceBreakdown } from '../../src/lib/accountBalance.js'
+import { proposalProblem, proposalSummary } from '../../src/lib/debtorArrangement.js'
 import { debtorStatement, unfilledFields, type DebtorStatementAccount } from '../../src/lib/debtorStatement.js'
 import { letterToPdf } from '../../src/lib/letterPdf.js'
 import { toSettings as toFirmSettings } from '../../src/lib/firmSettingsRow.js'
@@ -30,7 +31,7 @@ import {
  * own debt. The tables behind it have RLS on and no policies, so this is the only door.
  *
  *   anonymous   request-code, verify       (the code, sent to a contact the firm holds, is the authority)
- *   debtor      account, statement, proof-of-payment, sign-out   (x-debtor-token)
+ *   debtor      account, statement, proof-of-payment, propose, sign-out   (x-debtor-token)
  */
 
 type Handler = (req: VercelRequest, res: VercelResponse, admin: SupabaseClient) => Promise<void>
@@ -156,6 +157,28 @@ async function requireDebtor(req: VercelRequest, admin: SupabaseClient): Promise
   return { accountId: s.account_id as string, sessionId: s.id as string }
 }
 
+/** THE ONE PLACE THE PORTAL WORKS OUT A BALANCE -- computeBalance over the account page's ledgers. */
+async function balanceOf(admin: SupabaseClient, accountRow: Record<string, unknown>, accountId: string, today: string): Promise<BalanceBreakdown> {
+  const ledgers = await fetchLedgerRows(admin, [accountId])
+  return computeBalance(balanceInputFor({ account: balanceAccountFromRow(accountRow), ledgers: ledgers.get(accountId)!, today }))
+}
+
+/** What the debtor has agreed, or offered: the live promise, and the latest proposal (pending, or declined lately). */
+async function arrangementState(admin: SupabaseClient, accountId: string) {
+  const [{ data: live }, { data: prop }] = await Promise.all([
+    admin.from('promises_to_pay').select('arrangement, amount, due_on, status').eq('account_id', accountId).in('status', ['open', 'defaulted']).maybeSingle(),
+    admin.from('debtor_arrangement_proposals').select('status, arrangement, amount, first_due_on, decline_reason, created_at, decided_at')
+      .eq('account_id', accountId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ])
+  return {
+    live: live ? { arrangement: live.arrangement as string, amount: Number(live.amount), dueOn: live.due_on as string, missed: live.status === 'defaulted' } : null,
+    proposal: prop ? {
+      status: prop.status as string, arrangement: prop.arrangement as string, amount: Number(prop.amount), firstDueOn: prop.first_due_on as string,
+      declineReason: (prop.decline_reason as string | null) ?? null, createdAt: prop.created_at as string,
+    } : null,
+  }
+}
+
 const account: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
   if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
@@ -172,10 +195,9 @@ const account: Handler = async (req, res, admin) => {
   if (!a) { res.status(404).json({ error: 'Your account could not be found. Please call us.' }); return }
   let summary
   try {
-    const ledgers = await fetchLedgerRows(admin, [who.accountId])
     /* THE SAME computeBalance, OVER THE SAME LEDGERS, AS THE ACCOUNT PAGE -- in duplum and all. A second sum here
        would one day tell a debtor a different number from the one the collector quotes on the phone. */
-    summary = debtorSummary(computeBalance(balanceInputFor({ account: balanceAccountFromRow(a), ledgers: ledgers.get(who.accountId)!, today })))
+    summary = debtorSummary(await balanceOf(admin, a, who.accountId, today))
   } catch (e) {
     console.error(`[debtor] balance for ${who.accountId} failed: ${e instanceof Error ? e.message : e}`)
     res.status(500).json({ error: 'Your balance could not be worked out just now. Please try again later.' }); return
@@ -197,6 +219,7 @@ const account: Handler = async (req, res, admin) => {
       reference: a.case_number,
     } : null,
     contact: firm ? { phone: firm.phone ?? null, email: firm.email ?? null } : null,
+    ...(await arrangementState(admin, who.accountId)),
   })
 }
 
@@ -293,6 +316,64 @@ const proofOfPayment: Handler = async (req, res, admin) => {
   res.status(200).json({ ok: true })
 }
 
+/* ------------------------------------------------------------------ part 3: an arrangement, proposed */
+
+/**
+ * THE DEBTOR OFFERS; A COLLECTOR DECIDES. Checked against PROPOSAL_RULES here as well as on the page (a page can be
+ * edited), with the balance worked out the portal's one way. Refused while an arrangement is live -- changing one is
+ * a conversation, and one live promise per account is the database's rule -- and while an offer is still waiting.
+ * Nothing here is a promise: no promises_to_pay row, no fee, no message. The collector's Accept does all of that.
+ */
+const propose: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const offer = {
+    arrangement: (['once_off', 'weekly', 'monthly'].includes(body.arrangement) ? body.arrangement : '') as 'once_off' | 'weekly' | 'monthly',
+    amount: Math.round(Number(String(body.amount ?? '').replace(/[^\d.,]/g, '').replace(',', '.')) * 100) / 100,
+    firstDueOn: typeof body.firstDueOn === 'string' ? body.firstDueOn : '',
+  }
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) || null : null
+  const { today } = await firmNow(admin)
+  const { data: a } = await admin.from('debtor_accounts')
+    .select('id,capital_handed_over,handover_date,interest_rate_annual,status,last_action_at,ended_as,ended_on,prescribed,prescription_date,case_number,assigned_to')
+    .eq('id', who.accountId).maybeSingle()
+  if (!a) { res.status(404).json({ error: 'Your account could not be found. Please call us.' }); return }
+  if (a.ended_as) { res.status(400).json({ error: 'This account is closed, so there is nothing to arrange.' }); return }
+  const state = await arrangementState(admin, who.accountId)
+  if (state.live) { res.status(409).json({ error: 'You already have an arrangement with us. To change it, please call us.' }); return }
+  if (state.proposal?.status === 'pending') { res.status(409).json({ error: 'We already have your offer and will reply soon. To change it, please call us.' }); return }
+
+  let b: BalanceBreakdown
+  try { b = await balanceOf(admin, a, who.accountId, today) } catch { res.status(500).json({ error: 'Your balance could not be worked out just now. Please try again later.' }); return }
+  const problem = proposalProblem(offer, { balance: b.balance, settlement: b.settlement }, today)
+  if (problem) { res.status(400).json({ error: problem }); return }
+
+  const { error } = await admin.from('debtor_arrangement_proposals').insert({
+    account_id: who.accountId, arrangement: offer.arrangement, amount: offer.amount, first_due_on: offer.firstDueOn, note, balance_then: b.balance,
+  })
+  if (error) {
+    /* The one-pending index: a second press got here first. */
+    if (error.code === '23505') { res.status(409).json({ error: 'We already have your offer and will reply soon.' }); return }
+    console.error(`[debtor] proposal not saved for ${who.accountId}: ${error.message}`)
+    res.status(500).json({ error: 'Your offer could not be sent just now. Try again.' }); return
+  }
+  const text = `The debtor offered an arrangement on the debtor portal: ${proposalSummary(offer, b.settlement)}.${note ? ` They wrote: "${note}"` : ''} Accept or decline it on the account.`
+  await admin.from('account_notes').insert({ account_id: who.accountId, body: text, source: 'system', author_name: 'Debtor portal' })
+  let tell: string[] = a.assigned_to ? [a.assigned_to as string] : []
+  if (tell.length === 0) {
+    const { data: admins } = await admin.from('profiles').select('id').eq('role', 'Administrator').eq('status', 'Active')
+    tell = (admins ?? []).map((p) => p.id as string)
+  }
+  if (tell.length) {
+    const { error: bellErr } = await admin.from('notifications').insert(tell.map((userId) => ({
+      user_id: userId, type: 'debtor.arrangement_offer', message: `${a.case_number}: ${text}`, link: `/accounts/${who.accountId}`,
+    })))
+    if (bellErr) console.error(`[debtor] notification not made: ${bellErr.message}`)
+  }
+  res.status(200).json({ ok: true })
+}
+
 const signOut: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
   if (who) await admin.from('debtor_portal_sessions').delete().eq('id', who.sessionId)
@@ -305,6 +386,7 @@ export const DEBTOR_ROUTES: Record<string, Handler> = {
   account,
   statement,
   'proof-of-payment': proofOfPayment,
+  propose,
   'sign-out': signOut,
 }
 
