@@ -16,6 +16,7 @@ import unsubscribe from '../_lib/email/unsubscribe.js'
 import resendWebhook from '../_lib/email/resendWebhook.js'
 import optIn from '../_lib/email/optIn.js'
 import marketingDaily from '../_lib/email/marketingDaily.js'
+import letter from '../_lib/email/letter.js'
 
 /**
  * One serverless function for every /api/email/* route.
@@ -66,6 +67,8 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* THE MORNING RUN FOR CAMPAIGN FOLLOW-UPS AND RESULTS EMAILS (S14): Vercel's timer, or somebody with
      marketing.send. Here because it is a campaign route, and api/ has functions to spare but no need for one. */
   'marketing-daily': marketingDaily,
+  /* A LETTER OF DEMAND (Raptor · Handover 16): from my mailbox, the account holder's, or the firm's central one. */
+  letter,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

@@ -91,8 +91,14 @@ export function CompaniesList() {
           learns the services, the mandate and the contacts on the way; a client with no lead
           behind it has nowhere to have learned them, so this asks.
         */}
-        <button type="button" onClick={() => { setAddError(null); setAdding(true) }}
+        {/* A LETTER OF DEMAND (Ryno, 3 Nov): "on the Clients page ... to the left ... a plus New letter". */}
+        <Link to="/letters/demand" data-testid="clients-new-letter"
           className="ml-auto inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2
+            rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50">
+          <Plus size={15} /> New letter
+        </Link>
+        <button type="button" onClick={() => { setAddError(null); setAdding(true) }}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2
             rounded-lg bg-gold-400 text-navy-950 border border-gold-500 hover:bg-gold-500">
           <Plus size={15} /> Add client
         </button>

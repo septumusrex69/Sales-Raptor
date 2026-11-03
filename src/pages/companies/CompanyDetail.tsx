@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { clientTermsLink, workBlock } from '../../lib/mandateRule'
 import {
   UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
-  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy,
+  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy, FilePen,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useBackLink, useRecordName } from '../../lib/backLink'
@@ -919,6 +919,11 @@ export function CompanyDetail() {
               pushed the panels below off the screen; nothing is removed, because the fix for a
               crowded row is not to take away the button somebody needs twice a month.
             */}
+            {/* A LETTER OF DEMAND for one of this client's debtors (Ryno, 3 Nov), with the client already chosen. */}
+            {isClient && (
+              <RecordAction icon={FilePen} label="New letter" title="A letter of demand to one of this client’s debtors"
+                onClick={() => navigate(`/letters/demand?client=${company.id}`)} />
+            )}
             <RecordActionsMore>
               {/* "Add debtor" moved OUT of this menu, at the firm's asking. The references are
                   still fetched before the modal opens rather than alongside it: the reference it

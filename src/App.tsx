@@ -112,6 +112,8 @@ const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ de
 const CalendarPage = lazy(() => import('./pages/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const ActivitiesPage = lazy(() => import('./pages/activities/ActivitiesPage').then((m) => ({ default: m.ActivitiesPage })))
 const NewsPage = lazy(() => import('./pages/news/NewsPage').then((m) => ({ default: m.NewsPage })))
+/* Ryno's letter of demand builder (Raptor · Handover 16): the Clients page's "New letter". */
+const LetterOfDemandPage = lazy(() => import('./pages/letters/LetterOfDemandPage').then((m) => ({ default: m.LetterOfDemandPage })))
 const RepDetailPage = lazy(() => import('./pages/reps/RepDetailPage').then((m) => ({ default: m.RepDetailPage })))
 
 /**
@@ -201,6 +203,7 @@ function App() {
               {/* A hidden link is not a permission: a pre-legal agent who types the URL lands back
                   on the book they are meant to be working. */}
               <Route path="/companies" element={<RequireClientAccess><CompaniesList /></RequireClientAccess>} handle={{ title: 'Clients' }} />
+              <Route path="/letters/demand" element={<RequireClientAccess><LetterOfDemandPage /></RequireClientAccess>} handle={{ title: 'New letter' }} />
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
               {/* Loading a client's accounts, outside Settings (23 Oct): the page refuses, with a
                   sentence, anybody who may not load for this client (handoverUpload.ts). */}
