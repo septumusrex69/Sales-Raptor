@@ -8,11 +8,18 @@ import { sendSms } from './sms/connectMobile.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
 import { portalCodeCheck, PORTAL_CODE_MESSAGE } from '../../src/lib/clientPortal.js'
 import { computeBalance } from '../../src/lib/accountBalance.js'
+import { debtorStatement, unfilledFields, type DebtorStatementAccount } from '../../src/lib/debtorStatement.js'
+import { letterToPdf } from '../../src/lib/letterPdf.js'
+import { toSettings as toFirmSettings } from '../../src/lib/firmSettingsRow.js'
+import { letterheadFor } from './workflow/letterhead.js'
+import { charterFor } from './workflow/fonts.js'
+import { moneyZa } from './workflow/locale.js'
 import { balanceInputFor } from '../../src/lib/balanceInput.js'
 import { balanceAccountFromRow, fetchLedgerRows } from '../../src/lib/storedBalance.js'
 import {
   DEBTOR_CODE_MINUTES, DEBTOR_CODE_SENT, DEBTOR_SESSION_DAYS, DEBTOR_TOKEN_HEADER, codeDestination, debtorCodeEmail,
   debtorCodeSms, debtorPayments, debtorSummary, normaliseCaseNumber, type ContactRow,
+  DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote,
 } from '../../src/lib/debtorPortal.js'
 
 /**
@@ -23,7 +30,7 @@ import {
  * own debt. The tables behind it have RLS on and no policies, so this is the only door.
  *
  *   anonymous   request-code, verify       (the code, sent to a contact the firm holds, is the authority)
- *   debtor      account, sign-out          (x-debtor-token)
+ *   debtor      account, statement, proof-of-payment, sign-out   (x-debtor-token)
  */
 
 type Handler = (req: VercelRequest, res: VercelResponse, admin: SupabaseClient) => Promise<void>
@@ -193,6 +200,99 @@ const account: Handler = async (req, res, admin) => {
   })
 }
 
+/* ------------------------------------------------------------------ part 2: the statement, and a proof of payment */
+
+/**
+ * THE STATEMENT OF ACCOUNT, AS THE COLLECTOR WOULD SEND IT: the same statementOfAccount, the same buildStatement over
+ * the same ledgers, the same merge values (accountMergeValues, as the morning run builds them), drawn by letterToPdf on
+ * the firm's letterhead in Charter -- so the PDF a debtor downloads and the one the collector emails are one document.
+ * A second, simpler statement for the portal would one day disagree with the real one about what is owed.
+ */
+const statement: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const { today } = await firmNow(admin)
+  const [{ data: a }, { data: firm }, { data: contacts }] = await Promise.all([
+    admin.from('debtor_accounts')
+      .select('id,capital_handed_over,handover_date,interest_rate_annual,status,last_action_at,ended_as,ended_on,prescribed,prescription_date,case_number,opening_as_at,listing_date,listing_reference,bureaus_listed,debtor_kind,debtor_title,debtor_first_name,debtor_surname,account_number,client_reference,capital_outstanding,preferred_language,debtor_id_number,assigned_to,companies(name,account_owner_id)')
+      .eq('id', who.accountId).maybeSingle(),
+    admin.from('firm_settings').select('*').maybeSingle(),
+    admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', who.accountId),
+  ])
+  if (!a || !firm) { res.status(404).json({ error: 'Your statement could not be drawn just now. Please call us.' }); return }
+  const company = a.companies as unknown as { name: string; account_owner_id: string | null } | null
+  const [{ data: collector }, { data: liaison }] = await Promise.all([
+    a.assigned_to ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', a.assigned_to).maybeSingle() : Promise.resolve({ data: null }),
+    company?.account_owner_id ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', company.account_owner_id).maybeSingle() : Promise.resolve({ data: null }),
+  ])
+  try {
+    const ledgers = await fetchLedgerRows(admin, [who.accountId])
+    const { doc, values, fileName } = debtorStatement({
+      account: a as DebtorStatementAccount, ledgers: ledgers.get(who.accountId)!, firm: toFirmSettings(firm as never),
+      contacts: ((contacts ?? []) as ContactRow[]).map((c) => ({ kind: c.kind, value: c.value, isPrimary: !!c.is_primary, retiredAt: c.retired_at })),
+      collector, liaison, clientName: company?.name ?? null, today, money: moneyZa,
+    })
+    const gaps = unfilledFields(doc, values)
+    if (gaps.length) {
+      /* Said to the firm in the log (what to fill in), and to the debtor as "call us" -- never a statement with braces. */
+      console.error(`[debtor] statement for ${who.accountId} not drawn: nothing fills ${gaps.map((g) => `{{${g}}}`).join(', ')}`)
+      res.status(500).json({ error: 'Your statement could not be drawn just now. Please call us and we will send it to you.' }); return
+    }
+    const paper = await letterheadFor(admin)
+    const bytes = await letterToPdf({ doc, page: paper.page, filled: true, values, letterhead: paper.image, charter: await charterFor() })
+    res.status(200).json({ fileName, pdf: Buffer.from(bytes).toString('base64') })
+  } catch (e) {
+    /* letterToPdf refuses a document it cannot fill rather than printing {{braces}} -- said to the firm, not the debtor. */
+    console.error(`[debtor] statement for ${who.accountId} not drawn: ${e instanceof Error ? e.message : e}`)
+    res.status(500).json({ error: 'Your statement could not be drawn just now. Please try again later, or call us.' })
+  }
+}
+
+/**
+ * A PROOF OF PAYMENT: kept with the account's documents (kind 'Proof of payment', the app's own list), a line on the
+ * timeline, and the collector's bell -- or the Administrators', on an account nobody holds. It is NOT a payment: a slip
+ * is a claim, and money is money only when finance sees it on the trust account. So nothing here touches a ledger.
+ */
+const proofOfPayment: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const body = req.body ?? {}
+  const file = debtorPopFile(body.fileName)
+  if (!file) { res.status(400).json({ error: 'Send a PDF or a photo (JPG, PNG or HEIC) of your proof of payment.' }); return }
+  const bytes = typeof body.data === 'string' && /^[A-Za-z0-9+/=\s]+$/.test(body.data) ? Buffer.from(body.data, 'base64') : null
+  if (!bytes || bytes.length === 0) { res.status(400).json({ error: 'The file did not arrive. Please choose it again.' }); return }
+  if (bytes.length > DEBTOR_POP_MAX_BYTES) { res.status(400).json({ error: 'That file is larger than 3 MB. A photo or a smaller PDF will do.' }); return }
+  const { today } = await firmNow(admin)
+  const claim = debtorPopClaim(body, today)
+  if (!claim.ok) { res.status(400).json({ error: claim.error }); return }
+
+  const { data: a } = await admin.from('debtor_accounts').select('id, case_number, assigned_to').eq('id', who.accountId).maybeSingle()
+  if (!a) { res.status(404).json({ error: 'Your account could not be found. Please call us.' }); return }
+  /* FILE FIRST, THEN THE ROW (accountWorkspace.uploadDocument's order): a row pointing at nothing is a broken link. */
+  const path = `${a.id}/${crypto.randomUUID()}-${file.name}`
+  const up = await admin.storage.from('account-documents').upload(path, bytes, { contentType: file.contentType, upsert: false })
+  if (up.error) { console.error(`[debtor] proof of payment not kept for ${a.id}: ${up.error.message}`); res.status(500).json({ error: 'Your proof of payment could not be saved just now. Try again.' }); return }
+  const { error: rowErr } = await admin.from('account_documents').insert({
+    account_id: a.id, name: file.name, storage_path: path, mime_type: file.contentType, size_bytes: bytes.length,
+    kind: 'Proof of payment', uploaded_by: null, uploaded_by_name: 'The debtor (debtor portal)',
+    notes: [claim.amount !== null ? `Amount ${moneyZa(claim.amount)}` : null, claim.paidOn ? `paid on ${claim.paidOn}` : null].filter(Boolean).join(', ') || null,
+  })
+  if (rowErr) { console.error(`[debtor] proof of payment row not written for ${a.id}: ${rowErr.message}`); res.status(500).json({ error: 'Your proof of payment could not be saved just now. Try again.' }); return }
+
+  const text = debtorPopNote(a.case_number as string, claim, moneyZa)
+  await admin.from('account_notes').insert({ account_id: a.id, body: text, source: 'system', author_name: 'Debtor portal' })
+  let tell: string[] = a.assigned_to ? [a.assigned_to as string] : []
+  if (tell.length === 0) {
+    const { data: admins } = await admin.from('profiles').select('id').eq('role', 'Administrator').eq('status', 'Active')
+    tell = (admins ?? []).map((p) => p.id as string)
+  }
+  if (tell.length) {
+    const { error } = await admin.from('notifications').insert(tell.map((userId) => ({ user_id: userId, type: 'debtor.proof_of_payment', message: text, link: `/accounts/${a.id}` })))
+    if (error) console.error(`[debtor] notification not made: ${error.message}`)
+  }
+  res.status(200).json({ ok: true })
+}
+
 const signOut: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
   if (who) await admin.from('debtor_portal_sessions').delete().eq('id', who.sessionId)
@@ -203,6 +303,8 @@ export const DEBTOR_ROUTES: Record<string, Handler> = {
   'request-code': requestCode,
   verify,
   account,
+  statement,
+  'proof-of-payment': proofOfPayment,
   'sign-out': signOut,
 }
 

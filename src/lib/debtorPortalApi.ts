@@ -47,3 +47,8 @@ export interface DebtorAccount {
 }
 export const fetchDebtorAccount = (token: string) => call<DebtorAccount>('account', {}, token)
 export const signOutDebtor = (token: string) => call<{ ok: boolean }>('sign-out', {}, token)
+
+/* Part 2: the statement PDF (base64 off the wire, a Blob in the browser) and a proof of payment. */
+export const fetchDebtorStatement = (token: string) => call<{ fileName: string; pdf: string }>('statement', {}, token)
+export const sendDebtorProofOfPayment = (token: string, input: { fileName: string; data: string; amount?: string; paidOn?: string }) =>
+  call<{ ok: boolean }>('proof-of-payment', input, token)

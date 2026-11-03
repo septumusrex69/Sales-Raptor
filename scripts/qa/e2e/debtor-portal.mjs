@@ -37,6 +37,8 @@ try {
       ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: TOKEN, expiresAt: '2026-11-18T00:00:00Z' }) })
       : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That code is not right. Check it, or ask for a new one.' }) })
     if (action === 'account') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACCOUNT) })
+    if (action === 'statement') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ fileName: 'Statement RAP-125318 2026-11-11.pdf', pdf: Buffer.from('%PDF-1.7 test').toString('base64') }) })
+    if (action === 'proof-of-payment') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     if (action === 'sign-out') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     return route.fulfill({ status: 404, body: '{}' })
   })
@@ -77,6 +79,24 @@ try {
   const wide = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
   t.ok('it fits a phone: nothing scrolls sideways', wide)
   await t.shot(page, 'debtor-portal-account')
+
+  /* ---------- part 2: the statement, and a proof of payment ---------- */
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('debtor-statement').click()])
+  t.check('the statement arrives as a PDF file named for the case', download.suggestedFilename(), 'Statement RAP-125318 2026-11-11.pdf')
+  t.ok('...asked for with the session token', asked.some(([a, , tok]) => a === 'statement' && tok === TOKEN))
+
+  await page.getByRole('button', { name: 'Send it' }).isDisabled().then((d) => t.ok('nothing to send until a file is chosen', d))
+  await page.getByLabel('Proof of payment file').setInputFiles({ name: 'slip.png', mimeType: 'image/png', buffer: Buffer.from('not really a png') })
+  await page.getByLabel('Amount paid').fill('500')
+  await page.getByLabel('Date paid').fill('2026-11-10')
+  await page.getByRole('button', { name: 'Send it' }).click()
+  await page.getByTestId('debtor-pop-done').waitFor()
+  const sentPop = asked.find(([a]) => a === 'proof-of-payment')
+  t.ok('the slip goes up as the file the debtor chose, with what they said they paid',
+    !!sentPop && sentPop[1].fileName === 'slip.png' && Buffer.from(sentPop[1].data, 'base64').toString() === 'not really a png'
+    && sentPop[1].amount === '500' && sentPop[1].paidOn === '2026-11-10' && sentPop[2] === TOKEN)
+  t.ok('...and the debtor is told it is not yet a payment', /check it against our bank account/.test(await page.getByTestId('debtor-pop-done').innerText()))
+  await t.shot(page, 'debtor-portal-part2')
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByTestId('debtor-ask').waitFor()

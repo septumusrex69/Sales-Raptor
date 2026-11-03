@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs'
 import {
   normaliseCaseNumber, codeDestination, debtorCodeSms, debtorSummary, debtorPayments, DEBTOR_CODE_SENT, debtorCodeEmail,
+  debtorPopFile, debtorPopClaim, debtorPopNote,
 } from '../../src/lib/debtorPortal.ts'
 import { stripSqlComments } from './sqlComments.mjs'
 
@@ -62,6 +63,18 @@ const pays = debtorPayments([
   { received_at: '2026-10-26T00:00:00+02:00', amount: 70, approved_at: '2026-10-27T10:00:00Z', reversed_at: '2026-10-28T10:00:00Z', rejected_at: null },
 ])
 check('only payments that stand are shown -- not waiting, not reversed -- on their Johannesburg day', pays, [{ on: '2026-10-23', amount: 100 }])
+
+/* ---------- part 2: a proof of payment ---------- */
+check('a bank app\'s PDF is a proof of payment', debtorPopFile('FNB Payment 23-10.pdf'), { name: 'FNB Payment 23-10.pdf', contentType: 'application/pdf' })
+check('...so is an iPhone photo (HEIC)', debtorPopFile('IMG_0042.HEIC')?.contentType, 'image/heic')
+check('a path in the name is dropped, and odd characters made safe', debtorPopFile('C:\\Users\\me\\slip <1>.jpg')?.name, 'slip _1_.jpg')
+check('a spreadsheet or a program is not', [debtorPopFile('book.xlsx'), debtorPopFile('run.exe'), debtorPopFile('noextension')], [null, null, null])
+check('amount and date are optional', debtorPopClaim({}, '2026-11-03'), { ok: true, amount: null, paidOn: null })
+check('an amount typed with a comma', debtorPopClaim({ amount: 'R 1500,50' }, '2026-11-03'), { ok: true, amount: 1500.5, paidOn: null })
+check('a date in the future is a typing mistake', debtorPopClaim({ paidOn: '2026-11-04' }, '2026-11-03').ok, false)
+check('...and so is one more than a year back', debtorPopClaim({ paidOn: '2025-11-02' }, '2026-11-03').ok, false)
+check('nought is not an amount paid', debtorPopClaim({ amount: '0' }, '2026-11-03').ok, false)
+ok('the note says it is not yet money', /Check it against the trust account before it is treated as paid/.test(debtorPopNote('RAP-1', { amount: 500, paidOn: '2026-11-01' }, (n) => `R${n}`)))
 
 /* ---------- the locks ---------- */
 const schema = stripSqlComments(read('supabase/schema.sql'))

@@ -1,15 +1,18 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Copy, Loader2, LogOut } from 'lucide-react'
-import { normaliseCaseNumber } from '../../lib/debtorPortal'
+import { Copy, FileDown, Loader2, LogOut, Upload } from 'lucide-react'
+import { DEBTOR_POP_MAX_BYTES, debtorPopFile, normaliseCaseNumber } from '../../lib/debtorPortal'
+import { saveFile } from '../../lib/fileSave'
 import {
-  DebtorSignedOut, debtorToken, fetchDebtorAccount, requestDebtorCode, saveDebtorToken, signOutDebtor, verifyDebtorCode,
+  DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken,
+  sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
   type DebtorAccount,
 } from '../../lib/debtorPortalApi'
 
 /**
  * /my-account -- THE DEBTOR PORTAL (Raptor H16, part 1). Stephan, 2 Nov: a debtor signs in with their case number
  * and a code sent to the email or cellphone the firm already has, and sees what they owe, what they have paid and
- * how to pay. Arrangements and disputes come in parts 2 and 3; nothing here offers them before they exist.
+ * how to pay; part 2 adds the statement PDF and a proof-of-payment upload. Arrangements and disputes come next;
+ * nothing here offers them before they exist.
  *
  * PHONE FIRST. A debtor opens this from an SMS more often than from a desk, so it is one narrow column at every
  * width, large type for the number that matters, and nothing that needs a hover.
@@ -195,6 +198,10 @@ function AccountView({ token, onSignedOut }: { token: string; onSignedOut: () =>
         </Card>
       )}
 
+      {!a.closed && s.balance > 0 && <ProofOfPayment token={token} />}
+
+      <Statement token={token} />
+
       <Card>
         <Label>Payments we have received</Label>
         {a.payments.length === 0
@@ -225,4 +232,111 @@ function Row({ label, value }: { label: string; value: number }) {
 }
 function Pair({ label, value }: { label: string; value: string }) {
   return <div className="flex justify-between gap-3"><dt className="text-[#5A6B80]">{label}</dt><dd className="text-right font-medium">{value}</dd></div>
+}
+
+/* ------------------------------------------------------------------ part 2 */
+
+/**
+ * THE STATEMENT, AS A PDF THE DEBTOR KEEPS. Drawn on the server (the collector's own statement, on the firm's
+ * letterhead) and saved through fileSave.saveFile -- an ordinary download on a computer, the share sheet's "Save to
+ * Files" on an iPhone -- because on a phone a PDF opened in the tab replaces the page and the debtor cannot get back.
+ */
+function Statement({ token }: { token: string }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  /* SAFARI'S SECOND TAP (fileSave.ts): drawing the statement can outlast the tap that asked for it, and then an iPhone
+     will not open the share sheet. The file is kept and one more tap -- "Save ..." -- hands it over. */
+  const [ready, setReady] = useState<{ blob: Blob; name: string } | null>(null)
+  async function download() {
+    setBusy(true); setError(null); setReady(null)
+    try {
+      const r = await fetchDebtorStatement(token)
+      const blob = new Blob([Uint8Array.from(atob(r.pdf), (ch) => ch.charCodeAt(0))], { type: 'application/pdf' })
+      if ((await saveFile(blob, r.fileName)) === 'needs-tap') setReady({ blob, name: r.fileName })
+    } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+  }
+  return (
+    <Card>
+      <Label>Your statement</Label>
+      <p className="mt-1 text-[15px] text-[#5A6B80]">Every amount on your account in date order, on our letterhead.</p>
+      <button type="button" onClick={download} disabled={busy} data-testid="debtor-statement"
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-3 text-base font-semibold disabled:opacity-50"
+        style={{ borderColor: NAVY, color: NAVY }}>
+        {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <><FileDown size={18} /> Download my statement (PDF)</>}
+      </button>
+      {ready && (
+        <button type="button" onClick={() => { void saveFile(ready.blob, ready.name, { fromTap: true }).then(() => setReady(null)) }}
+          className="mt-2 w-full rounded-lg px-4 py-3 text-base font-semibold text-white" style={{ background: NAVY }}>
+          Save {ready.name}
+        </button>
+      )}
+      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+    </Card>
+  )
+}
+
+/**
+ * SEND US YOUR PROOF OF PAYMENT. The slip is what matters; the amount and the day only help finance find the line on
+ * the bank statement, so both are optional. Said plainly that it is not yet a payment -- a debtor who uploads a slip and
+ * sees the balance unchanged must not think it went nowhere.
+ */
+function ProofOfPayment({ token }: { token: string }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  async function send(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (!file || !debtorPopFile(file.name)) { setError('Choose a PDF or a photo (JPG, PNG or HEIC) of your proof of payment.'); return }
+    if (file.size > DEBTOR_POP_MAX_BYTES) { setError('That file is larger than 3 MB. A photo or a smaller PDF will do.'); return }
+    setBusy(true)
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''))
+        r.onerror = () => reject(new Error('The file could not be read. Please choose it again.'))
+        r.readAsDataURL(file)
+      })
+      await sendDebtorProofOfPayment(token, { fileName: file.name, data, amount: amount || undefined, paidOn: paidOn || undefined })
+      setDone(true)
+    } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+  }
+
+  if (done) {
+    return (
+      <Card>
+        <Label>Proof of payment</Label>
+        <p className="mt-1 text-[15px]" style={{ color: NAVY }} data-testid="debtor-pop-done">Thank you, we have it. We will check it against our bank account; the payment shows on this page once it is confirmed, usually within two working days.</p>
+        <button type="button" onClick={() => { setDone(false); setFile(null); setAmount(''); setPaidOn('') }} className="mt-2 text-sm text-[#5A6B80] underline">Send another</button>
+      </Card>
+    )
+  }
+  return (
+    <Card>
+      <Label>Paid already? Send us your proof of payment</Label>
+      <form onSubmit={send} className="mt-3 space-y-3" data-testid="debtor-pop">
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[#AEBBCB] px-4 py-4 text-[15px] text-[#3F5F86]">
+          <Upload size={18} /> {file ? file.name : 'Choose the PDF or a photo'}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,application/pdf,image/*" className="sr-only" aria-label="Proof of payment file"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">Amount (optional)</span>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="500" aria-label="Amount paid" className={field} />
+          </label>
+          <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">Date paid (optional)</span>
+            <input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} aria-label="Date paid" className={field} />
+          </label>
+        </div>
+        <button type="submit" disabled={busy || !file} className={button} style={{ background: NAVY }}>
+          {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Send it'}
+        </button>
+      </form>
+      {error && <p className="mt-2 text-sm text-red-700" data-testid="debtor-pop-error">{error}</p>}
+    </Card>
+  )
 }

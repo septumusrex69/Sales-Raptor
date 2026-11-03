@@ -39,9 +39,17 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   account's details with the case number as reference. Tables `debtor_portal_codes` / `debtor_portal_sessions` (RLS on,
   NO policies; cascade added by an assembled-word do block), server `api/_lib/debtorPortal.ts` + `api/debtor/[action].ts`
   (service role only), session in sessionStorage, 7 days max. A sign-in writes a note on the account for the collector.
-  check-debtor-portal 36, e2e debtor-portal 15 (6 sabotages, each red). **Next: part 2 (statement PDF + proof of
-  payment upload), part 3 (propose an arrangement -> collector approves), part 4 (dispute / question -> ticket).**
-  Not yet tried end to end against staging with a real code (it would email a real address).
+  check-debtor-portal 46, e2e debtor-portal 20 (sabotages each red). Not yet tried end to end against staging with a
+  real code (it would email a real address) -- the route answers on the preview (405 to a GET, so the module loads).
+- **DEBTOR PORTAL, PART 2 (S17, 3 Nov)**: **Download my statement** -- the collector's own statement of account
+  (`debtorStatement`, src/lib/debtorStatement.ts: buildStatement + accountMergeValues + statementOfAccount, shared by the
+  server and check-debtor-statement), drawn by letterToPdf on the letterhead in Charter, saved via fileSave.saveFile
+  (iPhone share sheet). **letterToPdf does NOT refuse unfilled fields** -- `unfilledFields` does, before drawing, and the
+  debtor is told to call rather than handed {{braces}}. **Send us your proof of payment** -- PDF/photo <= 3 MB, optional
+  amount and date; kept in account_documents (kind 'Proof of payment', bucket account-documents), a note on the account,
+  the collector's bell (Administrators' if nobody holds it). It touches NO ledger: a slip is not money. check-debtor-
+  statement 11 (draws a real PDF), e2e 20. **Next: part 3 (propose an arrangement -> collector approves), part 4
+  (dispute / question -> ticket).**
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

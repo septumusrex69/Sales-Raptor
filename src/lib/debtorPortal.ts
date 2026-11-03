@@ -132,3 +132,60 @@ export function debtorPayments(rows: readonly { received_at: string; amount: num
     .map((x) => ({ on: new Date(x.received_at).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }), amount: Number(x.amount) }))
     .sort((a, b) => b.on.localeCompare(a.on))
 }
+
+/* ---------------------------------------------------------------- part 2: statement and proof of payment */
+
+/**
+ * A PROOF OF PAYMENT, AS A DEBTOR SENDS IT: a PDF from the bank app or a photo of a slip. 3 MB, like the client
+ * portal's handover sheet, because the request carries it as base64 (a third larger) inside Vercel's 4.5 MB body.
+ * HEIC is accepted because an iPhone's camera writes it and a debtor will not know to convert.
+ */
+export const DEBTOR_POP_MAX_BYTES = 3_000_000
+const POP_TYPES: Record<string, string> = {
+  '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.heic': 'image/heic', '.heif': 'image/heif', '.webp': 'image/webp',
+}
+
+/** The file's name made safe to store, and its type off the extension; null for anything that is not a PDF or a photo. */
+export function debtorPopFile(name: unknown): { name: string; contentType: string } | null {
+  if (typeof name !== 'string') return null
+  const base = name.split(/[\\/]/).pop() ?? ''
+  const dot = base.lastIndexOf('.')
+  if (dot < 1) return null
+  const ext = base.slice(dot).toLowerCase()
+  const contentType = POP_TYPES[ext]
+  if (!contentType) return null
+  const stem = base.slice(0, dot).replace(/[^\w\-() ]+/g, '_').trim().slice(0, 80) || 'proof-of-payment'
+  return { name: `${stem}${ext}`, contentType }
+}
+
+/**
+ * WHAT THE DEBTOR SAYS THEY PAID, OPTIONAL BOTH: the slip is the evidence, these only help finance find the line on
+ * the bank statement. An amount must be positive and a date may not be in the future or more than a year back --
+ * either is a typing mistake, and a wrong date sends finance looking in the wrong month.
+ */
+export function debtorPopClaim(input: { amount?: unknown; paidOn?: unknown }, today: string):
+  { ok: true; amount: number | null; paidOn: string | null } | { ok: false; error: string } {
+  let amount: number | null = null
+  if (input.amount !== undefined && input.amount !== null && String(input.amount).trim() !== '') {
+    const n = Number(String(input.amount).replace(/[^\d.,]/g, '').replace(',', '.'))
+    if (!Number.isFinite(n) || n <= 0 || n > 10_000_000) return { ok: false, error: 'That amount does not look right. Type it as a number, for example 500.' }
+    amount = Math.round(n * 100) / 100
+  }
+  let paidOn: string | null = null
+  if (typeof input.paidOn === 'string' && input.paidOn.trim()) {
+    const d = input.paidOn.trim()
+    const [y, m] = today.split('-').map(Number)
+    const yearAgo = `${y - 1}-${String(m).padStart(2, '0')}-${today.slice(8, 10)}`
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > today || d < yearAgo) return { ok: false, error: 'The date you paid cannot be in the future, or more than a year ago.' }
+    paidOn = d
+  }
+  return { ok: true, amount, paidOn }
+}
+
+/** The line on the account's timeline, and the collector's bell, in one sentence. */
+export function debtorPopNote(caseNumber: string, claim: { amount: number | null; paidOn: string | null }, money: (n: number) => string): string {
+  const what = claim.amount !== null ? ` of ${money(claim.amount)}` : ''
+  const when = claim.paidOn ? ` paid on ${claim.paidOn}` : ''
+  return `The debtor sent a proof of payment${what}${when} from the debtor portal (${caseNumber}). It is under Documents. Check it against the trust account before it is treated as paid.`
+}
