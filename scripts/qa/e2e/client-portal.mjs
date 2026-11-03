@@ -396,6 +396,9 @@ try {
   await page.getByTestId('portal-ticket-view-open').click()
   await page.getByTestId('portal-ticket').first().locator('button').first().click()
   await page.getByTestId('portal-thread').waitFor({ timeout: 5000 })
+  /* WAIT FOR THE MESSAGE, NOT ONLY THE BOX (Raptor H16): the thread's frame draws before its messages arrive, so reading
+     it at once failed now and then on correct code -- HANDOFF's "Playwright's locators race React". */
+  await page.getByTestId('portal-thread').getByText(/statement for March/).first().waitFor({ timeout: 5000 }).catch(() => {})
   t.ok('the thread shows what the firm wrote, and who wrote it', /statement for March/.test(await page.getByTestId('portal-thread').innerText()) && /Liesl Liaison/.test(await page.getByTestId('portal-thread').innerText()))
   await page.getByTestId('portal-reply').fill('Attached is the proof.')
   await page.getByTestId('portal-reply-send').click()
