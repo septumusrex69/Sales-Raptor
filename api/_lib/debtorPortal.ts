@@ -280,6 +280,15 @@ async function balanceOf(admin: SupabaseClient, accountRow: Record<string, unkno
   return computeBalance(balanceInputFor({ account: balanceAccountFromRow(accountRow), ledgers: ledgers.get(accountId)!, today }))
 }
 
+/** The collector assigned to the account, as the debtor may see them: a name and the ways to reach them, nothing else. */
+async function agentOf(admin: SupabaseClient, accountId: string): Promise<{ name: string; phone: string | null; email: string | null; whatsapp: string | null } | null> {
+  const { data: a } = await admin.from('debtor_accounts').select('assigned_to').eq('id', accountId).maybeSingle()
+  if (!a?.assigned_to) return null
+  const { data: p } = await admin.from('profiles').select('name, phone, email, whatsapp, status').eq('id', a.assigned_to).maybeSingle()
+  if (!p || p.status !== 'Active' || !String(p.name ?? '').trim()) return null
+  return { name: String(p.name), phone: (p.phone as string | null) || null, email: (p.email as string | null) || null, whatsapp: (p.whatsapp as string | null) || null }
+}
+
 /** What the debtor has agreed, or offered: the live promise, and the latest proposal (pending, or declined lately). */
 async function arrangementState(admin: SupabaseClient, accountId: string) {
   const [{ data: live }, { data: prop }] = await Promise.all([
@@ -344,6 +353,10 @@ const account: Handler = async (req, res, admin) => {
       reference: a.case_number,
     } : null,
     contact: firm ? { phone: firm.phone ?? null, email: firm.email ?? null } : null,
+    /* YOUR AGENT (3 Nov, Stephan: "speak to your agent. This is the person assigned to you"): the collector on the
+       account -- the client portal names its liaison the same way. Their name and the ways to reach them; where nobody
+       holds the account, null, and the page gives the firm's own number instead. */
+    agent: await agentOf(admin, who.accountId),
     ...(await arrangementState(admin, who.accountId)),
     tickets: await ticketsOf(admin, who.accountId),
   })

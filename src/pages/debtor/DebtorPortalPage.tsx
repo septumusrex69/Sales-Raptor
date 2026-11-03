@@ -1,298 +1,486 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Copy, FileDown, Loader2, LogOut, Upload } from 'lucide-react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  ArrowRight, ChevronsLeft, ChevronsRight, Copy, Eye, EyeOff, FileDown, FileText, Handshake, Hash, KeyRound, LifeBuoy, Loader2,
+  Lock, LogOut, Mail, MessageCircle, Phone, Upload, Wallet,
+} from 'lucide-react'
 import { DEBTOR_DISPUTE_REASONS, DEBTOR_POP_MAX_BYTES, debtorDispute, debtorPopFile, debtorQuestion, normaliseCaseNumber } from '../../lib/debtorPortal'
 import { saveFile } from '../../lib/fileSave'
 import { PROPOSAL_RULES, applicationNote, needsApplication, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
 import type { Arrangement } from '../../lib/arrangements'
+import { bandBackground } from '../../lib/portalPhotos'
 import {
   DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken, setDebtorPassword, signInDebtor,
   askDebtorQuestion, proposeDebtorArrangement, raiseDebtorDispute, sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
   type DebtorAccount,
 } from '../../lib/debtorPortalApi'
+import { C, DayLine, Field, PhotoCredit, loadPortalLook, usePortalLook } from '../portal/portalLook'
+import { DOOR, PortalSignInFrame } from '../portal/PortalSignInFrame'
+import { PortalSplash } from '../portal/PortalSplash'
+import { primeSplashAudio } from '../portal/portalSound'
+import '../portal/portal.css'
+import '@fontsource-variable/raleway'
+import '@fontsource-variable/open-sans'
 
 /**
- * /my-account -- THE DEBTOR PORTAL (Raptor H16, part 1). Stephan, 2 Nov: a debtor signs in with their case number
- * and a code sent to the email or cellphone the firm already has, and sees what they owe, what they have paid and
- * how to pay; part 2 adds the statement PDF and a proof-of-payment upload; part 3 lets them OFFER an arrangement,
- * which a collector accepts or declines; part 4 lets them dispute the account in writing or ask a question, each a
- * ticket on the account.
+ * /my-account -- THE DEBTOR PORTAL (Raptor H16). A debtor signs in with their case number (a code the first time, a
+ * password after) and sees what they owe and how to pay, downloads their statement, sends a proof of payment, offers an
+ * arrangement, and asks a question or disputes the account.
  *
- * PHONE FIRST. A debtor opens this from an SMS more often than from a desk, so it is one narrow column at every
- * width, large type for the number that matters, and nothing that needs a hover.
- *
- * BREDELL FERREIRA'S, NOT RAPTOR'S. Raptor is the firm's own system and its name means nothing to a debtor; the
- * page wears the firm's navy and gold, the colours on the letters they already have.
+ * IT IS THE CLIENT PORTAL, FOR A DEBTOR (Stephan, 3 Nov: "Make the debtors login portal look like the client portal. Use
+ * the same skins, the same stuff, the Bredell Ferreira, the everything ... speak to your agent. This is the person
+ * assigned to you. It's exactly the same, except when it's a client, it's a debtor."). So: the same door
+ * (PortalSignInFrame), the same day's photograph and line (portalLook), the same opening on sign-in (PortalSplash), the
+ * same navy sidebar with the wordmark that folds to icons, the same band, cards, type and colours (portal.css's
+ * .portal-brand) -- and where the client portal names their liaison, this names the debtor's AGENT, the collector on
+ * the account. What is not the same is only what a debtor does: their own account, not a book.
  */
 
-const NAVY = '#111E2D'
-const GOLD = '#C69F54'
+const NAVY = C.navy
+const GOLD = C.gold
 
-const money = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split(' ').join(' ')}`
+const money = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split('\u00a0').join(' ')}`
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const longDay = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}` }
+const SUPPORT = 'mailto:info@bredellferreira.co.za?subject=Account%20sign-in'
 
 export default function DebtorPortalPage() {
   const [token, setToken] = useState<string | null>(() => debtorToken())
-  return (
-    <div className="min-h-dvh bg-[#F2F5F8] text-[#1B2B3E]">
-      <header className="border-b-[3px]" style={{ background: NAVY, borderColor: GOLD }}>
-        <div className="mx-auto max-w-[560px] px-4 py-4">
-          <p className="text-[13px] font-bold tracking-[0.3em]" style={{ color: GOLD }}>BREDELL FERREIRA</p>
-          <p className="mt-0.5 text-[11px] tracking-[0.18em] text-[#AEBBCB]">YOUR ACCOUNT</p>
-        </div>
-      </header>
-      <main className="mx-auto max-w-[560px] px-4 py-6">
-        {token
-          ? <AccountView token={token} onSignedOut={() => { saveDebtorToken(null); setToken(null) }} />
-          : <SignIn onSignedIn={(t, remember) => { saveDebtorToken(t, remember); setToken(t) }} />}
-      </main>
-    </div>
-  )
+  const [account, setAccount] = useState<DebtorAccount | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [opened, setOpened] = useState(false)
+  /* Set by a sign-in, so the full opening plays then (PortalSplash), as the client portal's does. */
+  const [fresh, setFresh] = useState(false)
+  const [round, setRound] = useState(0)
+
+  /* Today's approved look -- the same photograph and line the client portal shows today. */
+  useEffect(() => { loadPortalLook() }, [])
+
+  const signedOut = useCallback(() => { saveDebtorToken(null); setToken(null); setAccount(null) }, [])
+  useEffect(() => {
+    if (!token) return
+    let live = true
+    setError(null)
+    fetchDebtorAccount(token)
+      .then((r) => { if (live) setAccount(r) })
+      .catch((x) => { if (!live) return; if (x instanceof DebtorSignedOut) signedOut(); else setError(x instanceof Error ? x.message : String(x)) })
+    return () => { live = false }
+  }, [token, signedOut, round])
+
+  if (!token) return <SignIn onSignedIn={(t, remember) => { saveDebtorToken(t, remember); setToken(t); setOpened(false); setFresh(true) }} />
+  return <>
+    {!opened && <PortalSplash variant="arcs" ready={!!account || !!error} fresh={fresh} onDone={() => { setOpened(true); setFresh(false) }} />}
+    {error && !account && (
+      <div className="portal-brand min-h-screen flex items-center justify-center p-6 bg-[#F4F4F4]">
+        <Card><p className="text-sm text-red-700">{error}</p></Card>
+      </div>
+    )}
+    {account && <Signed token={token} a={account} onRefresh={() => setRound((n) => n + 1)}
+      onSignedOut={() => { signOutDebtor(token).catch(() => {}); signedOut() }} />}
+  </>
 }
 
+/* THE CLIENT PORTAL'S CARD, LABEL, FIELD AND BUTTON -- white, rounded, the brief's border and navy. */
 function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-xl border border-[#D5DBE3] bg-white p-5 ${className}`}>{children}</section>
+  return <section className={`rounded-2xl border border-[#D5DBE3] bg-white p-5 sm:p-6 ${className}`}>{children}</section>
 }
 function Label({ children }: { children: ReactNode }) {
-  return <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-[#3F5F86]">{children}</p>
+  return <p className="bf-label text-[10.5px] font-bold uppercase tracking-[0.12em] text-[#3F5F86]">{children}</p>
 }
-const field = 'w-full rounded-lg border border-[#D5DBE3] bg-white px-3 py-3 text-base outline-none focus:border-[#C69F54] focus:ring-2 focus:ring-[#C69F54]/25'
-const button = 'w-full rounded-lg px-4 py-3 text-base font-semibold text-white disabled:opacity-50'
+const field = 'w-full rounded-[13px] border border-[#DCE3EA] bg-white px-3.5 py-3 text-[15px] text-[#101F2C] placeholder:text-[#97B4CC] outline-none focus:border-[#C69F54]/70 focus:ring-2 focus:ring-[#C69F54]/40'
+const button = 'w-full rounded-[13px] px-4 py-3.5 text-[15px] font-semibold text-white shadow-sm hover:brightness-125 disabled:opacity-60 disabled:cursor-not-allowed transition'
 
 /* ------------------------------------------------------------------ signing in */
 
 /**
  * SIGNING IN: A CODE ONCE, A PASSWORD AFTER (Stephan, 3 Nov: "do one ... confirm your email address ... But not every
- * single time"). The page opens on the case number and the password, which is what a returning debtor needs; the code
- * is one press away for the first visit and for a forgotten password, and after it the debtor chooses a password.
- * "Keep me signed in on this device" is offered on both, off by default -- a borrowed phone is the common case.
+ * single time"), behind the client portal's own door. The page opens on the case number and the password; the code is
+ * one press away for the first visit and a forgotten password. Arriving from an invitation (?case=...), it opens on
+ * the code. "Keep me signed in on this device" is offered, off by default -- a borrowed phone is the common case.
  */
 function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean) => void }) {
   const [step, setStep] = useState<'password' | 'ask' | 'verify' | 'choose'>('password')
   const [caseNumber, setCaseNumber] = useState(() => new URLSearchParams(window.location.search).get('case') ?? '')
   const [password, setPassword] = useState('')
+  const [show, setShow] = useState(false)
   const [code, setCode] = useState('')
   const [remember, setRemember] = useState(false)
   const [sent, setSent] = useState<string | null>(null)
   const [fresh, setFresh] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  /* Arriving from an invitation (?case=...), the debtor has never signed in: open on the code. */
   useEffect(() => { if (new URLSearchParams(window.location.search).get('case')) setStep('ask') }, [])
 
   const go = async (fn: () => Promise<void>) => { setError(null); setBusy(true); try { await fn() } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) } }
   const caseOk = () => { if (normaliseCaseNumber(caseNumber)) return true; setError('Type the case number on our letter or SMS, for example RAP-123456.'); return false }
+  const { field: door, fieldStyle, primary, link } = DOOR
 
   const caseField = (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium">Case number</span>
-      <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="RAP-123456" autoComplete="username"
-        autoCapitalize="characters" aria-label="Case number" className={field} />
-    </label>
+    <Field icon={<Hash size={18} />}>
+      <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="Case number, e.g. RAP-123456" autoComplete="username"
+        autoCapitalize="characters" aria-label="Case number" className={door} style={fieldStyle} />
+    </Field>
+  )
+  const secret = (value: string, set: (v: string) => void, label: string, auto: string) => (
+    <Field icon={<Lock size={18} />}>
+      <input type={show ? 'text' : 'password'} value={value} onChange={(e) => set(e.target.value)} autoComplete={auto}
+        placeholder={label} aria-label={label} className={`${door} pr-12`} style={fieldStyle} />
+      <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? 'Hide the password' : 'Show the password'}
+        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-[#F4F4F4]" style={{ color: C.slate }}>
+        {show ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </Field>
   )
   const keep = (
-    <label className="flex items-center gap-2 text-sm text-[#5A6B80]">
-      <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} aria-label="Keep me signed in on this device" />
+    <label className="flex items-center gap-2.5 cursor-pointer text-sm" style={{ color: C.navy }}>
+      <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} aria-label="Keep me signed in on this device"
+        className="h-[18px] w-[18px] rounded border-[#B9C6D3] accent-[#101F2C]" />
       Keep me signed in on this device
     </label>
   )
+  const spin = <Loader2 className="h-5 w-5 animate-spin" />
 
   return (
-    <Card>
-      <h1 className="text-xl font-bold" style={{ color: NAVY }}>{step === 'choose' ? 'Choose a password' : 'See your account'}</h1>
-
+    <PortalSignInFrame
+      kicker="Your account"
+      promise="What you owe, what you have paid, and how to settle it — whenever suits you."
+      blurb="Your balance and your statement, how to pay, an arrangement you can offer us, and the person who looks after your account — all in one place."
+      secure="Secure account portal"
+      title={step === 'choose' ? 'Choose a password' : 'Sign in'}
+      intro={step === 'password' ? 'Sign in with your case number and your password.'
+        : step === 'ask' ? 'First time here, or forgot your password? Type the case number from our letter, email or SMS and we will send a code to the email address (or cellphone) we have for you.'
+          : step === 'verify' ? <span data-testid="debtor-code-sent">{sent}</span>
+            : 'Thank you, that is confirmed. Choose a password: next time you sign in with your case number and this password, and no code.'}
+      support={{ href: SUPPORT, title: 'Need help signing in?', sub: 'Contact us' }}>
       {step === 'password' && (
-        <form onSubmit={(e) => { e.preventDefault(); if (caseOk()) void go(async () => { onSignedIn((await signInDebtor(caseNumber, password, remember)).token, remember) }) }}
-          className="mt-4 space-y-4" data-testid="debtor-password">
+        <form onSubmit={(e) => { e.preventDefault(); primeSplashAudio(); if (caseOk()) void go(async () => { onSignedIn((await signInDebtor(caseNumber, password, remember)).token, remember) }) }}
+          className="space-y-4" data-testid="debtor-password">
           {caseField}
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">Password</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-label="Password" className={field} />
-          </label>
-          {keep}
-          <button type="submit" disabled={busy || !password} className={button} style={{ background: NAVY }}>
-            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Sign in'}
+          {secret(password, setPassword, 'Password', 'current-password')}
+          <div className="pt-1">{keep}</div>
+          <button type="submit" disabled={busy || !password} className={`${primary} mt-3`} style={{ background: C.navy }}>
+            {busy ? spin : <>Sign in <ArrowRight size={18} /></>}
           </button>
-          <button type="button" onClick={() => { setStep('ask'); setError(null) }} className="w-full text-sm text-[#5A6B80] underline" data-testid="debtor-first-time">
-            First time here, or forgot your password? Send me a code
-          </button>
+          <p className="text-center text-sm pt-2" style={{ color: C.slate }}>
+            <button type="button" onClick={() => { setStep('ask'); setError(null) }} className={link} style={{ color: C.navy }} data-testid="debtor-first-time">
+              First time here, or forgot your password? Send me a code
+            </button>
+          </p>
         </form>
       )}
-
       {step === 'ask' && (
         <form onSubmit={(e) => { e.preventDefault(); if (caseOk()) void go(async () => { setSent((await requestDebtorCode(caseNumber)).message); setStep('verify') }) }}
-          className="mt-4 space-y-4" data-testid="debtor-ask">
-          <p className="text-[15px] text-[#5A6B80]">Type the case number from our letter, email or SMS. We will send a code to the email address (or cellphone) we have for you, to confirm it is you. You only need a code the first time, or if you forget your password.</p>
+          className="space-y-4" data-testid="debtor-ask">
           {caseField}
-          <button type="submit" disabled={busy} className={button} style={{ background: NAVY }}>
-            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Send me a code'}
-          </button>
-          <button type="button" onClick={() => { setStep('password'); setError(null) }} className="w-full text-sm text-[#5A6B80] underline">I have a password</button>
+          <button type="submit" disabled={busy} className={primary} style={{ background: C.navy }}>{busy ? spin : 'Send me a code'}</button>
+          <button type="button" onClick={() => { setStep('password'); setError(null) }} className={`w-full text-sm ${link}`} style={{ color: C.slate }}>I have a password</button>
         </form>
       )}
-
       {step === 'verify' && (
-        <form onSubmit={(e) => { e.preventDefault(); void go(async () => {
+        <form onSubmit={(e) => { e.preventDefault(); primeSplashAudio(); void go(async () => {
           const r = await verifyDebtorCode(caseNumber, code, remember)
-          if (r.needsPassword) { setFresh(r.token); setStep('choose') } else onSignedIn(r.token, remember)
-        }) }} className="mt-4 space-y-4" data-testid="debtor-verify">
-          <p className="text-[15px] text-[#5A6B80]" data-testid="debtor-code-sent">{sent}</p>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">The six-digit code</span>
+          if (r.needsPassword) { setFresh(r.token); setPassword(''); setStep('choose') } else onSignedIn(r.token, remember)
+        }) }} className="space-y-4" data-testid="debtor-verify">
+          <Field icon={<KeyRound size={18} />}>
             <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={8}
-              aria-label="Code" className={`${field} tracking-[0.4em] text-center text-xl`} />
-          </label>
+              placeholder="123 456" aria-label="Code" className={`${door} tracking-[0.3em] text-lg`} style={fieldStyle} />
+          </Field>
           {keep}
-          <button type="submit" disabled={busy || code.replace(/\D/g, '').length < 6} className={button} style={{ background: NAVY }}>
-            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Continue'}
-          </button>
-          <button type="button" onClick={() => { setStep('ask'); setCode(''); setError(null) }} className="w-full text-sm text-[#5A6B80] underline">
-            Use a different case number, or send the code again
-          </button>
+          <button type="submit" disabled={busy || code.replace(/\D/g, '').length < 6} className={primary} style={{ background: C.navy }}>{busy ? spin : 'Continue'}</button>
+          <div className="flex justify-between text-sm" style={{ color: C.slate }}>
+            <button type="button" className={link} onClick={() => { setStep('ask'); setCode(''); setError(null) }}>Use a different case number</button>
+            <button type="button" className={link} disabled={busy} onClick={() => void go(async () => { setSent((await requestDebtorCode(caseNumber)).message) })}>Send a new code</button>
+          </div>
         </form>
       )}
-
       {step === 'choose' && fresh && (
-        <form onSubmit={(e) => { e.preventDefault(); void go(async () => { await setDebtorPassword(fresh, password); onSignedIn(fresh, remember) }) }}
-          className="mt-4 space-y-4" data-testid="debtor-choose-password">
-          <p className="text-[15px] text-[#5A6B80]">Thank you, that is confirmed. Choose a password: next time you sign in with your case number and this password, and no code.</p>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">New password (at least 8 characters)</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" aria-label="New password" className={field} />
-          </label>
-          <button type="submit" disabled={busy || password.length < 8} className={button} style={{ background: NAVY }}>
-            {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : 'Save my password and open my account'}
+        <form onSubmit={(e) => { e.preventDefault(); primeSplashAudio(); void go(async () => { await setDebtorPassword(fresh, password); onSignedIn(fresh, remember) }) }}
+          className="space-y-4" data-testid="debtor-choose-password">
+          {secret(password, setPassword, 'New password', 'new-password')}
+          <p className="text-xs" style={{ color: C.slate }}>At least 8 characters; a short phrase is easiest to remember.</p>
+          <button type="submit" disabled={busy || password.length < 8} className={primary} style={{ background: C.navy }}>
+            {busy ? spin : <>Save my password and open my account <ArrowRight size={18} /></>}
           </button>
         </form>
       )}
-      {error && <p className="mt-3 text-sm text-red-700" data-testid="debtor-error">{error}</p>}
-    </Card>
+      {error && <p className="text-sm text-red-700 mt-4 rounded-lg bg-red-50 border border-red-100 px-3 py-2" data-testid="debtor-error">{error}</p>}
+    </PortalSignInFrame>
   )
 }
 
 /* ------------------------------------------------------------------ signed in */
 
-function AccountView({ token, onSignedOut }: { token: string; onSignedOut: () => void }) {
-  const [a, setA] = useState<DebtorAccount | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [round, setRound] = useState(0)
+type Section = 'account' | 'payments' | 'arrangement' | 'help'
+const SECTIONS: { id: Section; label: string; icon: typeof Wallet; title: string; blurb: string }[] = [
+  { id: 'account', label: 'Your account', icon: Wallet, title: 'Your account', blurb: 'What you owe today, and how to pay it.' },
+  { id: 'payments', label: 'Payments & statement', icon: FileText, title: 'Payments & statement', blurb: 'What we have received, your statement, and your proof of payment.' },
+  { id: 'arrangement', label: 'Arrangement', icon: Handshake, title: 'Arrangement', blurb: 'Pay over time: offer us an arrangement, or see the one you have.' },
+  { id: 'help', label: 'Questions & disputes', icon: LifeBuoy, title: 'Questions & disputes', blurb: 'Ask us anything about your account, or tell us something is wrong.' },
+]
 
-  useEffect(() => {
-    let live = true
-    fetchDebtorAccount(token)
-      .then((r) => { if (live) setA(r) })
-      .catch((x) => { if (!live) return; if (x instanceof DebtorSignedOut) onSignedOut(); else setError(x instanceof Error ? x.message : String(x)) })
-    return () => { live = false }
-  }, [token, onSignedOut, round])
+/* THE FOLD IS REMEMBERED in this browser, as the client portal's is -- a convenience only. */
+const FOLD_KEY = 'raptor.debtor.sidebar'
+function useFold(): [boolean, () => void] {
+  const [folded, setFolded] = useState(() => { try { return localStorage.getItem(FOLD_KEY) === 'narrow' } catch { return false } })
+  const toggle = () => setFolded((f) => { try { localStorage.setItem(FOLD_KEY, f ? 'wide' : 'narrow') } catch { /* this tab only */ } return !f })
+  return [folded, toggle]
+}
 
-  async function signOut() {
-    try { await signOutDebtor(token) } catch { /* signed out here either way */ }
-    onSignedOut()
-  }
-
-  if (error) return <Card><p className="text-sm text-red-700">{error}</p></Card>
-  if (!a) return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-[#5A6B80]" /></div>
-
-  const s = a.summary
-  /* A CLOSED ACCOUNT SAYS SO FIRST. Paid up and settled are the debtor's good news; a withdrawn account is back with
-     the client and nothing on this page is ours to collect any more. */
-  const closedLine = a.closed === 'paid_up' ? 'This account is paid in full and closed. Thank you.'
-    : a.closed === 'settled' ? 'This account was settled and is closed. Thank you.'
-      : a.closed === 'withdrawn' ? `${a.client || 'Our client'} has taken this account back. Please contact them about it.`
-        : null
+function Signed({ token, a, onRefresh, onSignedOut }: { token: string; a: DebtorAccount; onRefresh: () => void; onSignedOut: () => void }) {
+  const look = usePortalLook()
+  const [section, setSection] = useState<Section>('account')
+  const [folded, toggleFold] = useFold()
+  const here = SECTIONS.find((x) => x.id === section)!
+  const open = a.tickets.filter((t) => t.open).length
+  const reach = a.agent?.phone ?? a.contact?.phone ?? null
 
   return (
-    <div className="space-y-4" data-testid="debtor-account">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: NAVY }}>{a.name || 'Your account'}</h1>
-          <p className="mt-0.5 text-sm text-[#5A6B80]">Case {a.caseNumber}{a.client ? ` · on behalf of ${a.client}` : ''}{a.clientReference ? ` (their reference ${a.clientReference})` : ''}</p>
+    <div className="portal-brand min-h-screen lg:h-screen lg:flex lg:overflow-hidden bg-[#F2F5F8]" data-testid="debtor-account">
+      {/* THE SIDEBAR, the client portal's shape: navy, the wordmark, gold for where you are; folds to icons. */}
+      <aside className={`hidden lg:flex flex-col shrink-0 h-full overflow-hidden text-[#B4BFCC] border-r border-[#C69F54]/30 transition-[width] duration-200 ${folded ? 'w-[4.5rem]' : 'w-64'}`}
+        style={{ background: NAVY }} data-testid="debtor-sidebar">
+        <div className={`h-20 flex items-center gap-3 border-b border-white/10 ${folded ? 'justify-center' : 'px-4'}`}>
+          <img src="/brand/icon-light.svg" alt={folded ? 'Bredell Ferreira' : ''} className={folded ? 'w-9 h-9' : 'w-11 h-11 shrink-0'} />
+          {!folded && <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-[13px] w-auto min-w-0" />}
         </div>
-        <button type="button" onClick={signOut} className="flex shrink-0 items-center gap-1.5 text-sm text-[#5A6B80]" aria-label="Sign out">
-          <LogOut size={15} /> Sign out
-        </button>
+        {!folded && (
+          <div className="px-5 pt-5 pb-2">
+            <p className="bf-label text-[10.5px] font-bold uppercase tracking-[0.12em] text-[#C69F54]">Your account</p>
+            <p className="text-white font-semibold mt-1 leading-tight">{a.caseNumber}</p>
+          </div>
+        )}
+        <nav aria-label="Your account" className="flex-1 px-3 py-3 space-y-1">
+          {SECTIONS.map((x) => (
+            <button key={x.id} type="button" onClick={() => setSection(x.id)} aria-current={section === x.id ? 'page' : undefined}
+              title={folded ? x.label : undefined} data-testid={`debtor-nav-${x.id}`}
+              className={`w-full flex items-center gap-3 rounded-[10px] py-2.5 text-sm font-semibold transition-colors ${folded ? 'justify-center' : 'px-3'} ${section === x.id
+                ? 'bg-[#C69F54] text-[#101F2C]' : 'hover:bg-white/[0.06] hover:text-white'}`}>
+              <x.icon size={17} className="shrink-0" />
+              {!folded && <span className="flex-1 text-left">{x.label}</span>}
+              {!folded && x.id === 'help' && open > 0 && (
+                <span className={`rounded-md px-1.5 text-[11px] font-semibold tabular-nums ${section === x.id ? 'bg-[#111E2D]/15' : 'bg-white/10 text-white'}`}>{open}</span>
+              )}
+            </button>
+          ))}
+          {reach && (
+            <a href={`tel:${reach.replace(/\s/g, '')}`} title={folded ? 'Call us' : undefined}
+              className={`w-full mt-4 flex items-center gap-3 rounded-lg py-2.5 text-sm font-medium border border-white/15 hover:bg-white/5 hover:text-white ${folded ? 'justify-center' : 'px-3'}`}>
+              <Phone size={16} className="shrink-0" />
+              {!folded && (a.agent ? `Call ${a.agent.name.split(' ')[0]}` : 'Call us')}
+            </a>
+          )}
+        </nav>
+        {/* THE FOOT: the gold sweep and the open rings, the client portal's lines. */}
+        {!folded && (
+          <div aria-hidden className="relative mt-auto h-60 -mb-2 pointer-events-none overflow-hidden">
+            <div className="absolute inset-0" style={{ background: `linear-gradient(180deg, ${NAVY} 0%, #15283A 70%, ${NAVY} 100%)` }} />
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 240" fill="none" preserveAspectRatio="xMaxYMax meet">
+              <path d="M 300 128 A 112 112 0 1 0 300 352" stroke="#C69F54" strokeOpacity="0.32" strokeWidth="1.2" transform="translate(-60 -20)" />
+              <path d="M 300 160 A 80 80 0 1 0 300 320" stroke="#97B4CC" strokeOpacity="0.18" strokeWidth="1" transform="translate(-60 -20)" />
+            </svg>
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 256 240" fill="none" preserveAspectRatio="none">
+              <path d="M-10 70 C 90 95, 190 150, 270 240" stroke="#C69F54" strokeOpacity="0.8" strokeWidth="1.4" />
+              <path d="M-10 92 C 90 117, 190 172, 270 262" stroke="#C69F54" strokeOpacity="0.22" strokeWidth="1" />
+            </svg>
+          </div>
+        )}
+        <div className="px-3 pb-2 relative">
+          <button type="button" onClick={toggleFold} aria-expanded={!folded} title={folded ? 'Widen the menu' : 'Narrow the menu'}
+            className={`w-full flex items-center gap-2.5 rounded-lg py-2 text-xs hover:bg-white/5 hover:text-white ${folded ? 'justify-center' : 'px-3'}`}>
+            {folded ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
+            {!folded && 'Narrow the menu'}
+          </button>
+        </div>
+        <div className={`border-t border-white/10 p-3 flex items-center gap-3 ${folded ? 'justify-center' : ''}`}>
+          {!folded && (
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-white truncate">{a.name || 'Your account'}</p>
+              <p className="text-[11px] truncate">{a.caseNumber}</p>
+            </div>
+          )}
+          <button type="button" onClick={onSignedOut} title="Sign out" aria-label="Sign out" className="p-2 rounded-lg hover:bg-white/5 hover:text-white">
+            <LogOut size={16} />
+          </button>
+        </div>
+      </aside>
+
+      {/* ON A PHONE: the same sections across the top, and the way out. */}
+      <div className="lg:hidden sticky top-0 z-30" style={{ background: NAVY }}>
+        <div className="flex items-center justify-between px-4 h-14">
+          <span className="flex items-center gap-2.5">
+            <img src="/brand/icon-light.svg" alt="" className="h-8 w-8" />
+            <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3 w-auto" />
+          </span>
+          <button type="button" onClick={onSignedOut} className="text-xs text-[#AEBBCB] underline" aria-label="Sign out">Sign out</button>
+        </div>
+        <nav aria-label="Your account" className="flex gap-1 overflow-x-auto px-3 pb-3">
+          {SECTIONS.map((x) => (
+            <button key={x.id} type="button" onClick={() => setSection(x.id)} aria-current={section === x.id ? 'page' : undefined}
+              data-testid={`debtor-tab-${x.id}`}
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-sm ${section === x.id ? 'bg-[#C69F54] text-[#111E2D] font-semibold' : 'text-[#AEBBCB]'}`}>
+              {x.label}
+            </button>
+          ))}
+        </nav>
       </div>
 
-      {closedLine && <Card><p className="text-[15px] font-medium" style={{ color: NAVY }} data-testid="debtor-closed">{closedLine}</p></Card>}
-
-      {a.closed !== 'withdrawn' && (
-        <Card>
-          <Label>What you owe today · {longDay(a.asAt)}</Label>
-          <p className="mt-1 text-[34px] font-bold tabular-nums leading-tight" style={{ color: NAVY }} data-testid="debtor-balance">{money(Math.max(0, s.balance))}</p>
-          {s.balance > 0 && s.settleToday !== s.balance && (
-            <p className="mt-1 text-sm text-[#5A6B80]">To settle in full today: <span className="font-semibold tabular-nums" data-testid="debtor-settle">{money(s.settleToday)}</span>, which includes the fee on the final payment.</p>
-          )}
-          {s.balance < 0 && <p className="mt-1 text-sm text-[#5A6B80]">You have paid {money(-s.balance)} more than you owed. Please call us so we can return it.</p>}
-          <dl className="mt-4 divide-y divide-[#EEF2F6] text-[15px]" data-testid="debtor-breakdown">
-            <Row label="Original amount owed" value={s.capital} />
-            <Row label="Interest" value={s.interest} />
-            <Row label="Fees and costs (VAT included)" value={s.fees} />
-            <Row label="You have paid" value={-s.paid} />
-          </dl>
-          {s.note && <p className="mt-3 rounded-lg bg-[#F2F5F8] p-3 text-sm text-[#3F5F86]" data-testid="debtor-note">{s.note}</p>}
-        </Card>
-      )}
-
-      {a.pay && !a.closed && s.balance > 0 && (
-        <Card>
-          <Label>How to pay</Label>
-          <p className="mt-1 text-[15px] text-[#5A6B80]">Pay into our trust account. <strong className="text-[#1B2B3E]">Always use your case number as the reference</strong> — that is how your payment reaches your account.</p>
-          <dl className="mt-3 space-y-2 text-[15px]" data-testid="debtor-pay">
-            <Pair label="Account name" value={a.pay.accountName} />
-            {a.pay.bank && <Pair label="Bank" value={a.pay.bank} />}
-            {a.pay.accountNumber && <Pair label="Account number" value={a.pay.accountNumber} />}
-            {a.pay.accountType && <Pair label="Account type" value={a.pay.accountType} />}
-            {a.pay.branchCode && <Pair label="Branch code" value={a.pay.branchCode} />}
-            <div className="flex items-center justify-between gap-3 rounded-lg p-3" style={{ background: '#FBF6EC', border: `1px solid ${GOLD}` }}>
-              <div><dt className="text-sm text-[#5A6B80]">Reference</dt><dd className="text-lg font-bold tracking-wide" style={{ color: NAVY }}>{a.pay.reference}</dd></div>
-              <button type="button" className="flex items-center gap-1.5 text-sm font-medium" style={{ color: NAVY }}
-                onClick={() => { void navigator.clipboard?.writeText(a.pay!.reference).then(() => setCopied(true)).catch(() => {}) }}>
-                <Copy size={15} /> {copied ? 'Copied' : 'Copy'}
-              </button>
+      <main className="flex-1 min-w-0 lg:overflow-y-auto bg-[#F4F4F4]">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
+          {/* THE BAND: the day's photograph, the debtor's name in gold, where they are, and the day's line. */}
+          <header className="relative overflow-hidden rounded-[18px] text-white min-h-[188px] flex" data-side={look.side} style={{ background: bandBackground(look) }}>
+            <div className={`w-full px-6 sm:px-10 py-7 flex flex-wrap items-center justify-between gap-4 ${look.side === 'right' ? 'flex-row-reverse text-right' : ''}`}>
+              <div className="min-w-0">
+                <p className="bf-label text-[11.5px] text-[#C69F54]">{a.name || 'Your account'}</p>
+                <h1 className="text-[30px] sm:text-[36px] leading-tight mt-1.5 [text-shadow:0_1px_12px_rgba(16,31,44,0.45)]">{here.title}</h1>
+                <p className="text-[15px] text-white/90 mt-1 [text-shadow:0_1px_8px_rgba(16,31,44,0.5)]">
+                  Case {a.caseNumber}{a.client ? ` · on behalf of ${a.client}` : ''}{a.clientReference ? ` (their reference ${a.clientReference})` : ''}
+                </p>
+                {section === 'account' && <DayLine className="mt-3 max-w-xl" compact />}
+              </div>
+              {reach && (
+                <a href={`tel:${reach.replace(/\s/g, '')}`}
+                  className="inline-flex items-center gap-2 rounded-[10px] bg-[#101F2C]/45 hover:bg-[#101F2C]/65 border border-white/25 px-4 py-2.5 text-sm font-semibold backdrop-blur-md">
+                  <Phone size={15} /> {a.agent ? `Call ${a.agent.name.split(' ')[0]}` : 'Call us'}
+                </a>
+              )}
             </div>
-          </dl>
-        </Card>
-      )}
+            <PhotoCredit className="absolute right-4 bottom-1.5" />
+          </header>
 
-      {!a.closed && s.balance > 0 && <ArrangementSection token={token} account={a} onSent={() => setRound((n) => n + 1)} />}
-
-      {!a.closed && s.balance > 0 && <ProofOfPayment token={token} />}
-
-      <Statement token={token} />
-
-      {!a.closed && <Tickets token={token} account={a} onSent={() => setRound((n) => n + 1)} />}
-
-      <Card>
-        <Label>Payments we have received</Label>
-        {a.payments.length === 0
-          ? <p className="mt-2 text-[15px] text-[#5A6B80]">None yet. A payment shows here once we have confirmed it, usually within two working days.</p>
-          : (
-            <ul className="mt-2 divide-y divide-[#EEF2F6] text-[15px]" data-testid="debtor-payments">
-              {a.payments.map((p, i) => (
-                <li key={`${p.on}-${i}`} className="flex justify-between py-2"><span>{longDay(p.on)}</span><span className="tabular-nums font-medium">{money(p.amount)}</span></li>
-              ))}
-            </ul>
+          {section === 'account' && <AccountSection a={a} />}
+          {section === 'payments' && (
+            <div className="grid gap-5 lg:grid-cols-2">
+              <PaymentsList a={a} />
+              <div className="space-y-5">
+                <Statement token={token} />
+                {!a.closed && a.summary.balance > 0 && <ProofOfPayment token={token} />}
+              </div>
+            </div>
           )}
-      </Card>
-
-      {a.contact && (a.contact.phone || a.contact.email) && (
-        <p className="px-1 text-center text-sm text-[#5A6B80]">
-          Questions? {a.contact.phone && <>Call us on <a href={`tel:${a.contact.phone.replace(/\s/g, '')}`} className="underline">{a.contact.phone}</a></>}
-          {a.contact.phone && a.contact.email ? ' or email ' : a.contact.email ? 'Email ' : ''}
-          {a.contact.email && <a href={`mailto:${a.contact.email}`} className="underline">{a.contact.email}</a>}
-          , quoting {a.caseNumber}.
-        </p>
-      )}
+          {section === 'arrangement' && (a.closed || a.summary.balance <= 0
+            ? <Card><p className="text-[15px]" style={{ color: NAVY }}>There is nothing to arrange on this account.</p></Card>
+            : <ArrangementSection token={token} account={a} onSent={onRefresh} />)}
+          {section === 'help' && (a.closed ? <Card><p className="text-[15px]" style={{ color: NAVY }}>This account is closed. To ask about it, please call us.</p></Card>
+            : <Tickets token={token} account={a} onSent={onRefresh} />)}
+          {section !== 'account' && <AgentCard a={a} />}
+        </div>
+      </main>
     </div>
   )
 }
 
+/** THE ACCOUNT AT A GLANCE: what is owed, how to pay it, and who looks after it. */
+function AccountSection({ a }: { a: DebtorAccount }) {
+  const [copied, setCopied] = useState(false)
+  const s = a.summary
+  const closedLine = a.closed === 'paid_up' ? 'This account is paid in full and closed. Thank you.'
+    : a.closed === 'settled' ? 'This account was settled and is closed. Thank you.'
+      : a.closed === 'withdrawn' ? `${a.client || 'Our client'} has taken this account back. Please contact them about it.`
+        : null
+  return (
+    <div className="grid gap-5 lg:grid-cols-[1.3fr_1fr]">
+      <div className="space-y-5">
+        {closedLine && <Card><p className="text-[15px] font-semibold" style={{ color: NAVY }} data-testid="debtor-closed">{closedLine}</p></Card>}
+        {a.closed !== 'withdrawn' && (
+          <Card>
+            <Label>What you owe today · {longDay(a.asAt)}</Label>
+            <p className="mt-1 text-[38px] font-bold tabular-nums leading-tight" style={{ color: NAVY, fontFamily: "'Raleway Variable', 'Raleway', sans-serif" }} data-testid="debtor-balance">{money(Math.max(0, s.balance))}</p>
+            {s.balance > 0 && s.settleToday !== s.balance && (
+              <p className="mt-1 text-sm text-[#5A6B80]">To settle in full today: <span className="font-semibold tabular-nums" data-testid="debtor-settle">{money(s.settleToday)}</span>, which includes the fee on the final payment.</p>
+            )}
+            {s.balance < 0 && <p className="mt-1 text-sm text-[#5A6B80]">You have paid {money(-s.balance)} more than you owed. Please call us so we can return it.</p>}
+            <dl className="mt-4 divide-y divide-[#EEF2F6] text-[15px]" data-testid="debtor-breakdown">
+              <Row label="Original amount owed" value={s.capital} />
+              <Row label="Interest" value={s.interest} />
+              <Row label="Fees and costs (VAT included)" value={s.fees} />
+              <Row label="You have paid" value={-s.paid} />
+            </dl>
+            {s.note && <p className="mt-3 rounded-xl bg-[#F2F5F8] p-3 text-sm text-[#3F5F86]" data-testid="debtor-note">{s.note}</p>}
+          </Card>
+        )}
+      </div>
+      <div className="space-y-5">
+        {a.pay && !a.closed && s.balance > 0 && (
+          <Card>
+            <Label>How to pay</Label>
+            <p className="mt-1 text-[15px] text-[#5A6B80]">Pay into our trust account. <strong className="text-[#101F2C]">Always use your case number as the reference</strong> — that is how your payment reaches your account.</p>
+            <dl className="mt-3 space-y-2 text-[15px]" data-testid="debtor-pay">
+              <Pair label="Account name" value={a.pay.accountName} />
+              {a.pay.bank && <Pair label="Bank" value={a.pay.bank} />}
+              {a.pay.accountNumber && <Pair label="Account number" value={a.pay.accountNumber} />}
+              {a.pay.accountType && <Pair label="Account type" value={a.pay.accountType} />}
+              {a.pay.branchCode && <Pair label="Branch code" value={a.pay.branchCode} />}
+              <div className="flex items-center justify-between gap-3 rounded-xl p-3" style={{ background: '#FBF6EC', border: `1px solid ${GOLD}` }}>
+                <div><dt className="text-sm text-[#5A6B80]">Reference</dt><dd className="text-lg font-bold tracking-wide" style={{ color: NAVY }}>{a.pay.reference}</dd></div>
+                <button type="button" className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: NAVY }}
+                  onClick={() => { void navigator.clipboard?.writeText(a.pay!.reference).then(() => setCopied(true)).catch(() => {}) }}>
+                  <Copy size={15} /> {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </dl>
+          </Card>
+        )}
+        <AgentCard a={a} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * YOUR AGENT (Stephan, 3 Nov: "speak to your agent. This is the person assigned to you"). The collector on the account,
+ * with the ways to reach them -- or, where nobody holds the account, the firm's own number and address.
+ */
+function AgentCard({ a }: { a: DebtorAccount }) {
+  const ag = a.agent
+  const phone = ag?.phone ?? a.contact?.phone ?? null
+  const email = ag?.email ?? a.contact?.email ?? null
+  const whatsapp = ag?.whatsapp ?? null
+  if (!ag && !phone && !email) return null
+  const pill = 'inline-flex items-center gap-2 rounded-[10px] border border-[#D5DBE3] px-3 py-2 text-sm font-semibold hover:bg-[#F2F5F8]'
+  return (
+    <Card>
+      <div data-testid="debtor-agent">
+        <Label>{ag ? 'Your agent' : 'Speak to us'}</Label>
+        <div className="mt-3 flex items-center gap-3">
+          <span className="h-12 w-12 shrink-0 rounded-full flex items-center justify-center text-lg font-semibold text-white" style={{ background: C.slate }}>
+            {(ag?.name ?? 'Bredell Ferreira').trim().charAt(0).toUpperCase()}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[17px] font-semibold" style={{ color: NAVY }}>{ag?.name ?? 'Bredell Ferreira'}</p>
+            <p className="text-sm text-[#5A6B80]">{ag ? 'Looks after your account. Quote ' : 'Quote '}{a.caseNumber}{ag ? '.' : ' when you call or write.'}</p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className={pill} style={{ color: NAVY }}><Phone size={15} /> {phone}</a>}
+          {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/\D/g, '').replace(/^0/, '27')}`} target="_blank" rel="noreferrer" className={pill} style={{ color: NAVY }}><MessageCircle size={15} /> WhatsApp</a>}
+          {email && <a href={`mailto:${email}?subject=${encodeURIComponent(a.caseNumber)}`} className={pill} style={{ color: NAVY }}><Mail size={15} /> {email}</a>}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function PaymentsList({ a }: { a: DebtorAccount }) {
+  return (
+    <Card>
+      <Label>Payments we have received</Label>
+      {a.payments.length === 0
+        ? <p className="mt-2 text-[15px] text-[#5A6B80]">None yet. A payment shows here once we have confirmed it, usually within two working days.</p>
+        : (
+          <ul className="mt-2 divide-y divide-[#EEF2F6] text-[15px]" data-testid="debtor-payments">
+            {a.payments.map((p, i) => (
+              <li key={`${p.on}-${i}`} className="flex justify-between py-2.5"><span>{longDay(p.on)}</span><span className="tabular-nums font-semibold" style={{ color: NAVY }}>{money(p.amount)}</span></li>
+            ))}
+          </ul>
+        )}
+    </Card>
+  )
+}
+
 function Row({ label, value }: { label: string; value: number }) {
-  return <div className="flex justify-between py-2"><dt className="text-[#5A6B80]">{label}</dt><dd className="tabular-nums">{value < 0 ? `− ${money(-value)}` : money(value)}</dd></div>
+  return <div className="flex justify-between py-2.5"><dt className="text-[#5A6B80]">{label}</dt><dd className="tabular-nums" style={{ color: NAVY }}>{value < 0 ? `− ${money(-value)}` : money(value)}</dd></div>
 }
 function Pair({ label, value }: { label: string; value: string }) {
-  return <div className="flex justify-between gap-3"><dt className="text-[#5A6B80]">{label}</dt><dd className="text-right font-medium">{value}</dd></div>
+  return <div className="flex justify-between gap-3"><dt className="text-[#5A6B80]">{label}</dt><dd className="text-right font-semibold" style={{ color: NAVY }}>{value}</dd></div>
 }
 
 /* ------------------------------------------------------------------ part 2 */

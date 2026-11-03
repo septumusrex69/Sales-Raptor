@@ -53,6 +53,8 @@ export interface DebtorAccount {
   payments: DebtorPayment[]
   pay: { accountName: string; bank: string | null; branchCode: string | null; accountNumber: string | null; accountType: string | null; reference: string } | null
   contact: { phone: string | null; email: string | null } | null
+  /** The collector assigned to the account; null where nobody holds it (the firm's own number then). */
+  agent: { name: string; phone: string | null; email: string | null; whatsapp: string | null } | null
   /** Part 3: the arrangement in force, if any, and the latest offer (pending, or how it was answered). */
   live: { arrangement: string; amount: number; dueOn: string; missed: boolean } | null
   proposal: {

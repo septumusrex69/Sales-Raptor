@@ -20,6 +20,7 @@ const ACCOUNT = {
   payments: [{ on: '2026-10-23', amount: 100 }],
   pay: { accountName: 'Bredell Ferreira Attorneys Trust Account', bank: 'FNB', branchCode: '250655', accountNumber: '62000000000', accountType: 'Trust', reference: 'RAP-125318' },
   contact: { phone: '012 000 0000', email: 'collections@bredellferreira.co.za' },
+  agent: { name: 'Lungi Dube', phone: '012 000 0001', email: 'lungi@bredellferreira.co.za', whatsapp: '082 000 0001' },
   live: null,
   proposal: null,
   tickets: [],
@@ -60,6 +61,10 @@ try {
   /* A RETURNING DEBTOR'S PAGE FIRST: case number and password (Stephan, 3 Nov: a code "not every single time"). */
   await page.getByTestId('debtor-password').waitFor({ timeout: 20000 })
   t.ok('no staff menu around it -- a debtor never sees Raptor', await page.getByRole('navigation').count() === 0 && !/Dashboard|Diary|Trust/.test(await page.locator('body').innerText()))
+  /* THE CLIENT PORTAL'S DOOR, FOR A DEBTOR (3 Nov, Stephan: "Make the debtors login portal look like the client portal"). */
+  t.ok('the door is the client portal\'s: the day\'s photograph, the logo, the secure label', await page.getByTestId('portal-sign-in-photo').isVisible()
+    && await page.getByTestId('portal-sign-in-logo').isVisible() && /Secure account portal/i.test(await page.getByTestId('portal-page').innerText()))
+  t.ok('...with the day\'s line on it, as the client portal has', await page.getByTestId('portal-day-line').isVisible())
   t.ok('it opens on case number and password, with the code one press away for a first visit', await page.getByLabel('Password').isVisible()
     && /First time here, or forgot your password\? Send me a code/.test(await page.getByTestId('debtor-first-time').innerText()))
   await page.getByTestId('debtor-first-time').click()
@@ -88,6 +93,8 @@ try {
   await page.getByLabel('New password').fill('a good password')
   await page.getByRole('button', { name: 'Save my password and open my account' }).click()
   await page.getByTestId('debtor-account').waitFor({ timeout: 10000 })
+  /* The client portal's opening plays on a sign-in; the page is underneath it. */
+  await page.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
   t.ok('...the password is saved with the session the code opened', asked.some(([a, b, tok]) => a === 'set-password' && b.password === 'a good password' && tok === TOKEN))
   t.ok('the account is read with the session token', asked.some(([a, , tok]) => a === 'account' && tok === TOKEN))
   const view = plain(await page.getByTestId('debtor-account').innerText())
@@ -99,10 +106,17 @@ try {
   t.ok('in duplum is explained', /legal maximum \(the in duplum rule\)/.test(plain(await page.getByTestId('debtor-note').innerText())))
   const pay = plain(await page.getByTestId('debtor-pay').innerText())
   t.ok('how to pay: the trust account, with the case number as the reference', /Trust Account/.test(pay) && /62000000000/.test(pay) && /Reference\s*RAP-125318/.test(pay))
-  t.ok('the payments received are listed', /23 October 2026\s*R 100[.,]00/.test(plain(await page.getByTestId('debtor-payments').innerText())))
   const wide = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
   t.ok('it fits a phone: nothing scrolls sideways', wide)
+  /* YOUR AGENT (3 Nov: "speak to your agent. This is the person assigned to you"). */
+  const agent = plain(await page.getByTestId('debtor-agent').innerText())
+  t.ok(`the debtor's agent is named, with the ways to reach them (${agent.slice(0, 60)}...)`, /Your agent/i.test(agent) && /Lungi Dube/.test(agent) && /012 000 0001/.test(agent) && /WhatsApp/.test(agent))
+  t.ok('...and the band offers to call them', await page.getByRole('link', { name: 'Call Lungi' }).first().isVisible())
   await t.shot(page, 'debtor-portal-account')
+
+  await page.getByTestId('debtor-tab-payments').click()
+  await page.getByTestId('debtor-payments').waitFor()
+  t.ok('the payments received are listed, under Payments & statement', /23 October 2026\s*R 100[.,]00/.test(plain(await page.getByTestId('debtor-payments').innerText())))
 
   /* ---------- part 2: the statement, and a proof of payment ---------- */
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('debtor-statement').click()])
@@ -123,6 +137,7 @@ try {
   await t.shot(page, 'debtor-portal-part2')
 
   /* ---------- part 3: an arrangement, offered ---------- */
+  await page.getByTestId('debtor-tab-arrangement').click()
   await page.getByTestId('debtor-propose').waitFor()
   await page.getByRole('radio', { name: 'Monthly' }).click()
   await page.getByLabel('Amount you can pay').fill('10')
@@ -145,7 +160,9 @@ try {
   await t.shot(page, 'debtor-portal-part3')
 
   /* ---------- part 4: a question, and a dispute ---------- */
+  await page.getByTestId('debtor-tab-help').click()
   const tk = page.getByTestId('debtor-ticket')
+  await tk.waitFor()
   await tk.getByRole('radio', { name: 'Ask a question' }).click()
   await page.getByLabel('Your question').fill('hi')
   await page.getByRole('button', { name: 'Send my question' }).click()
