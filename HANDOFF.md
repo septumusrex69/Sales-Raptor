@@ -31,6 +31,13 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   (`open_interest` subtracts `to_costs` taken): R100 of fees paid on ALP00012 (R120 capital) had left R103,77 of
   interest recoverable on top. 0 staging accounts were in that state. Migration `h16_in_duplum_left_to_take`,
   open_interest prosrc md5 `0f953549...` = file. check-in-duplum 67 (4 sabotages, each red).
+- **ADMINISTRATOR SIGN-IN CODE: ONCE PER PERSON, NOT PER BROWSER (S17, 3 Nov; Stephan: "I don't want a 6-digit code
+  every darn time ... For the first time ... confirm your email address ... But not every single time")**. The device id
+  lives in localStorage, which is per web address -- every new Vercel preview URL and every private window was a "new
+  device" (his staging list: 4x Safari on Mac, two made 2 and 3 Nov). api/_lib/email/loginCode.ts now trusts any new
+  browser for a person who has confirmed on ANY browser before (count of their trusted_devices), recording it like the
+  rest; a first-ever sign-in still gets the code; removing all their devices asks again. Trade-off said in the code: a
+  stolen Administrator password now opens a new browser without the mailbox. check-login-code 107.
 - **THE DEBTOR PORTAL, PART 1 (S17, 3 Nov; Stephan chose case number + code; scope: balance & statement, pay,
   arrangement, dispute)**: `/my-account`. Case number (typed any way -- `normaliseCaseNumber`) + a six-digit code sent
   to the account's OWN primary email (else mobile, by SMS, free to the debtor; never a contact the caller types); the
