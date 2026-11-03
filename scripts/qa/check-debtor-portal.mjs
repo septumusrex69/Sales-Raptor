@@ -7,7 +7,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-debtor-portal.mjs
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   normaliseCaseNumber, codeDestination, debtorCodeSms, debtorSummary, debtorPayments, DEBTOR_CODE_SENT, debtorCodeEmail,
   debtorPopFile, debtorPopClaim, debtorPopNote, debtorPortalLink,
@@ -50,6 +50,12 @@ const mail = debtorCodeEmail({ name: 'Tumelo <b>Patience', code: '123456', caseN
 ok('the code is in the email body, not the subject a lock screen shows', !mail.subject.includes('123456') && mail.html.includes('123456'))
 ok('...and a name cannot write markup into it', !mail.html.includes('<b>Patience'))
 ok('...in the firm\'s design, headed YOUR ACCOUNT, not CLIENT PORTAL', mail.html.includes('YOUR ACCOUNT') && !mail.html.includes('CLIENT PORTAL'))
+/* THE FIRM'S LOGO, NOT ITS NAME TYPED (3 Nov, Stephan: "put the Bredell Ferreira logo there ... more in line with our
+   branding"): the lockup from the sending site, its name as the alt text for a mail app that blocks pictures. */
+const invite = debtorCodeEmail({ name: 'Elsabe', code: '123456', caseNumber: 'RAP-125340', url: 'https://raptor.example/my-account?case=RAP-125340' })
+ok('the email wears the firm\'s logo, from the site that sent it', /<img src="https:\/\/raptor\.example\/brand\/email\/bf-lockup\.png"[^>]*alt="BREDELL FERREIRA"/.test(invite.html))
+ok('...and the file is there to be fetched', existsSync(new URL('../../public/brand/email/bf-lockup.png', import.meta.url)))
+ok('...and the firm\'s own line at the foot', /People &nbsp;\|&nbsp; Process &nbsp;\|&nbsp; Performance/.test(invite.html))
 
 /* ---------- the figures are computeBalance's, worded ---------- */
 const b = { capital: 177.5, interest: 0, fees: 177.5, receiptFees: 0, vat: 23.15, payments: 0, balance: 355, settlementFee: 35.5, settlement: 390.5, cappedBy: 'in duplum', waived: 0, withheld: 26.64 }

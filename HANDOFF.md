@@ -109,6 +109,12 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   from their next load. Stylesheets, photos and lines all kept -- un-archiving is deleting the flag (+ index.html).
   check-themes 161, check-collections-hero 97, e2e performance 124 / login-reset 19 / dashboard-landing 19.
 
+- **PORTAL EMAILS WEAR THE FIRM'S LOGO (S17, 3 Nov; Stephan: "put the Bredell Ferreira logo there ... more in line with
+  our branding")**: portalEmailHtml (every client- and debtor-portal email: codes, invitations) now has a white band with
+  the real lockup (`public/brand/email/bf-lockup.png`, 640px from bf-lockup.jpg, drawn at 320) over the gold rule, the
+  kicker in slate, and "People | Process | Performance" at the foot. The logo is fetched from the sending site
+  (`portalEmailLogoUrl`, or worked out from the button's link); alt text is the name, for clients that block images.
+
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
   1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
      not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.

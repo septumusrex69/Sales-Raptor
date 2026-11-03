@@ -105,7 +105,21 @@ const MAIL_FONT = "Charter, 'Bitstream Charter', Georgia, 'Times New Roman', ser
 
 /* `kicker` is the small line under the firm's name: CLIENT PORTAL here, YOUR ACCOUNT on the debtor portal's mail
    (Raptor H16) -- one design for both, because both are the firm writing about a debt. */
-export function portalEmailHtml(input: { lines: string[]; code?: string; codeNote?: string; button?: { url: string; label: string }; signOff: string; kicker?: string }): string {
+/*
+ * THE FIRM'S LOGO AT THE TOP (Raptor H16, 3 Nov; Stephan, of the debtor's invitation: "put the Bredell Ferreira logo there,
+ * and ... make it more in line with our branding"). The real lockup -- the BF monogram in its gold ring and the wordmark,
+ * navy on white, as the remittance advice and the client report print it -- on a white band with the gold rule under it,
+ * instead of the name typed in gold on navy. public/brand/email/bf-lockup.png, cropped from bf-lockup.jpg at 640px and
+ * drawn at 320 so it is sharp on a retina screen. FETCHED FROM THE SITE THAT SENT THE MAIL (an email cannot carry a
+ * file it can rely on every client to show inline), so `logoUrl` is absolute; where none is known it is worked out from
+ * the button's own link, and where there is neither the name is set in type, as before. ALT TEXT IS THE NAME in the
+ * firm's navy, spaced like the wordmark, so a mail app that blocks pictures still shows a header rather than a hole.
+ */
+export function portalEmailLogoUrl(origin: string): string {
+  return `${origin.replace(/\/+$/, '')}/brand/email/bf-lockup.png`
+}
+
+export function portalEmailHtml(input: { lines: string[]; code?: string; codeNote?: string; button?: { url: string; label: string }; signOff: string; kicker?: string; logoUrl?: string }): string {
   const p = (html: string) => `<p style="margin:0 0 16px;font-family:${MAIL_FONT};font-size:16px;line-height:1.55;color:#1B2B3E">${html}</p>`
   const code = input.code ? `
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px"><tr>
@@ -117,18 +131,23 @@ export function portalEmailHtml(input: { lines: string[]; code?: string; codeNot
             <a href="${escapeHtml(input.button.url)}" style="display:inline-block;padding:13px 26px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#111E2D;text-decoration:none">${escapeHtml(input.button.label)} &rarr;</a>
           </td>
         </tr></table>` : ''
+  const logo = input.logoUrl ?? (() => {
+    try { return input.button ? portalEmailLogoUrl(new URL(input.button.url).origin) : null } catch { return null }
+  })()
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F2F5F8;padding:24px 0"><tr><td align="center">
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#FFFFFF;border:1px solid #D5DBE3;border-radius:12px;overflow:hidden">
-    <tr><td style="background:#111E2D;padding:22px 32px;border-bottom:3px solid #C69F54">
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;letter-spacing:4px;font-weight:bold;color:#C69F54">BREDELL FERREIRA</div>
-      <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;color:#AEBBCB;margin-top:4px">${escapeHtml(input.kicker ?? 'CLIENT PORTAL')}</div>
+    <tr><td style="background:#FFFFFF;padding:26px 32px 20px;border-bottom:3px solid #C69F54">
+      ${logo
+        ? `<img src="${escapeHtml(logo)}" width="320" height="55" alt="BREDELL FERREIRA" style="display:block;width:320px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:15px;letter-spacing:5px;font-weight:bold;color:#111E2D">`
+        : '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;letter-spacing:5px;font-weight:bold;color:#111E2D">BREDELL FERREIRA</div>'}
+      <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:3px;color:#5A6B80;margin-top:14px">${escapeHtml(input.kicker ?? 'CLIENT PORTAL')}</div>
     </td></tr>
     <tr><td style="padding:30px 32px 14px">
         ${input.lines.map(p).join('\n        ')}${code}${button}
         ${p(input.signOff)}
     </td></tr>
     <tr><td style="padding:14px 32px 22px;border-top:1px solid #EEF2F6;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5A6B80">
-      Bredell Ferreira &middot; Debt collection
+      Bredell Ferreira &middot; People &nbsp;|&nbsp; Process &nbsp;|&nbsp; Performance
     </td></tr>
   </table>
 </td></tr></table>`
