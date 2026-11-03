@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Copy, FileDown, Loader2, LogOut, Upload } from 'lucide-react'
-import { DEBTOR_POP_MAX_BYTES, debtorPopFile, normaliseCaseNumber } from '../../lib/debtorPortal'
+import { DEBTOR_DISPUTE_REASONS, DEBTOR_POP_MAX_BYTES, debtorDispute, debtorPopFile, debtorQuestion, normaliseCaseNumber } from '../../lib/debtorPortal'
 import { saveFile } from '../../lib/fileSave'
 import { PROPOSAL_RULES, applicationNote, needsApplication, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
 import type { Arrangement } from '../../lib/arrangements'
 import {
   DebtorSignedOut, debtorToken, fetchDebtorAccount, fetchDebtorStatement, requestDebtorCode, saveDebtorToken,
-  proposeDebtorArrangement, sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
+  askDebtorQuestion, proposeDebtorArrangement, raiseDebtorDispute, sendDebtorProofOfPayment, signOutDebtor, verifyDebtorCode,
   type DebtorAccount,
 } from '../../lib/debtorPortalApi'
 
@@ -14,7 +14,8 @@ import {
  * /my-account -- THE DEBTOR PORTAL (Raptor H16, part 1). Stephan, 2 Nov: a debtor signs in with their case number
  * and a code sent to the email or cellphone the firm already has, and sees what they owe, what they have paid and
  * how to pay; part 2 adds the statement PDF and a proof-of-payment upload; part 3 lets them OFFER an arrangement,
- * which a collector accepts or declines. Disputes come next; nothing here offers them before they exist.
+ * which a collector accepts or declines; part 4 lets them dispute the account in writing or ask a question, each a
+ * ticket on the account.
  *
  * PHONE FIRST. A debtor opens this from an SMS more often than from a desk, so it is one narrow column at every
  * width, large type for the number that matters, and nothing that needs a hover.
@@ -206,6 +207,8 @@ function AccountView({ token, onSignedOut }: { token: string; onSignedOut: () =>
       {!a.closed && s.balance > 0 && <ProofOfPayment token={token} />}
 
       <Statement token={token} />
+
+      {!a.closed && <Tickets token={token} account={a} onSent={() => setRound((n) => n + 1)} />}
 
       <Card>
         <Label>Payments we have received</Label>
@@ -460,6 +463,100 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
         <p className="text-xs text-[#5A6B80]">The first payment must be within {PROPOSAL_RULES.firstPaymentWithinDays} days. Instalments that take longer than {PROPOSAL_RULES.longestMonths} months to settle the account are an application, with a short form about your income and expenses.</p>
       </form>
       {error && <p className="mt-2 text-sm text-red-700" data-testid="debtor-propose-error">{error}</p>}
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------ part 4 */
+
+/**
+ * SOMETHING WRONG, OR A QUESTION? Two different things, chosen first, because they do different things: a dispute is
+ * a formal step -- collection is paused until the firm answers it, and the page says so before they send -- and a
+ * question is a conversation. Below both, what they have already raised and whether it is still open.
+ */
+function Tickets({ token, account, onSent }: { token: string; account: DebtorAccount; onSent: () => void }) {
+  const [mode, setMode] = useState<'dispute' | 'question'>('question')
+  const [reason, setReason] = useState('')
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [sent, setSent] = useState<string | null>(null)
+  const openDispute = account.tickets.some((t) => t.kind === 'dispute' && t.open)
+
+  async function send(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const check = mode === 'dispute' ? debtorDispute({ reason, text }) : debtorQuestion({ text })
+    if (!check.ok) { setError(check.error); return }
+    setBusy(true)
+    try {
+      const r = mode === 'dispute' ? await raiseDebtorDispute(token, { reason, text }) : await askDebtorQuestion(token, text)
+      setSent(mode === 'dispute'
+        ? `We have your dispute${r.ticketNo ? ` (reference ${r.ticketNo})` : ''}. Collection is paused while we look into it, and we will reply in writing.`
+        : `We have your question${r.ticketNo ? ` (reference ${r.ticketNo})` : ''} and will reply, usually within one working day.`)
+      setReason(''); setText('')
+      onSent()
+    } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+  }
+
+  return (
+    <Card>
+      <Label>Something wrong, or a question?</Label>
+      {sent ? (
+        <div className="mt-2">
+          <p className="text-[15px]" style={{ color: NAVY }} data-testid="debtor-ticket-sent">{sent}</p>
+          <button type="button" onClick={() => setSent(null)} className="mt-2 text-sm text-[#5A6B80] underline">Send something else</button>
+        </div>
+      ) : (
+        <form onSubmit={send} className="mt-3 space-y-3" data-testid="debtor-ticket">
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-[#F2F5F8] p-1" role="radiogroup" aria-label="What is it">
+            {(['question', 'dispute'] as const).map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => { setMode(k); setError(null) }}
+                className={`rounded-md px-2 py-2 text-sm font-medium ${mode === k ? 'bg-white shadow-sm' : 'text-[#5A6B80]'}`}
+                style={mode === k ? { color: NAVY } : undefined}>
+                {k === 'question' ? 'Ask a question' : 'I dispute this account'}
+              </button>
+            ))}
+          </div>
+          {mode === 'dispute' && openDispute && (
+            <p className="rounded-lg bg-[#FBF6EC] p-3 text-sm" style={{ color: NAVY }}>You already have an open dispute on this account. To add to it, ask a question instead and we will add it to that dispute.</p>
+          )}
+          {mode === 'dispute' && !openDispute && (
+            <>
+              <p className="text-sm text-[#5A6B80]">A dispute says the debt, or part of it, is wrong. We pause collecting while we look into it, and reply in writing. If you only want to know something, ask a question instead.</p>
+              <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">Why do you dispute it?</span>
+                <select value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Why do you dispute it" className={field}>
+                  <option value="">Choose…</option>
+                  {DEBTOR_DISPUTE_REASONS.map((r) => <option key={r.label} value={r.label}>{r.label}</option>)}
+                </select>
+              </label>
+            </>
+          )}
+          {!(mode === 'dispute' && openDispute) && (
+            <>
+              <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">{mode === 'dispute' ? 'What is wrong?' : 'Your question'}</span>
+                <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} maxLength={2000}
+                  aria-label={mode === 'dispute' ? 'What is wrong' : 'Your question'} className={field} />
+              </label>
+              <button type="submit" disabled={busy} className={button} style={{ background: NAVY }}>
+                {busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : mode === 'dispute' ? 'Send my dispute' : 'Send my question'}
+              </button>
+            </>
+          )}
+        </form>
+      )}
+      {error && <p className="mt-2 text-sm text-red-700" data-testid="debtor-ticket-error">{error}</p>}
+      {account.tickets.length > 0 && (
+        <ul className="mt-4 divide-y divide-[#EEF2F6] text-sm" data-testid="debtor-tickets">
+          {account.tickets.map((t, i) => (
+            <li key={`${t.no ?? i}`} className="flex items-start justify-between gap-3 py-2">
+              <span className="text-[#1B2B3E]">{t.kind === 'dispute' ? 'Dispute' : 'Question'}{t.no ? ` ${t.no}` : ''} · {longDay(t.raisedOn)}
+                <span className="block text-[#5A6B80]">{t.about}</span></span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${t.open ? 'bg-[#FBF6EC] text-[#8A6A2B]' : 'bg-[#EEF2F6] text-[#5A6B80]'}`}>{t.open ? 'Open' : 'Closed'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   )
 }

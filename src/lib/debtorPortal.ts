@@ -189,3 +189,43 @@ export function debtorPopNote(caseNumber: string, claim: { amount: number | null
   const when = claim.paidOn ? ` paid on ${claim.paidOn}` : ''
   return `The debtor sent a proof of payment${what}${when} from the debtor portal (${caseNumber}). It is under Documents. Check it against the trust account before it is treated as paid.`
 }
+
+/* ---------------------------------------------------------------- part 4: a dispute, or a question */
+
+/**
+ * WHY A DEBTOR DISPUTES, IN THEIR WORDS -- each one the firm's own classification underneath (QUERY_CATEGORIES in
+ * disputeCategories.ts, "what every report groups by"), so a dispute raised online is counted with every other. The
+ * debtor never sees "Liability dispute"; the firm never sees "This is not my debt" in a report.
+ */
+export const DEBTOR_DISPUTE_REASONS: { label: string; category: string }[] = [
+  { label: 'The amount is wrong', category: 'Amount dispute' },
+  { label: 'I have already paid', category: 'Payment query' },
+  { label: 'This is not my debt', category: 'Liability dispute' },
+  { label: 'I did not get the goods or service', category: 'Product/service dispute' },
+  { label: 'I cancelled the contract', category: 'Contract/cancellation' },
+  { label: 'Someone else is meant to pay (insurance, medical aid, employer)', category: 'Third-party payment' },
+  { label: 'I am under debt review, sequestration or similar', category: 'Legal/status issue' },
+  { label: 'Something else', category: 'Other' },
+]
+
+/** Enough words for a person to act on. "Other" needs the firm's own minimum (EXPLANATION_MIN_LENGTH, 15). */
+export const DEBTOR_TICKET_MIN = 10
+export const DEBTOR_TICKET_MAX = 2000
+
+export function debtorDispute(input: { reason?: unknown; text?: unknown }): { ok: true; category: string; text: string } | { ok: false; error: string } {
+  const reason = DEBTOR_DISPUTE_REASONS.find((r) => r.label === input.reason)
+  if (!reason) return { ok: false, error: 'Choose why you dispute the account.' }
+  const text = typeof input.text === 'string' ? input.text.trim().slice(0, DEBTOR_TICKET_MAX) : ''
+  const min = reason.category === 'Other' ? 15 : DEBTOR_TICKET_MIN
+  if (text.length < min) return { ok: false, error: 'Tell us what is wrong, in a sentence or two, so we can look into it.' }
+  return { ok: true, category: reason.category, text }
+}
+
+export function debtorQuestion(input: { text?: unknown }): { ok: true; text: string } | { ok: false; error: string } {
+  const text = typeof input.text === 'string' ? input.text.trim().slice(0, DEBTOR_TICKET_MAX) : ''
+  if (text.length < DEBTOR_TICKET_MIN) return { ok: false, error: 'Type your question first.' }
+  return { ok: true, text }
+}
+
+/** A ticket as the debtor sees it: what, when, and whether it is still open -- never who holds it inside the firm. */
+export interface DebtorTicket { no: number | null; kind: 'dispute' | 'question'; raisedOn: string; open: boolean; about: string }

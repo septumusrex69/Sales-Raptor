@@ -200,7 +200,7 @@ export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
  * the firm supervising its own staff. A recommendation to sue is the firm deciding how to run
  * its business. A debtor pays for the first and must never pay for the other two.
  */
-export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import' | 'client'
+export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import' | 'client' | 'debtor'
 
 /**
  * WHAT A REQUEST IS ASKING FOR.
@@ -413,6 +413,25 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     cardTint: 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]',
     submitLabel: 'Raise it',
     freeNote: 'A client asking about their own account is not something the debtor caused.',
+  },
+  /*
+   * THE DEBTOR ASKED US SOMETHING, from the debtor portal (Raptor H16, part 4). Not a dispute -- a dispute is its
+   * own kind and stops the collection sequences -- and not a request, which is the firm asking somebody. Raised by
+   * the portal's server only, so it is not in ESCALATION_KIND_ORDER (nobody raises one from the account page).
+   * NEVER ITEM 3: a debtor asking how to pay, or when, is the conversation the firm wants, not a cost they caused.
+   */
+  debtor: {
+    label: 'The debtor asked a question',
+    blurb: 'Asked from the debtor portal about their own account.',
+    chargeable: false,
+    needsCategory: false,
+    prompt: 'What does the debtor want to know?',
+    placeholder: 'Can I pay on the 25th instead of the 1st?',
+    goesTo: 'anyone',
+    cardLabel: 'Debtor asked',
+    cardTint: 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]',
+    submitLabel: 'Raise it',
+    freeNote: 'A debtor asking about their own account is not a cost they caused.',
   },
 }
 

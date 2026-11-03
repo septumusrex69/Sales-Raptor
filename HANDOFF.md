@@ -66,8 +66,22 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   taken straight to /sign/<token>. The collector's card shows the assessment's state; **Accept is refused until it is
   signed** (acceptProposal, not only the button). check-debtor-statement 15 (both kinds of assessment leave only the
   debtor's boxes open).
-  **Ask Stephan: should item 5 be charged on an arrangement the DEBTOR offered online?** (It is, today -- the
-  collector's Accept is the same press as taking one on the phone.) **Next: part 4 (dispute / question -> ticket).**
+- **DEBTOR PORTAL, PART 4 (S17, 3 Nov): DISPUTE OR QUESTION -> A TICKET.** "I dispute this account": a reason in the
+  debtor's words (`DEBTOR_DISPUTE_REASONS`, each one of the firm's QUERY_CATEGORIES underneath) + what is wrong; filed as
+  a **WRITTEN** dispute (alleged/received today, in_writing -- so workflow_start_on_dispute starts stage B and collection
+  stops), to the client's liaison (else the collector), its sequence planned at once by `sweep` for that account; a
+  second open dispute (one_open_dispute_per_account, 23505) is answered "send a message instead". "Ask a question": a
+  ticket of the NEW kind **'debtor'** ("The debtor asked a question" -- disputeCategories ESCALATION_KINDS, never
+  chargeable, not in ESCALATION_KIND_ORDER, on no client list; account_queries_kind_check widened, verb assembled),
+  with the collector. Both: a note, a bell, and the debtor's ticket list (open/closed). check-debtor-tickets 19, e2e
+  debtor-portal 32.
+
+**THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
+  1. Item 5 (R50) is charged when a collector ACCEPTS an arrangement the debtor offered online (same press as a phone
+     promise). Keep?
+  2. Item 3 (R25) is **NOT** charged on a dispute the debtor raises online (no person in the loop). Charge it?
+  3. `PROPOSAL_RULES`: first payment within 30 days; 12 months online, longer = application. Right numbers?
+  4. Nobody has signed in for real yet: put your own email on a staging test account, open /my-account on the preview.
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

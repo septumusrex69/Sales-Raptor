@@ -22,8 +22,10 @@ const ACCOUNT = {
   contact: { phone: '012 000 0000', email: 'collections@bredellferreira.co.za' },
   live: null,
   proposal: null,
+  tickets: [],
 }
 let offered = null
+const raised = []
 
 const server = await startServer()
 const browser = await chromium.launch()
@@ -42,6 +44,7 @@ try {
     if (action === 'account') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(offered
       ? { ...ACCOUNT, proposal: { status: 'pending', arrangement: offered.arrangement, amount: Number(offered.amount), firstDueOn: offered.firstDueOn, declineReason: null, createdAt: '2026-11-11T08:00:00Z' } }
       : ACCOUNT) })
+    if (action === 'dispute' || action === 'ask') { raised.push([action, body]); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ticketNo: 1041 }) }) }
     if (action === 'propose') { offered = body; return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }) }
     if (action === 'statement') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ fileName: 'Statement RAP-125318 2026-11-11.pdf', pdf: Buffer.from('%PDF-1.7 test').toString('base64') }) })
     if (action === 'proof-of-payment') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
@@ -110,7 +113,7 @@ try {
   await page.getByLabel('Amount you can pay').fill('10')
   await page.getByLabel('First payment date').fill('2026-12-25')
   t.ok('a first payment more than 30 days out is explained, and cannot be sent', /within 30 days/.test(await page.getByTestId('debtor-offer-problem').innerText())
-    && await page.getByRole('button', { name: /Send my/ }).isDisabled())
+    && await page.getByTestId('debtor-propose').getByRole('button', { name: /Send my/ }).isDisabled())
   await page.getByLabel('First payment date').fill('2026-11-25')
   /* R10 a month on R280,50 is 29 months: longer than 12, so an APPLICATION (Stephan, 3 Nov), not a refusal. */
   const app = plain(await page.getByTestId('debtor-offer-application').innerText())
@@ -125,6 +128,28 @@ try {
   t.check('the offer goes to the server as chosen', JSON.stringify(offered), JSON.stringify({ arrangement: 'monthly', amount: '50', firstDueOn: '2026-11-25' }))
   t.ok('...and the page then says it is waiting for us, not agreed', /We have your offer of R 50[.,]00 a month/.test(plain(await page.getByTestId('debtor-offer-pending').innerText())))
   await t.shot(page, 'debtor-portal-part3')
+
+  /* ---------- part 4: a question, and a dispute ---------- */
+  const tk = page.getByTestId('debtor-ticket')
+  await tk.getByRole('radio', { name: 'Ask a question' }).click()
+  await page.getByLabel('Your question').fill('hi')
+  await page.getByRole('button', { name: 'Send my question' }).click()
+  t.ok('a question needs more than a word, said and not sent', /Type your question first/.test(await page.getByTestId('debtor-ticket-error').innerText()) && raised.length === 0)
+  await page.getByLabel('Your question').fill('Can I pay on the 25th instead of the 1st?')
+  await page.getByRole('button', { name: 'Send my question' }).click()
+  await page.getByTestId('debtor-ticket-sent').waitFor()
+  t.ok('a question is sent as written, and acknowledged with its reference', JSON.stringify(raised.at(-1)) === JSON.stringify(['ask', { text: 'Can I pay on the 25th instead of the 1st?' }])
+    && /reference 1041/.test(await page.getByTestId('debtor-ticket-sent').innerText()))
+  await page.getByRole('button', { name: 'Send something else' }).click()
+  await page.getByRole('radio', { name: 'I dispute this account' }).click()
+  t.ok('a dispute says, before it is sent, that collecting pauses and the reply is in writing', /We pause collecting while we look into it, and reply in writing/.test(await page.getByTestId('debtor-ticket').innerText()))
+  await page.getByLabel('Why do you dispute it').selectOption('This is not my debt')
+  await page.getByLabel('What is wrong').fill('I never had an account with Alianna Pharmacy.')
+  await page.getByRole('button', { name: 'Send my dispute' }).click()
+  await page.getByTestId('debtor-ticket-sent').waitFor()
+  t.ok('the dispute goes with the debtor\'s reason and words', JSON.stringify(raised.at(-1)) === JSON.stringify(['dispute', { reason: 'This is not my debt', text: 'I never had an account with Alianna Pharmacy.' }]))
+  t.ok('...and is acknowledged as paused, answered in writing', /Collection is paused while we look into it/.test(await page.getByTestId('debtor-ticket-sent').innerText()))
+  await t.shot(page, 'debtor-portal-part4')
 
   await page.getByRole('button', { name: 'Sign out' }).click()
   await page.getByTestId('debtor-ask').waitFor()

@@ -5,7 +5,7 @@
  * The token lives in sessionStorage -- this tab only -- because a debtor is as likely to be on a borrowed or a
  * shared phone as their own, and a debt is the last thing to leave signed in on somebody else's.
  */
-import { DEBTOR_TOKEN_HEADER, type DebtorPayment, type DebtorSummary } from './debtorPortal'
+import { DEBTOR_TOKEN_HEADER, type DebtorPayment, type DebtorSummary, type DebtorTicket } from './debtorPortal'
 
 const KEY = 'raptor.debtor.token'
 
@@ -52,6 +52,8 @@ export interface DebtorAccount {
     needsAssessment: boolean
     assessment: { state: string; link: string } | null
   } | null
+  /** Part 4: the disputes on the account and the questions asked here, newest first. */
+  tickets: DebtorTicket[]
 }
 export const fetchDebtorAccount = (token: string) => call<DebtorAccount>('account', {}, token)
 export const signOutDebtor = (token: string) => call<{ ok: boolean }>('sign-out', {}, token)
@@ -64,3 +66,7 @@ export const sendDebtorProofOfPayment = (token: string, input: { fileName: strin
 /* Part 3: an arrangement offered. Nothing is agreed until a collector accepts it. */
 export const proposeDebtorArrangement = (token: string, input: { arrangement: string; amount: string; firstDueOn: string; note?: string }) =>
   call<{ ok: boolean; application: boolean; assessmentLink: string | null }>('propose', input, token)
+
+/* Part 4: a written dispute, or a question -- each a ticket on the account. */
+export const raiseDebtorDispute = (token: string, input: { reason: string; text: string }) => call<{ ticketNo: number | null }>('dispute', input, token)
+export const askDebtorQuestion = (token: string, text: string) => call<{ ticketNo: number | null }>('ask', { text }, token)

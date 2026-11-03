@@ -23,8 +23,9 @@ import { balanceAccountFromRow, fetchLedgerRows } from '../../src/lib/storedBala
 import {
   DEBTOR_CODE_MINUTES, DEBTOR_CODE_SENT, DEBTOR_SESSION_DAYS, DEBTOR_TOKEN_HEADER, codeDestination, debtorCodeEmail,
   debtorCodeSms, debtorPayments, debtorSummary, normaliseCaseNumber, type ContactRow,
-  DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote,
+  DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote, debtorDispute, debtorQuestion, type DebtorTicket,
 } from '../../src/lib/debtorPortal.js'
+import { sweep } from './workflow/run.js'
 
 /**
  * /api/debtor/<action> -- THE DEBTOR PORTAL'S SERVER (Raptor H16). See src/lib/debtorPortal.ts.
@@ -34,7 +35,7 @@ import {
  * own debt. The tables behind it have RLS on and no policies, so this is the only door.
  *
  *   anonymous   request-code, verify       (the code, sent to a contact the firm holds, is the authority)
- *   debtor      account, statement, proof-of-payment, propose, sign-out   (x-debtor-token)
+ *   debtor      account, statement, proof-of-payment, propose, dispute, ask, sign-out   (x-debtor-token)
  */
 
 type Handler = (req: VercelRequest, res: VercelResponse, admin: SupabaseClient) => Promise<void>
@@ -231,7 +232,25 @@ const account: Handler = async (req, res, admin) => {
     } : null,
     contact: firm ? { phone: firm.phone ?? null, email: firm.email ?? null } : null,
     ...(await arrangementState(admin, who.accountId)),
+    tickets: await ticketsOf(admin, who.accountId),
   })
+}
+
+/**
+ * THE DEBTOR'S OWN TICKETS: every dispute on the account (theirs, however it was raised -- it is their dispute) and
+ * every question they asked here. Open or closed and when; not who holds it, not the internal stage, not the finding's
+ * working -- the finding reaches them as a letter, which is how the firm answers a dispute.
+ */
+async function ticketsOf(admin: SupabaseClient, accountId: string): Promise<DebtorTicket[]> {
+  const { data } = await admin.from('account_queries').select('ticket_no, kind, status, created_at, category, description')
+    .eq('account_id', accountId).in('kind', ['dispute', 'debtor']).order('created_at', { ascending: false }).limit(20)
+  return ((data ?? []) as Record<string, unknown>[]).map((q) => ({
+    no: q.ticket_no === null || q.ticket_no === undefined ? null : Number(q.ticket_no),
+    kind: q.kind === 'dispute' ? 'dispute' : 'question',
+    raisedOn: new Date(q.created_at as string).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }),
+    open: q.status !== 'closed',
+    about: String(q.description ?? '').slice(0, 140),
+  }))
 }
 
 /* ------------------------------------------------------------------ part 2: the statement, and a proof of payment */
@@ -445,6 +464,93 @@ const propose: Handler = async (req, res, admin) => {
   res.status(200).json({ ok: true, application, assessmentLink: token ? `/sign/${token}` : null })
 }
 
+/* ------------------------------------------------------------------ part 4: a dispute, or a question */
+
+/** Who hears of a debtor's ticket: the owner it is given to, and the collector on the account, or the Administrators. */
+async function ringAbout(admin: SupabaseClient, ids: (string | null)[], type: string, message: string, link: string) {
+  let tell = [...new Set(ids.filter(Boolean) as string[])]
+  if (tell.length === 0) {
+    const { data: admins } = await admin.from('profiles').select('id').eq('role', 'Administrator').eq('status', 'Active')
+    tell = (admins ?? []).map((p) => p.id as string)
+  }
+  if (!tell.length) return
+  const { error } = await admin.from('notifications').insert(tell.map((userId) => ({ user_id: userId, type, message, link })))
+  if (error) console.error(`[debtor] notification not made (${type}): ${error.message}`)
+}
+
+/**
+ * A DISPUTE, IN WRITING. Typed by the debtor on their own account, it is a written dispute exactly as an email is
+ * (raiseQuery's `reached: 'written'`): alleged and received today, in_writing -- so workflow_start_on_dispute starts
+ * the real dispute sequence and the collection sequences stop until the firm gives its finding (CLAUDE.md: a dispute
+ * is one of the three things that take an account out of a workflow). Classified by the debtor's own reason, mapped
+ * to the firm's categories. Given to the client's liaison -- a dispute's finding needs somebody with standing
+ * (ESCALATION_KINDS.dispute.goesTo) -- or the collector where the client has none.
+ *
+ * NO ITEM 3. raiseQuery charges a dispute a collector raises; this one nobody at the firm has looked at yet, and a fee
+ * raised with no person in the loop is the firm's decision to make, not this code's (asked in HANDOFF).
+ */
+const dispute: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const d = debtorDispute(req.body ?? {})
+  if (!d.ok) { res.status(400).json({ error: d.error }); return }
+  const { data: a } = await admin.from('debtor_accounts').select('id, case_number, assigned_to, companies(account_owner_id)').eq('id', who.accountId).maybeSingle()
+  if (!a) { res.status(404).json({ error: 'Your account could not be found. Please call us.' }); return }
+  const liaison = (a.companies as unknown as { account_owner_id: string | null } | null)?.account_owner_id ?? null
+  const owner = liaison ?? (a.assigned_to as string | null) ?? null
+  const { today, now } = await firmNow(admin)
+  const { data: q, error } = await admin.from('account_queries').insert({
+    account_id: a.id, kind: 'dispute', category: d.category, description: d.text, status: 'open',
+    owner_id: owner, stage: liaison ? 'liaison' : 'agent',
+    raised_by: null, raised_by_name: 'The debtor (debtor portal)',
+    alleged_on: today, received_on: today, in_writing: true,
+  }).select('id, ticket_no').single()
+  if (error || !q) {
+    /* one_open_dispute_per_account: a second dispute is added to the first, which a person does. */
+    if (error?.code === '23505') { res.status(409).json({ error: 'You already have an open dispute on this account. Send us a message below and we will add it to that one.' }); return }
+    console.error(`[debtor] dispute not raised on ${a.id}: ${error?.message}`)
+    res.status(500).json({ error: 'Your dispute could not be sent just now. Try again, or call us.' }); return
+  }
+  await admin.from('account_notes').insert({
+    account_id: a.id, query_id: q.id, kind: 'query', source: 'system', author_name: 'Debtor portal',
+    body: `The debtor disputed the account in writing on the debtor portal (${d.category}): ${d.text}`,
+  })
+  await ringAbout(admin, [owner, a.assigned_to as string | null], 'debtor.dispute',
+    `${a.case_number}: the debtor disputed the account on the debtor portal (${d.category}). Collection is paused until it is answered.`, `/queries/${q.id}`)
+  /*
+   * AND THE DISPUTE SEQUENCE GETS ITS DATES NOW, as raiseQuery's nudge does for a collector -- a run arrives from the
+   * trigger with no steps, and left to the morning the debtor's acknowledgement goes out tomorrow. It cannot fail the
+   * dispute: the dispute is saved, and the morning sweep is the backstop.
+   */
+  try { await sweep(admin, { accountIds: [a.id as string], today, now: new Date(now) }) }
+  catch (e) { console.error(`[debtor] dispute sequence not planned for ${a.id}: ${e instanceof Error ? e.message : e}`) }
+  res.status(200).json({ ticketNo: q.ticket_no ?? null })
+}
+
+/** A QUESTION: a ticket of the debtor's own kind, with the collector on the account. Never charged. */
+const ask: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const d = debtorQuestion(req.body ?? {})
+  if (!d.ok) { res.status(400).json({ error: d.error }); return }
+  const { data: a } = await admin.from('debtor_accounts').select('id, case_number, assigned_to').eq('id', who.accountId).maybeSingle()
+  if (!a) { res.status(404).json({ error: 'Your account could not be found. Please call us.' }); return }
+  const { data: q, error } = await admin.from('account_queries').insert({
+    account_id: a.id, kind: 'debtor', description: d.text, status: 'open',
+    owner_id: a.assigned_to ?? null, stage: 'agent', raised_by: null, raised_by_name: 'The debtor (debtor portal)',
+  }).select('id, ticket_no').single()
+  if (error || !q) {
+    console.error(`[debtor] question not raised on ${a.id}: ${error?.message}`)
+    res.status(500).json({ error: 'Your question could not be sent just now. Try again, or call us.' }); return
+  }
+  await admin.from('account_notes').insert({
+    account_id: a.id, query_id: q.id, kind: 'query', source: 'system', author_name: 'Debtor portal',
+    body: `The debtor asked on the debtor portal: ${d.text}`,
+  })
+  await ringAbout(admin, [a.assigned_to as string | null], 'debtor.question', `${a.case_number}: the debtor asked a question on the debtor portal: ${d.text.slice(0, 120)}`, `/queries/${q.id}`)
+  res.status(200).json({ ticketNo: q.ticket_no ?? null })
+}
+
 const signOut: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
   if (who) await admin.from('debtor_portal_sessions').delete().eq('id', who.sessionId)
@@ -458,6 +564,8 @@ export const DEBTOR_ROUTES: Record<string, Handler> = {
   statement,
   'proof-of-payment': proofOfPayment,
   propose,
+  dispute,
+  ask,
   'sign-out': signOut,
 }
 

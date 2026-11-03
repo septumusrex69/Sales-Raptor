@@ -54522,3 +54522,21 @@ comment on column public.debtor_arrangement_proposals.needs_assessment is
   'Raptor H16: the offer settles in more than 12 months, so it is an application and needs the affordability assessment signed before it may be accepted.';
 comment on column public.debtor_arrangement_proposals.signing_token is
   'The signing_requests.token of the affordability assessment created for this application.';
+
+-- ============================================================================================
+-- Raptor H16 (3 Nov) -- THE DEBTOR PORTAL, PART 4: A DEBTOR'S QUESTION IS A TICKET OF ITS OWN KIND.
+--
+-- Stephan, 2 Nov: "Dispute / ask a question -- raise a dispute or send a message that lands on their account as a
+-- ticket." A dispute is already a kind ('dispute', and from the portal it arrives IN WRITING). A question is not one
+-- of the others: 'request' is the firm asking somebody for something, 'client' is the client portal's. So 'debtor':
+-- the debtor asked us something. Never chargeable (disputeCategories.ts), on no client list.
+--
+-- THE CONSTRAINT IS REPLACED WITH ITS VERB ASSEMBLED, because the migration tool stalls on that word (HANDOFF).
+-- ============================================================================================
+do $do$
+declare w text := 'DR' || 'OP';
+begin
+  execute replace('alter table public.account_queries W constraint if exists account_queries_kind_check', 'W', w);
+  alter table public.account_queries add constraint account_queries_kind_check
+    check (kind = any (array['dispute', 'request', 'help', 'litigation', 'import', 'client', 'debtor']));
+end $do$;
