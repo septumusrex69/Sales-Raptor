@@ -34,7 +34,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const page = await context.newPage()
   await stubSupabase(page, [])
-  await page.route('**/api/debtor/*', async (route) => {
+  const answer = async (route) => {
     const action = route.request().url().split('/api/debtor/')[1]
     const body = route.request().postDataJSON() ?? {}
     asked.push([action, body, route.request().headers()['x-debtor-token'] ?? null])
@@ -55,7 +55,8 @@ try {
       : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That case number and password do not match. First time here, or forgot your password? Send yourself a code.' }) })
     if (action === 'sign-out') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     return route.fulfill({ status: 404, body: '{}' })
-  })
+  }
+  await page.route('**/api/debtor/*', answer)
 
   await page.goto(`http://127.0.0.1:${PORT}/my-account`, { waitUntil: 'domcontentloaded' })
   /* A RETURNING DEBTOR'S PAGE FIRST: case number and password (Stephan, 3 Nov: a code "not every single time"). */
@@ -65,7 +66,7 @@ try {
   t.ok('the door is the client portal\'s: the day\'s photograph, the logo, the secure label', await page.getByTestId('portal-sign-in-photo').isVisible()
     && await page.getByTestId('portal-sign-in-logo').isVisible() && /Secure account portal/i.test(await page.getByTestId('portal-page').innerText()))
   t.ok('...with the day\'s line on it, as the client portal has', await page.getByTestId('portal-day-line').isVisible())
-  t.ok('it opens on case number and password, with the code one press away for a first visit', await page.getByLabel('Password').isVisible()
+  t.ok('it opens on case number and password, with the code one press away for a first visit', await page.getByLabel('Password', { exact: true }).isVisible()
     && /First time here, or forgot your password\? Send me a code/.test(await page.getByTestId('debtor-first-time').innerText()))
   await page.getByTestId('debtor-first-time').click()
   await page.getByTestId('debtor-ask').waitFor()
@@ -89,7 +90,7 @@ try {
   await page.getByRole('button', { name: 'Continue' }).click()
   /* THE CODE ONCE, THEN A PASSWORD. */
   await page.getByTestId('debtor-choose-password').waitFor({ timeout: 10000 })
-  t.ok('after the first code the debtor chooses a password, and is told it replaces the code', /next time you sign in with your case number and this password, and no code/.test(await page.getByTestId('debtor-choose-password').innerText()))
+  t.ok('after the first code the debtor chooses a password, and is told it replaces the code', /next time you sign in with your case number and this password, and no code/.test(await page.getByTestId('portal-sign-in').innerText()))
   await page.getByLabel('New password').fill('a good password')
   await page.getByRole('button', { name: 'Save my password and open my account' }).click()
   await page.getByTestId('debtor-account').waitFor({ timeout: 10000 })
@@ -98,7 +99,7 @@ try {
   t.ok('...the password is saved with the session the code opened', asked.some(([a, b, tok]) => a === 'set-password' && b.password === 'a good password' && tok === TOKEN))
   t.ok('the account is read with the session token', asked.some(([a, , tok]) => a === 'account' && tok === TOKEN))
   const view = plain(await page.getByTestId('debtor-account').innerText())
-  t.ok('who and whose: name, case, the client and their reference', /Tumelo Patience Molefe/.test(view) && /Case RAP-125318 · on behalf of Alianna Pharmacy \(their reference ALIANNAPH\/30182\)/.test(view))
+  t.ok('who and whose: name, case, the client and their reference', /Tumelo Patience Molefe/i.test(view) && /Case RAP-125318 · on behalf of Alianna Pharmacy \(their reference ALIANNAPH\/30182\)/.test(view))
   /* en-ZA in Chromium writes R 255,00 and Node R 255.00 (HANDOFF: the separators differ), so either mark. */
   t.ok('what they owe, large', /^R 255[.,]00$/.test(plain(await page.getByTestId('debtor-balance').innerText())))
   t.ok('what settling today costs, and why it differs', /To settle in full today: R 280[.,]50/.test(view) && /fee on the final payment/.test(view))
@@ -190,17 +191,38 @@ try {
   /* ---------- the next visit: case number and password, NO code ---------- */
   const codesBefore = asked.filter(([a]) => a === 'request-code').length
   await page.getByLabel('Case number').fill('RAP-125318')
-  await page.getByLabel('Password').fill('wrong one')
+  await page.getByLabel('Password', { exact: true }).fill('wrong one')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByTestId('debtor-error').waitFor()
   t.ok('a wrong password is said the same way whatever the reason', /case number and password do not match/.test(await page.getByTestId('debtor-error').innerText()))
-  await page.getByLabel('Password').fill('a good password')
+  await page.getByLabel('Password', { exact: true }).fill('a good password')
   await page.getByLabel('Keep me signed in on this device').check()
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByTestId('debtor-account').waitFor({ timeout: 10000 })
   t.ok('the next visit signs in with the password -- no code asked for', asked.filter(([a]) => a === 'request-code').length === codesBefore)
   t.ok('..."keep me signed in" keeps it in this browser, past the tab', (await page.evaluate(() => localStorage.getItem('raptor.debtor.token'))) === TOKEN)
   await context.close()
+
+  /* ---------- ON AN IPAD, LANDSCAPE: the client portal's door and its sidebar (Stephan works on one) ---------- */
+  {
+    const wide = await browser.newContext({ viewport: { width: 1366, height: 1024 } })
+    const p2 = await wide.newPage()
+    await stubSupabase(p2, [])
+    await p2.route('**/api/debtor/*', answer)
+    await p2.goto(`http://127.0.0.1:${PORT}/my-account`, { waitUntil: 'domcontentloaded' })
+    await p2.getByTestId('debtor-password').waitFor({ timeout: 20000 })
+    t.ok('on an iPad the door is the split screen: the day\'s photograph beside the form', await p2.getByTestId('portal-sign-in-photo').isVisible() && await p2.getByTestId('portal-support').isVisible())
+    await t.shot(p2, 'debtor-portal-ipad-sign-in')
+    await p2.getByLabel('Case number').fill('RAP-125318')
+    await p2.getByLabel('Password', { exact: true }).fill('a good password')
+    await p2.getByRole('button', { name: 'Sign in' }).click()
+    await p2.getByTestId('debtor-account').waitFor({ timeout: 10000 })
+    await p2.getByTestId('portal-splash').waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
+    t.ok('...and inside, the client portal\'s navy sidebar with the four sections', await p2.getByTestId('debtor-sidebar').isVisible()
+      && await p2.getByTestId('debtor-nav-arrangement').isVisible() && await p2.getByTestId('debtor-nav-help').isVisible())
+    await t.shot(p2, 'debtor-portal-ipad-account')
+    await wide.close()
+  }
 } catch (e) {
   try { const pg = browser.contexts().flatMap((c) => c.pages())[0]; if (pg) await t.shot(pg, 'debtor-portal-where-it-stopped') } catch { /* */ }
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message.split('\n')[0] : e})`, false)

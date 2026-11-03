@@ -115,6 +115,16 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   kicker in slate, and "People | Process | Performance" at the foot. The logo is fetched from the sending site
   (`portalEmailLogoUrl`, or worked out from the button's link); alt text is the name, for clients that block images.
 
+- **THE DEBTOR PORTAL WEARS THE CLIENT PORTAL (S17, 3 Nov; Stephan: "Make the debtors login portal look like the client
+  portal ... speak to your agent. This is the person assigned to you. It's exactly the same, except when it's a client,
+  it's a debtor")**. SHARED, NOT COPIED: `src/pages/portal/portalLook.tsx` (C, HEAD, BODY, Field, the day's look +
+  DayLine + PhotoCredit, moved out of PortalPage) and `PortalSignInFrame.tsx` (the door; DOOR styles) -- the client
+  portal now draws through both (e2e client-portal 108, unchanged). DebtorPortalPage: the same door ("Your account",
+  "Secure account portal"), PortalSplash arcs on sign-in, the navy sidebar that folds, the band with the day's photograph,
+  the portal cards/type (.portal-brand); sections Your account / Payments & statement / Arrangement / Questions &
+  disputes; **Your agent** = the collector on the account (api `agentOf`: name, phone, email, WhatsApp), the firm's number
+  where nobody holds it; "Call <first name>" in the band and sidebar. e2e debtor-portal 44 (phone + iPad landscape).
+
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
   1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
      not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.
