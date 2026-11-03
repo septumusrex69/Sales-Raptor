@@ -156,7 +156,9 @@ const sender = read('api/_lib/email/sendAsUser.ts')
 const route = read('api/_lib/email/send.ts')
 
 ok('the shared sender exists', /export async function sendAsUser/.test(sender))
-ok('the compose box sends through it', /sendAsUser\(admin, caller\.id,/.test(route))
+/* As the caller, or (S13, Ryno's letter of demand) as the firm's central mailbox when asked and allowed --
+   senderId starts as the caller and changes only through centralMailboxFor. Either way, through sendAsUser. */
+ok('the compose box sends through it', /sendAsUser\(admin, senderId,/.test(route) && /let senderId = caller\.id/.test(route))
 ok('...and so does the runner, unattended', /sendAsUser\(admin, collector!?\.id,/.test(runner))
 /*
  * AND NEITHER BUILDS ITS OWN TRANSPORT. Two nodemailer calls is two senders however they are

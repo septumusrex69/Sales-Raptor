@@ -1,0 +1,91 @@
+/*
+ * THE LETTER OF DEMAND SHEET -- Ryno's own styles from his builder (3 Nov), scoped under .lod so nothing
+ * here can reach the rest of Raptor. Everything on the sheet is in POINTS, as he set it, because the PDF
+ * is drawn from these exact measurements (demandLetterPdf.ts): a pixel here is three quarters of a point
+ * there, and nothing else needs converting.
+ *
+ * The page around the sheet is Raptor's own (Tailwind); only the paper is his.
+ */
+@font-face { font-family: 'LOD Serif'; src: url('/letters/demand/NotoSerif-Regular.ttf') format('truetype'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'LOD Serif'; src: url('/letters/demand/NotoSerif-SemiBold.ttf') format('truetype'); font-weight: 600; font-display: block; }
+@font-face { font-family: 'LOD Serif'; src: url('/letters/demand/NotoSerif-Bold.ttf') format('truetype'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'LOD Sans'; src: url('/letters/demand/Inter-Regular.ttf') format('truetype'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'LOD Sans'; src: url('/letters/demand/Inter-SemiBold.ttf') format('truetype'); font-weight: 600; font-display: block; }
+
+.lod {
+  --navy: #1F2E3D; --ink: #2B2F33; --gold: #B8996A; --gold-dk: #9A7B4C; --cream: #FAF6EF; --rule: #E6DCCB; --p-muted: #6B7178;
+  --serif: 'LOD Serif', Georgia, serif; --sans: 'LOD Sans', Inter, system-ui, sans-serif;
+}
+.lod .preview { min-width: 0; overflow: hidden; }
+.lod .fit { margin: 0 auto; position: relative; }
+.lod .stack { position: absolute; left: 0; top: 0; transform-origin: 0 0; display: flex; flex-direction: column; gap: 12px; }
+.lod .doclab { font: 600 11px var(--sans); letter-spacing: .14em; color: #64748b; padding-top: 22px; }
+.lod .doclab:first-child { padding-top: 0; }
+.lod .sheet {
+  width: 595.28pt; min-height: 841.89pt; position: relative; flex: none; box-sizing: border-box;
+  background: #fff url('/letters/demand/letterhead.jpg') repeat-y 0 0 / 595.28pt 841.89pt;
+  box-shadow: 0 1px 2px rgba(20,30,40,.12), 0 8px 30px rgba(20,30,40,.14);
+  padding: 94pt 62pt 0 57pt; color: var(--ink); font-family: var(--serif); font-size: 9.5pt; line-height: 13.9pt;
+  /* The PDF draws without ligatures (demandLetterPdf.ts), so the sheet is set without them too. */
+  font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
+.lod .sheet * { box-sizing: border-box; }
+.lod .pgmark { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #C9CED4; }
+.lod .pgmark span { position: absolute; right: 8px; top: -9px; background: #fff; padding: 0 6px; font: 600 9px var(--sans); letter-spacing: .12em; color: #8A9098; }
+.lod .blk { margin: 0; }
+.lod .lab { font-family: var(--sans); font-weight: 600; font-size: 6.6pt; line-height: 9pt; letter-spacing: 1.6pt; color: var(--gold-dk); }
+.lod .meta { display: grid; grid-template-columns: 96pt 216pt 164pt; margin-bottom: 16pt; }
+.lod .meta .v { font-size: 9.4pt; line-height: 13pt; margin-top: 2pt; }
+.lod .meta .v b, .lod .b, .lod .sheet b { font-weight: 700; }
+.lod .title { font-weight: 700; font-size: 19.5pt; line-height: 22pt; color: var(--navy); margin-bottom: 1pt; }
+.lod .sub { font-size: 7.4pt; letter-spacing: 2pt; }
+.lod .rule { height: .8pt; background: var(--gold); margin: 5pt 0 9pt; }
+.lod .panel { display: grid; grid-template-columns: 176pt 160pt 140pt; background: var(--cream); margin-bottom: 11pt; }
+.lod .panel > div { padding: 8pt 8pt 9pt 13pt; border-left: .6pt solid var(--rule); }
+.lod .panel > div:first-child { border-left: 3pt solid var(--gold); }
+.lod .big { font-weight: 700; font-size: 17pt; line-height: 20pt; color: var(--navy); margin-top: 3pt; }
+.lod .mid { font-weight: 600; font-size: 10.5pt; line-height: 13.5pt; color: var(--navy); margin-top: 3pt; }
+.lod .note { font-size: 8.4pt; line-height: 12pt; color: var(--p-muted); }
+.lod p.blk { margin: 0 0 6pt; }
+.lod .inv { position: relative; margin-bottom: 21pt; }
+.lod .row { display: grid; grid-template-columns: 76pt 66pt 66pt 188pt 80pt; align-items: center; position: relative; }
+.lod .row > div { padding: 4.2pt 8pt; font-size: 8.5pt; line-height: 11.2pt; min-width: 0; overflow-wrap: anywhere; }
+.lod .row > div:nth-child(5) { text-align: right; }
+.lod .th { background: var(--navy); }
+.lod .th > div { font-family: var(--sans); font-weight: 600; font-size: 6.8pt; line-height: 9pt; letter-spacing: .4pt; color: #fff; }
+.lod .irow { border-bottom: .4pt solid var(--rule); background: #fff; }
+.lod .irow.alt { background: var(--cream); }
+.lod .irow > div:first-child { font-weight: 700; }
+.lod .tot { background: var(--navy); border-top: 2pt solid var(--gold); display: flex; justify-content: space-between; align-items: center; padding: 6pt 8pt; }
+.lod .tot .lab { color: #fff; font-size: 7.6pt; letter-spacing: .4pt; }
+.lod .tot .amt { font-weight: 700; font-size: 10.5pt; line-height: 13pt; color: #fff; }
+.lod .need { margin-bottom: 11pt; }
+.lod .need .lab { font-size: 7pt; letter-spacing: 1.8pt; margin-bottom: 5pt; }
+.lod .opts { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1.6pt solid var(--gold); }
+.lod .opts > div { padding: 7pt 14pt 0 0; }
+.lod .opts .n { font-family: var(--sans); font-weight: 600; font-size: 7pt; line-height: 9pt; letter-spacing: 1.4pt; color: var(--gold-dk); margin-bottom: 2pt; }
+.lod .opts h3 { margin: 0 0 3pt; font-weight: 700; font-size: 9.6pt; line-height: 12pt; color: var(--navy); }
+.lod .opts p { margin: 0; font-size: 8.3pt; line-height: 11.2pt; }
+.lod .sig .name { font-weight: 700; color: var(--navy); margin-top: 22pt; }
+.lod .sig .for { font-size: 8.8pt; color: var(--p-muted); }
+/* A field nobody has filled: gold on screen, plain in the PDF (.exporting). */
+.lod .calc.empty { color: #A0782F; background: rgba(184,153,106,.18); border-radius: 2px; }
+.lod .exporting .pgmark, .lod .exporting .ui { display: none; }
+.lod .exporting .calc.empty { background: none; color: inherit; }
+/* A paragraph that can be reworded: a soft outline on hover, on screen only. */
+.lod .editable { cursor: text; border-radius: 2px; }
+.lod .editable:hover { outline: 1px dashed rgba(184,153,106,.8); outline-offset: 2px; }
+.lod .exporting .editable:hover { outline: none; }
+/* The acknowledgement page. */
+.lod .ack .meta { grid-template-columns: 96pt 214pt 166pt; }
+.lod .intro { font-size: 8.8pt; line-height: 12.6pt; color: var(--p-muted); }
+.lod .ticks { display: grid; gap: 7pt; margin: 5pt 0 13pt; }
+.lod .tick { display: grid; grid-template-columns: 16pt 1fr; align-items: start; }
+.lod .box { width: 9pt; height: 9pt; border: .8pt solid var(--navy); margin-top: 2.4pt; }
+.lod .lines { margin-bottom: 13pt; }
+.lod .line { height: 19pt; border-bottom: .6pt solid #A9AEB4; }
+.lod .signed { display: grid; grid-template-columns: 1fr 132pt; gap: 0 18pt; }
+.lod .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12pt 16pt; }
+.lod .fields .line { height: 22pt; }
+.lod .stamp { border: .6pt solid var(--rule); display: flex; align-items: flex-start; justify-content: center; padding-top: 7pt; min-height: 120pt; }
+.lod .fineprint { background: var(--cream); padding: 7pt 10pt; font-size: 8pt; line-height: 11.4pt; color: var(--p-muted); margin-top: 14pt; }
