@@ -142,9 +142,10 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
      Administrator's connected mailbox (codeSenderOrder) -- Camille's. A shared address needs the mailbox to exist and
      be connected in Raptor (Settings > Email) by somebody who can sign into it; then it is a firm setting and the
      sender order puts it before the Administrators. Not built: waiting on the mailbox.
-  7. **Interest on Stephan's Test Client**: 86 of its 96 open accounts carry interest_rate_annual 0 (the client's
-     default is 24%), so no interest accrues -- Elsabe (RAP-125340) is one. The real clients' accounts all carry a rate.
-     Set the test accounts to 24%? Staging test data, but it changes 86 balances: asked, not done.
+  7. ~~Interest on Stephan's Test Client~~ -- **DONE 4 Nov ("Yes, 24%. Unless otherwise ... indicated")**: the 86 OPEN
+     accounts at 0% set to the client's default 24% on staging (closed ones left alone). Elsabe RAP-125340: open_interest
+     now R 4 406,21 over 722 days (in duplum still caps it with the fees on the page). New accounts already take the
+     client's rate unless the handover says otherwise (handoverDraft / newDebtor) -- the seed had written 0.
 - **DEBTOR PORTAL, 4 NOV (S17, after Stephan's first real sign-in):**
   - **Sign in with case number, ID number or email** (Stephan: "with your ID number ... your email address, or your
     case number. Like I couldn't sign in now"). The page refused anything but a case number before asking the server
