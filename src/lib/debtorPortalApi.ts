@@ -34,12 +34,13 @@ async function call<T>(action: string, body: Record<string, unknown> = {}, token
   return out
 }
 
-export const requestDebtorCode = (caseNumber: string) => call<{ message: string }>('request-code', { caseNumber })
-export const verifyDebtorCode = (caseNumber: string, code: string, remember: boolean, reset = false) =>
-  call<{ token: string; expiresAt: string; needsPassword: boolean }>('verify', { caseNumber, code, remember, reset })
+/* `login` is whatever the debtor typed -- a case number, an ID number or an email address (debtorLogin decides which). */
+export const requestDebtorCode = (login: string) => call<{ message: string }>('request-code', { login })
+export const verifyDebtorCode = (login: string, code: string, remember: boolean, reset = false) =>
+  call<{ token: string; expiresAt: string; needsPassword: boolean }>('verify', { login, code, remember, reset })
 /* A code once, a password after (Stephan, 3 Nov). */
-export const signInDebtor = (caseNumber: string, password: string, remember: boolean) =>
-  call<{ token: string; expiresAt: string }>('sign-in', { caseNumber, password, remember })
+export const signInDebtor = (login: string, password: string, remember: boolean) =>
+  call<{ token: string; expiresAt: string }>('sign-in', { login, password, remember })
 export const setDebtorPassword = (token: string, password: string) => call<{ ok: boolean }>('set-password', { password }, token)
 
 export interface DebtorAccount {

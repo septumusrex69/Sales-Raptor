@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import {
   normaliseCaseNumber, codeDestination, debtorCodeSms, debtorSummary, debtorPayments, DEBTOR_CODE_SENT, debtorCodeEmail,
-  debtorPopFile, debtorPopClaim, debtorPopNote, debtorPortalLink,
+  debtorPopFile, debtorPopClaim, debtorPopNote, debtorPortalLink, debtorLogin,
 } from '../../src/lib/debtorPortal.ts'
 import { stripSqlComments } from './sqlComments.mjs'
 
@@ -89,6 +89,19 @@ for (const t of ['debtor_portal_codes', 'debtor_portal_sessions', 'debtor_portal
   ok(`...and no policy at all -- the portal's server is the only door`, !new RegExp(`create policy[^;]* on public\\.${t}\\b`).test(schema))
 }
 const api = read('api/_lib/debtorPortal.ts')
+
+/* SIGN IN WITH WHAT YOU HAVE (Stephan, 4 Nov: "with your ID number ... your email address, or your case number"). */
+const L = (x) => JSON.stringify(debtorLogin(x))
+ok('a case number is a case number, however it is typed', L(' rap 125318 ') === JSON.stringify({ kind: 'case', value: 'RAP-125318' }))
+ok('an email is an email, lower-cased', L(' Stephan@BredellFerreira.co.za ') === JSON.stringify({ kind: 'email', value: 'stephan@bredellferreira.co.za' }))
+ok('an ID number is thirteen digits, spaces and dashes ignored', L('800101 5009 087') === JSON.stringify({ kind: 'id', value: '8001015009087' }))
+ok('...and anything else is nothing, so the page says what to type', debtorLogin('blah') === null && debtorLogin('') === null && debtorLogin(42) === null && debtorLogin('12') === null)
+ok('the server reads the login the same way on all three doors',
+  ['const requestCode', 'const verify', 'const signIn'].every((h) => {
+    const i = api.indexOf(`${h}: Handler`); return i >= 0 && /debtorLogin\((req\.)?body/.test(api.slice(i, i + 400)) || /debtorLogin\(\(req\.body/.test(api.slice(i, i + 400))
+  }))
+ok('a password opens only the account it belongs to, and a wrong one counts against each it was tried on',
+  /const matched = open\.filter\(\(l\) => passwordMatches\(password/.test(api) && /for \(const l of open\)[\s\S]{0,200}password_failures/.test(api))
 /* THE ONLY THING THE CALLER MAY SAY IS THE CASE NUMBER. Read as "every read of the request in this step is
    .caseNumber" rather than "no .email", because the first version of this assertion looked for `body.email` and
    passed a sabotage that read `(req.body ?? {}).email` -- a code sent wherever the caller asked. */
@@ -96,8 +109,11 @@ const askStep = api.slice(api.indexOf('const requestCode: Handler'), api.indexOf
 const bodyReads = askStep.match(/req\.body[^\n]{0,24}/g) ?? []
 ok(`the code goes to the account's own contact (${bodyReads.length} read(s) of the request, all the case number)`,
   askStep.length > 0 && /const dest = codeDestination\(\(contacts \?\? \[\]\) as ContactRow\[\]\)/.test(askStep)
-  && bodyReads.length > 0 && bodyReads.every((r) => /^req\.body \?\? \{\}\)\.caseNumber/.test(r)))
-ok('...and an unknown case gets the same answer as a real one',
+  && bodyReads.length > 0 && bodyReads.every((r) => /^req\.body \?\? \{\}\)\.(login|caseNumber)\b/.test(r)))
+/* A case number, ID number or email (4 Nov) names the account; the request still never names where the code goes. */
+ok('...and a code goes only where exactly one account matches what was typed',
+  /const acct = found\.length === 1 \? found\[0\] : null/.test(askStep) && /eq\('account_id', acct\.id\)/.test(askStep))
+ok('...and an unknown account gets the same answer as a real one',
   /if \(!acct \|\| !dest\) \{[\s\S]{0,200}res\.status\(200\)\.json\(\{ message: DEBTOR_CODE_SENT \}\)/.test(api))
 ok('only the hash of the code and of the token is stored', /code_hash: keyedHash\('debtor-code'/.test(api) && /token_hash: keyedHash\('debtor-session', token\)/.test(api))
 /* Everything a DEBTOR calls -- i.e. the file without the staff invite, where a collector names the account and
@@ -118,9 +134,9 @@ const verifyStep = api.slice(api.indexOf('const verify: Handler'), api.indexOf('
 ok('a code confirms the debtor once, and asks for a password where there is none (or they forgot it)',
   /confirmed_at: new Date\(t\)\.toISOString\(\)/.test(verifyStep) && /needsPassword: !login\?\.password_hash \|\| body\.reset === true/.test(verifyStep))
 const signInStep = api.slice(api.indexOf('const signIn: Handler'), api.indexOf('const setPassword: Handler'))
-ok('the everyday sign-in is case number and password, checked against the scrypt hash', /passwordMatches\(password, login\.password_hash as string\)/.test(signInStep))
-ok('...one answer for a case that is not ours, no password yet, or a wrong one', (signInStep.match(/DEBTOR_PASSWORD_WRONG/g) ?? []).length === 1
-  && /if \(!acct \|\| !login\?\.password_hash \|\| !passwordMatches/.test(signInStep))
+ok('the everyday sign-in is case number, ID number or email, and password, checked against the scrypt hash', /passwordMatches\(password, l\.password_hash as string\)/.test(signInStep))
+ok('...one answer for an account that is not ours, no password yet, or a wrong one', (signInStep.match(/DEBTOR_PASSWORD_WRONG/g) ?? []).length === 1
+  && /\.filter\(\(l\) => l\.password_hash\)/.test(signInStep) && /if \(matched\.length === 0\)/.test(signInStep))
 ok('...and five wrong in a row lock it (the client portal\'s numbers)', /PORTAL_PASSWORD_FAILURES/.test(signInStep) && /password_locked_until/.test(signInStep))
 const setStep = api.slice(api.indexOf('const setPassword: Handler'), api.indexOf('const invite: Handler'))
 ok('a password is stored as its hash, never as typed, and only from a signed-in session', /requireDebtor\(req, admin\)/.test(setStep) && /password_hash: hashPassword\(password as string\)/.test(setStep) && /portalPasswordProblem\(password, null\)/.test(setStep))

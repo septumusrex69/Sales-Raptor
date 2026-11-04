@@ -3,7 +3,7 @@ import {
   ArrowRight, ChevronsLeft, ChevronsRight, Copy, Eye, EyeOff, FileDown, FileText, Handshake, Hash, KeyRound, LifeBuoy, Loader2,
   Lock, LogOut, Mail, MessageCircle, Phone, Upload, Wallet,
 } from 'lucide-react'
-import { DEBTOR_DISPUTE_REASONS, DEBTOR_POP_MAX_BYTES, debtorDispute, debtorPopFile, debtorQuestion, normaliseCaseNumber } from '../../lib/debtorPortal'
+import { DEBTOR_DISPUTE_REASONS, DEBTOR_POP_MAX_BYTES, debtorDispute, debtorPopFile, debtorQuestion, debtorLogin, DEBTOR_LOGIN_HINT } from '../../lib/debtorPortal'
 import { saveFile } from '../../lib/fileSave'
 import { PROPOSAL_RULES, applicationNote, needsApplication, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
 import type { Arrangement } from '../../lib/arrangements'
@@ -111,13 +111,15 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
   useEffect(() => { if (new URLSearchParams(window.location.search).get('case')) setStep('ask') }, [])
 
   const go = async (fn: () => Promise<void>) => { setError(null); setBusy(true); try { await fn() } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) } }
-  const caseOk = () => { if (normaliseCaseNumber(caseNumber)) return true; setError('Type the case number on our letter or SMS, for example RAP-123456.'); return false }
+  /* Case number, ID number or email (Stephan, 4 Nov): the page used to refuse anything but a case number before it
+     asked the server, which is why his own sign-in "didn't work" with nothing in the logs. */
+  const caseOk = () => { if (debtorLogin(caseNumber)) return true; setError(DEBTOR_LOGIN_HINT); return false }
   const { field: door, fieldStyle, primary, link } = DOOR
 
   const caseField = (
     <Field icon={<Hash size={18} />}>
-      <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="Case number, e.g. RAP-123456" autoComplete="username"
-        autoCapitalize="characters" aria-label="Case number" className={door} style={fieldStyle} />
+      <input value={caseNumber} onChange={(e) => setCaseNumber(e.target.value)} placeholder="Case number, ID number or email" autoComplete="username"
+        autoCapitalize="none" aria-label="Case number, ID number or email" className={door} style={fieldStyle} />
     </Field>
   )
   const secret = (value: string, set: (v: string) => void, label: string, auto: string) => (

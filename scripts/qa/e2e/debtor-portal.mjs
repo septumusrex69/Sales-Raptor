@@ -8,6 +8,7 @@
  * Run: node scripts/qa/e2e/debtor-portal.mjs
  */
 import { OUT, PORT, chromium, makeRunner, startServer, stopServer, stubSupabase } from './harness.mjs'
+import { DEBTOR_CODE_SENT } from '../../../src/lib/debtorPortal.ts'
 
 const t = makeRunner('debtor-portal')
 const plain = (x) => x.split(String.fromCharCode(0xa0)).join(' ')
@@ -38,7 +39,7 @@ try {
     const action = route.request().url().split('/api/debtor/')[1]
     const body = route.request().postDataJSON() ?? {}
     asked.push([action, body, route.request().headers()['x-debtor-token'] ?? null])
-    if (action === 'request-code') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: 'If that case number is one of ours, a code is on its way to the email address (or cellphone) we have for you. It lasts 10 minutes.' }) })
+    if (action === 'request-code') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: DEBTOR_CODE_SENT }) })
     if (action === 'verify') return body.code === '123456'
       ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ token: TOKEN, expiresAt: '2026-11-18T00:00:00Z', needsPassword: true }) })
       : route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That code is not right. Check it, or ask for a new one.' }) })
@@ -71,15 +72,15 @@ try {
   await page.getByTestId('debtor-first-time').click()
   await page.getByTestId('debtor-ask').waitFor()
 
-  await page.getByLabel('Case number').fill('blah')
+  await page.getByLabel('Case number, ID number or email').fill('blah')
   await page.getByRole('button', { name: 'Send me a code' }).click()
-  t.ok('something that is not a case number is said, and not sent', /Type the case number/.test(await page.getByTestId('debtor-error').innerText()) && asked.length === 0)
+  t.ok('something that is not a case number is said, and not sent', /Type your case number/.test(await page.getByTestId('debtor-error').innerText()) && asked.length === 0)
 
-  await page.getByLabel('Case number').fill('rap 125318')
+  await page.getByLabel('Case number, ID number or email').fill('rap 125318')
   await page.getByRole('button', { name: 'Send me a code' }).click()
   await page.getByTestId('debtor-verify').waitFor()
-  t.ok('the case number goes as typed; the server reads it', JSON.stringify(asked.at(-1)?.[1]) === JSON.stringify({ caseNumber: 'rap 125318' }))
-  t.ok('...and the answer never says whether the case exists', /If that case number is one of ours/.test(await page.getByTestId('debtor-code-sent').innerText()))
+  t.ok('the case number goes as typed; the server reads it', JSON.stringify(asked.at(-1)?.[1]) === JSON.stringify({ login: 'rap 125318' }))
+  t.ok('...and the answer never says whether the case exists', /If that is one of our accounts/.test(await page.getByTestId('debtor-code-sent').innerText()))
 
   await page.getByLabel('Code').fill('000000')
   await page.getByRole('button', { name: 'Continue' }).click()
@@ -190,7 +191,7 @@ try {
 
   /* ---------- the next visit: case number and password, NO code ---------- */
   const codesBefore = asked.filter(([a]) => a === 'request-code').length
-  await page.getByLabel('Case number').fill('RAP-125318')
+  await page.getByLabel('Case number, ID number or email').fill('RAP-125318')
   await page.getByLabel('Password', { exact: true }).fill('wrong one')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByTestId('debtor-error').waitFor()
@@ -213,7 +214,7 @@ try {
     await p2.getByTestId('debtor-password').waitFor({ timeout: 20000 })
     t.ok('on an iPad the door is the split screen: the day\'s photograph beside the form', await p2.getByTestId('portal-sign-in-photo').isVisible() && await p2.getByTestId('portal-support').isVisible())
     await t.shot(p2, 'debtor-portal-ipad-sign-in')
-    await p2.getByLabel('Case number').fill('RAP-125318')
+    await p2.getByLabel('Case number, ID number or email').fill('RAP-125318')
     await p2.getByLabel('Password', { exact: true }).fill('a good password')
     await p2.getByRole('button', { name: 'Sign in' }).click()
     await p2.getByTestId('debtor-account').waitFor({ timeout: 10000 })

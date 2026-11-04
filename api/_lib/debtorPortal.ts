@@ -22,7 +22,7 @@ import { balanceInputFor } from '../../src/lib/balanceInput.js'
 import { balanceAccountFromRow, fetchLedgerRows } from '../../src/lib/storedBalance.js'
 import {
   DEBTOR_CODE_MINUTES, DEBTOR_CODE_SENT, DEBTOR_SESSION_DAYS, DEBTOR_TOKEN_HEADER, codeDestination, debtorCodeEmail,
-  debtorCodeSms, debtorPayments, debtorSummary, normaliseCaseNumber, type ContactRow,
+  debtorCodeSms, debtorPayments, debtorSummary, debtorLogin, DEBTOR_LOGIN_HINT, type ContactRow, type DebtorLogin,
   DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote, debtorDispute, debtorQuestion, type DebtorTicket,
   DEBTOR_PASSWORD_WRONG, DEBTOR_REMEMBER_DAYS, debtorInviteEmail, debtorPortalLink,
 } from '../../src/lib/debtorPortal.js'
@@ -57,11 +57,41 @@ const realNow = () => Date.now()
 
 /* ------------------------------------------------------------------ anonymous: the sign-in */
 
+/**
+ * THE ACCOUNT(S) A CASE NUMBER, ID NUMBER OR EMAIL ADDRESS NAMES (Raptor H16, 4 Nov; Stephan: "sign in ... with your
+ * ID number, and then a password also, your email address, or your case number"). A case number names one account;
+ * an identity number or an email may name several -- the same person owing two of the firm's clients -- and then the
+ * PASSWORD decides which (signIn), and a code is sent only where there is exactly one (requestCode). An email counts
+ * only as a CURRENT contact on the account: a retired one is an address the firm knows is wrong.
+ */
+type LoginAccount = { id: string; case_number: string; debtor_first_name: string | null; assigned_to: string | null; ended_as: string | null }
+async function accountsFor(admin: SupabaseClient, login: DebtorLogin): Promise<LoginAccount[]> {
+  const cols = 'id, case_number, debtor_first_name, assigned_to, ended_as'
+  if (login.kind === 'case') {
+    const { data } = await admin.from('debtor_accounts').select(cols).eq('case_number', login.value).limit(1)
+    return (data ?? []) as LoginAccount[]
+  }
+  if (login.kind === 'id') {
+    const { data } = await admin.from('debtor_accounts').select(cols).eq('debtor_id_number', login.value).limit(10)
+    return (data ?? []) as LoginAccount[]
+  }
+  const { data: hits } = await admin.from('account_contacts').select('account_id')
+    .eq('kind', 'email').is('retired_at', null).ilike('value', login.value.replace(/[%_\\]/g, (c) => `\\${c}`)).limit(10)
+  const ids = [...new Set((hits ?? []).map((h) => h.account_id as string))]
+  if (!ids.length) return []
+  const { data } = await admin.from('debtor_accounts').select(cols).in('id', ids)
+  return (data ?? []) as LoginAccount[]
+}
+
 const requestCode: Handler = async (req, res, admin) => {
-  const caseNumber = normaliseCaseNumber((req.body ?? {}).caseNumber)
-  if (!caseNumber) { res.status(400).json({ error: 'Type the case number on our letter or SMS, for example RAP-123456.' }); return }
-  const { data: acct } = await admin.from('debtor_accounts')
-    .select('id, case_number, debtor_first_name, assigned_to').eq('case_number', caseNumber).maybeSingle()
+  const login = debtorLogin((req.body ?? {}).login ?? (req.body ?? {}).caseNumber)
+  if (!login) { res.status(400).json({ error: DEBTOR_LOGIN_HINT }); return }
+  const found = await accountsFor(admin, login)
+  /* ONE ACCOUNT OR NONE: a code opens one account, and with several the code would have to choose -- so it does not,
+     and the answer (the same answer) tells them to use the case number. */
+  const acct = found.length === 1 ? found[0] : null
+  const caseNumber = acct?.case_number ?? `${login.kind}:${login.kind === 'case' ? login.value : '(hidden)'}`
+  if (found.length > 1) console.log(`[debtor] code asked by ${login.kind}: ${found.length} accounts match, none chosen`)
   const { data: contacts } = acct
     ? await admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', acct.id)
     : { data: [] }
@@ -123,10 +153,12 @@ const requestCode: Handler = async (req, res, admin) => {
 
 const verify: Handler = async (req, res, admin) => {
   const body = req.body ?? {}
-  const caseNumber = normaliseCaseNumber(body.caseNumber)
+  const login = debtorLogin(body.login ?? body.caseNumber)
   const code = normaliseCode(body.code)
-  if (!caseNumber || !code) { res.status(400).json({ error: 'Type the six digits we sent you.' }); return }
-  const { data: acct } = await admin.from('debtor_accounts').select('id').eq('case_number', caseNumber).maybeSingle()
+  if (!login || !code) { res.status(400).json({ error: 'Type the six digits we sent you.' }); return }
+  /* The same rule as the send: a code was only sent where exactly one account matched. */
+  const found = await accountsFor(admin, login)
+  const acct = found.length === 1 ? found[0] : null
   const { data: stored } = acct
     ? await admin.from('debtor_portal_codes').select('code_hash, expires_at, attempts').eq('account_id', acct.id).maybeSingle()
     : { data: null }
@@ -182,27 +214,40 @@ async function openDebtorSession(admin: SupabaseClient, req: VercelRequest, acco
  */
 const signIn: Handler = async (req, res, admin) => {
   const body = req.body ?? {}
-  const caseNumber = normaliseCaseNumber(body.caseNumber)
+  const who = debtorLogin(body.login ?? body.caseNumber)
   const password = typeof body.password === 'string' ? body.password : ''
-  if (!caseNumber || !password) { res.status(400).json({ error: 'Type your case number and your password.' }); return }
-  const { data: acct } = await admin.from('debtor_accounts').select('id').eq('case_number', caseNumber).maybeSingle()
-  const { data: login } = acct
-    ? await admin.from('debtor_portal_logins').select('password_hash, password_failures, password_locked_until').eq('account_id', acct.id).maybeSingle()
-    : { data: null }
+  if (!who || !password) { res.status(400).json({ error: `${DEBTOR_LOGIN_HINT} Then your password.` }); return }
+  const found = await accountsFor(admin, who)
+  const { data: rows } = found.length
+    ? await admin.from('debtor_portal_logins').select('account_id, password_hash, password_failures, password_locked_until, last_login_at').in('account_id', found.map((a) => a.id))
+    : { data: [] }
+  const logins = ((rows ?? []) as { account_id: string; password_hash: string | null; password_failures: number | null; password_locked_until: string | null; last_login_at: string | null }[])
+    .filter((l) => l.password_hash)
   const t = realNow()
-  if (login?.password_locked_until && Date.parse(login.password_locked_until as string) > t) {
+  const open = logins.filter((l) => !(l.password_locked_until && Date.parse(l.password_locked_until) > t))
+  if (logins.length > 0 && open.length === 0) {
     res.status(429).json({ error: `Too many wrong passwords. Try again in ${PORTAL_PASSWORD_LOCK_MINUTES} minutes, or send yourself a code.` }); return
   }
-  if (!acct || !login?.password_hash || !passwordMatches(password, login.password_hash as string)) {
-    if (acct && login?.password_hash) {
-      const failures = Number(login.password_failures ?? 0) + 1
+  /*
+   * WHICHEVER ACCOUNT THE PASSWORD OPENS. One identity number or email may name several accounts, each with its own
+   * password; the one whose password this is, is the one meant. Where two share a password, the one still open, then
+   * the one used last. A wrong password counts against every account it was tried on, so the lock still means five.
+   */
+  const matched = open.filter((l) => passwordMatches(password, l.password_hash as string))
+  if (matched.length === 0) {
+    for (const l of open) {
+      const failures = Number(l.password_failures ?? 0) + 1
       await admin.from('debtor_portal_logins').update({
         password_failures: failures >= PORTAL_PASSWORD_FAILURES ? 0 : failures,
         password_locked_until: failures >= PORTAL_PASSWORD_FAILURES ? new Date(t + PORTAL_PASSWORD_LOCK_MINUTES * 60_000).toISOString() : null,
-      }).eq('account_id', acct.id)
+      }).eq('account_id', l.account_id)
     }
+    console.log(`[debtor] sign-in by ${who.kind} refused: ${found.length} account(s), ${logins.length} with a password`)
     res.status(400).json({ error: DEBTOR_PASSWORD_WRONG }); return
   }
+  const ended = new Map(found.map((a) => [a.id, !!a.ended_as]))
+  matched.sort((x, y) => Number(ended.get(x.account_id)) - Number(ended.get(y.account_id)) || String(y.last_login_at ?? '').localeCompare(String(x.last_login_at ?? '')))
+  const acct = { id: matched[0].account_id }
   await admin.from('debtor_portal_logins').update({ password_failures: 0, password_locked_until: null }).eq('account_id', acct.id)
   const session = await openDebtorSession(admin, req, acct.id as string, t, body.remember === true, 'password')
   if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
