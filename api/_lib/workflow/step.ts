@@ -2,7 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendAsUser } from '../email/sendAsUser.js'
 import { sendSms, toMsisdn } from '../sms/connectMobile.js'
 import { accountMergeValues } from '../../../src/lib/accountMergeValues.js'
-import { computeBalance } from '../../../src/lib/accountBalance.js'
+import { buildStatement, computeBalance } from '../../../src/lib/accountBalance.js'
+import { statementDocument } from '../../../src/lib/debtorStatement.js'
+import { UNASSIGNED_MAILBOX } from '../../../src/lib/unassignedMailbox.js'
 import { balanceInputFor } from '../../../src/lib/balanceInput.js'
 import { balanceAccountFromRow, fetchLedgerRows } from '../../../src/lib/storedBalance.js'
 import { planSend, type StepTemplate } from '../../../src/lib/workflowSend.js'
@@ -173,7 +175,7 @@ export async function runOneStep(
       ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', account.companies.account_owner_id).maybeSingle()
       : Promise.resolve({ data: null }),
     admin.from('message_templates')
-      .select('id, kind, subject, body, audience, name, attachment_id, attaches_schedule, seed_key')
+      .select('id, kind, subject, body, audience, name, attachment_id, attaches_schedule, attaches_statement, seed_key')
       .in('id', [node.templateId, node.templateCompanyId].filter(Boolean) as string[]),
     fetchLedgerRows(admin, [account.id as string]),
     /* Did the step this one follows actually go? Only asked where the node says it follows one --
@@ -265,9 +267,20 @@ export async function runOneStep(
    * no connected mailbox, is a thing a team leader can put right in a minute; a statutory demand
    * signed by the wrong person is not.
    */
-  if (node.channel === 'email' && !collector?.id) {
+  /*
+   * ...EXCEPT THE FIRM'S LEGAL MAILBOX, WHERE NOBODY HOLDS THE ACCOUNT (Stephan, 4 Nov: "we should have email address
+   * like for people that are not assigned ... I think legal"). Not "somebody else's name": the message is signed by
+   * The Pre-Legal Department (UNASSIGNED_NAME) and a reply lands in a mailbox the firm reads for exactly these. Until
+   * legal@ is connected in Raptor, the step still holds -- and says what would let it go.
+   */
+  let senderId: string | null = collector?.id ?? null
+  if (node.channel === 'email' && !senderId) {
+    const { data: legal } = await admin.from('email_connections').select('user_id').ilike('email', UNASSIGNED_MAILBOX).maybeSingle()
+    senderId = (legal?.user_id as string | undefined) ?? null
+  }
+  if (node.channel === 'email' && !senderId) {
     return hold(
-      'Nobody is assigned to this account, so there is no mailbox for the notice to go out from.',
+      `Nobody is assigned to this account, and ${UNASSIGNED_MAILBOX} is not connected in Raptor, so there is no mailbox for the notice to go out from.`,
       about(account, node.label, null),
     )
   }
@@ -290,7 +303,11 @@ export async function runOneStep(
        */
       attachment: r.attaches_schedule && scheduleDoc
         ? { key: 'Payment arrangement schedule', doc: scheduleDoc }
-        : r.attachment_id
+        /* THE STATEMENT, BUILT FOR THIS ACCOUNT TODAY (message_templates.attaches_statement): the arrangement
+           reminder carries it, so the debtor holds the figure as it stands two days before they pay. */
+        : r.attaches_statement
+          ? { key: 'Statement of account', doc: statementDocument(buildStatement(balanceInput), Number(account.capital_handed_over ?? 0), today, moneyZa) }
+          : r.attachment_id
           ? (attachments.get(r.attachment_id) ?? null)
           : null,
     }
@@ -641,7 +658,7 @@ export async function runOneStep(
       bodyText = `${bodyText.replace(/\s+$/, '')}\n\nPlease confirm and accept this arrangement here:\n${emailUrl}`
       acceptHtml = signingButtonHtml(emailUrl, 'Confirm and accept')
     }
-    const sent = await sendAsUser(admin, collector!.id, {
+    const sent = await sendAsUser(admin, senderId!, {
       to: pickContact(contacts, 'email')!,
       subject: plan.subject ?? '',
       /* THE FIRM'S PARAGRAPHING. A blank line is a paragraph and a single newline is a line --
@@ -693,7 +710,7 @@ export async function runOneStep(
        * the Message-ID finds this row, and this column names the notice that never arrived.
        */
       workflow_step_id: step.id,
-      sent_by: collector?.id ?? null,
+      sent_by: senderId ?? collector?.id ?? null,
       /* The workflow did this, not a person -- and it says so, because "sent by Itumeleng" on a
          notice nobody typed would be wrong about who to ask. */
       sent_by_name: 'Workflow',
@@ -932,6 +949,7 @@ interface TemplateRow {
   /** True where this wording carries the account's own repayment schedule. See the column's own
       comment: it is built per account, so there is no template to point `attachment_id` at. */
   attaches_schedule: boolean | null
+  attaches_statement: boolean | null
 }
 
 /** The primary live contact of a kind, never a retired one -- the same rule as the address. */

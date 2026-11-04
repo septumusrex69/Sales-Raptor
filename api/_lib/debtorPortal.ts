@@ -6,6 +6,7 @@ import { credentialsKeyProblem, hashPassword, keyedHash, passwordMatches, sameHe
 import { sendAsUser } from './email/sendAsUser.js'
 import { sendSms } from './sms/connectMobile.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
+import { UNASSIGNED_MAILBOX, withLegal } from '../../src/lib/unassignedMailbox.js'
 import { portalCodeCheck, portalPasswordProblem, PORTAL_CODE_MESSAGE, PORTAL_PASSWORD_FAILURES, PORTAL_PASSWORD_LOCK_MINUTES } from '../../src/lib/clientPortal.js'
 import { computeBalance, type BalanceBreakdown } from '../../src/lib/accountBalance.js'
 import { needsApplication, proposalProblem, proposalSummary } from '../../src/lib/debtorArrangement.js'
@@ -121,16 +122,19 @@ const requestCode: Handler = async (req, res, admin) => {
   let sent = false
   let why = ''
   if (dest.channel === 'email') {
-    /* WHO SENDS IT: the collector on the account first -- the name the debtor already hears from -- then an
-       Administrator's mailbox. Raptor has no system mailbox (loginCode.ts says why). */
+    /* WHO SENDS IT: the collector on the account first -- the name the debtor already hears from -- then the firm's
+       legal@ mailbox where it is connected (UNASSIGNED_MAILBOX; Stephan, 4 Nov: "why did the email go out from
+       Camille"), and an Administrator's only after both. Raptor has no system mailbox (loginCode.ts says why). */
     const [{ data: staff }, { data: boxes }] = await Promise.all([
       admin.from('profiles').select('id, name, status, role').or(`role.eq.Administrator${acct.assigned_to ? `,id.eq.${acct.assigned_to}` : ''}`),
-      admin.from('email_connections').select('user_id'),
+      admin.from('email_connections').select('user_id, email'),
     ])
     const withMailbox = new Set((boxes ?? []).map((b) => b.user_id as string))
-    const order = codeSenderOrder((acct.assigned_to as string | null) ?? '', (staff ?? []).map((p) => ({
+    const ordered = codeSenderOrder((acct.assigned_to as string | null) ?? '', (staff ?? []).map((p) => ({
       id: p.id as string, name: String(p.name ?? ''), hasMailbox: withMailbox.has(p.id as string), active: p.status === 'Active',
     })))
+    const legal = (boxes ?? []).find((b) => String(b.email ?? '').toLowerCase() === UNASSIGNED_MAILBOX)?.user_id as string | undefined
+    const order = withLegal(ordered, (acct.assigned_to as string | null) ?? null, legal ?? null)
     const host = req.headers['x-forwarded-host'] ?? req.headers.host
     const mail = debtorCodeEmail({ name: String(acct.debtor_first_name ?? ''), code, caseNumber, url: host ? `https://${String(host)}/my-account` : undefined })
     why = 'Nobody at the firm has a mailbox connected to send it from.'

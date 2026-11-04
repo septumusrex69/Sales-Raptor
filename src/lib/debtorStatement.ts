@@ -67,12 +67,19 @@ export function debtorLetterValues(input: DebtorLetterInput): { values: Record<s
   return { values, statement: st }
 }
 
+/**
+ * THE STATEMENT DOCUMENT FROM A STATEMENT ALREADY BUILT -- the one place it is laid out, for the portal's download and
+ * for the arrangement reminder that carries it (Stephan, 4 Nov: "Yeah, that's the statement to the reminder"). Two
+ * builders would one day show the debtor two statements of one account.
+ */
+export function statementDocument(st: Statement, handedOver: number, today: string, money: (n: number) => string): LetterDocument {
+  return statementOfAccount({ breakdown: st.breakdown, handedOver, asAt: today, money, lines: st.lines, status: null })
+}
+
 export function debtorStatement(input: DebtorLetterInput): { doc: LetterDocument; values: Record<string, string>; fileName: string } {
   const a = input.account as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
   const { values, statement: st } = debtorLetterValues(input)
-  const doc = statementOfAccount({
-    breakdown: st.breakdown, handedOver: Number(a.capital_handed_over ?? 0), asAt: input.today, money: input.money, lines: st.lines, status: null,
-  })
+  const doc = statementDocument(st, Number(a.capital_handed_over ?? 0), input.today, input.money)
   return { doc, values, fileName: `Statement ${a.case_number ?? ''} ${input.today}.pdf`.replace(/\s+/g, ' ') }
 }
 

@@ -133,11 +133,11 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
      QUESTION is not charged yet** -- it is correspondence received too; ask whether it should be.
   3. `PROPOSAL_RULES`: first payment within 30 days; 12 months online, longer = application. Right numbers?
   4. Nobody has signed in for real yet: put your own email on a staging test account, open /my-account on the preview.
-  5. **A STATEMENT TWO WORKING DAYS BEFORE A LATER ONCE-OFF** (4 Nov, Stephan: "we will send you a statement 2 days
+  5. ~~A STATEMENT ON THE REMINDER~~ -- **DONE 4 Nov ("Yeah, that's the statement to the reminder")**: see below. Was: **A STATEMENT TWO WORKING DAYS BEFORE A LATER ONCE-OFF** (4 Nov, Stephan: "we will send you a statement 2 days
      before the date ... then also send you a reminder on the day"). The "Promise to pay" workflow's reminder (-2
      business days) and due-today steps quote {{ptp_amount}} and attach nothing. The portal promises only the reminders
      and points at the page. Attach the statement to that reminder? (A workflow/template change -- ask first.)
-  6. **A shared mailbox for accounts nobody holds** (4 Nov, Stephan: "why did the email go out from Camille ... we
+  6. ~~Which mailbox~~ -- **"I think legal"**: legal@bredellferreira.co.za, built (below); waiting on the mailbox being CONNECTED. Was: **A shared mailbox for accounts nobody holds** (4 Nov, Stephan: "why did the email go out from Camille ... we
      should have email address like ... prelegal@ or legal@"). The code email goes from the collector, else an
      Administrator's connected mailbox (codeSenderOrder) -- Camille's. A shared address needs the mailbox to exist and
      be connected in Raptor (Settings > Email) by somebody who can sign into it; then it is a firm setting and the
@@ -173,6 +173,17 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
     to pay label-over-value; agent card = the person (line, email, WhatsApp, "Ask <name> to call me back" -> a portal
     question) + the office beneath. e2e debtor-portal 46.
   - **Company dashboard**: the photo credit is in the hero's bottom-right corner (HeroPhotoCredit), not under the line.
+  - **The arrangement reminder carries the statement**: `message_templates.attaches_statement` (staging, mirrored; true
+    on email-ptp-reminder-individual/-company only; email-only check constraint). step.ts builds it per account that
+    morning with `statementDocument` (debtorStatement.ts) -- the SAME builder as the portal download. Wording untouched.
+  - **legal@ for accounts nobody holds** (`src/lib/unassignedMailbox.ts`, UNASSIGNED_MAILBOX): a workflow email on an
+    account with no collector now sends from the mailbox connected as legal@bredellferreira.co.za, and HOLDS saying
+    so until it is connected (before: held, always). The debtor's code: collector -> legal@ -> Administrators
+    (`withLegal`). **TO DO (Stephan): create a Raptor login for the legal mailbox and connect legal@ under it
+    (Settings > Email)** -- a mailbox belongs to one login (email_connections.user_id). Not connected on staging yet.
+  - **Preview the statement** on the account's Transactions row, beside Summary/Statement: PreviewPdf (pdf.js on a
+    canvas; iPad-safe), opens on "This account" (startFilled). e2e payment-reverse 23; check-reminder-statement 14.
+  - **Unassigned signer renamed "The Pre-Legal Department"** (Stephan).
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

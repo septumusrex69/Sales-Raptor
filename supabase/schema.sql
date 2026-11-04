@@ -54573,3 +54573,33 @@ begin
       foreign key (account_id) references public.debtor_accounts (id) on W cascade', 'W', w);
   end if;
 end $do$;
+
+-- ============================================================================
+-- THE ARRANGEMENT REMINDER CARRIES THE STATEMENT (Raptor H16, S17, 4 Nov).
+--
+-- Stephan, of a once-off settlement dated later than five working days: "we will send you a
+-- statement 2 days before the date ... then also send you a reminder on the day", and asked
+-- whether the reminder should carry it: "Yeah, that's the statement to the reminder."
+--
+-- BUILT PER ACCOUNT ON THE DAY, like attaches_schedule beside it: the statement of account has no
+-- stored form, its lines are the account's own ledgers as they stand that morning -- the figure the
+-- debtor needs two working days before they pay, after whatever interest and fees ran meanwhile.
+-- The same statementDocument the debtor portal's download draws, so the two cannot differ.
+--
+-- A FLAG, NOT WORDING. The reminder's body is the firm's and is not touched; the attachment speaks
+-- for itself, and the firm can add a line about it in the library if they want one.
+-- ============================================================================
+alter table public.message_templates
+  add column if not exists attaches_statement boolean not null default false;
+
+comment on column public.message_templates.attaches_statement is
+  'True where this email carries the account''s statement of account, built per account on the day '
+  '(statementDocument). Separate from attachment_id (a stored letter) and attaches_schedule (the '
+  'repayment schedule). Ignored on anything but an email.';
+
+alter table public.message_templates add constraint message_templates_statement_is_email
+  check (attaches_statement = false or kind = 'email');
+
+update public.message_templates
+   set attaches_statement = true
+ where seed_key in ('email-ptp-reminder-individual', 'email-ptp-reminder-company');

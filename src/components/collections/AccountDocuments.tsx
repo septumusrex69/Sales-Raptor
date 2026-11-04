@@ -9,6 +9,7 @@ import { renderTemplate } from '../../lib/messageTemplates'
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import type { BalanceBreakdown, StatementLine } from '../../lib/accountBalance.ts'
 
+import { PreviewPdf } from '../letters/PreviewPdf'
 /**
  * THE TWO DOCUMENTS A DEBTOR ASKS FOR, WHERE THE FIRM PUT THEM.
  *
@@ -171,6 +172,11 @@ export function AccountDocuments({
             </span>
           </span>
         ))}
+        {/* PREVIEW ON THE PAGE (Stephan, 4 Nov: "I need a place where you can preview the statement"). Open and
+            Download hand the PDF to the device -- on the iPad, a new tab and out of Raptor. This draws the same
+            bytes in place with pdf.js (PreviewPdf), filled for this account, before it is emailed or handed over. */}
+        <PreviewPdf doc={build('statement')} scope="collections" values={values} name={TITLES.statement}
+          label="Preview the statement" startFilled testId="account-doc-statement-preview" />
       </div>
       {/* The reason it could not be drawn, beside the buttons rather than in a tooltip only: on
           the iPad the firm works on there is no hover to reveal one. */}
