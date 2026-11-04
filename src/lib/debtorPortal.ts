@@ -293,3 +293,41 @@ export function debtorLogin(typed: unknown): DebtorLogin | null {
 }
 
 export const DEBTOR_LOGIN_HINT = 'Type your case number (for example RAP-123456), your ID number or your email address.'
+
+/* ---------------------------------------------------------------- where the account stands */
+
+/**
+ * WHERE THE ACCOUNT STANDS, AT A GLANCE (Stephan, 4 Nov: "on the dashboard ... where the account stands ... so when
+ * they log in, that they can see that. But progress bar"). Two things: how much of the debt is behind them, and the
+ * one thing happening on it now. The share is paid over paid-plus-owed -- what a debtor means by "how far am I" --
+ * not paid over the original amount, which would read past 100% on an account where interest and fees grew it.
+ *
+ * ONE STAGE, IN THIS ORDER, because each above silences the ones below: a closed account says nothing else; an open
+ * dispute has stopped collection; a missed payment is the urgent thing on a live arrangement; then the arrangement,
+ * the offer waiting on the firm, and last, nothing agreed yet -- the only stage with a button, because it is the only
+ * one the debtor moves.
+ */
+export interface StandingInput {
+  closed: string | null
+  summary: { paid: number; balance: number }
+  live: { arrangement: string; amount: number; dueOn: string; missed: boolean } | null
+  proposal: { status: string } | null
+  tickets: { kind: 'dispute' | 'question'; open: boolean }[]
+}
+export interface Standing {
+  paidShare: number
+  stage: 'closed' | 'dispute' | 'missed' | 'arranged' | 'offered' | 'nothing'
+  headline: string
+  action: 'arrangement' | 'payments' | null
+}
+export function debtorStanding(a: StandingInput, money: (n: number) => string, day: (iso: string) => string): Standing {
+  const owed = Math.max(0, a.summary.balance)
+  const paid = Math.max(0, a.summary.paid)
+  const paidShare = a.closed ? 1 : paid + owed > 0 ? Math.min(1, paid / (paid + owed)) : 0
+  if (a.closed) return { paidShare, stage: 'closed', headline: 'This account is closed.', action: null }
+  if (a.tickets.some((t) => t.kind === 'dispute' && t.open)) return { paidShare, stage: 'dispute', headline: 'Your dispute is open. Collection is paused while we look at it.', action: null }
+  if (a.live?.missed) return { paidShare, stage: 'missed', headline: `A payment on your arrangement was missed. Please pay ${money(a.live.amount)} now, or call us.`, action: 'payments' }
+  if (a.live) return { paidShare, stage: 'arranged', headline: `Arrangement in place. Next payment: ${money(a.live.amount)} on ${day(a.live.dueOn)}.`, action: null }
+  if (a.proposal?.status === 'pending') return { paidShare, stage: 'offered', headline: 'Your offer is with us. We will reply, usually within one working day.', action: null }
+  return { paidShare, stage: 'nothing', headline: owed > 0 ? 'Nothing is agreed yet. Settle the account, or tell us what you can pay.' : 'Nothing is owed on this account.', action: owed > 0 ? 'arrangement' : null }
+}

@@ -3,9 +3,9 @@ import {
   ArrowRight, ChevronsLeft, ChevronsRight, Copy, Eye, EyeOff, FileDown, FileText, Handshake, Hash, KeyRound, LifeBuoy, Loader2,
   Lock, LogOut, Mail, MessageCircle, Phone, Upload, Wallet,
 } from 'lucide-react'
-import { DEBTOR_DISPUTE_REASONS, DEBTOR_POP_MAX_BYTES, debtorDispute, debtorPopFile, debtorQuestion, debtorLogin, DEBTOR_LOGIN_HINT } from '../../lib/debtorPortal'
+import { DEBTOR_DISPUTE_REASONS, DEBTOR_POP_MAX_BYTES, debtorDispute, debtorPopFile, debtorQuestion, debtorLogin, debtorStanding, DEBTOR_LOGIN_HINT } from '../../lib/debtorPortal'
 import { saveFile } from '../../lib/fileSave'
-import { PROPOSAL_RULES, applicationNote, needsApplication, proposalProblem, proposalSummary } from '../../lib/debtorArrangement'
+import { PROPOSAL_RULES, applicationNote, needsApplication, onceOffNote, proposalProblem, proposalSummary, settlementHolds, settlementHoldsUntil } from '../../lib/debtorArrangement'
 import type { Arrangement } from '../../lib/arrangements'
 import { bandBackground } from '../../lib/portalPhotos'
 import {
@@ -348,7 +348,7 @@ function Signed({ token, a, onRefresh, onSignedOut }: { token: string; a: Debtor
             <PhotoCredit className="absolute right-4 bottom-1.5" />
           </header>
 
-          {section === 'account' && <AccountSection a={a} />}
+          {section === 'account' && <AccountSection a={a} token={token} onSent={onRefresh} go={setSection} />}
           {section === 'payments' && (
             <div className="grid gap-5 lg:grid-cols-2">
               <PaymentsList a={a} />
@@ -363,7 +363,7 @@ function Signed({ token, a, onRefresh, onSignedOut }: { token: string; a: Debtor
             : <ArrangementSection token={token} account={a} onSent={onRefresh} />)}
           {section === 'help' && (a.closed ? <Card><p className="text-[15px]" style={{ color: NAVY }}>This account is closed. To ask about it, please call us.</p></Card>
             : <Tickets token={token} account={a} onSent={onRefresh} />)}
-          {section !== 'account' && <AgentCard a={a} />}
+          {section !== 'account' && <AgentCard a={a} token={token} onSent={onRefresh} />}
         </div>
       </main>
     </div>
@@ -371,31 +371,70 @@ function Signed({ token, a, onRefresh, onSignedOut }: { token: string; a: Debtor
 }
 
 /** THE ACCOUNT AT A GLANCE: what is owed, how to pay it, and who looks after it. */
-function AccountSection({ a }: { a: DebtorAccount }) {
+function AccountSection({ a, token, onSent, go }: { a: DebtorAccount; token: string; onSent: () => void; go: (s: Section) => void }) {
   const [copied, setCopied] = useState(false)
   const s = a.summary
   const closedLine = a.closed === 'paid_up' ? 'This account is paid in full and closed. Thank you.'
     : a.closed === 'settled' ? 'This account was settled and is closed. Thank you.'
       : a.closed === 'withdrawn' ? `${a.client || 'Our client'} has taken this account back. Please contact them about it.`
         : null
+  const st = debtorStanding(a, money, longDay)
+  const pct = Math.round(st.paidShare * 100)
   return (
     <div className="grid gap-5 lg:grid-cols-[1.3fr_1fr]">
+      {/* WHERE IT STANDS, FIRST (Stephan, 4 Nov: "when they log in ... they can see that. But progress bar"). */}
+      <div className="lg:col-span-2">
+        <Card>
+          <div data-testid="debtor-standing">
+            <div className="flex items-baseline justify-between gap-3">
+              <Label>Where your account stands</Label>
+              <span className="text-sm font-semibold tabular-nums" style={{ color: NAVY }} data-testid="debtor-progress-pct">{pct}% paid</span>
+            </div>
+            <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-[#EEF2F6]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="How much of the account is paid">
+              <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%`, background: `linear-gradient(90deg, ${GOLD}, #D9BC7E)` }} />
+            </div>
+            <div className="mt-2 flex justify-between text-[13px] text-[#5A6B80] tabular-nums">
+              <span>Paid {money(Math.max(0, s.paid))}</span>
+              <span>Still to pay {money(Math.max(0, s.balance))}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className={`text-[15px] font-semibold ${st.stage === 'missed' ? 'text-red-700' : ''}`} style={st.stage === 'missed' ? undefined : { color: NAVY }} data-testid="debtor-stage">{st.headline}</p>
+              {st.action === 'arrangement' && (
+                <button type="button" onClick={() => go('arrangement')} className="rounded-[10px] px-4 py-2 text-sm font-semibold text-white" style={{ background: NAVY }} data-testid="debtor-stage-action">Settle or make an arrangement</button>
+              )}
+            </div>
+          </div>
+        </Card>
+      </div>
       <div className="space-y-5">
         {closedLine && <Card><p className="text-[15px] font-semibold" style={{ color: NAVY }} data-testid="debtor-closed">{closedLine}</p></Card>}
         {a.closed !== 'withdrawn' && (
           <Card>
             <Label>What you owe today · {longDay(a.asAt)}</Label>
             <p className="mt-1 text-[38px] font-bold tabular-nums leading-tight" style={{ color: NAVY, fontFamily: "'Raleway Variable', 'Raleway', sans-serif" }} data-testid="debtor-balance">{money(Math.max(0, s.balance))}</p>
-            {s.balance > 0 && s.settleToday !== s.balance && (
-              <p className="mt-1 text-sm text-[#5A6B80]">To settle in full today: <span className="font-semibold tabular-nums" data-testid="debtor-settle">{money(s.settleToday)}</span>, which includes the fee on the final payment.</p>
-            )}
             {s.balance < 0 && <p className="mt-1 text-sm text-[#5A6B80]">You have paid {money(-s.balance)} more than you owed. Please call us so we can return it.</p>}
-            <dl className="mt-4 divide-y divide-[#EEF2F6] text-[15px]" data-testid="debtor-breakdown">
+            {/* HOW THE FIGURE IS MADE, AS A SUM (Stephan, 4 Nov: "the text is a little bit all over the place"): the four
+                parts, then the total under a rule where a sum's answer goes -- and the settlement figure OUT of the sum,
+                in its own box, because it is a different number with a date on it, not a fifth line of the same one. */}
+            <dl className="mt-4 text-[15px]" data-testid="debtor-breakdown">
               <Row label="Original amount owed" value={s.capital} />
               <Row label="Interest" value={s.interest} />
               <Row label="Fees and costs (VAT included)" value={s.fees} />
               <Row label="You have paid" value={-s.paid} />
+              <div className="mt-1 flex justify-between border-t-2 pt-3" style={{ borderColor: NAVY }}>
+                <dt className="font-semibold" style={{ color: NAVY }}>What you owe</dt>
+                <dd className="tabular-nums font-bold" style={{ color: NAVY }}>{money(Math.max(0, s.balance))}</dd>
+              </div>
             </dl>
+            {s.balance > 0 && (
+              <div className="mt-4 rounded-xl p-4" style={{ background: '#FBF6EC', border: `1px solid ${GOLD}` }} data-testid="debtor-settle-box">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: '#8A6A2E' }}>To settle in full</p>
+                <p className="mt-1 text-[22px] font-bold tabular-nums" style={{ color: NAVY }} data-testid="debtor-settle">{money(s.settleToday)}</p>
+                <p className="mt-1 text-sm text-[#5A6B80]">
+                  If paid by {longDay(settlementHoldsUntil(a.asAt))}.{s.settleToday !== s.balance ? ' It includes the fee on the final payment.' : ''} After that date interest and fees may add to it.
+                </p>
+              </div>
+            )}
             {s.note && <p className="mt-3 rounded-xl bg-[#F2F5F8] p-3 text-sm text-[#3F5F86]" data-testid="debtor-note">{s.note}</p>}
           </Card>
         )}
@@ -405,13 +444,14 @@ function AccountSection({ a }: { a: DebtorAccount }) {
           <Card>
             <Label>How to pay</Label>
             <p className="mt-1 text-[15px] text-[#5A6B80]">Pay into our trust account. <strong className="text-[#101F2C]">Always use your case number as the reference</strong> — that is how your payment reaches your account.</p>
-            <dl className="mt-3 space-y-2 text-[15px]" data-testid="debtor-pay">
-              <Pair label="Account name" value={a.pay.accountName} />
+            {/* Label over value, two to a row: a long account name beside its label wrapped into a ragged column. */}
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]" data-testid="debtor-pay">
+              <div className="col-span-2"><Pair label="Account name" value={a.pay.accountName} /></div>
               {a.pay.bank && <Pair label="Bank" value={a.pay.bank} />}
+              {a.pay.branchCode && <Pair label="Branch code" value={a.pay.branchCode} />}
               {a.pay.accountNumber && <Pair label="Account number" value={a.pay.accountNumber} />}
               {a.pay.accountType && <Pair label="Account type" value={a.pay.accountType} />}
-              {a.pay.branchCode && <Pair label="Branch code" value={a.pay.branchCode} />}
-              <div className="flex items-center justify-between gap-3 rounded-xl p-3" style={{ background: '#FBF6EC', border: `1px solid ${GOLD}` }}>
+              <div className="col-span-2 flex items-center justify-between gap-3 rounded-xl p-3" style={{ background: '#FBF6EC', border: `1px solid ${GOLD}` }}>
                 <div><dt className="text-sm text-[#5A6B80]">Reference</dt><dd className="text-lg font-bold tracking-wide" style={{ color: NAVY }}>{a.pay.reference}</dd></div>
                 <button type="button" className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: NAVY }}
                   onClick={() => { void navigator.clipboard?.writeText(a.pay!.reference).then(() => setCopied(true)).catch(() => {}) }}>
@@ -421,41 +461,86 @@ function AccountSection({ a }: { a: DebtorAccount }) {
             </dl>
           </Card>
         )}
-        <AgentCard a={a} />
+        <AgentCard a={a} token={token} onSent={onSent} />
       </div>
     </div>
   )
 }
 
 /**
- * YOUR AGENT (Stephan, 3 Nov: "speak to your agent. This is the person assigned to you"). The collector on the account,
- * with the ways to reach them -- or, where nobody holds the account, the firm's own number and address.
+ * YOUR AGENT, AND THE FIRM BEHIND THEM (Stephan, 3 Nov: "speak to your agent. This is the person assigned to you";
+ * 4 Nov: "the person handling your matter is Itumeleng ... their direct line, but also ... speak to Bredell Ferreira").
+ * Two halves, always both where there is an agent: the person, with their own line, email and WhatsApp and a button
+ * that asks them to call back; then the office, because an agent is on leave some days and a debtor with money in
+ * hand should never find the only number on the page unanswered. Where nobody holds the account, the office alone.
  */
-function AgentCard({ a }: { a: DebtorAccount }) {
+function AgentCard({ a, token, onSent }: { a: DebtorAccount; token: string; onSent: () => void }) {
   const ag = a.agent
-  const phone = ag?.phone ?? a.contact?.phone ?? null
-  const email = ag?.email ?? a.contact?.email ?? null
-  const whatsapp = ag?.whatsapp ?? null
-  if (!ag && !phone && !email) return null
-  const pill = 'inline-flex items-center gap-2 rounded-[10px] border border-[#D5DBE3] px-3 py-2 text-sm font-semibold hover:bg-[#F2F5F8]'
+  const office = { phone: a.contact?.phone ?? null, email: a.contact?.email ?? null }
+  const [asking, setAsking] = useState(false)
+  const [number, setNumber] = useState('')
+  const [when, setWhen] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  if (!ag && !office.phone && !office.email) return null
+  const pill = 'inline-flex items-center gap-2 rounded-[10px] border border-[#D5DBE3] px-3 py-2 text-sm font-semibold hover:bg-[#F2F5F8] max-w-full'
+  const first = ag?.name.trim().split(/\s+/)[0] ?? ''
+  const ways = (p: { phone: string | null; email: string | null; whatsapp?: string | null }, testid: string) => (
+    <div className="mt-3 flex flex-wrap gap-2" data-testid={testid}>
+      {p.phone && <a href={`tel:${p.phone.replace(/\s/g, '')}`} className={pill} style={{ color: NAVY }}><Phone size={15} /> {p.phone}</a>}
+      {p.whatsapp && <a href={`https://wa.me/${p.whatsapp.replace(/\D/g, '').replace(/^0/, '27')}`} target="_blank" rel="noreferrer" className={pill} style={{ color: NAVY }}><MessageCircle size={15} /> WhatsApp</a>}
+      {p.email && <a href={`mailto:${p.email}?subject=${encodeURIComponent(a.caseNumber)}`} className={pill} style={{ color: NAVY }}><Mail size={15} /> <span className="truncate">{p.email}</span></a>}
+    </div>
+  )
+  async function askCallback(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (number.replace(/\D/g, '').length < 9) { setError('Type the number we should call you on.'); return }
+    setBusy(true)
+    try {
+      await askDebtorQuestion(token, `Please call me back on ${number.trim()}${when.trim() ? ` (${when.trim()})` : ''}.`)
+      setDone(true); setAsking(false); onSent()
+    } catch (x) { setError(x instanceof Error ? x.message : String(x)) } finally { setBusy(false) }
+  }
   return (
     <Card>
       <div data-testid="debtor-agent">
-        <Label>{ag ? 'Your agent' : 'Speak to us'}</Label>
-        <div className="mt-3 flex items-center gap-3">
-          <span className="h-12 w-12 shrink-0 rounded-full flex items-center justify-center text-lg font-semibold text-white" style={{ background: C.slate }}>
-            {(ag?.name ?? 'Bredell Ferreira').trim().charAt(0).toUpperCase()}
-          </span>
-          <div className="min-w-0">
-            <p className="text-[17px] font-semibold" style={{ color: NAVY }}>{ag?.name ?? 'Bredell Ferreira'}</p>
-            <p className="text-sm text-[#5A6B80]">{ag ? 'Looks after your account. Quote ' : 'Quote '}{a.caseNumber}{ag ? '.' : ' when you call or write.'}</p>
+        {ag && (
+          <>
+            <Label>The person handling your account</Label>
+            <div className="mt-3 flex items-center gap-3">
+              <span className="h-12 w-12 shrink-0 rounded-full flex items-center justify-center text-lg font-semibold text-white" style={{ background: C.slate }}>
+                {ag.name.trim().charAt(0).toUpperCase()}
+              </span>
+              <div className="min-w-0">
+                <p className="text-[17px] font-semibold" style={{ color: NAVY }}>{ag.name}</p>
+                <p className="text-sm text-[#5A6B80]">Your agent at Bredell Ferreira. Quote {a.caseNumber}.</p>
+              </div>
+            </div>
+            {ways({ phone: ag.phone, email: ag.email, whatsapp: ag.whatsapp }, 'debtor-agent-ways')}
+            {done
+              ? <p className="mt-3 rounded-lg bg-[#F2F5F8] p-3 text-sm" style={{ color: NAVY }} data-testid="debtor-callback-sent">Thank you. {first} will call you back, usually within one working day.</p>
+              : !asking
+                ? <button type="button" onClick={() => setAsking(true)} className="mt-3 text-sm font-semibold underline underline-offset-2" style={{ color: NAVY }} data-testid="debtor-callback">Ask {first} to call me back</button>
+                : (
+                  <form onSubmit={askCallback} className="mt-3 space-y-2" data-testid="debtor-callback-form">
+                    <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="tel" placeholder="Your number" aria-label="Number to call back" className={field} />
+                    <input value={when} onChange={(e) => setWhen(e.target.value)} placeholder="Best time (optional), e.g. after 2pm" aria-label="Best time to call" maxLength={80} className={field} />
+                    <button type="submit" disabled={busy} className={button} style={{ background: NAVY }}>{busy ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : `Ask ${first} to call me`}</button>
+                    {error && <p className="text-sm text-red-700">{error}</p>}
+                  </form>
+                )}
+          </>
+        )}
+        {(office.phone || office.email) && (
+          <div className={ag ? 'mt-5 border-t border-[#EEF2F6] pt-4' : ''} data-testid="debtor-office">
+            <Label>{ag ? 'Or speak to the office' : 'Speak to us'}</Label>
+            <p className="mt-1 text-[15px] font-semibold" style={{ color: NAVY }}>Bredell Ferreira</p>
+            <p className="text-sm text-[#5A6B80]">{ag ? `Anyone at the office can help when ${first} is not available.` : `Quote ${a.caseNumber} when you call or write.`}</p>
+            {ways(office, 'debtor-office-ways')}
           </div>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className={pill} style={{ color: NAVY }}><Phone size={15} /> {phone}</a>}
-          {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/\D/g, '').replace(/^0/, '27')}`} target="_blank" rel="noreferrer" className={pill} style={{ color: NAVY }}><MessageCircle size={15} /> WhatsApp</a>}
-          {email && <a href={`mailto:${email}?subject=${encodeURIComponent(a.caseNumber)}`} className={pill} style={{ color: NAVY }}><Mail size={15} /> {email}</a>}
-        </div>
+        )}
       </div>
     </Card>
   )
@@ -479,10 +564,10 @@ function PaymentsList({ a }: { a: DebtorAccount }) {
 }
 
 function Row({ label, value }: { label: string; value: number }) {
-  return <div className="flex justify-between py-2.5"><dt className="text-[#5A6B80]">{label}</dt><dd className="tabular-nums" style={{ color: NAVY }}>{value < 0 ? `− ${money(-value)}` : money(value)}</dd></div>
+  return <div className="flex justify-between border-b border-[#EEF2F6] py-2.5"><dt className="text-[#5A6B80]">{label}</dt><dd className="tabular-nums" style={{ color: NAVY }}>{value < 0 ? `− ${money(-value)}` : money(value)}</dd></div>
 }
 function Pair({ label, value }: { label: string; value: string }) {
-  return <div className="flex justify-between gap-3"><dt className="text-[#5A6B80]">{label}</dt><dd className="text-right font-semibold" style={{ color: NAVY }}>{value}</dd></div>
+  return <div className="min-w-0"><dt className="text-[12px] text-[#5A6B80]">{label}</dt><dd className="font-semibold break-words" style={{ color: NAVY }}>{value}</dd></div>
 }
 
 /* ------------------------------------------------------------------ part 2 */
@@ -646,9 +731,11 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
     )
   }
 
-  const value = Number(amount.replace(/[^\d.,]/g, '').replace(',', '.'))
+  /* A once-off is the settlement figure, shown rather than typed (Stephan, 4 Nov); the server records its own. */
+  const onceOff = arrangement === 'once_off'
+  const value = onceOff ? s.settleToday : Number(amount.replace(/[^\d.,]/g, '').replace(',', '.'))
   const offer = { arrangement, amount: value, firstDueOn }
-  const typed = amount.trim() !== '' && firstDueOn !== ''
+  const typed = (onceOff || amount.trim() !== '') && firstDueOn !== ''
   const problem = typed ? proposalProblem(offer, { balance: s.balance, settlement: s.settleToday }, today) : null
   const application = typed && !problem && needsApplication(offer, s.settleToday)
 
@@ -659,7 +746,7 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
     if (p) { setError(p); return }
     setBusy(true)
     try {
-      const r = await proposeDebtorArrangement(token, { arrangement, amount, firstDueOn, note: note.trim() || undefined })
+      const r = await proposeDebtorArrangement(token, { arrangement, amount: onceOff ? String(s.settleToday) : amount, firstDueOn, note: note.trim() || undefined })
       /* Straight on to the form, in this tab: it is the next thing they have to do, and the portal is a tap back. */
       if (r.assessmentLink) { window.location.assign(r.assessmentLink); return }
       onSent()
@@ -687,9 +774,17 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">{arrangement === 'once_off' ? 'Amount' : arrangement === 'weekly' ? 'Each week' : 'Each month'}</span>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="500" aria-label="Amount you can pay" className={field} />
-          </label>
+          {onceOff
+            ? (
+              <div className="text-sm"><span className="mb-1 block text-[#5A6B80]">To settle in full</span>
+                <p className="rounded-[10px] border border-[#D5DBE3] bg-[#F7F9FB] px-3 py-2.5 text-[15px] font-semibold tabular-nums" style={{ color: NAVY }} data-testid="debtor-once-off-amount">{money(s.settleToday)}</p>
+              </div>
+            )
+            : (
+              <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">{arrangement === 'weekly' ? 'Each week' : 'Each month'}</span>
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="500" aria-label="Amount you can pay" className={field} />
+              </label>
+            )}
           <label className="block text-sm"><span className="mb-1 block text-[#5A6B80]">{arrangement === 'once_off' ? 'On' : 'First payment'}</span>
             <input type="date" value={firstDueOn} onChange={(e) => setFirstDueOn(e.target.value)} min={today} aria-label="First payment date" className={field} />
           </label>
@@ -698,6 +793,11 @@ function ArrangementSection({ token, account, onSent }: { token: string; account
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} aria-label="Note" className={field} />
         </label>
         {typed && !problem && <p className="text-sm" style={{ color: NAVY }} data-testid="debtor-offer-summary">{proposalSummary(offer, s.settleToday)}.</p>}
+        {onceOff && firstDueOn && !problem && (
+          <p className={`rounded-lg p-3 text-sm ${settlementHolds(firstDueOn, today) ? 'bg-[#F2F5F8]' : 'bg-[#FBF6EC]'}`} style={{ color: NAVY }} data-testid="debtor-once-off-note">
+            {onceOffNote(firstDueOn, today, s.settleToday)}
+          </p>
+        )}
         {application && <p className="rounded-lg bg-[#FBF6EC] p-3 text-sm" style={{ color: NAVY }} data-testid="debtor-offer-application">{applicationNote(offer, s.settleToday)}</p>}
         {typed && problem && <p className="text-sm text-red-700" data-testid="debtor-offer-problem">{problem}</p>}
         <button type="submit" disabled={busy || !typed || !!problem} className={button} style={{ background: NAVY }}>

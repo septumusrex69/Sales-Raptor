@@ -153,11 +153,11 @@ const requestCode: Handler = async (req, res, admin) => {
 
 const verify: Handler = async (req, res, admin) => {
   const body = req.body ?? {}
-  const login = debtorLogin(body.login ?? body.caseNumber)
+  const who = debtorLogin(body.login ?? body.caseNumber)
   const code = normaliseCode(body.code)
-  if (!login || !code) { res.status(400).json({ error: 'Type the six digits we sent you.' }); return }
+  if (!who || !code) { res.status(400).json({ error: 'Type the six digits we sent you.' }); return }
   /* The same rule as the send: a code was only sent where exactly one account matched. */
-  const found = await accountsFor(admin, login)
+  const found = await accountsFor(admin, who)
   const acct = found.length === 1 ? found[0] : null
   const { data: stored } = acct
     ? await admin.from('debtor_portal_codes').select('code_hash, expires_at, attempts').eq('account_id', acct.id).maybeSingle()
@@ -595,6 +595,9 @@ const propose: Handler = async (req, res, admin) => {
 
   let b: BalanceBreakdown
   try { b = await balanceOf(admin, a, who.accountId, today) } catch { res.status(500).json({ error: 'Your balance could not be worked out just now. Please try again later.' }); return }
+  /* A ONCE-OFF IS THE SETTLEMENT, AS THE SERVER WORKS IT OUT (Stephan, 4 Nov) -- not a figure the page sent, which
+     could be a day stale or edited. The page shows the same number; this is the one that is recorded. */
+  if (offer.arrangement === 'once_off') offer.amount = b.settlement
   const problem = proposalProblem(offer, { balance: b.balance, settlement: b.settlement }, today)
   if (problem) { res.status(400).json({ error: problem }); return }
 

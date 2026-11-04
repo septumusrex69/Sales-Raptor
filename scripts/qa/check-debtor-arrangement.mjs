@@ -8,7 +8,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-debtor-arrangement.mjs
  */
 import { readFileSync } from 'node:fs'
-import { PROPOSAL_RULES, proposalProblem, proposalSummary, paymentsToSettle, monthsToSettle, needsApplication, applicationNote } from '../../src/lib/debtorArrangement.ts'
+import { PROPOSAL_RULES, proposalProblem, proposalSummary, paymentsToSettle, monthsToSettle, needsApplication, applicationNote, onceOffNote, settlementHolds, settlementHoldsUntil } from '../../src/lib/debtorArrangement.ts'
 import { stripSqlComments } from './sqlComments.mjs'
 
 let pass = 0
@@ -34,8 +34,20 @@ ok(`...and the debtor is told so before sending, with what would avoid the form 
 check('R190 a week is 52 weeks: 12 months, ordinary', [monthsToSettle(P('weekly', 190), 9840), needsApplication(P('weekly', 190), 9840)], [12, false])
 check('R100 a week is 99 weeks: 23 months, an application', [monthsToSettle(P('weekly', 100), 9840), needsApplication(P('weekly', 100), 9840)], [23, true])
 check('a once-off is never an application', needsApplication(P('once_off', 100), 9840), false)
-check('a once-off of any size may be offered (the collector decides)', proposalProblem(P('once_off', 2000), M, T), null)
-ok('...and says what it leaves owing', /leaving R 7[ \u00a0]?840[.,]00 still to pay/.test(proposalSummary(P('once_off', 2000), 9840)))
+/* A ONCE-OFF SETTLES THE ACCOUNT, AND TODAY'S FIGURE HOLDS FIVE WORKING DAYS (Stephan, 4 Nov). */
+ok('a once-off for less than the settlement is refused, with the figure and the other ways',
+  /settles the account: R 9[ \u00a0]?840[.,]00/.test(proposalProblem(P('once_off', 2000), M, T) ?? '') && /weekly or monthly/.test(proposalProblem(P('once_off', 2000), M, T) ?? ''))
+check('...and the settlement itself is fine', proposalProblem(P('once_off', 9840), M, T), null)
+ok('...said as settling in full', /R 9[ \u00a0]?840[.,]00 on .*, settling the account in full/.test(proposalSummary(P('once_off', 9840), 9840)))
+check('five working days from Tuesday 3 November is Tuesday 10 November', [PROPOSAL_RULES.settlementHoldsWorkingDays, settlementHoldsUntil(T)], [5, '2026-11-10'])
+check('...so the 10th holds and the 11th does not', [settlementHolds('2026-11-10', T), settlementHolds('2026-11-11', T)], [true, false])
+ok('within it: pay this by then and it is settled', /^Pay R 9[ \u00a0]?840[.,]00 by 10 November 2026 and your account is settled in full\.$/.test(onceOffNote('2026-11-06', T, 9840)))
+const later = onceOffNote('2026-11-25', T, 9840)
+ok(`after it: the figure may grow, and the reminders say so (${later.slice(0, 50)}...)`,
+  /may add to it/.test(later) && /two working days before 25 November 2026 and again on the day/.test(later))
+const apiP = read('api/_lib/debtorPortal.ts')
+ok('the server records the settlement it works out, not the figure the page sent',
+  /if \(offer\.arrangement === 'once_off'\) offer\.amount = b\.settlement\s*const problem = proposalProblem/.test(apiP))
 ok('an instalment that pays everything is a once-off, said so', /Choose "once-off" instead/.test(proposalProblem(P('monthly', 9840), M, T) ?? ''))
 ok('the first payment cannot be in the past', /cannot be in the past/.test(proposalProblem(P('monthly', 500, '2026-11-02'), M, T) ?? ''))
 check('...may be today', proposalProblem(P('monthly', 500, '2026-11-03'), M, T), null)

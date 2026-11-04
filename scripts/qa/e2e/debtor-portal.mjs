@@ -103,7 +103,15 @@ try {
   t.ok('who and whose: name, case, the client and their reference', /Tumelo Patience Molefe/i.test(view) && /Case RAP-125318 · on behalf of Alianna Pharmacy \(their reference ALIANNAPH\/30182\)/.test(view))
   /* en-ZA in Chromium writes R 255,00 and Node R 255.00 (HANDOFF: the separators differ), so either mark. */
   t.ok('what they owe, large', /^R 255[.,]00$/.test(plain(await page.getByTestId('debtor-balance').innerText())))
-  t.ok('what settling today costs, and why it differs', /To settle in full today: R 280[.,]50/.test(view) && /fee on the final payment/.test(view))
+  t.ok('what settling costs, in its own box, with the day it holds to and why it differs',
+    /^R 280[.,]50$/.test(plain(await page.getByTestId('debtor-settle').innerText()))
+    && /If paid by 18 November 2026\. It includes the fee on the final payment/.test(plain(await page.getByTestId('debtor-settle-box').innerText())))
+  /* WHERE IT STANDS (4 Nov): R100 paid of R100 + R255 is 28%. */
+  t.ok('where the account stands: a progress bar and the one thing happening now',
+    /^28% paid$/.test(await page.getByTestId('debtor-progress-pct').innerText())
+    && /Nothing is agreed yet/.test(await page.getByTestId('debtor-stage').innerText()))
+  t.ok('...the agent, with a call-back, and the office beside them', await page.getByTestId('debtor-callback').isVisible()
+    && /Bredell Ferreira/.test(await page.getByTestId('debtor-office').innerText()))
   t.ok('the breakdown adds up to it', /Original amount owed\s*R 177[.,]50/.test(view) && /Fees and costs \(VAT included\)\s*R 177[.,]50/.test(view) && /You have paid\s*− R 100[.,]00/.test(view))
   t.ok('in duplum is explained', /legal maximum \(the in duplum rule\)/.test(plain(await page.getByTestId('debtor-note').innerText())))
   const pay = plain(await page.getByTestId('debtor-pay').innerText())
