@@ -150,6 +150,15 @@ check('a page break starts a new page',
 check('...and one at the very start does not leave a blank sheet',
   plan({ ...blankLetter(), blocks: [{ kind: 'pagebreak' }, p('one')] }).pages.length, 1)
 
+/* `aside` DRAWS ONE VERTICAL RULE, AT THE SECOND COLUMN'S LEFT EDGE, AND NO GRID (the statement's reference block). */
+{
+  const rows = [0, 1, 2].map((i) => [cell(''), cell(''), cell(`Label ${i}:`), cell('value')])
+  const pl = plan({ ...blankLetter(), blocks: [{ kind: 'table', rows, widths: [50, 4, 20, 26], borders: 'aside' }] })
+  const lines = pl.pages[0].ops.filter((o) => o.op === 'line')
+  ok(`...three row segments, all vertical, all at one x (${lines.length})`,
+    lines.length === 3 && lines.every((l) => l.x1Mm === l.x2Mm && l.x1Mm === lines[0].x1Mm))
+}
+
 /*
  * A TABLE ROW IS KEPT WHOLE. Half the legal-process table at the foot of a page, with its other
  * half at the top of the next, is a table that reads as two different statements about what

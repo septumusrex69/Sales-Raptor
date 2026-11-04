@@ -513,6 +513,18 @@ ok('...while plain text still goes in the way the browser can undo',
   check('...and an ordinary one still breaks', (plain[0] ?? {}).keepTogether, undefined)
 }
 
+/* THE REFERENCE BLOCK'S RULE SURVIVES THE TRIP (`aside`, 4 Nov: "make the statement look like this"). Read back as
+   anything else, the statement edited once in the sheet would lose the rule beside its date and reference. */
+{
+  const aside = {
+    defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+    blocks: [{ kind: 'table', borders: 'aside', widths: [50, 4, 20, 26],
+      rows: [[{ spans: [{ text: '' }] }, { spans: [{ text: '' }] }, { spans: [{ text: 'Date:' }] }, { spans: [{ text: '4 November 2026' }] }]] }],
+  }
+  const back = documentHtmlToBlocks(letterToHtml(parseLetter(JSON.stringify(aside)), { filled: false, values: {} }))
+  check('a reference block with its rule is still one after the trip', (back[0] ?? {}).borders, 'aside')
+}
+
 /*
  * AND THE SELECTION IS WATCHED RATHER THAN SAMPLED. The first cut of this remembered the caret
  * from the sheet's own key and mouse events, so a selection made any other way was never seen —

@@ -163,8 +163,12 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   - **Statement on an account nobody holds**: refused for {{collector_name}}. Now EVERY document: collector_name and
     agent_name fall back to UNASSIGNED_NAME "The Pre-Legal Department" (Stephan renamed it from "The Collections Team"), collector_email to the firm's (messageTemplates;
     Stephan: "We should have fail-safes for that"). check-message-templates' "names nobody" assertion changed with it.
-  - **Statement head is a band**: DATE / OUR REFERENCE / ACCOUNT / CREDITOR / (STATUS) / POSITION AS AT, three across,
-    7pt label over 9pt value (accountSummaryLetter addressBlock; both documents) -- "takes up half the page".
+  - **Statement head as the firm drew it** (Stephan sent a page, "make the statement look like this"): Date / Our
+    reference / Account / Creditor / (Status) / Position as at as a block on the RIGHT, "Label:" beside value at 9.5pt,
+    with one vertical rule on its left (accountSummaryLetter addressBlock; summary and statement both). New table
+    borders value **`aside`** in the closed set: no grid, a 0.3mm rule down column 2's left edge, rows padded 0.5mm --
+    letterLayout (PDF), `.ltr-b-aside` CSS (screen, same 0.5mm), and the parser reads it back
+    (check-page-editor round trip, check-letter-pdf). Replaced the morning's three-across band.
   - **Once-off = settle in full** at the server's settlement figure, which holds 5 working days
     (`PROPOSAL_RULES.settlementHoldsWorkingDays`, `settlementHoldsUntil`, `onceOffNote`); later is a promise with the PTP
     workflow's reminders. Server sets `offer.amount = b.settlement`. check-debtor-arrangement 42.

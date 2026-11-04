@@ -129,6 +129,9 @@ const CELL_PAD_MM = 2
 const CELL_PAD_Y_MM = 1.4
 const RULE_MM = 0.2
 const RULE_COLOUR = '#d8dee6'
+const ASIDE_RULE_MM = 0.3
+const ASIDE_PAD_Y_MM = 0.5
+const ASIDE_RULE_COLOUR = '#4b5563'
 /*
  * THE DRAWN BAR, and the same four numbers the sheet's own CSS uses -- see the .ltr-bar rules in
  * letterDocument.ts. Written in both places rather than shared because one is a CSS string and the
@@ -485,6 +488,8 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
         const cols = block.rows[0]?.length ?? 0
         if (cols === 0) break
         const pad = block.borders === 'all' ? CELL_PAD_MM : 0
+        /* The reference block is set tight, as a letter's is (`aside`); the screen's CSS uses the same 0.5mm. */
+        const padY = block.borders === 'aside' ? ASIDE_PAD_Y_MM : CELL_PAD_Y_MM
         /*
          * WIDTHS THE LETTER GAVE, OR THE ONES THE CONTENT ASKS FOR.
          *
@@ -528,7 +533,7 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
           const heights = cells.map((ls) => ls.reduce((n, l) => n + l.heightMm, 0))
           return {
             cells,
-            rowHeight: Math.max(...heights, ptToMm(base.sizePt) * lineHeight) + CELL_PAD_Y_MM * 2,
+            rowHeight: Math.max(...heights, ptToMm(base.sizePt) * lineHeight) + padY * 2,
           }
         }
 
@@ -566,7 +571,7 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
           room(keep)
           const rowTop = y
           cells.forEach((lines, ci) => {
-            y = rowTop + CELL_PAD_Y_MM
+            y = rowTop + padY
             drawLines(lines, xs[ci] + pad, widths[ci] - pad * 2, row[ci].align ?? 'left')
           })
           y = rowTop + rowHeight
@@ -576,6 +581,9 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
               op: 'line', x1Mm: left, y1Mm: y, x2Mm: right, y2Mm: y,
               widthMm: RULE_MM, colour: RULE_COLOUR,
             })
+          } else if (block.borders === 'aside' && xs.length > 1) {
+            /* One rule down the second column's left edge, row by row, so it runs the table's height unbroken. */
+            at().ops.push({ op: 'line', x1Mm: xs[1], y1Mm: rowTop, x2Mm: xs[1], y2Mm: y, widthMm: ASIDE_RULE_MM, colour: ASIDE_RULE_COLOUR })
           } else if (block.borders === 'all') {
             at().ops.push({ op: 'line', x1Mm: left, y1Mm: rowTop, x2Mm: right, y2Mm: rowTop, widthMm: RULE_MM, colour: RULE_COLOUR })
             at().ops.push({ op: 'line', x1Mm: left, y1Mm: y, x2Mm: right, y2Mm: y, widthMm: RULE_MM, colour: RULE_COLOUR })

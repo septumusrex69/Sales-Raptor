@@ -127,7 +127,13 @@ export interface TableBlock {
    * How much of a grid to draw. The section 129 uses all three: `none` for the date/reference
    * strip at the top, `rows` for the banking details, `all` for the legal-process table.
    */
-  borders?: 'none' | 'rows' | 'all'
+  /**
+   * `aside` (Raptor H16, 4 Nov): no grid, and ONE vertical rule down the left edge of the SECOND column. The statement's
+   * reference block uses it -- an empty first column pushes the block to the right of the page, and the rule sets it
+   * apart from the body, the way the firm drew it ("make the statement look like this"). The rule is drawn at the
+   * second column's left edge, so the gutter beside it is the column's own padding.
+   */
+  borders?: 'none' | 'rows' | 'all' | 'aside'
   /**
    * DO NOT BREAK THIS TABLE ACROSS A PAGE.
    *
@@ -833,6 +839,8 @@ export function letterCss(doc: LetterDocument, page: PageSetup): string {
 .ltr-t th { font-weight: 700; }
 .ltr-b-rows td, .ltr-b-rows th { border-bottom: 0.2mm solid #d8dee6; padding-left: 0; }
 .ltr-b-all td, .ltr-b-all th { border: 0.2mm solid #d8dee6; padding: 1.4mm 2mm; }
+.ltr-b-aside td, .ltr-b-aside th { padding-top: 0.5mm; padding-bottom: 0.5mm; }
+.ltr-b-aside td:nth-child(2), .ltr-b-aside th:nth-child(2) { border-left: 0.3mm solid #4b5563; }
 .ltr-break { break-before: page; page-break-before: always; }
 .ltr-sig { margin: 0 0 3mm; }
 .ltr-rule { border-bottom: 0.3mm solid #4b5563; height: 10mm; margin-bottom: 1.5mm;
@@ -1272,7 +1280,7 @@ export function documentHtmlToBlocks(html: string): Block[] {
           spans: editableHtmlToSpans(cell.inner),
           ...(alignOf(cell.attrs) ? { align: alignOf(cell.attrs)! } : {}),
         })))
-      const borders = /ltr-b-(none|rows|all)/.exec(cls)?.[1] as TableBlock['borders'] | undefined
+      const borders = /ltr-b-(none|rows|all|aside)/.exec(cls)?.[1] as TableBlock['borders'] | undefined
       const headerRow = /<th\b/i.test(raw.inner)
       out.push({
         kind: 'table',
