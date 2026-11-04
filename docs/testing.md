@@ -26,7 +26,7 @@ When any page crashes, the user sees a "Something went wrong — it's been repor
 a white screen, and the error is sent to `/api/report-error`. That stores it in the
 `error_reports` table and emails you -- once per distinct bug per 6 hours, with a count of repeats.
 
-1. Run the `error_reports` block at the bottom of `supabase/schema.sql` in the Supabase SQL editor.
+1. ~~Create the `error_reports` table~~ — done on "Sales Raptor Staging" (the live project) on 4 Nov 2026. For a new project, run the block at the bottom of `supabase/schema.sql`.
 2. Create a free key at resend.com.
 3. In Vercel → Project → Settings → Environment Variables add:
    - `RESEND_API_KEY` = the key

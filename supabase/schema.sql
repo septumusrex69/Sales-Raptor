@@ -1574,6 +1574,7 @@ create table if not exists public.error_reports (
 
 create index if not exists error_reports_fingerprint_idx on public.error_reports (fingerprint, last_seen_at desc);
 create index if not exists error_reports_recent_idx on public.error_reports (last_seen_at desc);
+create index if not exists error_reports_user_idx on public.error_reports (user_id);
 
 alter table public.error_reports enable row level security;
 
@@ -1581,8 +1582,8 @@ alter table public.error_reports enable row level security;
 -- through the API route, which validates and caps them.
 drop policy if exists error_reports_admin_read on public.error_reports;
 create policy error_reports_admin_read on public.error_reports for select to authenticated
-  using (public.current_user_role() = 'Administrator');
+  using ((select public.current_user_role()) = 'Administrator');
 drop policy if exists error_reports_admin_resolve on public.error_reports;
 create policy error_reports_admin_resolve on public.error_reports for update to authenticated
-  using (public.current_user_role() = 'Administrator')
-  with check (public.current_user_role() = 'Administrator');
+  using ((select public.current_user_role()) = 'Administrator')
+  with check ((select public.current_user_role()) = 'Administrator');
