@@ -146,6 +146,10 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
      accounts at 0% set to the client's default 24% on staging (closed ones left alone). Elsabe RAP-125340: open_interest
      now R 4 406,21 over 722 days (in duplum still caps it with the fees on the page). New accounts already take the
      client's rate unless the handover says otherwise (handoverDraft / newDebtor) -- the seed had written 0.
+     WHY 0: S16's test-history seed wrote "no interest" on all 140 STC-H accounts on purpose (see its entry below).
+     Stephan, 4 Nov: "One should always have 24% on default ... Always. Unless we change anything." The app and the
+     column default already say 24 (DEFAULT_INTEREST_RATE_ANNUAL; `alter column ... set default 24`). The 54 CLOSED
+     test accounts stay at 0: raising them would put interest back on accounts already settled or paid up.
 - **DEBTOR PORTAL, 4 NOV (S17, after Stephan's first real sign-in):**
   - **Sign in with case number, ID number or email** (Stephan: "with your ID number ... your email address, or your
     case number. Like I couldn't sign in now"). The page refused anything but a case number before asking the server
@@ -157,7 +161,7 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
     ~10 minutes until 2759a679. The temp-tsconfig API typecheck I used had `types: ["node"]` and failed before
     checking anything -- use `types: []` (tsconfig.app.json base), and READ its output.
   - **Statement on an account nobody holds**: refused for {{collector_name}}. Now EVERY document: collector_name and
-    agent_name fall back to UNASSIGNED_NAME "The Collections Team", collector_email to the firm's (messageTemplates;
+    agent_name fall back to UNASSIGNED_NAME "The Pre-Legal Department" (Stephan renamed it from "The Collections Team"), collector_email to the firm's (messageTemplates;
     Stephan: "We should have fail-safes for that"). check-message-templates' "names nobody" assertion changed with it.
   - **Statement head is a band**: DATE / OUR REFERENCE / ACCOUNT / CREDITOR / (STATUS) / POSITION AS AT, three across,
     7pt label over 9pt value (accountSummaryLetter addressBlock; both documents) -- "takes up half the page".

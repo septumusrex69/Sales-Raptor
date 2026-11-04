@@ -1225,10 +1225,11 @@ export function longDate(date: string): string {
  * collector name, in the brackets. We should have fail-safes for that ... by default ... Bredell Ferreira handles the
  * account"). Ninety-six open accounts on staging have nobody; every statement, repayment letter and call script that
  * names the collector printed the braces or was refused. The firm's own team stands in -- true, where an invented
- * person would not be -- and reads in both places it appears: "Speak to The Collections Team, who handles this
+ * person would not be -- and reads in both places it appears: "Speak to The Pre-Legal Department, who handles this
  * account" and over "for and on behalf of Bredell Ferreira". The office's email stands in for theirs.
  */
-export const UNASSIGNED_NAME = 'The Collections Team'
+/* Named by Stephan, 4 Nov: "The collections team we can rename pre-legal department." */
+export const UNASSIGNED_NAME = 'The Pre-Legal Department'
 
 export interface Person {
   name?: string | null
