@@ -5,7 +5,7 @@ import { balanceInputFor, type LedgerRows } from './balanceInput.js'
 import { balanceAccountFromRow } from './storedBalance.js'
 import type { FirmSettings } from './firmSettings.js'
 import { PRINTER_FIELDS, type LetterDocument } from './letterDocument.js'
-import { MERGE_FIELDS, type Person } from './messageTemplates.js'
+import { MERGE_FIELDS, UNASSIGNED_NAME, type Person } from './messageTemplates.js'
 
 /**
  * THE DEBTOR PORTAL'S STATEMENT, ASSEMBLED (Raptor H16, part 2) -- in one place so the server that draws it and the
@@ -38,15 +38,8 @@ export interface DebtorLetterInput {
  * application carries -- built the way the morning run builds them, over the account's own statement, ONCE. Two
  * builders would answer {{balance}} two ways on two documents the same debtor holds.
  */
-/**
- * WHO SIGNS WHERE NOBODY HOLDS THE ACCOUNT (Raptor H16, 4 Nov). The statement names the collector twice -- "Speak to
- * {{collector_name}}" and the signature -- and on the morning run that is always somebody, because a person sends it.
- * A debtor downloading their own statement off an account nobody has been given (96 of the open accounts on staging)
- * had nothing to fill it, and the guard that refuses a document with braces in it refused the statement: Stephan,
- * signed in as a debtor, "I tried to download my statement, I couldn't get it." The firm signs instead -- its own
- * collections team, on the firm's own number -- which is true, where an invented name would not be.
- */
-export const UNASSIGNED_SIGNER: Person = { name: 'The Collections Team' }
+/** Who signs where nobody holds the account: the fallback accountMergeValues applies to every document (UNASSIGNED_NAME). */
+export const UNASSIGNED_SIGNER: Person = { name: UNASSIGNED_NAME }
 
 export function debtorLetterValues(input: DebtorLetterInput): { values: Record<string, string>; statement: Statement } {
   const a = input.account as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -64,7 +57,7 @@ export function debtorLetterValues(input: DebtorLetterInput): { values: Record<s
     balance: st.breakdown.balance,
     clientName: input.clientName,
     /* Nobody at a keyboard, as on the morning run: the collector on the account is who the document names. */
-    agent: input.collector ?? UNASSIGNED_SIGNER, collector: input.collector ?? UNASSIGNED_SIGNER, liaison: input.liaison,
+    agent: input.collector, collector: input.collector, liaison: input.liaison,
     debtorIdNumber: a.debtor_id_number ?? null,
     contacts: input.contacts,
     firm: input.firm,

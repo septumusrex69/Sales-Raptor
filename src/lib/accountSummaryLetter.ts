@@ -121,18 +121,34 @@ export function statementOfAccount(input: AccountLetterInput): LetterDocument {
  * somebody will read as both.
  */
 function addressBlock(input: AccountLetterInput, title: string): Block[] {
-  const rows: TableCell[][] = [
-    pair('DATE', '{{today}}'),
-    pair('OUR REFERENCE', '{{case_number}}'),
-    pair('ACCOUNT', '{{account_number}}'),
-    pair('CREDITOR', '{{client_name}}'),
+  /*
+   * SMALL AND ACROSS, NOT TALL AND DOWN (Stephan, 4 Nov, previewing a statement: "the date, our reference, account
+   * ... takes up half the page. I think that can be small, and spread out at the top. So that you can get down to
+   * business ... the important stuff is the summary of account"). Six facts were six full-size rows, a third of the
+   * first page before a single figure. Now a band of three across, the label small over its value, so the summary of
+   * account starts near the top of the page where the eye lands.
+   */
+  const facts: [string, string][] = [
+    ['DATE', '{{today}}'],
+    ['OUR REFERENCE', '{{case_number}}'],
+    ['ACCOUNT', '{{account_number}}'],
+    ['CREDITOR', '{{client_name}}'],
   ]
-  /* LEFT OUT RATHER THAN PRINTED EMPTY. A row reading "STATUS" with nothing beside it is a
+  /* LEFT OUT RATHER THAN PRINTED EMPTY. A cell reading "STATUS" with nothing under it is a
      question the debtor will ring about. */
-  if (input.status) rows.push(pair('STATUS', input.status))
-  rows.push(pair('POSITION AS AT', longDate(input.asAt)))
+  if (input.status) facts.push(['STATUS', input.status])
+  facts.push(['POSITION AS AT', longDate(input.asAt)])
+  const fact = ([label, value]: [string, string]): TableCell => ({
+    spans: [{ text: label, bold: true, size: 7, colour: '#6b7280' }, { text: `\n${value}`, size: 9 }],
+  })
+  const rows: TableCell[][] = []
+  for (let i = 0; i < facts.length; i += 3) {
+    const row = facts.slice(i, i + 3).map(fact)
+    while (row.length < 3) row.push({ spans: [{ text: '' }] })
+    rows.push(row)
+  }
   return [
-    { kind: 'table', borders: 'none', widths: [28, 72], rows },
+    { kind: 'table', borders: 'none', widths: [30, 30, 40], rows },
     { kind: 'paragraph', spans: [{ text: '{{debtor_name}}', bold: true }] },
     /* The identity number as a paragraph of its own, the way all four of the firm's notices carry
        it -- and it leaves with the field on the 97% of the book that has none. See

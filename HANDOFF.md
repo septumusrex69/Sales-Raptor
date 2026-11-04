@@ -133,6 +133,41 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
      QUESTION is not charged yet** -- it is correspondence received too; ask whether it should be.
   3. `PROPOSAL_RULES`: first payment within 30 days; 12 months online, longer = application. Right numbers?
   4. Nobody has signed in for real yet: put your own email on a staging test account, open /my-account on the preview.
+  5. **A STATEMENT TWO WORKING DAYS BEFORE A LATER ONCE-OFF** (4 Nov, Stephan: "we will send you a statement 2 days
+     before the date ... then also send you a reminder on the day"). The "Promise to pay" workflow's reminder (-2
+     business days) and due-today steps quote {{ptp_amount}} and attach nothing. The portal promises only the reminders
+     and points at the page. Attach the statement to that reminder? (A workflow/template change -- ask first.)
+  6. **A shared mailbox for accounts nobody holds** (4 Nov, Stephan: "why did the email go out from Camille ... we
+     should have email address like ... prelegal@ or legal@"). The code email goes from the collector, else an
+     Administrator's connected mailbox (codeSenderOrder) -- Camille's. A shared address needs the mailbox to exist and
+     be connected in Raptor (Settings > Email) by somebody who can sign into it; then it is a firm setting and the
+     sender order puts it before the Administrators. Not built: waiting on the mailbox.
+  7. **Interest on Stephan's Test Client**: 86 of its 96 open accounts carry interest_rate_annual 0 (the client's
+     default is 24%), so no interest accrues -- Elsabe (RAP-125340) is one. The real clients' accounts all carry a rate.
+     Set the test accounts to 24%? Staging test data, but it changes 86 balances: asked, not done.
+- **DEBTOR PORTAL, 4 NOV (S17, after Stephan's first real sign-in):**
+  - **Sign in with case number, ID number or email** (Stephan: "with your ID number ... your email address, or your
+    case number. Like I couldn't sign in now"). The page refused anything but a case number before asking the server
+    -- nothing reached the logs. `debtorLogin` reads what was typed; api `accountsFor` finds the account(s): case ->
+    one; ID -> debtor_id_number (all 13 digits on staging); email -> CURRENT email contacts. Password: whichever account
+    it opens (several share an ID/email); a wrong one counts against each tried. A CODE goes only where exactly one
+    account matches (else the same generic answer, "use the case number"). Body field `login` (old `caseNumber` read).
+  - **My push 787e24c8 redeclared `login` in verify**: the debtor API did not bundle ("could not be reached") for
+    ~10 minutes until 2759a679. The temp-tsconfig API typecheck I used had `types: ["node"]` and failed before
+    checking anything -- use `types: []` (tsconfig.app.json base), and READ its output.
+  - **Statement on an account nobody holds**: refused for {{collector_name}}. Now EVERY document: collector_name and
+    agent_name fall back to UNASSIGNED_NAME "The Collections Team", collector_email to the firm's (messageTemplates;
+    Stephan: "We should have fail-safes for that"). check-message-templates' "names nobody" assertion changed with it.
+  - **Statement head is a band**: DATE / OUR REFERENCE / ACCOUNT / CREDITOR / (STATUS) / POSITION AS AT, three across,
+    7pt label over 9pt value (accountSummaryLetter addressBlock; both documents) -- "takes up half the page".
+  - **Once-off = settle in full** at the server's settlement figure, which holds 5 working days
+    (`PROPOSAL_RULES.settlementHoldsWorkingDays`, `settlementHoldsUntil`, `onceOffNote`); later is a promise with the PTP
+    workflow's reminders. Server sets `offer.amount = b.settlement`. check-debtor-arrangement 42.
+  - **Account page**: "Where your account stands" (progress = paid / (paid + owed); one stage, `debtorStanding`) with a
+    button to the arrangement; the sum with a total row; settlement in its own gold box with the day it holds to; How
+    to pay label-over-value; agent card = the person (line, email, WhatsApp, "Ask <name> to call me back" -> a portal
+    question) + the office beneath. e2e debtor-portal 46.
+  - **Company dashboard**: the photo credit is in the hero's bottom-right corner (HeroPhotoCredit), not under the line.
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

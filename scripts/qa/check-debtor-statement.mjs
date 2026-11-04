@@ -68,7 +68,8 @@ const orphan = debtorStatement({
 })
 const orphanGaps = unfilledFields(orphan.doc, orphan.values)
 ok(`an account nobody holds still gets its statement (unfilled: ${orphanGaps.join(', ') || 'none'})`, orphanGaps.length === 0)
-ok('...signed by the firm\'s collections team, not a person who does not exist', orphan.values.collector_name === UNASSIGNED_SIGNER.name)
+ok('...signed by the firm\'s collections team, not a person who does not exist', orphan.values.collector_name === UNASSIGNED_SIGNER.name && orphan.values.agent_name === UNASSIGNED_SIGNER.name)
+ok('...with the office\'s email where the collector\'s would be', orphan.values.collector_email === FIRM.email && !!FIRM.email)
 
 /* ---------- THE AFFORDABILITY ASSESSMENT AN APPLICATION CARRIES (Stephan, 3 Nov: more than 12 months) ----------
    Built as createAssessment builds it: the account's values, every fillable field Raptor cannot answer plus the

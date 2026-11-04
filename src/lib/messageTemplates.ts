@@ -1220,6 +1220,16 @@ export function longDate(date: string): string {
  * database would drag supabase in behind it. Every field optional -- a person with no WhatsApp
  * number is ordinary, and null leaves the placeholder standing.
  */
+/**
+ * WHO A DOCUMENT NAMES WHERE NOBODY HOLDS THE ACCOUNT (Stephan, 4 Nov: "There is no collector assigned ... it says
+ * collector name, in the brackets. We should have fail-safes for that ... by default ... Bredell Ferreira handles the
+ * account"). Ninety-six open accounts on staging have nobody; every statement, repayment letter and call script that
+ * names the collector printed the braces or was refused. The firm's own team stands in -- true, where an invented
+ * person would not be -- and reads in both places it appears: "Speak to The Collections Team, who handles this
+ * account" and over "for and on behalf of Bredell Ferreira". The office's email stands in for theirs.
+ */
+export const UNASSIGNED_NAME = 'The Collections Team'
+
 export interface Person {
   name?: string | null
   phone?: string | null
@@ -1447,7 +1457,7 @@ export function mergeValuesFor(input: {
     interest_rate: input.interestRateAnnual === null || input.interestRateAnnual === undefined
       ? null : `${input.interestRateAnnual}% a year`,
     interest_from: input.interestFrom ? longDate(input.interestFrom) : null,
-    agent_name: (input.agentName ?? '').trim() || null,
+    agent_name: (input.agentName ?? '').trim() || UNASSIGNED_NAME,
     /*
      * THE FIRM'S NUMBER WHERE THE PERSON HAS NONE. The firm, told that not one of the fifty live
      * profiles carries a phone number: "it should give the company's default details as contact,
@@ -1465,9 +1475,11 @@ export function mergeValuesFor(input: {
     agent_phone: (input.agentPhone ?? '').trim() || some(input.firm.phone),
     agent_email: some(input.agentEmail),
     agent_whatsapp: some(input.agentWhatsapp),
-    collector_name: some(input.collector?.name),
+    /* NOBODY HOLDS THE ACCOUNT: the firm's own team, and the firm's own address (UNASSIGNED_NAME says why). The direct
+       line stays optional -- every template that quotes it prints {{firm_phone}} below it. */
+    collector_name: some(input.collector?.name) ?? UNASSIGNED_NAME,
     collector_phone: some(input.collector?.phone),
-    collector_email: some(input.collector?.email),
+    collector_email: some(input.collector?.email) ?? some(input.firm.email),
     collector_whatsapp: some(input.collector?.whatsapp),
     liaison_name: some(input.liaison?.name),
     liaison_phone: some(input.liaison?.phone),

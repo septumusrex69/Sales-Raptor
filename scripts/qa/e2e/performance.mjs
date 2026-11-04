@@ -624,7 +624,7 @@ try {
     await heroBox.getByText(/Good (morning|afternoon|evening), /).isVisible())
   /* "Discipline drives results" went with the slogan (3 Nov: "just keep one"); what is under the day's line now is the
      photograph's credit. Asserted absent too, because it is exactly the sort of line that creeps back. */
-  t.ok('...the day\'s line credits its photograph', /Photo: .* on Unsplash/.test(await page.getByTestId('hero-day-line').innerText()))
+  t.ok('...the day\'s line credits its photograph', /Photo: .* on Unsplash/.test(await page.getByTestId('hero-photo-credit').innerText()))
   t.ok('...and "Discipline drives results" is not said beside it', !(await heroBox.innerText()).includes('DISCIPLINE DRIVES RESULTS') && !(await heroBox.innerText()).includes('Discipline drives results'))
   t.ok('...and the rail beside it',
     await heroBox.getByText(/Higher\s*Performance\s*Closer\s*Tomorrow/).isVisible())

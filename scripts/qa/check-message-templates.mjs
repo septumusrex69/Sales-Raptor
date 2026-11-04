@@ -31,7 +31,7 @@ import {
   FIELD_GROUPS, bankLine, groupedFields, maskSaId, mergeValuesFor, renderTemplate, resolveNote,
   resolveTemplate, sampleValues,
   templateProblems,
-  unknownFields, usageNote,
+  unknownFields, usageNote, UNASSIGNED_NAME,
 } from '../../src/lib/messageTemplates.ts'
 
 let pass = 0
@@ -448,7 +448,7 @@ check('the liaison is whoever looks after the CLIENT',
   ['Camile Bredell', '012 348 2157', 'camile@bf.co.za', '082 000 0003'])
 
 /*
- * NOBODY ASSIGNED IS NULL, NOT A BLANK. An unassigned account merging as an empty line would read
+ * NOBODY ASSIGNED IS NULL, NOT A BLANK (the collector excepted, 4 Nov -- below). An unassigned account merging as an empty line would read
  * as a finished letter naming nobody; left standing, {{collector_name}} is caught before it is
  * posted. The same rule as every other unfillable field in this file.
  */
@@ -456,8 +456,11 @@ const orphan = mergeValuesFor({
   account: person, balance: 1, clientName: 'x', agentName: 'y', agentPhone: 'z',
   firm: { firmName: 'f' }, today: '2026-09-18', money,
 })
-check('an account nobody holds names nobody, rather than a gap',
-  [orphan.collector_name, orphan.liaison_name, orphan.agent_email], [null, null, null])
+/* ...EXCEPT THE COLLECTOR (Stephan, 4 Nov): "There is no collector assigned ... it says collector name, in the
+   brackets. We should have fail-safes for that". A document refused for want of a collector is a statement the
+   debtor cannot get; the firm's own team signs instead (UNASSIGNED_NAME). Nobody else is invented. */
+check('an account nobody holds is signed by the firm\'s team; nobody else is invented',
+  [orphan.collector_name, orphan.liaison_name, orphan.agent_email], [UNASSIGNED_NAME, null, null])
 
 /*
  * THE LIAISON IS A COLLECTIONS IDEA. It is for what the firm writes TO a client about an account;

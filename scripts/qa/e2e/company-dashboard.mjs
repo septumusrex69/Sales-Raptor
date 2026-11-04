@@ -157,7 +157,7 @@ try {
   /* The day's line is the hero's headline since 3 Nov (no fixed slogan); with nothing approved, Llandudno's. */
   t.ok('the hero is still the company hero', /two oceans meet the mountains/i.test(text))
   /* THE BREDELL FERREIRA SKIN, the default since 31 Oct, wears the client portal's photograph of the day and its line. */
-  t.ok('the default skin\'s hero carries the day\'s line and its photographer', /Photo: .+ on Unsplash/.test(await page.getByTestId('hero-day-line').innerText().catch(() => '')))
+  t.ok('the default skin\'s hero carries the day\'s line and its photographer', /Photo: .+ on Unsplash/.test(await page.getByTestId('hero-photo-credit').innerText().catch(() => '')))
   t.ok('...over the day\'s photograph, Llandudno beneath it', /portal-photo\.webp/.test(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--skin-collections-hero-image'))))
   /* DAYS NOBODY APPROVED (Stephan, 31 Oct: "pre-choose everything and approve it ... for the month"): nothing approved
      for the coming week here, so the Administrator is told, with the way to /portal-looks. */

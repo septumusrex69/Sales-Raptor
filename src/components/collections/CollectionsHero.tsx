@@ -101,6 +101,7 @@ export function CollectionsHero({ figures, filters, action, progress }: {
       rather than padding, so the figures sit in the lower third whatever the window is doing.
     */
     <div className="collections-hero">
+      {theme.id === BASE_THEME && <HeroPhotoCredit />}
       {/* The brief caps the content at 1250-1350px. Wider than that and the rail of small caps
           ends up a screen away from the headline it belongs to. */}
       <div className="mx-auto flex w-full max-w-[1320px] flex-col px-5 py-7 sm:px-9 sm:py-9
@@ -328,7 +329,6 @@ function DayLine() {
   /* Today's APPROVED look (dayLookState.ts) -- the same one the client portal shows; Llandudno where none was approved. */
   const look = useSyncExternalStore(subscribeDayLook, currentDayLook, currentDayLook)
   const photo = { ...look.photo, line: look.line, who: look.who }
-  const credit = photoCredit(photo)
   return (
     <figure className="mt-4 max-w-3xl" data-testid="hero-day-line">
       {/* THE HEADLINE, in the weight the firm chose for the old one ("make the font thicker"), a size down because a
@@ -338,9 +338,21 @@ function DayLine() {
       </h1>
       {photo.who && <figcaption className="mt-3 text-sm text-[var(--ch-champagne)]">{photo.who}</figcaption>}
       <span className="mt-4 block h-px w-14 bg-[var(--ch-gold)]" />
-      <p className="mt-3 text-[10px] text-white/55">
-        {photo.title}, {photo.place}. Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">{credit.name}</a> on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">Unsplash</a>
-      </p>
     </figure>
+  )
+}
+
+/**
+ * THE PHOTOGRAPH'S CREDIT, IN ITS CORNER (Stephan, 4 Nov: "put it ... on the right bottom of the photo ... to give
+ * credit ... But not like right there in the middle of the fucking photo"). It sat under the headline, which is the
+ * middle of the panel. Bottom right, small, where a picture credit is looked for -- the client portal's place for it.
+ */
+function HeroPhotoCredit() {
+  const look = useSyncExternalStore(subscribeDayLook, currentDayLook, currentDayLook)
+  const credit = photoCredit({ ...look.photo, line: look.line, who: look.who })
+  return (
+    <p className="pointer-events-auto absolute bottom-2 right-4 z-10 max-w-[70%] truncate text-right text-[10px] text-white/55" data-testid="hero-photo-credit">
+      {look.photo.title}, {look.photo.place}. Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">{credit.name}</a> on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">Unsplash</a>
+    </p>
   )
 }
