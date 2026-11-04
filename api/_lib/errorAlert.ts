@@ -11,7 +11,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  *
  * Configuration (Vercel -> Project -> Settings -> Environment Variables):
  *   ERROR_ALERT_EMAIL   who gets told, comma-separated for several people
- *   RESEND_API_KEY      a Resend key (resend.com). Absent: errors are still stored, just not emailed.
+ *   ERROR_ALERT_RESEND_KEY  a Resend send-only key. Absent: errors are still stored, just not emailed.
+ *                           (Not RESEND_API_KEY -- that is News's key, locked to bfnews.co.za.)
  *   ERROR_ALERT_FROM    optional sender, default "Raptor Alerts <onboarding@resend.dev>"
  *
  * One email per distinct error per QUIET_HOURS. Twenty collectors hitting the same bug is one
@@ -90,7 +91,8 @@ export async function recordError(admin: SupabaseClient | null, r: ErrorReport):
 }
 
 async function sendAlert(r: ErrorReport, fp: string): Promise<boolean> {
-  const key = process.env.RESEND_API_KEY
+  // Its own key, not RESEND_API_KEY: that one belongs to News and is locked to bfnews.co.za.
+  const key = process.env.ERROR_ALERT_RESEND_KEY
   const to = process.env.ERROR_ALERT_EMAIL?.split(',').map((s) => s.trim()).filter(Boolean)
   if (!key || !to?.length) return false
 

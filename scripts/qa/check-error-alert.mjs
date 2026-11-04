@@ -29,7 +29,7 @@ check('same message from a different component is a different bug',
 check('render vs promise are kept apart', fingerprint(base) !== fingerprint({ ...base, source: 'promise' }))
 
 // Unconfigured (no database, no Resend key) must not throw: a broken reporter would hide bugs.
-delete process.env.RESEND_API_KEY
+delete process.env.ERROR_ALERT_RESEND_KEY
 const origError = console.error
 console.error = () => {}
 const r = await recordError(null, { ...base })

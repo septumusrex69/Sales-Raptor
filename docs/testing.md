@@ -29,7 +29,7 @@ a white screen, and the error is sent to `/api/report-error`. That stores it in 
 1. ~~Create the `error_reports` table~~ — done on "Sales Raptor Staging" (the live project) on 4 Nov 2026. For a new project, run the block at the bottom of `supabase/schema.sql`.
 2. Create a free key at resend.com.
 3. In Vercel → Project → Settings → Environment Variables add:
-   - `RESEND_API_KEY` = the key
+   - `ERROR_ALERT_RESEND_KEY` = the key (NOT `RESEND_API_KEY`, which is News's key for bfnews.co.za)
    - `ERROR_ALERT_EMAIL` = who gets told (comma-separate several)
    - `ERROR_ALERT_FROM` = optional; needs a domain verified in Resend, otherwise the
      `onboarding@resend.dev` default only delivers to the Resend account owner's address.
