@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node scripts/qa/run-all.mjs",
+    "test:quick": "node scripts/qa/run-all.mjs --no-build",
+    "test:smoke": "node scripts/qa/smoke.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

@@ -1,0 +1,58 @@
+# Runs every check on every push and pull request. GitHub emails whoever pushed when it fails,
+# and shows a red X on the commit -- so a broken build is known before Vercel ships it.
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The build needs these to exist; the checks never talk to Supabase.
+      VITE_SUPABASE_URL: https://example.supabase.co
+      VITE_SUPABASE_ANON_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # The click-through-every-page robot. Only runs once the repo has these secrets
+  # (Settings -> Secrets and variables -> Actions), and should point at a STAGING Supabase.
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: checks
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.QA_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.QA_SUPABASE_ANON_KEY }}
+      RAPTOR_QA_EMAIL: ${{ secrets.RAPTOR_QA_EMAIL }}
+      RAPTOR_QA_PASSWORD: ${{ secrets.RAPTOR_QA_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.RAPTOR_QA_EMAIL != ''
+      - uses: actions/setup-node@v4
+        if: env.RAPTOR_QA_EMAIL != ''
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        if: env.RAPTOR_QA_EMAIL != ''
+        run: |
+          npm ci
+          npm install -g playwright@1
+          playwright install --with-deps chromium
+      - name: Smoke tour
+        if: env.RAPTOR_QA_EMAIL != ''
+        run: npm run test:smoke
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-screenshots
+          path: .qa-screenshots/smoke

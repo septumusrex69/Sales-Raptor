@@ -1548,3 +1548,42 @@ alter table public.sms_messages enable row level security;
 drop policy if exists sms_messages_read on public.sms_messages;
 create policy sms_messages_read on public.sms_messages for select to authenticated using (true);
 -- Writes are server-side only. Nothing in the browser holds the provider token.
+
+-- ============================================================================================
+-- Error reports: every crash the app or an API route hits, so a bug is known before a
+-- collector has to mention it. Written by api/report-error.ts (service role) only; one row per
+-- distinct error per 6 hours, with `occurrences` counting repeats. See api/_lib/errorAlert.ts.
+create table if not exists public.error_reports (
+  id uuid primary key default gen_random_uuid(),
+  fingerprint text not null,
+  message text not null,
+  stack text,
+  component_stack text,
+  source text not null,
+  first_url text,
+  last_url text,
+  user_agent text,
+  build text,
+  user_id uuid references public.profiles (id) on delete set null,
+  user_email text,
+  occurrences integer not null default 1,
+  resolved boolean not null default false,
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create index if not exists error_reports_fingerprint_idx on public.error_reports (fingerprint, last_seen_at desc);
+create index if not exists error_reports_recent_idx on public.error_reports (last_seen_at desc);
+create index if not exists error_reports_user_idx on public.error_reports (user_id);
+
+alter table public.error_reports enable row level security;
+
+-- Administrators can read and mark resolved. Nobody writes from the browser: reports go
+-- through the API route, which validates and caps them.
+drop policy if exists error_reports_admin_read on public.error_reports;
+create policy error_reports_admin_read on public.error_reports for select to authenticated
+  using ((select public.current_user_role()) = 'Administrator');
+drop policy if exists error_reports_admin_resolve on public.error_reports;
+create policy error_reports_admin_resolve on public.error_reports for update to authenticated
+  using ((select public.current_user_role()) = 'Administrator')
+  with check ((select public.current_user_role()) = 'Administrator');
