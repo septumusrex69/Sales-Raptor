@@ -44,6 +44,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const outcome = await apply(admin, event)
+    /*
+     * ONE LINE PER EVENT, MATCHED OR NOT (S18). Stephan, 5 Nov: "It says it's dialing Buzzbox, but
+     * nothing happens." BuzzBox was reporting on every call and an event that matched no call row
+     * was dropped without a word, so nobody could see whether the extension rang, was busy or was
+     * not registered. The number is cut to its last three digits: this is a log, not a ledger.
+     */
+    console.log('[buzzbox-webhook]', JSON.stringify({
+      event: event.event, extension: event.extension, numberEnds: event.number ? event.number.slice(-3) : null,
+      answered: event.answered, ended: event.ended, hangupCause: event.hangupCause,
+      externalId: event.externalId, ...outcome,
+    }))
     res.status(200).json({ ok: true, ...outcome })
   } catch (err) {
     // A thrown error here would make BuzzBox retry an event that will fail again. Log and accept.
