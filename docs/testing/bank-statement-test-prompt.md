@@ -56,7 +56,8 @@ FORMAT — copy file (A)'s layout exactly; Raptor's reader is strict:
 
 SCENARIOS — make at least one line for each (use different accounts where you can):
   1.  Clean match: reference = account number exactly, part payment (about 10–30% of Balance).
-  2.  Case number as the reference (e.g. RAP-125318) instead of the account number.
+  2.  Case number as the reference instead of the account number -- one line written RAP-125318,
+      one RAP125318, one "rap 125318", and one RAP number that does not exist (e.g. RAP-999999).
   3.  Account number typed in lower case.
   4.  Same account number behind each channel style above (FNB APP, CAPITEC, ABSA, INT-BANKING,
       ADT CASH DEPO, reference alone).
@@ -89,8 +90,9 @@ OUTPUT:
 
 WHAT RAPTOR SHOULD DO (use these words in the key's "expected" column):
   1, 3, 4   Placed on the account automatically; waits in Trust → Payments in for approval.
-  2         Raptor's notices tell debtors to pay with the CASE number. Record what happens:
-            placed automatically, or left in "Needs an account"?
+  2         Placed automatically on that case's account, however the case number is written
+            (RAP-125318, RAP125318, rap 125318). A RAP number that is not a real case goes to
+            "Needs an account".
   5, 6      Not placed. Appears under Trust → To sort → "Needs an account" (suspense). Findable
             with the suspense search by amount or name.
   7         Not placed; flagged as matching more than one account.

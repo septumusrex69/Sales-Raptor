@@ -27,6 +27,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-bank-statement.mjs
  */
+import { readFileSync } from 'node:fs'
 import { parseBankStatement, referenceFrom, summarise } from '../../src/lib/bankStatement.ts'
 
 let pass = 0
@@ -100,6 +101,17 @@ check('no debit carries a reference',
 /* ---------------- the reference, behind whatever the bank put in front of it ---------------- */
 
 check('FNB app', referenceFrom('FNB APP PAYMENT FROM  QQQ1932'), 'QQQ1932')
+
+/* RAPTOR'S CASE NUMBER (S18; Stephan, 5 Nov: "Match case numbers on import too"): every notice asks
+   the debtor to pay with it, and the dash used to split it into two things that matched nothing. */
+check('a case number with its dash', referenceFrom('FNB APP PAYMENT FROM  RAP-125318'), 'RAP-125318')
+check('...without it, in lower case', referenceFrom('CAPITEC  rap125318'), 'RAP-125318')
+check('...with a space', referenceFrom('ABSA BANK  RAP 125318'), 'RAP-125318')
+check('...with a dot', referenceFrom('RAP.125318 J SMITH'), 'RAP-125318')
+check('...ahead of an account number on the same line', referenceFrom('QQQ1932 RAP-125318'), 'RAP-125318')
+check('...in brackets', referenceFrom('INT-BANKING PMT FRM (RAP-125318)'), 'RAP-125318')
+check('a name beginning RAP is not a case number', referenceFrom('CAPITEC RAPHAEL MOKOENA'), null)
+check('...nor is a longer word ending RAP and digits (it stays an ordinary reference)', referenceFrom('XRAP125318'), 'XRAP125318')
 check('Capitec', referenceFrom('CAPITEC   WWW0296'), 'WWW0296')
 check('ABSA', referenceFrom('ABSA BANK PPP11708'), 'PPP11708')
 check('a cash deposit at a branch', referenceFrom('ADT CASH DEPOSOMEWHERE   WWW0296'), 'WWW0296')
@@ -214,6 +226,19 @@ check('...and reported', impossible.problems.length, 1)
 const note = s.lines.find((l) => l.direction === 'note')
 check('the interest-rate notice keeps its whole description',
   note?.description, 'CR.INT.RATE   4,25000')
+
+/* ...AND THE IMPORT PLACES IT (S18): the last import_bank_lines matches a RAP reference on case_number,
+   normalised, and never retries it as an account number. */
+{
+  const sqlAll = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+  const at = sqlAll.lastIndexOf('create or replace function public.import_bank_lines(')
+  const imp = at < 0 ? '' : sqlAll.slice(at, sqlAll.indexOf('\nend $$;', at))
+  ok('import_bank_lines is in the schema', imp.length > 2000)
+  ok('import_bank_lines matches the case number', /if v_ref ~ '\^RAP\[\\s\._\/-\]\*\[0-9\]\{4,9\}\$' then/.test(imp)
+    && /where upper\(a\.case_number\) = v_ref;/.test(imp))
+  ok('...normalised to RAP-digits', /v_ref := 'RAP-' \|\| regexp_replace\(v_ref, '\[\^0-9\]', '', 'g'\);/.test(imp))
+  ok('...and only otherwise the account number', /else\s*\n[\s\S]*?where upper\(a\.account_number\) = v_ref;\s*\n\s*end if;/.test(imp))
+}
 
 console.log(`\ncheck-bank-statement: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

@@ -164,6 +164,18 @@ export function referenceFrom(description: string): string | null {
     if (stripped !== rest) { rest = stripped; break }
   }
 
+  /*
+   * RAPTOR'S CASE NUMBER, ANYWHERE IN THE LINE, BEFORE ANYTHING ELSE (S18; Stephan, 5 Nov: "Match
+   * case numbers on import too"). Every notice tells the debtor to pay with it, and it is the one
+   * reference that is unique. Written "RAP-125318", "RAP 125318", "rap125318" or "RAP.125318" it is
+   * one reference, and is handed on as RAP-125318 -- the dash used to split it into "RAP" and
+   * "125318", neither of which looked like anything, and the payment went to suspense. Ahead of the
+   * account number because when a debtor writes both, the unique one decides. "RAPHAEL" is safe:
+   * the letters must be followed by digits.
+   */
+  const caseNo = /(?:^|[^A-Z0-9])RAP[\s._/-]*(\d{4,9})(?![0-9])/i.exec(` ${rest}`)
+  if (caseNo) return `RAP-${caseNo[1]}`
+
   for (const word of rest.split(/\s+/).filter(Boolean)) {
     /*
      * THE WHOLE TOKEN FIRST, AND THIS ORDER IS LOAD-BEARING. A slashed series IS the reference --

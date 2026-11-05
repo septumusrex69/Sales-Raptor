@@ -55254,3 +55254,136 @@ begin
   end if;
   return new;
 end $$;
+
+-- ============================================================================================
+-- RAPTOR H17 / S18: THE STATEMENT IMPORT MATCHES RAPTOR'S CASE NUMBER, THEN THE ACCOUNT NUMBER.
+-- (Stephan, 5 Nov: "Match case numbers on import too.") bankStatement.ts reads RAP-125318 out of a
+-- description however it is written; this places it. See the note inside.
+-- ============================================================================================
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+  v_late date;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to import into.' using errcode = '42501';
+  end if;
+
+  -- A STATEMENT CANNOT RUN AHEAD OF THE CLOCK (prompt 10): a line dated after today refuses the
+  -- whole statement, before anything is written, so it cannot be half imported.
+  select min((l->>'date')::date) filter (where (l->>'date')::date > public.raptor_today())
+    into v_late from jsonb_array_elements(p_lines) l;
+  if v_late is not null then
+    raise exception 'That statement has a line dated %, after today (%). A statement cannot be dated after today.',
+      to_char(v_late, 'DD Mon YYYY'), to_char(public.raptor_today(), 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'note' then 'excluded' else 'unallocated' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- RAPTOR'S CASE NUMBER FIRST (S18; Stephan, 5 Nov: "Match case numbers on import too"). Every
+    -- notice tells the debtor to pay with it ("PAYMENT REFERENCE {{case_number}}"), and the import
+    -- matched only the client's account number -- so a debtor who did exactly as asked landed in
+    -- suspense. A case number is unique and never reused, so it names exactly one account or none;
+    -- written any way a person types it (RAP-125318, RAP125318, rap 125318) it is read as one. A
+    -- RAP reference that names no account is NOT then tried as an account number: no account number
+    -- on the book is RAP-shaped, and a guess there is a debtor credited with somebody else's money.
+    if v_ref ~ '^RAP[\s._/-]*[0-9]{4,9}$' then
+      v_ref := 'RAP-' || regexp_replace(v_ref, '[^0-9]', '', 'g');
+      select array_agg(a.id) into v_ids
+        from public.debtor_accounts a
+       where upper(a.case_number) = v_ref;
+    else
+    -- EXACTLY ONE ACCOUNT, OR NOBODY. account_number is the reference the DEBTOR knows and types.
+    -- It is not unique the way case_number is, so a reference naming two accounts is counted and
+    -- left for a person -- guessing credits one debtor with another's money, and a payment is
+    -- immutable once processed. (array_agg, not min(): there is no min(uuid).)
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.account_number) = v_ref;
+    end if;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by,
+      bank_line_id
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid(),
+      v_id
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = public.raptor_now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;
