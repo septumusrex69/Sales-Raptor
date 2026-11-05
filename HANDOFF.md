@@ -6,6 +6,43 @@
 > older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by
 > that name.
 
+## S18 -- RUNNING LOG (Raptor · Handover 17, 5 Nov; branch `claude/upbeat-goldberg-amk2i3`, started from `claude/sales-raptor-review-p1pzx2` at 7e89084)
+
+**SHIPPED: EXPORT THE BOOK TO CSV** (Stephan, 5 Nov: "export anything that you want to ... the whole book, closed,
+active ... for a specific client, so use your filters"). Accounts gets **Export** beside Filters and in the bulk bar:
+the ticked rows, or everything the screen's book + client + filters + search match (`ExportModal.tsx`,
+`accountExport.ts` pure, `accountExportRun.ts`). Read 1 000 a time (PostgREST max-rows), count held against what
+arrived and a difference SAID. Money columns are computeBalance's (interest, fees, receipt fees separately, paid,
+balance, to settle), optional because they read every ledger (100 accounts a batch, 4 in flight, progress + Stop).
+Text cells starting `= + - @` are defused; BOM + CRLF for Excel. Offered to `canAllocate` (leaders, Administrators, a
+liaison on her own client) -- **ask Stephan if that is the right set**; receipt fees are their own column -- he said
+"we can talk about that later". Known Excel nuisance not fixed: a 13-digit ID number shows as 8.0E+12 when the CSV
+is double-clicked (the text is intact in the file).
+**Load more moved to the top** beside "Showing N of M"; page sizes now **100/200/300/500/1000** -- 2 000 was silently
+cut to 1 000 by PostgREST and the next page skipped a thousand accounts. **Filters panel** hung from the button's
+LEFT edge with the button at the right, so it ran off screen and slid sideways as chips appeared; now measured on
+open (right-aligned), chips on their own row. Checks: check-account-export 70, check-account-views, e2e accounts 164
+(downloads both CSVs).
+
+**DECIDED, NOT BUILT: PAYMENT DATES, AND A BACKDATED PAYMENT AFTER A PAYOVER RUN** (Stephan, 5 Nov).
+- Facts found: `account_payments.received_at` is the bank's date (import_bank_lines / place_bank_line / split use
+  `txn_date`); PTC date is typed (RecordPaymentModal defaults to TODAY -- risk); no captured/imported column on the
+  payment (only `created_at`, shown nowhere); payover runs select on `allocated_on` (set at approval), so a late PTC
+  already lands in the CURRENT run; `clerk_commission_lines` and collector_performance/daily filter on
+  `received_at` -- a suspense payment from March placed in November falls in March's (closed) commission period
+  and March's collections figures (PTCs are exempt in commission). Interest is never stored for Raptor-period
+  accounts: computeBalance walks payments on their own days, so a PTC captured dated 5 April corrects the balance by
+  itself. Posted Swordfish accruals after the backdated date do NOT recompute (frozen history -> flag, ask).
+- **Stephan's decision on over-taken interest:** when a backdated payment shows an earlier, already-paid-over
+  allocation took too much interest, the excess is **re-allocated in the waterfall -- Annexure B fees first, then
+  capital** -- and the correction is carried as a **credit through the next payover run(s)**, never by editing an
+  approved run (same pattern as `reversal_carried_run_id` / line_kind 'reversal').
+- Proposed (awaiting Stephan): three dates per payment -- PAID (interest/balance), CAPTURED/ALLOCATED (commission
+  period, collections figures, who gets credit), PROCESSED (`allocated_on`, payover) -- shown on the account's
+  Transactions list, Trust's payments list and the remittance advice; a backdating warning with before/after; PTC
+  date compulsory with no default. **Open questions:** commission/collections by captured date instead of paid
+  date? Credit for a late-placed suspense payment to the collector holding it when placed, or on the bank date?
+
 ## S17 -- WHERE IT STANDS, AND WHERE S18 STARTS (Raptor · Handover 17, 2 - 5 Nov; branch `claude/sales-raptor-review-p1pzx2`)
 
 29 commits, `Raptor H16: S17 -- ...`, all pushed; fast suite green (22 950-odd checks), build and lint clean. The detail
