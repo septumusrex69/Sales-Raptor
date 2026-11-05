@@ -108,12 +108,84 @@ export function summaryOfAccount(input: AccountLetterInput): LetterDocument {
  * THE FIGURES ARE UNCHANGED -- the same breakdown and lines, the same progress arithmetic (moneyProgress) as before and
  * as the account screen. Only the page changed.
  */
-const STMT_NAVY = '#16324F'
-const STMT_STRIPE = '#F1F4F8'
-const STMT_SOFT = '#E6ECF2'
-const WHITE = '#FFFFFF'
+/*
+ * FIVE LOOKS, ONE STATEMENT (Stephan, 5 Nov, of the first navy version: "You're pretty much copied it ... this is too
+ * much blue ... In our branding ... colour shades ... You can maybe build me 5 and then show them to me so that I can
+ * see what's the best"). The CONTENT and the order are one; only the palette, the face and how heavy the bars are
+ * change. All five are drawn from the firm's own colours: navy #101F2C, gold #C69F54 and its champagne tints, the
+ * portal's slate #3F5F86, warm paper. A PDF can embed Charter (the firm's face) and every reader has Helvetica, so
+ * those are the two faces on offer.
+ *
+ * The firm picks one; the others go. Until then STATEMENT_LOOK_DEFAULT is what every caller gets.
+ */
+export type StatementLookId = 'gold-rule' | 'champagne' | 'navy-gold' | 'ledger' | 'slate'
 
-export function statementOfAccount(input: AccountLetterInput): LetterDocument {
+export interface StatementLook {
+  id: StatementLookId
+  name: string
+  font: string
+  /** Body ink, headings, and the big title. */
+  ink: string
+  title: string
+  /** Heading bars over the tables: background and text. A bar with no fill is a coloured label over a rule. */
+  barFill: string | null
+  barText: string
+  /** Striped rows, the total row, the balance bar. */
+  stripe: string | null
+  total: string
+  balanceFill: string
+  balanceText: string
+  /** The movements grid and the progress fill. */
+  grid: 'all' | 'rows' | 'none'
+  progress: string
+  /** Small labels (Date:, Creditor:). */
+  muted: string
+}
+
+const NAVY_BF = '#101F2C'
+const GOLD_BF = '#C69F54'
+const GOLD_DEEP = '#8A6A26'
+const CHAMPAGNE = '#F4EAD3'
+const CHAMPAGNE_PALE = '#FAF5EA'
+const SLATE = '#3F5F86'
+const HELVETICA = 'Helvetica, Arial, sans-serif'
+
+export const STATEMENT_LOOKS: Record<StatementLookId, StatementLook> = {
+  /* 1. White page, navy words, gold only as accent: gold labels over thin rules, a champagne balance band. */
+  'gold-rule': {
+    id: 'gold-rule', name: '1 · Gold rule', font: CHARTER, ink: '#1f2937', title: NAVY_BF,
+    barFill: null, barText: GOLD_DEEP, stripe: null, total: CHAMPAGNE_PALE,
+    balanceFill: CHAMPAGNE, balanceText: NAVY_BF, grid: 'rows', progress: GOLD_BF, muted: '#6b7280',
+  },
+  /* 2. Warm: champagne bars with navy words, the softest stripe, a navy balance band with the figure in gold. */
+  champagne: {
+    id: 'champagne', name: '2 · Champagne', font: CHARTER, ink: '#1f2937', title: NAVY_BF,
+    barFill: CHAMPAGNE, barText: NAVY_BF, stripe: CHAMPAGNE_PALE, total: CHAMPAGNE,
+    balanceFill: NAVY_BF, balanceText: '#E4C68A', grid: 'rows', progress: GOLD_BF, muted: '#6b7280',
+  },
+  /* 3. The firm's two colours at full strength, used once each: navy heading bars in gold type, a gold balance band. */
+  'navy-gold': {
+    id: 'navy-gold', name: '3 · Navy and gold', font: HELVETICA, ink: '#1f2937', title: NAVY_BF,
+    barFill: NAVY_BF, barText: '#E4C68A', stripe: '#F5F6F7', total: '#EDEFF2',
+    balanceFill: GOLD_BF, balanceText: NAVY_BF, grid: 'none', progress: GOLD_BF, muted: '#6b7280',
+  },
+  /* 4. A bank statement: Helvetica, no colour blocks, grey labels, hairlines, gold only in the bar and the total. */
+  ledger: {
+    id: 'ledger', name: '4 · Ledger', font: HELVETICA, ink: '#111827', title: NAVY_BF,
+    barFill: null, barText: '#6b7280', stripe: null, total: CHAMPAGNE_PALE,
+    balanceFill: CHAMPAGNE_PALE, balanceText: NAVY_BF, grid: 'rows', progress: GOLD_BF, muted: '#6b7280',
+  },
+  /* 5. The portal's slate in place of navy -- lighter than navy, still the firm's -- with champagne for the balance. */
+  slate: {
+    id: 'slate', name: '5 · Slate', font: CHARTER, ink: '#1f2937', title: SLATE,
+    barFill: SLATE, barText: '#FFFFFF', stripe: '#F2F5F8', total: '#E8EDF3',
+    balanceFill: CHAMPAGNE, balanceText: NAVY_BF, grid: 'rows', progress: SLATE, muted: '#5A6B80',
+  },
+}
+export const STATEMENT_LOOK_DEFAULT: StatementLookId = 'gold-rule'
+
+export function statementOfAccount(input: AccountLetterInput, lookId: StatementLookId = STATEMENT_LOOK_DEFAULT): LetterDocument {
+  const L = STATEMENT_LOOKS[lookId]
   const lines = input.lines ?? []
   const b = input.breakdown
   const m = moneyProgress({ payments: b.payments, balance: b.balance, settlementFee: b.settlementFee })
@@ -121,8 +193,13 @@ export function statementOfAccount(input: AccountLetterInput): LetterDocument {
   const feesNet = b.fees + b.receiptFees - b.vat
   const t = (text: string, over: Partial<Span> = {}): Span => ({ text, size: 9, ...over })
   const c = (text: string, over: Partial<TableCell> = {}, span: Partial<Span> = {}): TableCell => ({ spans: [t(text, span)], ...over })
-  const bar = (text: string, align: TableCell['align'] = 'left'): TableCell => c(text, { fill: STMT_NAVY, align }, { bold: true, colour: WHITE })
+  /* A HEADING BAR: filled where the look fills them; otherwise a coloured label, which the table's own rule underlines. */
+  const bar = (text: string, align: TableCell['align'] = 'left'): TableCell =>
+    c(text, { align, ...(L.barFill ? { fill: L.barFill } : {}) }, { bold: true, colour: L.barText, ...(L.barFill ? {} : { size: 8.5 }) })
+  const stripe = (i: number): Partial<TableCell> => (L.stripe && i % 2 ? { fill: L.stripe } : {})
   const blank: TableCell = { spans: [{ text: '' }] }
+  const heading = (text: string): Block =>
+    ({ kind: 'paragraph', keepWithNext: true, spans: [{ text, bold: true, size: 11, colour: L.title }] } as Block)
 
   /* ---- the head: the lockup left; the title and the reference facts right, under it, as a statement carries them ---- */
   const facts: [string, string][] = [
@@ -139,8 +216,8 @@ export function statementOfAccount(input: AccountLetterInput): LetterDocument {
       {
         align: 'right',
         spans: [
-          { text: 'STATEMENT OF ACCOUNT', bold: true, size: 17, colour: STMT_NAVY },
-          ...facts.flatMap(([label, value]) => [t(`\n${label}: `, { colour: '#4b5563' }), t(value, { bold: true })]),
+          { text: 'STATEMENT OF ACCOUNT', bold: true, size: 16, colour: L.title },
+          ...facts.flatMap(([label, value]) => [t(`\n${label}: `, { colour: L.muted }), t(value, { bold: true })]),
         ],
       },
     ]],
@@ -154,93 +231,97 @@ export function statementOfAccount(input: AccountLetterInput): LetterDocument {
     ['VAT', input.money(b.vat), false],
     ['Payments received', `- ${input.money(b.payments)}`, false],
   ]
-  /* WHERE A RULE HELD THE BALANCE DOWN, BY HOW MUCH -- as before; without it the page does not add up. */
+  /* WHERE A RULE HELD THE BALANCE DOWN, BY HOW MUCH -- without it the page does not add up. */
   if (b.withheld > 0) summary.push([b.cappedBy === 'written off' ? 'Written off' : 'Not recoverable (in duplum)', `- ${input.money(b.withheld)}`, false])
   summary.push(['BALANCE NOW OWING', input.money(b.balance), true])
   const who: TableCell[] = [
     c('{{debtor_name}}', {}, { bold: true, size: 10 }),
-    c('Creditor: {{client_name}}'),
+    c('Creditor: {{client_name}}', {}, { colour: L.ink }),
     /* OPTIONAL, AND ITS LINE LEAVES WITH IT (97% of the book has none): documentWithoutOptional empties this cell and
        keeps the row, because the summary beside it is still there. Last, so the gap it leaves is at the foot. */
     c('Identity number: {{debtor_id_masked}}'),
   ]
-  const sideRows: TableCell[][] = [[bar('Account holder'), { spans: [{ text: '' }] }, bar('How the balance is made up'), bar('', 'right')]]
+  const sideRows: TableCell[][] = [[bar('Account holder'), blank, bar('How the balance is made up'), bar('', 'right')]]
   for (let i = 0; i < summary.length; i++) {
     const [label, value, total] = summary[i]
+    const shade = total ? { fill: L.total } : {}
     sideRows.push([
       who[i] ?? blank,
       blank,
-      c(label, total ? { fill: STMT_SOFT } : {}, total ? { bold: true } : {}),
-      c(value, { align: 'right', ...(total ? { fill: STMT_SOFT } : {}) }, total ? { bold: true } : {}),
+      c(label, shade, total ? { bold: true, colour: L.title } : {}),
+      c(value, { align: 'right', ...shade }, total ? { bold: true, colour: L.title } : {}),
     ])
   }
-  const side: Block = { kind: 'table', borders: 'none', widths: [42, 4, 34, 20], headerRow: true, keepTogether: true, rows: sideRows }
+  const side: Block = { kind: 'table', borders: L.barFill ? 'none' : 'rows', widths: [42, 4, 34, 20], headerRow: true, keepTogether: true, rows: sideRows }
 
-  /* ---- how far: the same bar as the account screen, rounded ---- */
+  /* ---- how far: the same arithmetic as the account screen, in the look's colour ---- */
   const progress: Block = {
-    kind: 'progress', fraction: m.fraction,
+    kind: 'progress', fraction: m.fraction, fill: L.progress,
     note: `${pct}% paid · ${input.money(m.recovered)} of ${input.money(m.charged)}${m.owed > 0 ? ` · ${input.money(m.owed)} to settle today` : ''}`,
   } as Block
 
-  /* ---- every movement: navy heading, striped, ruled ---- */
+  /* ---- every movement ---- */
   const movements: Block[] = lines.length === 0
     ? [p('Nothing has been charged or received on this account yet.')]
     : [{
-      kind: 'table', borders: 'all', headerRow: true, widths: [14, 46, 13, 13, 14],
+      kind: 'table', borders: L.grid, headerRow: true, widths: [14, 46, 13, 13, 14],
       rows: [
         /* THE SAME FIVE COLUMNS THE SCREEN SHOWS, in the firm's words. */
         [bar('DATE'), bar('DETAIL'), bar('DEBIT', 'right'), bar('CREDIT', 'right'), bar('BALANCE', 'right')],
         ...lines.map((l, i) => {
-          const fill = i % 2 ? STMT_STRIPE : WHITE
-          /* A DASH, NOT R 0.00, in the column this line is not in (as before): a nought reads as a charge of nothing. */
+          const s = stripe(i)
+          /* A DASH, NOT R 0.00, in the column this line is not in: a nought reads as a charge of nothing. */
           return [
-            c(shortish(l.date), { fill }),
-            c(l.description, { fill }),
-            c(l.debit > 0 ? input.money(l.debit) : '—', { fill, align: 'right' }),
-            c(l.credit > 0 ? input.money(l.credit) : '—', { fill, align: 'right' }),
-            c(input.money(l.balance), { fill, align: 'right' }),
+            c(shortish(l.date), s),
+            c(l.description, s),
+            c(l.debit > 0 ? input.money(l.debit) : '—', { ...s, align: 'right' }),
+            c(l.credit > 0 ? input.money(l.credit) : '—', { ...s, align: 'right' }),
+            c(input.money(l.balance), { ...s, align: 'right' }),
           ]
         }),
       ],
     } as Block,
-    /* THE BALANCE, IN THE BAR AT THE FOOT OF THE MOVEMENTS -- where a statement's reader's eye ends up. */
+    /* THE BALANCE, IN A BAND AT THE FOOT OF THE MOVEMENTS -- where a statement's reader's eye ends up. */
     {
       kind: 'table', borders: 'none', widths: [74, 26], keepTogether: true,
-      rows: [[c('BALANCE NOW OWING', { fill: STMT_NAVY, align: 'right' }, { bold: true, colour: WHITE, size: 10 }),
-        c(input.money(b.balance), { fill: STMT_NAVY, align: 'right' }, { bold: true, colour: WHITE, size: 10 })]],
+      rows: [[c('BALANCE NOW OWING', { fill: L.balanceFill, align: 'right' }, { bold: true, colour: L.balanceText, size: 10 }),
+        c(input.money(b.balance), { fill: L.balanceFill, align: 'right' }, { bold: true, colour: L.balanceText, size: 11 })]],
     } as Block]
 
-  /* ---- the notes, small and centred; then how to pay, the same table the summary carries ---- */
   const small = (text: string, over: Partial<Span> = {}): Block =>
     ({ kind: 'paragraph', align: 'center', spans: [{ text, size: 9, ...over }] } as Block)
+  const label = (text: string, i: number): TableCell => c(text, stripe(i), { bold: true, colour: L.title, size: 8.5 })
+  const value = (text: string, i: number, bold = false): TableCell => c(text, stripe(i), bold ? { bold: true } : {})
 
   return {
-    defaults: { font: CHARTER, size: 10, colour: '#1f2937', lineHeight: 1.35 },
+    defaults: { font: L.font, size: 10, colour: L.ink, lineHeight: 1.35 },
     paper: 'plain',
     runningFoot: 'Statement of account · Ref {{case_number}} · {{firm_name}} · {{firm_phone}} · {{firm_email}} · Page {{page}} of {{pages}}',
     blocks: [
       head,
       side,
-      h(2, 'Where the account stands'),
+      heading('Where the account stands'),
       progress,
-      h(2, 'Every movement on the account'),
+      heading('Every movement on the account'),
       ...movements,
       small('Interest is charged at the rate on the agreement. Fees are those prescribed by Annexure B to the Debt '
         + 'Collectors Act 114 of 1998, plus VAT. A line showing no charge is work done that earned nothing, because the '
-        + 'Annexure B ceiling for this debt had been reached.', { size: 8, colour: '#6b7280' }),
+        + 'Annexure B ceiling for this debt had been reached.', { size: 8, colour: L.muted }),
       /* HOW TO PAY: the summary's own rows and words -- trust account, OUR reference (21% of client references are
          shared, so a payment quoting one cannot be placed), proof of payment, who to ask -- two across in one box that
          is never split over a page. */
       { kind: 'spacer', mm: 2 } as Block,
-      small('PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT', { bold: true, colour: STMT_NAVY }),
+      /* Kept with the box it introduces: alone at the foot of a page it is an instruction with no account number. */
+      { ...small('PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT', { bold: true, colour: L.title }), keepWithNext: true } as Block,
       {
-        kind: 'table', borders: 'none', widths: [18, 32, 20, 30], headerRow: true, keepTogether: true,
+        kind: 'table', borders: L.barFill ? 'none' : 'rows', widths: [18, 32, 20, 30], headerRow: true, keepTogether: true,
         rows: [
           [bar('How to pay'), bar(''), bar(''), bar('')],
-          [c('BANK', {}, { bold: true }), c('{{firm_bank_name}}'), c('ACCOUNT NUMBER', {}, { bold: true }), c('{{firm_bank_account}}')],
-          [c('ACCOUNT NAME', { fill: STMT_STRIPE }, { bold: true }), c('{{firm_bank_holder}}', { fill: STMT_STRIPE }), c('BRANCH CODE', { fill: STMT_STRIPE }, { bold: true }), c('{{firm_bank_branch}}', { fill: STMT_STRIPE })],
-          [c('REFERENCE', {}, { bold: true }), c('{{case_number}}', {}, { bold: true }), c('PROOF OF PAYMENT', {}, { bold: true }), c('Email it to {{firm_email}} on the day you pay')],
-          [c('QUESTIONS', { fill: STMT_STRIPE }, { bold: true }), c('Speak to {{collector_name}}, who handles this account, on {{firm_phone}}', { fill: STMT_STRIPE }), c('SOMETHING WRONG?', { fill: STMT_STRIPE }, { bold: true }), c('If anything here does not agree with your own record, tell us in writing and we will check it.', { fill: STMT_STRIPE })],
+          [label('BANK', 0), value('{{firm_bank_name}}', 0), label('ACCOUNT NUMBER', 0), value('{{firm_bank_account}}', 0)],
+          [label('ACCOUNT NAME', 1), value('{{firm_bank_holder}}', 1), label('BRANCH CODE', 1), value('{{firm_bank_branch}}', 1)],
+          [label('REFERENCE', 0), value('{{case_number}}', 0, true), label('PROOF OF PAYMENT', 0), value('Email it to {{firm_email}} on the day you pay', 0)],
+          [label('QUESTIONS', 1), value('Speak to {{collector_name}}, who handles this account, on {{firm_phone}}', 1),
+            label('SOMETHING WRONG?', 1), value('If anything here does not agree with your own record, tell us in writing and we will check it.', 1)],
         ],
       } as Block,
     ],

@@ -697,7 +697,7 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
           at().ops.push({
             op: 'rect', xMm: left + RULE_MM, yMm: y + RULE_MM,
             wMm: (textWidth - RULE_MM * 2) * share, hMm: BAR_MM - RULE_MM * 2,
-            fill: BAR_FILL, stroke: null, strokeMm: 0, radiusMm: (BAR_MM - RULE_MM * 2) / 2,
+            fill: block.fill && /^#[0-9a-f]{6}$/i.test(block.fill) ? block.fill : BAR_FILL, stroke: null, strokeMm: 0, radiusMm: (BAR_MM - RULE_MM * 2) / 2,
           })
         }
         y += BAR_MM

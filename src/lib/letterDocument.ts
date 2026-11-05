@@ -226,6 +226,8 @@ export interface ProgressBlock {
   kind: 'progress'
   /** 0..1. Clamped on the way in, so a renderer never has to defend against a bar 140% long. */
   fraction: number
+  /** The fill's colour (hex), where a document has its own palette -- the statement's gold. Absent is the dark ink. */
+  fill?: string
   /** What the bar is about, drawn above it. */
   label?: string
   /** The figures, drawn under it. The bar is the picture; this is the evidence for it. */
@@ -788,12 +790,13 @@ export function letterToHtml(doc: LetterDocument, input: {
          * millimetres would be the one element whose geometry could be mistaken for one.
          */
         const pc = Math.max(0, Math.min(1, b.fraction)) * 100
-        out.push(`<div class="ltr-bar" data-fraction="${b.fraction}"${attr}>`
+        const barFill = b.fill && /^#[0-9a-f]{6}$/i.test(b.fill) ? b.fill : null
+        out.push(`<div class="ltr-bar" data-fraction="${b.fraction}"${barFill ? ` data-fill="${barFill}"` : ''}${attr}>`
           /* Through `inline`, like every other run of words on the sheet, so a field in a bar's
              caption is merged and escaped by the one code path that does it everywhere else. */
           + (b.label ? `<div class="ltr-bar-label">${inline([{ text: b.label }])}</div>` : '')
           + '<div class="ltr-bar-track">'
-          + `<div class="ltr-bar-fill" style="width:${pc.toFixed(2)}%"></div></div>`
+          + `<div class="ltr-bar-fill" style="width:${pc.toFixed(2)}%${barFill ? `;background:${barFill}` : ''}"></div></div>`
           + (b.note ? `<div class="ltr-bar-note">${inline([{ text: b.note }])}</div>` : '')
           + '</div>')
         break
@@ -1237,6 +1240,7 @@ export function documentHtmlToBlocks(html: string): Block[] {
       out.push({
         kind: 'progress',
         fraction: Number.isFinite(raw_f) ? Math.max(0, Math.min(1, raw_f)) : 0,
+        ...(/^#[0-9a-f]{6}$/i.test(attrValue(raw.attrs, 'data-fill') ?? '') ? { fill: attrValue(raw.attrs, 'data-fill')! } : {}),
         ...(text('ltr-bar-label') !== undefined ? { label: text('ltr-bar-label') } : {}),
         ...(text('ltr-bar-note') !== undefined ? { note: text('ltr-bar-note') } : {}),
         ...(spacing ? { spacing } : {}),
