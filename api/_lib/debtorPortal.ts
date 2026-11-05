@@ -17,7 +17,8 @@ import { newToken } from '../../src/lib/signingRules.js'
 import { letterToPdf } from '../../src/lib/letterPdf.js'
 import { toSettings as toFirmSettings } from '../../src/lib/firmSettingsRow.js'
 import { letterheadFor } from './workflow/letterhead.js'
-import { charterFor } from './workflow/fonts.js'
+import { brandFor, charterFor } from './workflow/fonts.js'
+import { isBrand } from '../../src/lib/brandFonts.js'
 import { moneyZa } from './workflow/locale.js'
 import { balanceInputFor } from '../../src/lib/balanceInput.js'
 import { balanceAccountFromRow, fetchLedgerRows } from '../../src/lib/storedBalance.js'
@@ -486,7 +487,7 @@ const statement: Handler = async (req, res, admin) => {
       res.status(500).json({ error: 'Your statement could not be drawn just now. Please call us and we will send it to you.' }); return
     }
     const paper = await letterheadFor(admin)
-    const bytes = await letterToPdf({ doc, page: paper.page, filled: true, values, letterhead: paper.image, charter: await charterFor() })
+    const bytes = await letterToPdf({ doc, page: paper.page, filled: true, values, letterhead: paper.image, charter: await charterFor(), brand: isBrand(doc.defaults.font) ? await brandFor() : null })
     res.status(200).json({ fileName, pdf: Buffer.from(bytes).toString('base64') })
   } catch (e) {
     /* A failure while drawing (a font, the letterhead, a character the PDF cannot print) -- said to the firm, not the debtor. */

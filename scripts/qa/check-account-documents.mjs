@@ -13,7 +13,9 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-account-documents.mjs
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { BRAND_TTF, HEADING_FROM_PT, isBrand } from '../../src/lib/brandFonts.ts'
+import { STATEMENT_LOOKS } from '../../src/lib/accountSummaryLetter.ts'
 import { summaryOfAccount, statementOfAccount } from '../../src/lib/accountSummaryLetter.ts'
 import { lettersText, letterProblems, canUseLetter, PRINTER_FIELDS } from '../../src/lib/letterDocument.ts'
 import { MERGE_FIELDS, unknownFields } from '../../src/lib/messageTemplates.ts'
@@ -182,6 +184,18 @@ ok('...with navy bars over its tables', statement.blocks.some((b) => b.kind === 
 ok('...and no "Dear", "Yours faithfully" or signature: a statement states',
   !/Dear |Yours faithfully/.test(tText) && !statement.blocks.some((b) => b.kind === 'signature'))
 check('the summary is still a letter, on the letterhead', summary.paper, undefined)
+/* NO FIGURE IN RALEWAY. Bold at HEADING_FROM_PT and up is drawn in Raleway, whose numerals are old-style -- they dip
+   below the line like lowercase letters. A heading may be big; a rand amount on a statement may not, in any look. */
+for (const id of Object.keys(STATEMENT_LOOKS)) {
+  const doc = statementOfAccount(INPUT, id)
+  const spans = doc.blocks.flatMap((b) => [...(b.spans ?? []), ...(b.rows ?? []).flat().flatMap((c) => c.spans)])
+  const big = spans.filter((sp) => sp.bold && (sp.size ?? doc.defaults.size) >= HEADING_FROM_PT && /\d/.test(sp.text))
+  check(`look ${id}: no figure is big and bold enough to be drawn in Raleway`, big.map((sp) => sp.text), [])
+}
+/* THE FONTS SHIP WITH THEIR LICENCE, which the OFL makes a condition of shipping them. */
+ok('the brand fonts are in the repo, each family with its OFL',
+  Object.values(BRAND_TTF).every((p) => existsSync(new URL(`../../public${p}`, import.meta.url)))
+  && existsSync(new URL('../../public/fonts/open-sans/OFL.txt', import.meta.url)) && existsSync(new URL('../../public/fonts/raleway/OFL.txt', import.meta.url)))
 const pdfSrc = read('../../src/lib/letterPdf.ts')
 ok('a plain document is drawn on A4_PLAIN and never on the letterhead, whatever the caller passed',
   /const page = plainPaper \? A4_PLAIN : input\.page/.test(pdfSrc) && /input\.letterhead && !plainPaper/.test(pdfSrc))
@@ -282,8 +296,9 @@ for (const [name, doc] of [['summary', summary], ['statement', statement]]) {
   ok(`...and its foot numbers the pages`,
     PRINTER_FIELDS.every((f) => (doc.runningFoot ?? '').includes(`{{${f}}}`)))
   ok(`...naming which document it is`, /^(Summary|Statement) of account /.test(doc.runningFoot))
-  /* THE FIRM'S OWN FACE. A page set in something else is visibly not theirs. */
-  ok(`...set in Charter`, /Charter/.test(doc.defaults.font))
+  /* THE FIRM'S OWN FACE. A page set in something else is visibly not theirs: the summary is a letter, in Charter; the
+     statement is set as the brand guide sets things, Open Sans with Raleway headings (Stephan, 5 Nov). */
+  ok(`...set in the firm's face`, name === 'summary' ? /Charter/.test(doc.defaults.font) : isBrand(doc.defaults.font))
 }
 
 /* THE IDENTITY NUMBER IS OPTIONAL AND ITS LINE LEAVES WITH IT -- 97% of the book has none. */

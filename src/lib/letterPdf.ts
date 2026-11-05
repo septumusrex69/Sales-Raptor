@@ -39,6 +39,7 @@ import type { LetterDocument, PageSetup } from './letterDocument.ts'
 import { A4_PLAIN } from './letterDocument.js'
 import { printableForPdf, unprintableMessage, type FaceGaps } from './winAnsi.js'
 import { CHARTER_GAPS, isCharter, type CharterBytes } from './charter.js'
+import { HEADING_FROM_PT, isBrand, type BrandBytes } from './brandFonts.js'
 
 /** Which of the fourteen standard faces a document's font stack is drawn in. */
 export function standardFamilyFor(fontStack: string): 'Times' | 'Helvetica' | 'Courier' {
@@ -82,6 +83,11 @@ export interface LetterPdfInput {
    * set in Charter prints in Times, which is the fallback its own font stack names anyway.
    */
   charter?: CharterBytes | null
+  /**
+   * The brand faces (brandFonts.ts): Open Sans and Raleway Bold, already fetched. Used only by a document set in
+   * BRAND_STACK -- the statement -- and absent or null it falls back to Helvetica, the guide's own fallback (Arial).
+   */
+  brand?: BrandBytes | null
   /**
    * THE SIGNER'S MARK, where this is the signed copy.
    *
@@ -148,8 +154,16 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
    * and the four files are a quarter of a megabyte of work nobody sending a Georgia letter should
    * pay for, and a Charter letter with no bytes has to print in something.
    */
+  const brandDoc = isBrand(input.doc.defaults.font)
   const embedded = isCharter(input.doc.defaults.font) && input.charter
     ? await embedCharter(pdf, input.charter)
+    : brandDoc && input.brand
+      ? await embedCharter(pdf, input.brand)
+      : null
+  /* Raleway Bold for the headings of a brand document -- only once Open Sans itself embedded, or a Helvetica fallback
+     would be drawn with Raleway titles over it. */
+  const headingFace = brandDoc && embedded && input.brand
+    ? await pdf.embedFont(input.brand.heading, { subset: true }).catch(() => null)
     : null
   const family = standardFamilyFor(input.doc.defaults.font)
   /*
@@ -176,9 +190,12 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
   /* Which characters THIS face cannot draw. Empty for the standard fourteen, three long for
      Charter -- and it has to follow the face actually used, not the one asked for, or a fallback
      to Times would start refusing euros for no reason. */
-  const gaps = embedded ? CHARTER_GAPS : undefined
-  const faceFor = (bold: boolean, italic: boolean) =>
-    (bold && italic ? faces.boldItalic : bold ? faces.bold : italic ? faces.italic : faces.regular)
+  /* Open Sans and Raleway draw every character Windows-1252 has (no-break space, soft hyphen and euro included), so a
+     brand document has no gaps; only Charter does. */
+  const gaps = embedded && !brandDoc ? CHARTER_GAPS : undefined
+  const faceFor = (bold: boolean, italic: boolean, sizePt = 0) =>
+    (headingFace && bold && !italic && sizePt >= HEADING_FROM_PT ? headingFace
+      : bold && italic ? faces.boldItalic : bold ? faces.bold : italic ? faces.italic : faces.regular)
 
   /*
    * MEASURED AGAINST THE FACE IT WILL BE DRAWN IN. Measuring in one font and drawing in another
@@ -193,7 +210,7 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
    * it, which is how a line that fit in the plan overruns the margin on paper.
    */
   const measure: Measure = (text, sizePt, bold, italic) =>
-    faceFor(bold, italic).widthOfTextAtSize(printableForPdf(text, gaps).text, sizePt) / (72 / 25.4)
+    faceFor(bold, italic, sizePt).widthOfTextAtSize(printableForPdf(text, gaps).text, sizePt) / (72 / 25.4)
 
   /* A PLAIN DOCUMENT IS ITS OWN PAPER (LetterDocument.paper): no letterhead, plain margins, whatever the caller passed. */
   const plainPaper = input.doc.paper === 'plain'
@@ -314,7 +331,7 @@ type Sheet = Awaited<ReturnType<typeof import('pdf-lib').PDFDocument.create>> ex
   ? never : ReturnType<Awaited<ReturnType<typeof import('pdf-lib').PDFDocument.create>>['addPage']>
 
 function draw(sheet: Sheet, op: DrawOp, k: {
-  faceFor: (bold: boolean, italic: boolean) => import('pdf-lib').PDFFont
+  faceFor: (bold: boolean, italic: boolean, sizePt?: number) => import('pdf-lib').PDFFont
   rgb: (r: number, g: number, b: number) => import('pdf-lib').RGB
   yPt: (mm: number) => number
   gaps?: FaceGaps
@@ -387,7 +404,7 @@ function draw(sheet: Sheet, op: DrawOp, k: {
       x: mmToPt(op.xMm),
       y: k.yPt(op.yMm),
       size: op.sizePt,
-      font: k.faceFor(op.bold, op.italic),
+      font: k.faceFor(op.bold, op.italic, op.sizePt),
       color: k.rgb(c.r, c.g, c.b),
     })
     return

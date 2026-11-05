@@ -29,6 +29,7 @@
  */
 import type { Block, LetterDocument, Span, TableCell } from './letterDocument.ts'
 import { BF_LOCKUP_PNG, BF_LOCKUP_RATIO } from './brandLogo.js'
+import { BRAND_STACK } from './brandFonts.js'
 import type { BalanceBreakdown, StatementLine } from './accountBalance.ts'
 import { longDate } from './messageTemplates.js'
 import { moneyProgress, progressPercent } from './paymentProgress.js'
@@ -109,16 +110,12 @@ export function summaryOfAccount(input: AccountLetterInput): LetterDocument {
  * as the account screen. Only the page changed.
  */
 /*
- * FIVE LOOKS, ONE STATEMENT (Stephan, 5 Nov, of the first navy version: "You're pretty much copied it ... this is too
- * much blue ... In our branding ... colour shades ... You can maybe build me 5 and then show them to me so that I can
- * see what's the best"). The CONTENT and the order are one; only the palette, the face and how heavy the bars are
- * change. All five are drawn from the firm's own colours: navy #101F2C, gold #C69F54 and its champagne tints, the
- * portal's slate #3F5F86, warm paper. A PDF can embed Charter (the firm's face) and every reader has Helvetica, so
- * those are the two faces on offer.
- *
- * The firm picks one; the others go. Until then STATEMENT_LOOK_DEFAULT is what every caller gets.
+ * LOOKS, ONE STATEMENT (Stephan, 5 Nov: "this is too much blue ... In our branding ... colour shades ... build me 5
+ * and then show them to me"). Five went; he chose number 1 and asked for it in three weights (below). The CONTENT and
+ * the order are one; only the palette and how heavy the balance is change. The firm picks one; the others go. Until
+ * then STATEMENT_LOOK_DEFAULT is what every caller gets.
  */
-export type StatementLookId = 'gold-rule' | 'champagne' | 'navy-gold' | 'ledger' | 'slate'
+export type StatementLookId = 'brand' | 'brand-band' | 'brand-both'
 
 export interface StatementLook {
   id: StatementLookId
@@ -133,6 +130,8 @@ export interface StatementLook {
   /** Striped rows, the total row, the balance bar. */
   stripe: string | null
   total: string
+  /** The summary's BALANCE NOW OWING row: its words. */
+  totalText: string
   balanceFill: string
   balanceText: string
   /** The movements grid and the progress fill. */
@@ -142,47 +141,37 @@ export interface StatementLook {
   muted: string
 }
 
+/*
+ * THE BRAND GUIDE'S OWN COLOURS (Stephan, 5 Nov, sending it): main #101F2C, #46607B, #97B4CC, #C69F54; secondary
+ * #32404D, #525D66, #B4BFCC, #D5E1EB, #ECECEC, #F4F4F4. Nothing here that is not on that page -- the champagne of the
+ * first round is not a brand colour and has gone.
+ */
 const NAVY_BF = '#101F2C'
 const GOLD_BF = '#C69F54'
-const GOLD_DEEP = '#8A6A26'
-const CHAMPAGNE = '#F4EAD3'
-const CHAMPAGNE_PALE = '#FAF5EA'
-const SLATE = '#3F5F86'
-const HELVETICA = 'Helvetica, Arial, sans-serif'
+const INK_BF = '#32404D'
+const GREY_BF = '#525D66'
+const PALE_BLUE_BF = '#D5E1EB'
+const LIGHT_BF = '#F4F4F4'
 
-export const STATEMENT_LOOKS: Record<StatementLookId, StatementLook> = {
-  /* 1. White page, navy words, gold only as accent: gold labels over thin rules, a champagne balance band. */
-  'gold-rule': {
-    id: 'gold-rule', name: '1 · Gold rule', font: CHARTER, ink: '#1f2937', title: NAVY_BF,
-    barFill: null, barText: GOLD_DEEP, stripe: null, total: CHAMPAGNE_PALE,
-    balanceFill: CHAMPAGNE, balanceText: NAVY_BF, grid: 'rows', progress: GOLD_BF, muted: '#6b7280',
-  },
-  /* 2. Warm: champagne bars with navy words, the softest stripe, a navy balance band with the figure in gold. */
-  champagne: {
-    id: 'champagne', name: '2 · Champagne', font: CHARTER, ink: '#1f2937', title: NAVY_BF,
-    barFill: CHAMPAGNE, barText: NAVY_BF, stripe: CHAMPAGNE_PALE, total: CHAMPAGNE,
-    balanceFill: NAVY_BF, balanceText: '#E4C68A', grid: 'rows', progress: GOLD_BF, muted: '#6b7280',
-  },
-  /* 3. The firm's two colours at full strength, used once each: navy heading bars in gold type, a gold balance band. */
-  'navy-gold': {
-    id: 'navy-gold', name: '3 · Navy and gold', font: HELVETICA, ink: '#1f2937', title: NAVY_BF,
-    barFill: NAVY_BF, barText: '#E4C68A', stripe: '#F5F6F7', total: '#EDEFF2',
-    balanceFill: GOLD_BF, balanceText: NAVY_BF, grid: 'none', progress: GOLD_BF, muted: '#6b7280',
-  },
-  /* 4. A bank statement: Helvetica, no colour blocks, grey labels, hairlines, gold only in the bar and the total. */
-  ledger: {
-    id: 'ledger', name: '4 · Ledger', font: HELVETICA, ink: '#111827', title: NAVY_BF,
-    barFill: null, barText: '#6b7280', stripe: null, total: CHAMPAGNE_PALE,
-    balanceFill: CHAMPAGNE_PALE, balanceText: NAVY_BF, grid: 'rows', progress: GOLD_BF, muted: '#6b7280',
-  },
-  /* 5. The portal's slate in place of navy -- lighter than navy, still the firm's -- with champagne for the balance. */
-  slate: {
-    id: 'slate', name: '5 · Slate', font: CHARTER, ink: '#1f2937', title: SLATE,
-    barFill: SLATE, barText: '#FFFFFF', stripe: '#F2F5F8', total: '#E8EDF3',
-    balanceFill: CHAMPAGNE, balanceText: NAVY_BF, grid: 'rows', progress: SLATE, muted: '#5A6B80',
-  },
+/*
+ * LOOK 1, IN THREE WEIGHTS (Stephan, 5 Nov: "show me number 1 and show me number 1 that has only the balance now
+ * owing at the bottom ... with the blue, and then ... the balance now owing in the 2 places with the blue" -- "when I
+ * mean blue, it's the dark blue"). Of the first five he passed over the striped rows ("one champagne, one white ...
+ * one looks better"), so no look stripes. Open Sans with Raleway headings, as the guide sets them.
+ */
+const BRAND_BASE = {
+  font: BRAND_STACK, ink: INK_BF, title: NAVY_BF, barFill: null, barText: GOLD_BF, stripe: null,
+  grid: 'rows' as const, progress: GOLD_BF, muted: GREY_BF,
 }
-export const STATEMENT_LOOK_DEFAULT: StatementLookId = 'gold-rule'
+export const STATEMENT_LOOKS: Record<StatementLookId, StatementLook> = {
+  brand: { ...BRAND_BASE, id: 'brand', name: 'A · As number 1',
+    total: LIGHT_BF, totalText: NAVY_BF, balanceFill: PALE_BLUE_BF, balanceText: NAVY_BF },
+  'brand-band': { ...BRAND_BASE, id: 'brand-band', name: 'B · Dark blue balance at the foot',
+    total: LIGHT_BF, totalText: NAVY_BF, balanceFill: NAVY_BF, balanceText: '#FFFFFF' },
+  'brand-both': { ...BRAND_BASE, id: 'brand-both', name: 'C · Dark blue balance in both places',
+    total: NAVY_BF, totalText: '#FFFFFF', balanceFill: NAVY_BF, balanceText: '#FFFFFF' },
+}
+export const STATEMENT_LOOK_DEFAULT: StatementLookId = 'brand'
 
 export function statementOfAccount(input: AccountLetterInput, lookId: StatementLookId = STATEMENT_LOOK_DEFAULT): LetterDocument {
   const L = STATEMENT_LOOKS[lookId]
@@ -248,8 +237,8 @@ export function statementOfAccount(input: AccountLetterInput, lookId: StatementL
     sideRows.push([
       who[i] ?? blank,
       blank,
-      c(label, shade, total ? { bold: true, colour: L.title } : {}),
-      c(value, { align: 'right', ...shade }, total ? { bold: true, colour: L.title } : {}),
+      c(label, shade, total ? { bold: true, colour: L.totalText } : {}),
+      c(value, { align: 'right', ...shade }, total ? { bold: true, colour: L.totalText } : {}),
     ])
   }
   const side: Block = { kind: 'table', borders: L.barFill ? 'none' : 'rows', widths: [42, 4, 34, 20], headerRow: true, keepTogether: true, rows: sideRows }
@@ -285,7 +274,7 @@ export function statementOfAccount(input: AccountLetterInput, lookId: StatementL
     {
       kind: 'table', borders: 'none', widths: [74, 26], keepTogether: true,
       rows: [[c('BALANCE NOW OWING', { fill: L.balanceFill, align: 'right' }, { bold: true, colour: L.balanceText, size: 10 }),
-        c(input.money(b.balance), { fill: L.balanceFill, align: 'right' }, { bold: true, colour: L.balanceText, size: 11 })]],
+        c(input.money(b.balance), { fill: L.balanceFill, align: 'right' }, { bold: true, colour: L.balanceText, size: 10.5 })]],
     } as Block]
 
   const small = (text: string, over: Partial<Span> = {}): Block =>

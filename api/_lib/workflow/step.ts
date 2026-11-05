@@ -13,7 +13,8 @@ import { itemAmountFor, scheduleFor } from '../../../src/lib/annexureB.js'
 import { letterToPdf, letterFilename } from '../../../src/lib/letterPdf.js'
 import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
 import type { LetterDocument } from '../../../src/lib/letterDocument.js'
-import { charterFor } from './fonts.js'
+import { brandFor, charterFor } from './fonts.js'
+import { isBrand } from '../../../src/lib/brandFonts.js'
 import { letterheadFor } from './letterhead.js'
 import { siteOrigin } from './siteOrigin.js'
 import { ARRANGEMENT_TITLE, arrangementDocument } from '../../../src/lib/arrangementDocument.js'
@@ -643,6 +644,8 @@ export async function runOneStep(
         values,
         letterhead: paper.image,
         charter: await charterFor(),
+        /* The statement on the arrangement reminder is set in the brand faces (brandFonts.ts). */
+        brand: isBrand(plan.template.attachment.doc.defaults.font) ? await brandFor() : null,
       })
       files.push({
         filename: letterFilename(plan.template.attachment.key, values.case_number ?? null),

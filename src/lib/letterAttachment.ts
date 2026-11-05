@@ -22,6 +22,7 @@ import {
 import type { TemplateScope } from './messageTemplates'
 import { letterFilename, letterToPdf, toBase64 } from './letterPdf.ts'
 import { fetchCharter, isCharter } from './charter.ts'
+import { fetchBrand, isBrand } from './brandFonts.ts'
 import type { LibraryTemplate } from './templateLibrary.ts'
 
 export interface AttachedFile {
@@ -108,6 +109,8 @@ export async function letterPdfBytes({ doc, scope, values, filled, letterhead, n
    * the fourteen faces every reader already has and fetches nothing.
    */
   const charter = isCharter(doc.defaults.font) ? await fetchCharter() : null
+  /* The brand faces likewise, only for a document set in them (the statement -- brandFonts.ts). */
+  const brand = isBrand(doc.defaults.font) ? await fetchBrand() : null
 
   return letterToPdf({
     doc,
@@ -116,6 +119,7 @@ export async function letterPdfBytes({ doc, scope, values, filled, letterhead, n
     values,
     letterhead: image,
     charter,
+    brand,
   })
 }
 

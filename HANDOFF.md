@@ -201,6 +201,18 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   cannot disagree), **`TableCell.fill`** (hex; a shaded table is padded both sides, `.ltr-filled`), **`TableCell.image`**
   (PNG data URL + mm size; `.ltr-cell-img`), **`RectOp.radiusMm`** (rounded bar; SVG path in the PDF, clamped).
   Checks: check-letter-pdf 65, check-page-editor 72, check-account-documents 82 (each broken once).
+  **Then (5 Nov) the brand guide**: Stephan sent the guide (main #101F2C #46607B #97B4CC #C69F54; secondary #32404D
+  #525D66 #B4BFCC #D5E1EB #ECECEC #F4F4F4; headings Raleway Bold, body Open Sans, fallback Arial). Five looks were shown
+  and dropped; he chose look 1 and asked for three weights of it, now `STATEMENT_LOOKS` brand / brand-band / brand-both
+  (A: pale-blue balance band; B: dark navy band at the foot only; C: dark navy BALANCE NOW OWING in both places).
+  **WAITING ON HIS CHOICE** -- then delete the other two and the look parameter. Default meanwhile: `brand` (A).
+  Fonts: `src/lib/brandFonts.ts` (BRAND_STACK, BRAND_TTF, fetchBrand); files in public/fonts/open-sans (static
+  instances cut from the variable font -- Open Sans reserves no name) and public/fonts/raleway (Google Fonts' own static
+  Bold, unmodified -- Raleway reserves its name), each with OFL.txt. letterPdf embeds them for a BRAND_STACK document
+  (`brand` input; server `brandFor()` in workflow/fonts.ts, browser `fetchBrand()` in letterAttachment); **bold at
+  HEADING_FROM_PT (11pt) and up is drawn in Raleway** -- a size rule, not a span flag, so nothing new crosses the
+  editor; check-account-documents holds every rand figure in the statement under it (Raleway's numerals are old-style).
+  The progress bar takes a colour (`ProgressBlock.fill`).
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

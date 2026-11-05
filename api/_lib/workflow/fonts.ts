@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { CHARTER_TTF, type CharterBytes } from '../../../src/lib/charter.js'
+import { fetchBrand, type BrandBytes } from '../../../src/lib/brandFonts.js'
 
 /**
  * CHARTER'S FOUR FACES, FETCHED FROM THE DEPLOYMENT'S OWN ORIGIN.
@@ -93,6 +94,40 @@ async function fromOrigin(): Promise<CharterBytes | null> {
       }),
     )
     return { regular, bold, italic, boldItalic }
+  } catch {
+    return null
+  }
+}
+
+/*
+ * THE BRAND FACES (Open Sans + Raleway Bold, brandFonts.ts), loaded the way Charter is and for the same reasons: off
+ * the disk by LITERAL paths the tracer can see, the deployment's origin as the fallback, once per warm function.
+ * Only a document set in BRAND_STACK asks -- the statement -- so a section 129 never pays for five files it does not use.
+ */
+let brandCached: BrandBytes | null | undefined
+
+export async function brandFor(): Promise<BrandBytes | null> {
+  if (brandCached !== undefined) return brandCached
+  brandCached = await brandFromDisk() ?? await (async () => {
+    const origin = originOf()
+    return origin ? fetchBrand(origin) : null
+  })()
+  return brandCached
+}
+
+async function brandFromDisk(): Promise<BrandBytes | null> {
+  try {
+    const [regular, bold, italic, boldItalic, heading] = await Promise.all([
+      readFile(new URL('../../../public/fonts/open-sans/open-sans-regular.ttf', import.meta.url)),
+      readFile(new URL('../../../public/fonts/open-sans/open-sans-bold.ttf', import.meta.url)),
+      readFile(new URL('../../../public/fonts/open-sans/open-sans-italic.ttf', import.meta.url)),
+      readFile(new URL('../../../public/fonts/open-sans/open-sans-bold-italic.ttf', import.meta.url)),
+      readFile(new URL('../../../public/fonts/raleway/raleway-bold.ttf', import.meta.url)),
+    ])
+    return {
+      regular: new Uint8Array(regular), bold: new Uint8Array(bold), italic: new Uint8Array(italic),
+      boldItalic: new Uint8Array(boldItalic), heading: new Uint8Array(heading),
+    }
   } catch {
     return null
   }
