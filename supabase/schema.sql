@@ -54603,3 +54603,206 @@ alter table public.message_templates add constraint message_templates_statement_
 update public.message_templates
    set attaches_statement = true
  where seed_key in ('email-ptp-reminder-individual', 'email-ptp-reminder-company');
+
+-- ============================================================================
+-- RAPTOR H17 / S18: THE RECEIPT FEE IS CAPPED AT WHAT IT TOOK TO SETTLE (Stephan, 5 Nov).
+--
+-- THE FIRM: "If an account is only 300 Rand, you can't allocate the 600 Rand receipt fee. It should
+-- be relevant to only what can be allocated ... in a case of an overpayment, take all of the money to
+-- close the account and then calculate that receipt fee on what was outstanding the moment the
+-- account was settled." And, of how: "It shouldn't change the payment split ... there should rather
+-- be a cap than a payment split."
+--
+-- SO ONE LINE MOVES AND THE SPLIT DOES NOT. Item 9 was 10% of the WHOLE receipt; it is now 10% of the
+-- receipt OR of what the account owed just before it (interest + costs + capital, before this fee),
+-- whichever is less -- still under the tariff's own cap. On every payment that does not clear the
+-- account the base is the payment, exactly as before. On one that does, the fee is the same item 9
+-- the account page quotes as part of "To settle" (settlementReceiptFee: 10% of the balance before
+-- the fee), so a debtor who pays the settlement figure, or more, is charged what they were told.
+--
+-- STILL IMMUTABLE AND TABLE-FREE: the base is arithmetic on what the caller already passes.
+-- ============================================================================
+create or replace function public.finance_split(
+  p_payment numeric,
+  /* Outstanding interest before this payment. */
+  p_interest numeric,
+  /* Outstanding costs INCLUDING VAT, before the receipt fee this payment triggers. */
+  p_costs numeric,
+  p_capital numeric,
+  p_vat numeric,
+  p_fee_rate numeric,
+  p_fee_cap_excl numeric
+) returns table (
+  fee_excl numeric,
+  fee_vat numeric,
+  half_a numeric,
+  half_b numeric,
+  to_interest numeric,
+  to_costs numeric,
+  to_capital numeric,
+  /* What half A could not spend and passed to capital. Reported because it is the line that makes
+     a R1 000 payment put R535 against capital rather than R500, and somebody will ask. */
+  rolled numeric,
+  /* Left after capital, interest and costs are all settled. Held as a credit, never paid over. */
+  excess numeric
+)
+language plpgsql
+immutable
+as $$
+declare
+  v_costs numeric;
+  v_rem numeric;
+  v_pot numeric;
+  v_over numeric;
+  v_i numeric;
+  v_c numeric;
+  v_i2 numeric;
+  v_c2 numeric;
+  v_base numeric;
+begin
+  /* 1. THE RECEIPT FEE, CHARGED IMMEDIATELY BEFORE THE PAYMENT -- so the payment can pay it.
+        Annexure B item 9: 10 per cent of the payment, capped, plus VAT. It joins costs.
+        THE BASE IS NEVER MORE THAN WHAT WAS OWED (S18, above): an overpayment is charged on what it
+        took to settle, not on money that was never a payment towards the debt. */
+  v_base   := least(greatest(p_payment, 0),
+                    greatest(coalesce(p_interest, 0), 0) + greatest(coalesce(p_costs, 0), 0)
+                    + greatest(coalesce(p_capital, 0), 0));
+  fee_excl := round(least(v_base * p_fee_rate, p_fee_cap_excl), 2);
+  fee_vat  := round(fee_excl * p_vat, 2);
+  v_costs  := greatest(coalesce(p_costs, 0), 0) + fee_excl + fee_vat;
+
+  /* 2. FIFTY-FIFTY. half_b takes the odd cent, so the two halves always add back to the payment:
+        R0,01 short on every odd-cent payment is money that vanishes between the debtor and the
+        client, and financeHealth's fourth rule exists to catch exactly that. */
+  half_a := round(greatest(p_payment, 0) / 2, 2);
+  half_b := greatest(p_payment, 0) - half_a;
+
+  /* 3. HALF A: INTEREST FIRST, THEN COSTS. Costs are VAT-inclusive -- the firm's decision 1: the
+        debtor owes the VAT-inclusive amount, and the receipt fee is charged with VAT. */
+  v_i   := least(half_a, greatest(coalesce(p_interest, 0), 0));
+  v_rem := half_a - v_i;
+  v_c   := least(v_rem, v_costs);
+  v_rem := v_rem - v_c;
+  rolled := v_rem;
+
+  /* 4. HALF B, PLUS WHATEVER HALF A COULD NOT USE: CAPITAL. */
+  v_pot := half_b + rolled;
+  to_capital := least(v_pot, greatest(coalesce(p_capital, 0), 0));
+  v_over := v_pot - to_capital;
+
+  /* 5. CAPITAL SETTLED AND MONEY STILL LEFT: remaining interest, then remaining costs. The firm's
+        decision 2. Anything after that is an overpayment and is held as a credit -- it is NOT
+        paid to the client, because the client is owed capital and this is not capital. */
+  v_i2 := least(v_over, greatest(coalesce(p_interest, 0) - v_i, 0));
+  v_over := v_over - v_i2;
+  v_c2 := least(v_over, greatest(v_costs - v_c, 0));
+  v_over := v_over - v_c2;
+
+  to_interest := v_i + v_i2;
+  to_costs    := v_c + v_c2;
+  excess      := v_over;
+  return next;
+end $$;
+
+comment on function public.finance_split(numeric, numeric, numeric, numeric, numeric, numeric, numeric) is
+  'The 50/50 payment split as pure arithmetic: receipt fee, half A to interest then costs, half B '
+  'to capital, the roll-over between them, and the excess where everything is settled. The receipt '
+  'fee is item 9 on the payment or on what the account owed before it, whichever is less (S18). '
+  'Touches no table so the engine, the dry run and the tests cannot disagree about it.';
+
+-- ============================================================================
+-- RAPTOR H17 / S18: fee_split -- the new receipt fee is outside the in duplum room, as in the engine.
+-- ============================================================================
+create or replace function public.fee_split(
+  p_account uuid,
+  /* The payment whose own fee row must be left out -- see the header. */
+  p_exclude_payment uuid,
+  /* The item 9 fee this payment raises, INCLUDING VAT, and the day it is raised on. */
+  p_new_fee_incl numeric,
+  p_new_fee_day date,
+  /* What earlier payments have already taken out of the pool, and what this one takes. */
+  p_taken_before numeric,
+  p_to_costs numeric,
+  /* Interest that has not been posted yet and is about to be. The dry run has some; the posting
+     has none, because it writes the accrual before it asks. Without it the preview and the ledger
+     disagreed about what the ceiling refuses -- R57,01 against R62,63 on RRC00005, the difference
+     being exactly the R5,62 of interest the approval was about to post. */
+  p_interest_pending numeric default 0
+)
+returns table (
+  rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with room as (select public.in_duplum_cost_room(p_account, p_interest_pending) as mm),
+  fee_rows as (
+    select 0 as sk, f.id, f.incurred_at,
+           (f.counts_toward_fee_cap is not true) as is_receipt,
+           f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+           /* RECOVERABLE BY THE ENGINE'S OWN RULE, not the money position view's plainer one:
+              engine_balances gathers the pool with fee_stands() and `billed is not false`, and it
+              is that pool to_costs came out of. The view's reading would make the two buckets fail
+              to add back on an account carrying an imported Promise to Pay. */
+           (public.fee_stands(f.cancelled_at, f.legacy_name) and f.billed is not false) as stands
+      from public.account_fees_net f
+     where f.account_id = p_account
+       and (p_exclude_payment is null
+            or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid)
+               is distinct from p_exclude_payment)
+    union all
+    select 1, '00000000-0000-0000-0000-000000000000'::uuid,
+           coalesce(p_new_fee_day, public.raptor_today())::timestamptz,
+           true, greatest(coalesce(p_new_fee_incl, 0), 0), true
+  ),
+  /* What the ceiling had already been spent on by the time this fee's turn came, oldest first. */
+  roomed as (
+    select r.*,
+           /* THE NEW RECEIPT FEE TAKES NO ROOM (S18). engine_balances clips the account's EXISTING
+              costs to the ceiling and finance_split adds this payment's fee on top, outside it; counting
+              it here as well left less room for the fees after it than the engine had given them, so
+              to_fees fell short of to_costs by up to the fee, and the approval queue's "Client share +
+              BF share + credit = total" failed on overpayments (5 Nov). */
+           coalesce(sum(case when r.stands and r.sk = 0 then r.incl else 0 end)
+             over (order by date(r.incurred_at), r.sk, r.incurred_at, r.id
+                   rows between unbounded preceding and 1 preceding), 0) as raised_before
+      from fee_rows r
+  ),
+  payable as (
+    select r.sk, r.id, r.incurred_at, r.is_receipt, r.incl,
+           case when not r.stands then 0
+                /* The new receipt fee is outside the clip -- see the header. */
+                when r.sk = 1 then r.incl
+                else least(greatest((select mm from room) - r.raised_before, 0), r.incl) end as can
+      from roomed r
+  ),
+  /* And what earlier payments had settled by the time this fee's turn came -- over `can`, not
+     `incl`, because a payment can only ever have settled what was within the ceiling. */
+  ordered as (
+    select p.*,
+           coalesce(sum(p.can) over (order by date(p.incurred_at), p.sk, p.incurred_at, p.id
+                                     rows between unbounded preceding and 1 preceding), 0)
+             as settled_before
+      from payable p
+  ),
+  split as (
+    select o.is_receipt, o.incl, o.can,
+           least(greatest(coalesce(p_taken_before, 0) - o.settled_before, 0), o.can) as was,
+           least(greatest(coalesce(p_taken_before, 0) + coalesce(p_to_costs, 0)
+                          - o.settled_before, 0), o.can) as now_
+      from ordered o
+  )
+  select
+    coalesce(sum(incl) filter (where is_receipt), 0),
+    coalesce(sum(incl - can) filter (where is_receipt), 0),
+    coalesce(sum(was) filter (where is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where is_receipt), 0),
+    coalesce(sum(incl) filter (where not is_receipt), 0),
+    coalesce(sum(incl - can) filter (where not is_receipt), 0),
+    coalesce(sum(was) filter (where not is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where not is_receipt), 0)
+  from split
+$$;

@@ -31,7 +31,7 @@ ok('on the day', suspenseMatches(row, q('', '2026-10-22', '2026-10-22')))
 no('before the from day', suspenseMatches(row, q('', '2026-10-23')))
 no('after the to day', suspenseMatches(row, q('', null, '2026-10-21')))
 ok('a timestamp is read as its day', suspenseMatches({ ...row, date: '2026-10-22T22:00:00Z' }, q('', '2026-10-22', '2026-10-22')))
-ok('a reference typed without its dash', suspenseMatches({ ...row, words: ['RAP-125310'] }, q('rap125310')))
+ok('a reference typed without its dash', suspenseMatches({ ...row, words: ['RAP-100001'] }, q('rap100001')))
 
 const page = readFileSync(new URL('../../src/pages/finance/UnallocatedReceipts.tsx', import.meta.url), 'utf8')
 ok('all three suspense lists are searched', ['shownRows.map', 'shownSuspended.map', 'shownParked.map'].every((s) => page.includes(s)))

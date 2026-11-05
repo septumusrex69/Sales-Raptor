@@ -157,6 +157,22 @@ ok('what half A cannot spend goes to capital', /v_pot := half_b \+ rolled;/.test
 /* AND AN OVERPAYMENT IS HELD, NOT PAID OVER: the client is owed capital and this is not capital. */
 ok('what is left when everything is settled is an excess', /excess\s*:= v_over;/.test(split))
 
+/*
+ * THE RECEIPT FEE IS CAPPED AT WHAT IT TOOK TO SETTLE (S18; Stephan, 5 Nov: "you can't allocate the
+ * 600 Rand receipt fee" on a 300 Rand account -- "there should rather be a cap than a payment split").
+ * The base is the payment or interest + costs + capital, whichever is less, and the fee is item 9 on
+ */
+ok('the receipt fee base is never more than what was owed',
+  /v_base\s*:= least\(greatest\(p_payment, 0\),\s*greatest\(coalesce\(p_interest, 0\), 0\) \+ greatest\(coalesce\(p_costs, 0\), 0\)\s*\+ greatest\(coalesce\(p_capital, 0\), 0\)\);/.test(split))
+ok('...and the fee is item 9 on that base, under the tariff cap',
+  /fee_excl := round\(least\(v_base \* p_fee_rate, p_fee_cap_excl\), 2\);/.test(split))
+const feeSplit = lastFn('fee_split')
+ok('fee_split is in the schema', feeSplit.length > 500)
+/* AND THE NEW FEE TAKES NO IN DUPLUM ROOM IN THE BREAKDOWN, as it takes none in engine_balances --
+   counted there, to_fees fell short of to_costs and the approval queue failed to close. */
+ok('the breakdown leaves the new receipt fee out of the room it measures',
+  /sum\(case when r\.stands and r\.sk = 0 then r\.incl else 0 end\)/.test(feeSplit))
+
 /* ---------------- commission ---------------- */
 
 /*

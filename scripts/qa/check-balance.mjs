@@ -35,6 +35,38 @@ const empty = { payments: [], fees: [], interest: [] }
 }
 
 /*
+ * THE FIXTURES BELOW CARRY A R100 000 CAPITAL so their payments stay ordinary instalments: since S18
+ * an instalment bigger than what the account owes is charged item 9 on what it owed, not on itself.
+ *
+ * AND THAT RULE, HELD HERE (Stephan, 5 Nov: "If an account is only 300 Rand, you can't allocate the
+ * 600 Rand receipt fee ... calculate that receipt fee on what was outstanding the moment the account
+ * was settled"). finance_split does the same in the engine.
+ */
+{
+  const over = computeBalance({
+    capitalHandedOver: 300, handoverDate: '2026-04-10',
+    ledgers: { ...empty, payments: [{ date: '2026-05-01', amount: 6000 }] },
+  })
+  check('an overpayment is charged item 9 on what was owed (R300), not on R6 000', over.receiptFees, 34.50)
+  const exact = computeBalance({
+    capitalHandedOver: 300, handoverDate: '2026-04-10',
+    ledgers: { ...empty, payments: [{ date: '2026-05-01', amount: 300 }] },
+  })
+  check('...the same fee as paying exactly what was owed', exact.receiptFees, 34.50)
+  const part = computeBalance({
+    capitalHandedOver: 300, handoverDate: '2026-04-10',
+    ledgers: { ...empty, payments: [{ date: '2026-05-01', amount: 100 }] },
+  })
+  check('...and a part payment is still 10% of itself', part.receiptFees, 11.50)
+  const second = computeBalance({
+    capitalHandedOver: 300, handoverDate: '2026-04-10',
+    ledgers: { ...empty, payments: [{ date: '2026-05-01', amount: 100 }, { date: '2026-05-02', amount: 6000 }] },
+  })
+  /* After R100 and its R11.50 fee, R211.50 is left: the second payment is charged on that. */
+  check('...and a later overpayment on what the earlier one left', second.receiptFees, 11.50 + 24.32)
+}
+
+/*
  * The receipt fee is priced on the cap in force the DAY THE PAYMENT ARRIVED, not today.
  * A R6,100 instalment is exactly at the 2026 maximum of R610 and well past the earlier R502, so
  * the same payment costs different amounts either side of the day the firm raised it. Getting this
@@ -46,19 +78,19 @@ const empty = { payments: [], fees: [], interest: [] }
  */
 {
   const before = computeBalance({
-    capitalHandedOver: 0, handoverDate: '2025-01-01',
+    capitalHandedOver: 100000, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-11-29', amount: 6100 }] },
   })
   check('payment in 2025 caps at the R502 the firm charged', before.receiptFees, 577.30)
 
   const after = computeBalance({
-    capitalHandedOver: 0, handoverDate: '2026-01-01',
+    capitalHandedOver: 100000, handoverDate: '2026-01-01',
     ledgers: { ...empty, payments: [{ date: '2026-04-28', amount: 6100 }] },
   })
   check('the same payment in 2026 caps at R610', after.receiptFees, 701.5)
 
   const small = computeBalance({
-    capitalHandedOver: 0, handoverDate: '2026-01-01',
+    capitalHandedOver: 100000, handoverDate: '2026-01-01',
     ledgers: { ...empty, payments: [{ date: '2026-04-28', amount: 1000 }] },
   })
   check('a payment under the cap is 10% + VAT', small.receiptFees, 115)
@@ -419,7 +451,7 @@ const empty = { payments: [], fees: [], interest: [] }
 
   /* The same payment with nothing recorded falls back to the gazette. */
   const computed = computeBalance({
-    capitalHandedOver: 0, handoverDate: '2025-01-01',
+    capitalHandedOver: 100000, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000 }] },
   })
   /*

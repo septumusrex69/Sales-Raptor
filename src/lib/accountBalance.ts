@@ -291,7 +291,7 @@ export function feeIsTheOnlyRecord(fee: { source?: string | null }): boolean {
   return IMPORTED_FEE_SOURCES.includes(fee.source ?? '')
 }
 
-function splitFeeLedger(ledgers: LedgerLines) {
+function splitFeeLedger(ledgers: LedgerLines, capital: number, vatRate: number) {
   /*
    * FILTERED HERE AND NOWHERE ELSE, because computeBalance and buildStatement both read this and
    * they have to agree -- a statement whose lines do not add up to the figure at its foot is the
@@ -314,7 +314,51 @@ function splitFeeLedger(ledgers: LedgerLines) {
     ledgers.fees.filter((f) => f.annexureItem === '9')
       .map((f) => f.paymentId).filter((id): id is string => !!id),
   )
-  return { receiptRows, costRows, covered }
+  return { receiptRows, costRows, covered, computed: computedReceiptFees(ledgers, capital, vatRate, receiptRows, costRows, covered) }
+}
+
+/**
+ * THE ITEM 9 FEE ON EACH PAYMENT THAT HAS NO ROW OF ITS OWN, CAPPED AT WHAT IT TOOK TO SETTLE.
+ *
+ * Stephan, 5 Nov: "If an account is only 300 Rand, you can't allocate the 600 Rand receipt fee ...
+ * take all of the money to close the account and then calculate that receipt fee on what was
+ * outstanding the moment the account was settled." The engine does this in finance_split (S18): the
+ * base is the payment or what was owed just before it, whichever is less. This is the same rule for
+ * the payments the engine has not posted yet, so the account page and the approval queue quote one
+ * fee on an overpayment rather than two.
+ *
+ * WHAT IS OWED BEFORE A PAYMENT is walked here from the dated ledger: capital, posted interest, fees
+ * and receipt fees on or before its day, less the payments before it. ONE KNOWN DIFFERENCE from the
+ * engine: interest still in the open period is not in the walk (it is worked out after the fees, out
+ * of them), so on an account with open interest the cap here can sit lower than the engine's by 10%
+ * of that interest. It only touches a payment big enough to clear the account, and only until that
+ * payment is approved -- then the posted row wins (`covered`).
+ */
+function computedReceiptFees(
+  ledgers: LedgerLines, capital: number, vatRate: number,
+  receiptRows: LedgerLines['fees'], costRows: LedgerLines['fees'], covered: Set<string>,
+): Map<LedgerLines['payments'][number], number> {
+  const out = new Map<LedgerLines['payments'][number], number>()
+  const dated: { date: string; order: number; amount: number; pay?: LedgerLines['payments'][number] }[] = [
+    ...ledgers.interest.map((i) => ({ date: i.from, order: 0, amount: i.amount })),
+    ...costRows.map((f) => ({ date: f.date, order: 0, amount: f.exclVat + f.vat })),
+    ...receiptRows.map((f) => ({ date: f.date, order: 0, amount: f.exclVat + f.vat })),
+    ...ledgers.payments.map((p) => ({ date: p.date, order: 1, amount: -p.amount, pay: p })),
+  ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.order - b.order))
+  let owed = capital
+  for (const m of dated) {
+    if (!m.pay) { owed += m.amount; continue }
+    const p = m.pay
+    if (!(p.id && covered.has(p.id))) {
+      const fee = p.receiptFeeExclVat != null
+        ? receiptFeeOn(p, vatRate)
+        : receiptFeeOn({ ...p, amount: Math.min(p.amount, Math.max(roundToCents(owed), 0)) }, vatRate)
+      out.set(p, fee)
+      owed += fee
+    }
+    owed -= p.amount
+  }
+  return out
 }
 
 export function computeBalance(input: BalanceInput): BalanceBreakdown {
@@ -328,7 +372,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const interest = roundToCents(
     ledgers.interest.filter((i) => within(i.from)).reduce((t, i) => t + i.amount, 0),
   )
-  const { receiptRows, costRows, covered } = splitFeeLedger(ledgers)
+  const { receiptRows, costRows, computed } = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
   /* `fees` IS ITEMS 1-7 ONLY now, which is what the account's own "What is left to take" panel
      has always called it. Item 9 is counted below, once. */
   const chargedFees = costRows.filter((f) => within(f.date))
@@ -341,7 +385,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     receiptRows.filter((f) => within(f.date)).reduce((t, f) => t + f.exclVat + f.vat, 0)
     /* ...plus the computed figure for the payments that carry no row of their own. */
     + ledgers.payments.reduce(
-      (t, p) => t + (p.id && covered.has(p.id) ? 0 : receiptFeeOn(p, vatRate)), 0,
+      (t, p) => t + (computed.get(p) ?? 0), 0,
     ),
   )
 
@@ -364,7 +408,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
       .map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
     ...ledgers.payments.map((p) => ({
       date: p.date,
-      amount: -p.amount + (p.id && covered.has(p.id) ? 0 : receiptFeeOn(p, vatRate)),
+      amount: -p.amount + (computed.get(p) ?? 0),
     })),
   ]
 
@@ -671,13 +715,13 @@ export interface Statement {
 /* The schedule parameter is kept so callers need not change, and is no longer used for the receipt
    fee: that is read on each payment's own date now, which is what it should always have been. */
 export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedule): Statement {
-  const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
+  const { capitalHandedOver: capital, ledgers } = input
   const breakdown = computeBalance(input)
   const stopAt = input.writtenOffAt ?? input.settledOn ?? null
   /* THE SAME SPLIT THE BALANCE USED. The statement printed the item 9 ROW as an ordinary fee and
      then printed the computed receipt fee under the payment as well -- the same fee on two lines,
      and a running balance that ended at the doubled figure. */
-  const { receiptRows, costRows, covered } = splitFeeLedger(ledgers)
+  const { receiptRows, costRows, covered, computed } = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
 
   type Pending = Omit<StatementLine, 'balance'> & { at?: string }
   const pending: Pending[] = []
@@ -808,7 +852,7 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     /* ONLY WHERE NO ROW COVERS IT -- see splitFeeLedger. A payment whose fee is already a row
        above would otherwise be charged for it twice on one page. */
     if (p.id && covered.has(p.id)) continue
-    const fee = receiptFeeOn(p, vatRate)
+    const fee = computed.get(p) ?? 0
     if (fee > 0) {
       pending.push({
         date: p.date,

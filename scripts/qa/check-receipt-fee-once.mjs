@@ -122,11 +122,11 @@ const projected = computeBalance({
   ...THEIRS,
   ledgers: {
     ...THEIRS.ledgers,
-    payments: [...THEIRS.ledgers.payments, { date: '2026-10-28', amount: 1000 }],
+    payments: [...THEIRS.ledgers.payments, { date: '2026-10-28', amount: 500 }],
   },
 })
 check('a payment with no row of its own is still charged item 9',
-  cents(projected.receiptFees - b.receiptFees), cents(100 * 1.15))
+  cents(projected.receiptFees - b.receiptFees), cents(50 * 1.15))
 
 /*
  * AND THE ROW WINS WHERE THE TWO DISAGREE, which is receiptFeeOn's own rule stated one level up.
@@ -182,7 +182,7 @@ ok('...and the payment ids, or nothing can be matched', /id: p\.id,/.test(detail
 const bal = read('src/lib/accountBalance.ts')
 check('the split is written once', (bal.match(/function splitFeeLedger/g) ?? []).length, 1)
 check('...and read by both the balance and the statement',
-  (bal.match(/splitFeeLedger\(ledgers\)/g) ?? []).length, 2)
+  (bal.match(/splitFeeLedger\(ledgers, /g) ?? []).length, 2)
 
 /* ---------------- and the statement opens where a statement opens ---------------- */
 

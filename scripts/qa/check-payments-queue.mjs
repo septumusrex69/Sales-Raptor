@@ -274,6 +274,14 @@ const split = splitForBatch([
   { row: { paymentId: 'bad' }, problems: [{ rule: 'r', detail: 'd' }] },
 ])
 check('a batch carries only rows that add up', JSON.stringify(split), JSON.stringify({ clean: ['ok'], held: ['bad'] }))
+/* PAID BEFORE THE HANDOVER IS INVESTIGATED, NOT BATCHED (S18; Stephan, 5 Nov). */
+check('a payment from before the handover is held out of Approve all',
+  JSON.stringify(splitForBatch([{ row: { paymentId: 'early' }, problems: [],
+    exceptions: [{ key: 'before_handover', label: '', detail: '', warn: true }] }])),
+  JSON.stringify({ clean: [], held: ['early'] }))
+check('...and the badge says what to look at, not "refund"',
+  /handover date wrong.*handover amount.*withdrawn/s.test(exceptionsOf(A, [], '2026-10-06').find((e) => e.key === 'before_handover')?.detail ?? '')
+  && !/refund/i.test(exceptionsOf(A, [], '2026-10-06').find((e) => e.key === 'before_handover')?.detail ?? ''), true)
 const queuePage = stripTs(read('src/pages/finance/AwaitingApproval.tsx'))
 check('Approve all and Approve selected send the clean ids only',
   /approve\(batchAll\.clean\)/.test(queuePage) && /approve\(batchPicked\.clean\)/.test(queuePage)

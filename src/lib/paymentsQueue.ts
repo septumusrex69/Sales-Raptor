@@ -238,9 +238,19 @@ export function exceptionsOf(
     out.push({ key: 'needs_rate', label: 'Needs commission rate', warn: true,
       detail: 'No commission rate could be found for this account. Approving marks it needs_rate.' })
   }
+  /*
+   * PAID BEFORE THE FILE WAS OURS (Stephan, 5 Nov: "a payment made before handover is
+   * weird ... it shouldn't happen. It means that we are not entitled to our commissions" -- the debtor
+   * cannot have had a notice from us). So it is INVESTIGATED, not approved in a batch: the handover
+   * date may be wrong, the handover amount may need reducing (the client was paid before handing
+   * over), or the account is withdrawn with the client charged the fees. Never a refund -- "nobody
+   * will ever pay us without being handed over". Held out of Approve all, below.
+   */
   if (handoverDate && r.receivedOn < handoverDate) {
     out.push({ key: 'before_handover', label: 'Before handover', warn: true,
-      detail: `Received ${r.receivedOn}, before the account was handed over on ${handoverDate}.` })
+      detail: `Received ${r.receivedOn}, before the account was handed over on ${handoverDate}. `
+        + 'Investigate before approving: is the handover date wrong, should the handover amount be '
+        + 'reduced, or should the account be withdrawn and the client charged the fees?' })
   }
   /*
    * MONEY ON A CLOSED ACCOUNT (prompt 10's third cycle: "a payment arrives on a closed account
@@ -417,8 +427,10 @@ export function splitForBatch<T extends {
 ): { clean: string[]; held: string[] } {
   const clean: string[] = []; const held: string[] = []
   for (const c of items) {
-    /* A broken formula, or money on a closed account -- both are looked at before approving. */
-    const hold = c.problems.length > 0 || (c.exceptions ?? []).some((e) => e.key === 'closed_account')
+    /* A broken formula, money on a closed account, or money from before the handover -- each is
+       looked at before approving. */
+    const hold = c.problems.length > 0
+      || (c.exceptions ?? []).some((e) => e.key === 'closed_account' || e.key === 'before_handover')
     ;(hold ? held : clean).push(c.row.paymentId)
   }
   return { clean, held }
