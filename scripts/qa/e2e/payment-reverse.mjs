@@ -158,6 +158,20 @@ try {
       .catch(async (e) => { await page.screenshot({ path: `${OUT}/payment-reverse-account-fail.png`, fullPage: true }); throw e })
     await page.getByTestId('account-payments').waitFor({ timeout: 10000 })
     t.ok('the account lists its payments on Transactions', /R\s*3 ?500\.00|3 500\.00/.test(await page.getByTestId('account-payment').first().innerText()))
+    /* PREVIEW THE STATEMENT ON THE PAGE (Stephan, 4 Nov). Present beside the documents, and it draws -- or says why not. */
+    const preview = page.getByTestId('account-doc-statement-preview')
+    t.ok('Transactions offers "Preview the statement"', await preview.isVisible().catch(() => false))
+    if (await preview.isVisible().catch(() => false)) {
+      await preview.click()
+      await page.locator('[role="dialog"] canvas').first().waitFor({ timeout: 15000 }).catch(() => {})
+      const drawn = await page.locator('[role="dialog"] canvas').count()
+      const said = await page.locator('[role="dialog"]').innerText().catch(() => '')
+      t.ok('...titled for the statement, filled for THIS account', /Statement of account, as it will print/.test(said) && /This account/.test(said))
+      await page.screenshot({ path: `${OUT}/statement-preview.png` })
+      t.ok(`...which draws the statement on the page (${drawn} page(s)${drawn ? '' : `; ${said.slice(0, 120)}`})`, drawn > 0)
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+    }
     await page.getByTestId('account-payment-reverse').first().click()
     await reverseFromBox(page, 'Not this debtor’s payment')
     t.ok('...and Reverse there makes the same call', calls.some((c) => c.fn === 'reverse_payment' && c.p_reason === 'Not this debtor’s payment' && c.p_payment === PAY_ID))

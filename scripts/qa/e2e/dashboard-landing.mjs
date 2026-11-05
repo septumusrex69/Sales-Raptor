@@ -69,8 +69,10 @@ try {
        over the mountain at dawn; the firm: "each place will have its own saying." What this is
        really asking is "is the company hero on the screen", so if the default skin changes, this
        string changes with it -- and it did: Africa from 29 Oct ("Africa is our roots"), then from 31 Oct the Bredell
-       Ferreira skin, "The sky is only the beginning." */
-    t.ok('a pre-legal agent lands on the company dashboard', /the sky is only/i.test(text))
+       Ferreira skin, "The sky is only the beginning." -- and from 3 Nov there is no fixed line at all: the day's line IS
+       the headline (Stephan: "remove that the sky is the whatever. And just use the quotes"). With nothing approved at
+       /portal-looks the day is Llandudno, whose line is the one asserted. */
+    t.ok('a pre-legal agent lands on the company dashboard', /two oceans meet the mountains/i.test(text))
     t.ok('...not on the communications one', !/Communications Dashboard/.test(text))
     /* AND THE STALE TEAM DOES NOT DECIDE WHERE THEY GO NEXT. This is the Stefnova glitch, moved
        onto the button. */
@@ -87,7 +89,7 @@ try {
        other hero section. There should only be one very special page." So the floor must NOT
        carry the hero's line — a second epic screen is the thing that makes the first one ordinary.
     */
-    t.ok('...and the floor does not wear the company hero', !/the sky is only/i.test(floor))
+    t.ok('...and the floor does not wear the company hero', !/two oceans meet the mountains/i.test(floor))
     await context.close()
   }
 
@@ -96,7 +98,7 @@ try {
     const { context, page, text } = await land(browser, {
       ...PROFILE, id: 'u-noteam', name: 'No Team', role: 'Pre-legal Agent', team_id: null,
     })
-    t.ok('a pre-legal agent with no team lands on the company dashboard too', /the sky is only/i.test(text))
+    t.ok('a pre-legal agent with no team lands on the company dashboard too', /two oceans meet the mountains/i.test(text))
     const href = await page.locator('a', { hasText: 'Go to my dashboard' }).first().getAttribute('href')
     t.check('...and their dashboard is still the floor', href, '/dashboard/collections')
     await context.close()
@@ -108,7 +110,7 @@ try {
     const { context, page, text } = await land(browser, {
       ...PROFILE, id: 'u-comms', name: 'Comms Person', role: 'Liaison', team_id: COMMS_TEAM.id,
     })
-    t.ok('a liaison lands on the company dashboard', /the sky is only/i.test(text))
+    t.ok('a liaison lands on the company dashboard', /two oceans meet the mountains/i.test(text))
     const href = await page.locator('a', { hasText: 'Go to my dashboard' }).first().getAttribute('href')
     t.check('...and their dashboard is communications', href, '/dashboard/communications')
     await page.locator('a', { hasText: 'Go to my dashboard' }).first().click()
@@ -123,7 +125,7 @@ try {
     const { context, page, text } = await land(browser, {
       ...PROFILE, id: 'u-admin', name: 'The Admin', role: 'Administrator', team_id: COMMS_TEAM.id,
     })
-    t.ok('an administrator lands on the company dashboard as well', /the sky is only/i.test(text))
+    t.ok('an administrator lands on the company dashboard as well', /two oceans meet the mountains/i.test(text))
     const href = await page.locator('a', { hasText: 'Go to my dashboard' }).first().getAttribute('href')
     t.check('...and their own screen is the office', href, '/dashboard/admin')
     await context.close()

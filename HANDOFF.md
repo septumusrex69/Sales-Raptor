@@ -86,6 +86,13 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   (`open_interest` subtracts `to_costs` taken): R100 of fees paid on ALP00012 (R120 capital) had left R103,77 of
   interest recoverable on top. 0 staging accounts were in that state. Migration `h16_in_duplum_left_to_take`,
   open_interest prosrc md5 `0f953549...` = file. check-in-duplum 67 (4 sabotages, each red).
+- **ADMINISTRATOR SIGN-IN CODE: ONCE PER PERSON, NOT PER BROWSER (S17, 3 Nov; Stephan: "I don't want a 6-digit code
+  every darn time ... For the first time ... confirm your email address ... But not every single time")**. The device id
+  lives in localStorage, which is per web address -- every new Vercel preview URL and every private window was a "new
+  device" (his staging list: 4x Safari on Mac, two made 2 and 3 Nov). api/_lib/email/loginCode.ts now trusts any new
+  browser for a person who has confirmed on ANY browser before (count of their trusted_devices), recording it like the
+  rest; a first-ever sign-in still gets the code; removing all their devices asks again. Trade-off said in the code: a
+  stolen Administrator password now opens a new browser without the mailbox. check-login-code 107.
 - **THE DEBTOR PORTAL, PART 1 (S17, 3 Nov; Stephan chose case number + code; scope: balance & statement, pay,
   arrangement, dispute)**: `/my-account`. Case number (typed any way -- `normaliseCaseNumber`) + a six-digit code sent
   to the account's OWN primary email (else mobile, by SMS, free to the debtor; never a contact the caller types); the
@@ -131,12 +138,124 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   with the collector. Both: a note, a bell, and the debtor's ticket list (open/closed). check-debtor-tickets 19, e2e
   debtor-portal 32.
 
+- **DEBTOR PORTAL: A CODE ONCE, A PASSWORD AFTER; AND THE INVITATION (S17, 3 Nov).** Stephan: "I don't know how to invite
+  someone to that" and, of codes, "do one ... But not every single time". **Invite**: a "Debtor portal" card on the
+  account page (DebtorPortalCard, side column): **Email the debtor an invitation** (`invite` action -- requireCaller,
+  the caller's own mailbox, the account's own email via codeDestination, a note, NOT charged) and **Copy link**
+  (`/my-account?case=RAP-...`, for WhatsApp/SMS). **Sign-in**: table `debtor_portal_logins` (RLS on, no policies):
+  the code confirms the contact ONCE (confirmed_at), the debtor chooses a password (scrypt, `hashPassword`), then signs in
+  with case number + password (`sign-in`; one answer for every failure; 5 wrong = 15 min lock; the code is the reset).
+  "Keep me signed in on this device": a month in localStorage; otherwise a day, this tab only. The page opens on the
+  password, or on the code when arriving from an invitation link. check-debtor-portal 58, e2e debtor-portal 38 +
+  debtor-proposal-staff 11.
+
+- **CLIENT PORTAL: SIGNED IN ONCE MEANS SIGNED IN (S17, 3 Nov; Stephan: "they can have confirmed the email addresses
+  once, and that's it. The rest is irritating")**. PortalPage: "Keep me signed in" is now TICKED by default (a month;
+  clients are on their own computers), and a code no longer forces a new password -- `reset` is sent only from "Forgot
+  your password?" (it was `true` on every code). e2e client-portal 108.
+
+- **ONE SKIN, AND ONE LINE ON IT (S17, 3 Nov).** Stephan, circling the company hero: "you've got two like things that
+  are being said here ... just keep one ... remove that the sky is the whatever. And just use the quotes" and "make this
+  the default skin for everyone and archive everything else ... if I will call on that again, I will ask". So:
+  (1) CollectionsHero on Bredell Ferreira: the day's line IS the h1 (DayLine, 26/34/40px bold, credit under it); "The sky
+  is only the beginning." and "Discipline drives results" are drawn only for an archived skin. (2) themes.ts:
+  `archived: true` on raptor, desert, glass-mountain, ocean, africa, forest; `ACTIVE_THEMES` (= Bredell Ferreira) is all
+  the Settings picker offers; readStoredTheme and index.html's pre-paint honour only active ids, so everybody is on it
+  from their next load. Stylesheets, photos and lines all kept -- un-archiving is deleting the flag (+ index.html).
+  check-themes 161, check-collections-hero 97, e2e performance 124 / login-reset 19 / dashboard-landing 19.
+
+- **PORTAL EMAILS WEAR THE FIRM'S LOGO (S17, 3 Nov; Stephan: "put the Bredell Ferreira logo there ... more in line with
+  our branding")**: portalEmailHtml (every client- and debtor-portal email: codes, invitations) now has a white band with
+  the real lockup (`public/brand/email/bf-lockup.png`, 640px from bf-lockup.jpg, drawn at 320) over the gold rule, the
+  kicker in slate, and "People | Process | Performance" at the foot. The logo is fetched from the sending site
+  (`portalEmailLogoUrl`, or worked out from the button's link); alt text is the name, for clients that block images.
+
+- **THE DEBTOR PORTAL WEARS THE CLIENT PORTAL (S17, 3 Nov; Stephan: "Make the debtors login portal look like the client
+  portal ... speak to your agent. This is the person assigned to you. It's exactly the same, except when it's a client,
+  it's a debtor")**. SHARED, NOT COPIED: `src/pages/portal/portalLook.tsx` (C, HEAD, BODY, Field, the day's look +
+  DayLine + PhotoCredit, moved out of PortalPage) and `PortalSignInFrame.tsx` (the door; DOOR styles) -- the client
+  portal now draws through both (e2e client-portal 108, unchanged). DebtorPortalPage: the same door ("Your account",
+  "Secure account portal"), PortalSplash arcs on sign-in, the navy sidebar that folds, the band with the day's photograph,
+  the portal cards/type (.portal-brand); sections Your account / Payments & statement / Arrangement / Questions &
+  disputes; **Your agent** = the collector on the account (api `agentOf`: name, phone, email, WhatsApp), the firm's number
+  where nobody holds it; "Call <first name>" in the band and sidebar. e2e debtor-portal 44 (phone + iPad landscape).
+
 **THE DEBTOR PORTAL -- QUESTIONS FOR STEPHAN (ask, don't guess):**
-  1. Item 5 (R50) is charged when a collector ACCEPTS an arrangement the debtor offered online (same press as a phone
-     promise). Keep?
-  2. Item 3 (R25) is **NOT** charged on a dispute the debtor raises online (no person in the loop). Charge it?
+  1. ~~Item 5 on an offer the debtor made online~~ -- **DECIDED 3 Nov: not charged** ("No, don't charge. Well, I mean,
+     not yet"). `recordPromise({ charge: false })` from acceptProposal; a collector's own promise still charges.
+  2. ~~Item 3 on a portal dispute~~ -- **DECIDED 3 Nov: item 6 (R13), correspondence received**, as a debtor's email is
+     ("just charge them for the correspondence received"); chargeItemWith with emailSync's constants. **A portal
+     QUESTION is not charged yet** -- it is correspondence received too; ask whether it should be.
   3. `PROPOSAL_RULES`: first payment within 30 days; 12 months online, longer = application. Right numbers?
   4. Nobody has signed in for real yet: put your own email on a staging test account, open /my-account on the preview.
+  5. ~~A STATEMENT ON THE REMINDER~~ -- **DONE 4 Nov ("Yeah, that's the statement to the reminder")**: see below. Was: **A STATEMENT TWO WORKING DAYS BEFORE A LATER ONCE-OFF** (4 Nov, Stephan: "we will send you a statement 2 days
+     before the date ... then also send you a reminder on the day"). The "Promise to pay" workflow's reminder (-2
+     business days) and due-today steps quote {{ptp_amount}} and attach nothing. The portal promises only the reminders
+     and points at the page. Attach the statement to that reminder? (A workflow/template change -- ask first.)
+  6. ~~Which mailbox~~ -- **"I think legal"**: legal@bredellferreira.co.za, built (below); waiting on the mailbox being CONNECTED. Was: **A shared mailbox for accounts nobody holds** (4 Nov, Stephan: "why did the email go out from Camille ... we
+     should have email address like ... prelegal@ or legal@"). The code email goes from the collector, else an
+     Administrator's connected mailbox (codeSenderOrder) -- Camille's. A shared address needs the mailbox to exist and
+     be connected in Raptor (Settings > Email) by somebody who can sign into it; then it is a firm setting and the
+     sender order puts it before the Administrators. Not built: waiting on the mailbox.
+  7. ~~Interest on Stephan's Test Client~~ -- **DONE 4 Nov ("Yes, 24%. Unless otherwise ... indicated")**: the 86 OPEN
+     accounts at 0% set to the client's default 24% on staging (closed ones left alone). Elsabe RAP-125340: open_interest
+     now R 4 406,21 over 722 days (in duplum still caps it with the fees on the page). New accounts already take the
+     client's rate unless the handover says otherwise (handoverDraft / newDebtor) -- the seed had written 0.
+     WHY 0: S16's test-history seed wrote "no interest" on all 140 STC-H accounts on purpose (see its entry below).
+     Stephan, 4 Nov: "One should always have 24% on default ... Always. Unless we change anything." The app and the
+     column default already say 24 (DEFAULT_INTEREST_RATE_ANNUAL; `alter column ... set default 24`). The 54 CLOSED
+     test accounts stay at 0: raising them would put interest back on accounts already settled or paid up.
+- **DEBTOR PORTAL, 4 NOV (S17, after Stephan's first real sign-in):**
+  - **Sign in with case number, ID number or email** (Stephan: "with your ID number ... your email address, or your
+    case number. Like I couldn't sign in now"). The page refused anything but a case number before asking the server
+    -- nothing reached the logs. `debtorLogin` reads what was typed; api `accountsFor` finds the account(s): case ->
+    one; ID -> debtor_id_number (all 13 digits on staging); email -> CURRENT email contacts. Password: whichever account
+    it opens (several share an ID/email); a wrong one counts against each tried. A CODE goes only where exactly one
+    account matches (else the same generic answer, "use the case number"). Body field `login` (old `caseNumber` read).
+  - **My push 787e24c8 redeclared `login` in verify**: the debtor API did not bundle ("could not be reached") for
+    ~10 minutes until 2759a679. The temp-tsconfig API typecheck I used had `types: ["node"]` and failed before
+    checking anything -- use `types: []` (tsconfig.app.json base), and READ its output.
+  - **Statement on an account nobody holds**: refused for {{collector_name}}. Now EVERY document: collector_name and
+    agent_name fall back to UNASSIGNED_NAME "The Pre-Legal Department" (Stephan renamed it from "The Collections Team"), collector_email to the firm's (messageTemplates;
+    Stephan: "We should have fail-safes for that"). check-message-templates' "names nobody" assertion changed with it.
+  - **Statement head as the firm drew it** (Stephan sent a page, "make the statement look like this"): Date / Our
+    reference / Account / Creditor / (Status) / Position as at as a block on the RIGHT, "Label:" beside value at 9.5pt,
+    with one vertical rule on its left (accountSummaryLetter addressBlock; summary and statement both). New table
+    borders value **`aside`** in the closed set: no grid, a 0.3mm rule down column 2's left edge, rows padded 0.5mm --
+    letterLayout (PDF), `.ltr-b-aside` CSS (screen, same 0.5mm), and the parser reads it back
+    (check-page-editor round trip, check-letter-pdf). Replaced the morning's three-across band.
+  - **Once-off = settle in full** at the server's settlement figure, which holds 5 working days
+    (`PROPOSAL_RULES.settlementHoldsWorkingDays`, `settlementHoldsUntil`, `onceOffNote`); later is a promise with the PTP
+    workflow's reminders. Server sets `offer.amount = b.settlement`. check-debtor-arrangement 42.
+  - **Account page**: "Where your account stands" (progress = paid / (paid + owed); one stage, `debtorStanding`) with a
+    button to the arrangement; the sum with a total row; settlement in its own gold box with the day it holds to; How
+    to pay label-over-value; agent card = the person (line, email, WhatsApp, "Ask <name> to call me back" -> a portal
+    question) + the office beneath. e2e debtor-portal 46.
+  - **Company dashboard**: the photo credit is in the hero's bottom-right corner (HeroPhotoCredit), not under the line.
+  - **The arrangement reminder carries the statement**: `message_templates.attaches_statement` (staging, mirrored; true
+    on email-ptp-reminder-individual/-company only; email-only check constraint). step.ts builds it per account that
+    morning with `statementDocument` (debtorStatement.ts) -- the SAME builder as the portal download. Wording untouched.
+  - **legal@ for accounts nobody holds** (`src/lib/unassignedMailbox.ts`, UNASSIGNED_MAILBOX): a workflow email on an
+    account with no collector now sends from the mailbox connected as legal@bredellferreira.co.za, and HOLDS saying
+    so until it is connected (before: held, always). The debtor's code: collector -> legal@ -> Administrators
+    (`withLegal`). **TO DO (Stephan): create a Raptor login for the legal mailbox and connect legal@ under it
+    (Settings > Email)** -- a mailbox belongs to one login (email_connections.user_id). Not connected on staging yet.
+  - **Preview the statement** on the account's Transactions row, beside Summary/Statement: PreviewPdf (pdf.js on a
+    canvas; iPad-safe), opens on "This account" (startFilled). e2e payment-reverse 23; check-reminder-statement 14.
+  - **Unassigned signer renamed "The Pre-Legal Department"** (Stephan).
+- **THE STATEMENT IS A STATEMENT (S17, 5 Nov; Stephan sent a statement template: "It's not really statementy. Make it
+  statementy ... Still use the Bredell Ferreira logos ... I don't think the letterhead is a good idea to put it on")**.
+  `statementOfAccount` rebuilt: lockup top left (`src/lib/brandLogo.ts`, the portal-email PNG inlined as a data URL so
+  browser and server both have it), STATEMENT OF ACCOUNT + Date / Our reference / Account / Position as at top right;
+  "Account holder" and "How the balance is made up" side by side under navy bars; the rounded progress bar; every
+  movement in a navy-headed, striped, ruled table; a navy BALANCE NOW OWING bar; the notes; the trust-account line and
+  a kept-together "How to pay" box (same rows and words as the summary's, two across). No Dear / Yours faithfully /
+  signature. The summary of account is unchanged (still a letter on the letterhead, `aside` reference block).
+  Letter-model additions, all in the closed set and read back by the parser: **`LetterDocument.paper: 'plain'`**
+  (letterToPdf draws on `A4_PLAIN`, never the letterhead, whatever the caller passed -- portal, reminder and preview
+  cannot disagree), **`TableCell.fill`** (hex; a shaded table is padded both sides, `.ltr-filled`), **`TableCell.image`**
+  (PNG data URL + mm size; `.ltr-cell-img`), **`RectOp.radiusMm`** (rounded bar; SVG path in the PDF, clamped).
+  Checks: check-letter-pdf 65, check-page-editor 72, check-account-documents 82 (each broken once).
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

@@ -183,6 +183,21 @@ ok('the e2e browser is a known device by default', /\/rpc\/trusted_device_seen[\
 const appSource = [requireAuth, gate, strip(read('src/store/AuthContext.tsx')), strip(read('api/_lib/auth.ts')), server].join('\n')
 ok('no authenticator app: no TOTP, no MFA enrolment, no aal2', !/totp|mfa\.|enroll|aal2|qrcode/i.test(appSource))
 
+/*
+ * ONCE PER PERSON (Raptor H16, 3 Nov). Stephan: "I don't want a 6-digit code every darn time ... For the first time,
+ * maybe you need to confirm your email address ... But not every single time." Held: somebody who has confirmed on
+ * any browser is trusted on the next one without a code (and that browser is recorded, so it can be removed); and
+ * somebody who never has is still asked -- the check is a COUNT of their confirmed browsers, before any code is sent.
+ */
+const knownAt = server.indexOf("if (known) { res.status(200).json({ trusted: true }); return }")
+const onceAt = server.indexOf("const { count: confirmedBefore } = await admin.from('trusted_devices')")
+const sendAt = server.indexOf("if (body.step === 'send')")
+ok('a person who has confirmed once is not asked again on a new browser', onceAt > 0
+  && /if \(\(confirmedBefore \?\? 0\) > 0\) \{\s*const \{ error: trustErr \} = await trust\(\)[\s\S]{0,200}res\.status\(200\)\.json\(\{ trusted: true \}\)/.test(server))
+ok('...counted over THEIR devices only', /\.select\('id', \{ count: 'exact', head: true \}\)\.eq\('user_id', caller\.id\)/.test(server))
+ok('...decided before any code is sent, after the browser itself is looked up', knownAt > 0 && sendAt > 0 && knownAt < onceAt && onceAt < sendAt)
+ok('...while the first sign-in ever still sends a code (the send step is still reached)', sendAt > 0 && /await send\(admin, res, me as Profile/.test(server))
+
 console.log(failures.length ? `\n${failures.length} FAILED:\n\n  ✗ ${failures.join('\n\n  ✗ ')}\n` : '')
 console.log(`check-login-code: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

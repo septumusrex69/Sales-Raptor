@@ -55,6 +55,14 @@ try {
     t.ok('...and cannot be accepted until it is signed', await app.getByRole('button', { name: 'Accept' }).isDisabled())
     await t.shot(page, 'debtor-proposal-staff-application')
   }
+  /* THE INVITATION (Stephan, 3 Nov: "I don't know how to invite someone to that"). */
+  const inv = page.getByTestId('debtor-portal-card')
+  await inv.scrollIntoViewIfNeeded()
+  t.ok('the account page offers to invite the debtor to the portal', await inv.isVisible() && /Debtor portal/.test(await inv.innerText()))
+  t.ok('...with no email on the account, emailing waits and says why, and the link can still be copied',
+    await inv.getByRole('button', { name: 'Email the debtor an invitation' }).isDisabled()
+    && /No email address on this account yet/.test(await inv.innerText()) && await inv.getByRole('button', { name: 'Copy link' }).isEnabled())
+  await t.shot(page, 'debtor-portal-invite-card')
   application = false
   await page.reload()
   const card = page.getByTestId('debtor-proposal')
@@ -72,7 +80,7 @@ try {
   await page.getByTestId('debtor-proposal-done').waitFor({ timeout: 10000 })
   t.ok(`accepting records the promise first, then marks the offer (${order.join(' → ')})`, order.indexOf('promise') >= 0 && order.indexOf('promise') < order.indexOf('offer'))
   t.ok('...as the debtor offered it: monthly, R500, from the 25th, on the 25th', promiseBody?.arrangement === 'monthly' && Number(promiseBody?.amount) === 500 && promiseBody?.due_on === '2026-11-25' && promiseBody?.day_of_month === 25)
-  t.ok('...charged item 5, as a collector\'s own promise is', order.includes('fee'))
+  t.ok('...WITHOUT item 5 -- the debtor offered it (Stephan, 3 Nov: "don\'t charge ... not yet")', !order.includes('fee'))
   t.ok('...and the offer is marked accepted, with the promise it became', decided?.status === 'accepted' && decided?.promise_id === 'ptp-1')
 } catch (e) {
   try { const pg = browser?.contexts().flatMap((c) => c.pages())[0]; if (pg) await t.shot(pg, 'debtor-proposal-staff-where-it-stopped') } catch { /* */ }

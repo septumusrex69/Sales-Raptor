@@ -55,6 +55,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('user_id', caller.id).eq('device_hash', deviceHash).maybeSingle()
   if (known) { res.status(200).json({ trusted: true }); return }
 
+  /*
+   * CONFIRMED ONCE IS CONFIRMED (Raptor H16, 3 Nov). Stephan: "I don't want a 6-digit code every darn time I want to
+   * sign into the thing ... For the first time, maybe you need to confirm your email address ... But not every single
+   * time." A browser is remembered by an id in its localStorage, and localStorage belongs to one web address -- so
+   * every new Vercel preview URL, and every private window, read as a new device and asked again (Stephan's staging
+   * list: four "Safari on Mac", two of them made on consecutive days). So the code is now asked ONCE PER PERSON: an
+   * Administrator who has confirmed their mailbox on any browser has every later browser trusted on the password,
+   * recorded in Trusted devices like any other so it can be seen and removed there. Removing all of them asks again.
+   * THE TRADE, SAID PLAINLY: a stolen Administrator password now opens Raptor on a new device without the mailbox. The
+   * firm chose that; a strong, unshared password is what holds that door now.
+   */
+  const { count: confirmedBefore } = await admin.from('trusted_devices')
+    .select('id', { count: 'exact', head: true }).eq('user_id', caller.id)
+  if ((confirmedBefore ?? 0) > 0) {
+    const { error: trustErr } = await trust()
+    if (trustErr) console.error(`[login-code] could not remember a browser for ${caller.id}: ${trustErr.message}`)
+    res.status(200).json({ trusted: true }); return
+  }
+
   if (body.step === 'send') { await send(admin, res, me as Profile, caller.email ?? null, deviceHash, label, trust); return }
   if (body.step === 'check') { await check(admin, res, caller.id, deviceHash, body.code, trust); return }
   res.status(400).json({ error: 'Unknown step.' })

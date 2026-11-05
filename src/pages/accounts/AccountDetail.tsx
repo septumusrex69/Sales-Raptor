@@ -46,6 +46,7 @@ import { fetchStatusChanges } from '../../lib/accountEndingApi'
 import type { StatusChange } from '../../lib/accountTimeline'
 import { ENDING_LABEL, ENDING_SHORT } from '../../lib/accountEnding'
 import { DebtorProposalCard } from '../../components/accounts/DebtorProposalCard'
+import { DebtorPortalCard } from '../../components/accounts/DebtorPortalCard'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -1546,6 +1547,10 @@ function AccountPage() {
   const proposalPanel = account.book === 'closed' ? null : (
     <DebtorProposalCard accountId={account.id} balance={b?.balance} settlement={b?.settlement} onDecided={reload} />
   )
+  /* THE DEBTOR PORTAL INVITATION (Raptor H16): email the debtor the link, or copy it for WhatsApp. */
+  const debtorPortalPanel = account.book === 'closed' ? null : (
+    <DebtorPortalCard accountId={account.id} caseNumber={account.caseNumber ?? null} hasEmail={!!emailContact} />
+  )
   const promisePanel = (
     <PromisePanel
       accountId={account.id}
@@ -2195,7 +2200,7 @@ function AccountPage() {
            * already gone out by itself, which is worth seeing and never the first thing to act on.
            */
           side={[proposalPanel, clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel, settlementPanel,
-            disputesPanel, workflowNowPanel, testClockPanel, positionPanel]}
+            disputesPanel, workflowNowPanel, debtorPortalPanel, testClockPanel, positionPanel]}
           /*
            * THE TRACE, THE DIRECTORS AND THE JUDGMENTS, under the timeline where the firm asked
            * for them -- and null in the other two arrangements, where the same panel is already
@@ -3572,7 +3577,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
            database starts the run, and this is what dates it and sends what is due. */
         accessToken: session?.access_token ?? null,
       })
-      message = [issued, chargeMessage(charge, PROMISE_ITEM_ID)].filter(Boolean).join(' ')
+      /* A collector's own promise is always charged (recordPromise's `charge` defaults on); null only on a debtor's offer. */
+      message = [issued, charge ? chargeMessage(charge, PROMISE_ITEM_ID) : ''].filter(Boolean).join(' ')
     })
     // Said after the fact rather than promised beforehand: whether item 5 has room on this
     // account depends on the ledger, and the ledger is read when the charge is made.

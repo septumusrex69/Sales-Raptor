@@ -108,6 +108,17 @@ export interface ListBlock {
 export interface TableCell {
   spans: Span[]
   align?: Align
+  /**
+   * A SHADED CELL (Raptor H16, 4 Nov: the statement, "make it statementy"): a hex background, drawn behind the text on
+   * screen and in the PDF -- the navy heading bars, the zebra rows and the balance bar of a statement. A table with any
+   * shaded cell is padded on both sides (`.ltr-filled`), or the text would sit on the edge of its own colour.
+   */
+  fill?: string
+  /**
+   * A PICTURE IN THE CELL, above any text: the firm's logo at the head of a statement. A PNG data URL (the PDF embeds
+   * PNG only), sized in millimetres because the page is.
+   */
+  image?: { src: string; widthMm: number; heightMm: number }
 }
 
 export interface TableBlock {
@@ -127,7 +138,13 @@ export interface TableBlock {
    * How much of a grid to draw. The section 129 uses all three: `none` for the date/reference
    * strip at the top, `rows` for the banking details, `all` for the legal-process table.
    */
-  borders?: 'none' | 'rows' | 'all'
+  /**
+   * `aside` (Raptor H16, 4 Nov): no grid, and ONE vertical rule down the left edge of the SECOND column. The statement's
+   * reference block uses it -- an empty first column pushes the block to the right of the page, and the rule sets it
+   * apart from the body, the way the firm drew it ("make the statement look like this"). The rule is drawn at the
+   * second column's left edge, so the gutter beside it is the column's own padding.
+   */
+  borders?: 'none' | 'rows' | 'all' | 'aside'
   /**
    * DO NOT BREAK THIS TABLE ACROSS A PAGE.
    *
@@ -209,6 +226,8 @@ export interface ProgressBlock {
   kind: 'progress'
   /** 0..1. Clamped on the way in, so a renderer never has to defend against a bar 140% long. */
   fraction: number
+  /** The fill's colour (hex), where a document has its own palette -- the statement's gold. Absent is the dark ink. */
+  fill?: string
   /** What the bar is about, drawn above it. */
   label?: string
   /** The figures, drawn under it. The bar is the picture; this is the evidence for it. */
@@ -261,6 +280,12 @@ export interface LetterDocument {
    * vocabulary, because nothing but a printer knows them.
    */
   runningFoot?: string
+  /**
+   * 'plain': drawn on A4_PLAIN with NO letterhead behind it (Stephan, 4 Nov, of the statement: "I don't think the
+   * letterhead is a good idea to put it on. It's not really for a statement"). Absent is a letter, on the letterhead.
+   * Decided by the document, not the caller, so the portal, the reminder and the preview cannot disagree about it.
+   */
+  paper?: 'plain'
   blocks: Block[]
 }
 
@@ -285,6 +310,17 @@ export interface PageSetup {
  * bottom margin lets body text run about three millimetres into it. That is invisible until the
  * day a paragraph happens to reach the bottom of the page, which on a two-page notice is often.
  */
+/** A4 on plain paper: a document that carries the firm's name itself (the statement) rather than the letterhead. */
+export const A4_PLAIN: PageSetup = {
+  widthMm: 210,
+  heightMm: 297,
+  marginTopMm: 14,
+  marginRightMm: 14,
+  marginBottomMm: 18,
+  marginLeftMm: 14,
+  backgroundUrl: null,
+}
+
 export const A4_LETTERHEAD: PageSetup = {
   widthMm: 210,
   heightMm: 297,
@@ -696,15 +732,19 @@ export function letterToHtml(doc: LetterDocument, input: {
         const cols = (b.widths ?? []).map((w) => `<col style="width:${w}%">`).join('')
         const rows = b.rows.map((row, ri) => {
           const cells = row.map((c) => {
-            const cs = c.align ? ` style="text-align:${c.align}"` : ''
+            const fill = c.fill && /^#[0-9a-f]{6}$/i.test(c.fill) ? c.fill : null
+            const style = [c.align ? `text-align:${c.align}` : '', fill ? `background:${fill}` : ''].filter(Boolean).join(';')
+            const cs = style ? ` style="${style}"` : ''
             const t = b.headerRow && ri === 0 ? 'th' : 'td'
-            return `<${t}${cs}>${inline(c.spans)}</${t}>`
+            const img = c.image ? `<img class="ltr-cell-img" src="${esc(c.image.src)}" style="width:${c.image.widthMm}mm;height:${c.image.heightMm}mm">` : ''
+            return `<${t}${cs}>${img}${inline(c.spans)}</${t}>`
           }).join('')
           return `<tr>${cells}</tr>`
         }).join('')
         /* `keepTogether` travels as data, for the reason `keepWithNext` does: it has no appearance
            to be read back from, so the attribute IS the record of it. */
-        out.push(`<table class="ltr-t ltr-b-${b.borders ?? 'none'}"${attr}`
+        const filled = b.rows.some((r) => r.some((c) => c.fill))
+        out.push(`<table class="ltr-t ltr-b-${b.borders ?? 'none'}${filled ? ' ltr-filled' : ''}"${attr}`
           + `${b.keepTogether ? ' data-whole="1"' : ''}>`
           + (cols ? `<colgroup>${cols}</colgroup>` : '') + `<tbody>${rows}</tbody></table>`)
         break
@@ -750,12 +790,13 @@ export function letterToHtml(doc: LetterDocument, input: {
          * millimetres would be the one element whose geometry could be mistaken for one.
          */
         const pc = Math.max(0, Math.min(1, b.fraction)) * 100
-        out.push(`<div class="ltr-bar" data-fraction="${b.fraction}"${attr}>`
+        const barFill = b.fill && /^#[0-9a-f]{6}$/i.test(b.fill) ? b.fill : null
+        out.push(`<div class="ltr-bar" data-fraction="${b.fraction}"${barFill ? ` data-fill="${barFill}"` : ''}${attr}>`
           /* Through `inline`, like every other run of words on the sheet, so a field in a bar's
              caption is merged and escaped by the one code path that does it everywhere else. */
           + (b.label ? `<div class="ltr-bar-label">${inline([{ text: b.label }])}</div>` : '')
           + '<div class="ltr-bar-track">'
-          + `<div class="ltr-bar-fill" style="width:${pc.toFixed(2)}%"></div></div>`
+          + `<div class="ltr-bar-fill" style="width:${pc.toFixed(2)}%${barFill ? `;background:${barFill}` : ''}"></div></div>`
           + (b.note ? `<div class="ltr-bar-note">${inline([{ text: b.note }])}</div>` : '')
           + '</div>')
         break
@@ -833,6 +874,10 @@ export function letterCss(doc: LetterDocument, page: PageSetup): string {
 .ltr-t th { font-weight: 700; }
 .ltr-b-rows td, .ltr-b-rows th { border-bottom: 0.2mm solid #d8dee6; padding-left: 0; }
 .ltr-b-all td, .ltr-b-all th { border: 0.2mm solid #d8dee6; padding: 1.4mm 2mm; }
+.ltr-b-aside td, .ltr-b-aside th { padding-top: 0.5mm; padding-bottom: 0.5mm; }
+.ltr-filled td, .ltr-filled th { padding-left: 2mm; padding-right: 2mm; }
+.ltr-cell-img { display: block; }
+.ltr-b-aside td:nth-child(2), .ltr-b-aside th:nth-child(2) { border-left: 0.3mm solid #4b5563; }
 .ltr-break { break-before: page; page-break-before: always; }
 .ltr-sig { margin: 0 0 3mm; }
 .ltr-rule { border-bottom: 0.3mm solid #4b5563; height: 10mm; margin-bottom: 1.5mm;
@@ -853,8 +898,8 @@ export function letterCss(doc: LetterDocument, page: PageSetup): string {
    the border width are the same numbers letterLayout draws with, so the sheet and the PDF agree. */
 .ltr-bar { margin: 0 0 3mm; }
 .ltr-bar-label { margin-bottom: 1.2mm; }
-.ltr-bar-track { height: 5mm; border: 0.2mm solid #9ca3af; background: #eef1f5; }
-.ltr-bar-fill { height: 100%; background: #1f2937; }
+.ltr-bar-track { height: 5mm; border: 0.2mm solid #9ca3af; background: #eef1f5; border-radius: 2.5mm; overflow: hidden; }
+.ltr-bar-fill { height: 100%; background: #1f2937; border-radius: 2.5mm; }
 .ltr-bar-note { font-size: ${(d.size * 0.86).toFixed(1)}pt; color: #6b7280; margin-top: 1.2mm; }
 /* The running line sits BELOW the text, in the bottom margin, clear of the letterhead's own
    footer block. At the top it competed with the logo and pushed the date block down the page. */
@@ -1195,6 +1240,7 @@ export function documentHtmlToBlocks(html: string): Block[] {
       out.push({
         kind: 'progress',
         fraction: Number.isFinite(raw_f) ? Math.max(0, Math.min(1, raw_f)) : 0,
+        ...(/^#[0-9a-f]{6}$/i.test(attrValue(raw.attrs, 'data-fill') ?? '') ? { fill: attrValue(raw.attrs, 'data-fill')! } : {}),
         ...(text('ltr-bar-label') !== undefined ? { label: text('ltr-bar-label') } : {}),
         ...(text('ltr-bar-note') !== undefined ? { note: text('ltr-bar-note') } : {}),
         ...(spacing ? { spacing } : {}),
@@ -1268,11 +1314,20 @@ export function documentHtmlToBlocks(html: string): Block[] {
          asking for `tr` at whatever depth rather than assuming either shape. */
       const body = topLevelBlocks(raw.inner).find((b) => b.tag === 'tbody')
       const rows = childrenOf(body ? body.inner : raw.inner, ['tr']).map((tr) =>
-        childrenOf(tr.inner, ['td', 'th']).map((cell) => ({
-          spans: editableHtmlToSpans(cell.inner),
-          ...(alignOf(cell.attrs) ? { align: alignOf(cell.attrs)! } : {}),
-        })))
-      const borders = /ltr-b-(none|rows|all)/.exec(cls)?.[1] as TableBlock['borders'] | undefined
+        childrenOf(tr.inner, ['td', 'th']).map((cell) => {
+          /* The shade and the picture read back, or a statement edited once would lose its bars and its logo. */
+          const fill = (styleProp(cell.attrs, 'background') ?? '').trim()
+          const img = /<img\b[^>]*class="ltr-cell-img"[^>]*>/i.exec(cell.inner)?.[0] ?? null
+          const src = img ? /\bsrc="([^"]*)"/.exec(img)?.[1] ?? null : null
+          const mm = (prop: string) => Number((/([\d.]+)mm/.exec(styleProp(img ?? '', prop) ?? '') ?? [])[1] ?? 0)
+          return {
+            spans: editableHtmlToSpans(img ? cell.inner.replace(img, '') : cell.inner),
+            ...(alignOf(cell.attrs) ? { align: alignOf(cell.attrs)! } : {}),
+            ...(/^#[0-9a-f]{6}$/i.test(fill) ? { fill } : {}),
+            ...(src ? { image: { src: unesc(src), widthMm: mm('width'), heightMm: mm('height') } } : {}),
+          }
+        }))
+      const borders = /ltr-b-(none|rows|all|aside)/.exec(cls)?.[1] as TableBlock['borders'] | undefined
       const headerRow = /<th\b/i.test(raw.inner)
       out.push({
         kind: 'table',

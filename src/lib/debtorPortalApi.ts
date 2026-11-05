@@ -1,19 +1,23 @@
 /**
- * THE DEBTOR PORTAL PAGE'S CALLS (Raptor H16) -- a debtor's browser, never staff. Imports no Supabase: the debtor
- * has no Supabase session and the page's chunk has no use for the library.
+ * THE DEBTOR PORTAL PAGE'S CALLS (Raptor H16) -- a debtor's browser, never staff (except `inviteDebtor`, which a
+ * collector presses on the account page). Imports no Supabase for the debtor's half.
  *
- * The token lives in sessionStorage -- this tab only -- because a debtor is as likely to be on a borrowed or a
- * shared phone as their own, and a debt is the last thing to leave signed in on somebody else's.
+ * WHERE THE SESSION IS KEPT: "Keep me signed in on this device" puts it in localStorage (a month, the server's
+ * DEBTOR_REMEMBER_DAYS); otherwise sessionStorage -- this tab only -- because a debtor is as likely to be on a
+ * borrowed phone as their own. Read defensively: a private window throws, and the answer then is "sign in".
  */
 import { DEBTOR_TOKEN_HEADER, type DebtorPayment, type DebtorSummary, type DebtorTicket } from './debtorPortal'
 
 const KEY = 'raptor.debtor.token'
 
 export function debtorToken(): string | null {
-  try { return sessionStorage.getItem(KEY) } catch { return null }
+  try { return localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY) } catch { return null }
 }
-export function saveDebtorToken(token: string | null): void {
-  try { if (token) sessionStorage.setItem(KEY, token); else sessionStorage.removeItem(KEY) } catch { /* this page only */ }
+export function saveDebtorToken(token: string | null, remember = false): void {
+  try {
+    localStorage.removeItem(KEY); sessionStorage.removeItem(KEY)
+    if (token) (remember ? localStorage : sessionStorage).setItem(KEY, token)
+  } catch { /* signed in for this page only */ }
 }
 
 export class DebtorSignedOut extends Error {}
@@ -30,8 +34,14 @@ async function call<T>(action: string, body: Record<string, unknown> = {}, token
   return out
 }
 
-export const requestDebtorCode = (caseNumber: string) => call<{ message: string }>('request-code', { caseNumber })
-export const verifyDebtorCode = (caseNumber: string, code: string) => call<{ token: string; expiresAt: string }>('verify', { caseNumber, code })
+/* `login` is whatever the debtor typed -- a case number, an ID number or an email address (debtorLogin decides which). */
+export const requestDebtorCode = (login: string) => call<{ message: string }>('request-code', { login })
+export const verifyDebtorCode = (login: string, code: string, remember: boolean, reset = false) =>
+  call<{ token: string; expiresAt: string; needsPassword: boolean }>('verify', { login, code, remember, reset })
+/* A code once, a password after (Stephan, 3 Nov). */
+export const signInDebtor = (login: string, password: string, remember: boolean) =>
+  call<{ token: string; expiresAt: string }>('sign-in', { login, password, remember })
+export const setDebtorPassword = (token: string, password: string) => call<{ ok: boolean }>('set-password', { password }, token)
 
 export interface DebtorAccount {
   asAt: string
@@ -44,6 +54,8 @@ export interface DebtorAccount {
   payments: DebtorPayment[]
   pay: { accountName: string; bank: string | null; branchCode: string | null; accountNumber: string | null; accountType: string | null; reference: string } | null
   contact: { phone: string | null; email: string | null } | null
+  /** The collector assigned to the account; null where nobody holds it (the firm's own number then). */
+  agent: { name: string; phone: string | null; email: string | null; whatsapp: string | null } | null
   /** Part 3: the arrangement in force, if any, and the latest offer (pending, or how it was answered). */
   live: { arrangement: string; amount: number; dueOn: string; missed: boolean } | null
   proposal: {
@@ -70,3 +82,18 @@ export const proposeDebtorArrangement = (token: string, input: { arrangement: st
 /* Part 4: a written dispute, or a question -- each a ticket on the account. */
 export const raiseDebtorDispute = (token: string, input: { reason: string; text: string }) => call<{ ticketNo: number | null }>('dispute', input, token)
 export const askDebtorQuestion = (token: string, text: string) => call<{ ticketNo: number | null }>('ask', { text }, token)
+
+/**
+ * STAFF: email the debtor the link to their account, from the caller's own mailbox. Sent with the Raptor session, not a
+ * debtor token -- the server checks it is somebody signed in to Raptor.
+ */
+export async function inviteDebtor(accessToken: string, accountId: string): Promise<{ to: string; url: string }> {
+  const res = await fetch('/api/debtor/invite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ accountId }),
+  })
+  const out = (await res.json().catch(() => ({}))) as { to?: string; url?: string; error?: string }
+  if (!res.ok) throw new Error(out.error ?? 'The invitation could not be sent just now.')
+  return { to: out.to ?? '', url: out.url ?? '' }
+}

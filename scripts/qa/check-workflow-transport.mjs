@@ -159,7 +159,7 @@ ok('the shared sender exists', /export async function sendAsUser/.test(sender))
 /* As the caller, or (S13, Ryno's letter of demand) as the firm's central mailbox when asked and allowed --
    senderId starts as the caller and changes only through centralMailboxFor. Either way, through sendAsUser. */
 ok('the compose box sends through it', /sendAsUser\(admin, senderId,/.test(route) && /let senderId = caller\.id/.test(route))
-ok('...and so does the runner, unattended', /sendAsUser\(admin, collector!?\.id,/.test(runner))
+ok('...and so does the runner, unattended', /sendAsUser\(admin, (collector!?\.id|senderId!),/.test(runner))
 /*
  * AND NEITHER BUILDS ITS OWN TRANSPORT. Two nodemailer calls is two senders however they are
  * named -- a signature block, a Sent copy or the firm's font added to one and not the other is
@@ -486,7 +486,7 @@ ok('a release sends the SMS behind the notice as the same person',
  * the seed's own guard fell into, in a new place.
  */
 ok('the runner asks the library which wording carries a schedule',
-  /select\('id, kind, subject, body, audience, name, attachment_id, attaches_schedule(, seed_key)?'\)/.test(runner))
+  /select\('id, kind, subject, body, audience, name, attachment_id, attaches_schedule(, attaches_statement)?(, seed_key)?'\)/.test(runner))
 ok('...and branches on it when the attachment is chosen',
   /attachment: r\.attaches_schedule && scheduleDoc/.test(runner))
 ok('...and builds it from the live arrangement', /const scheduleDoc = \(\(\) => \{/.test(runner))

@@ -1,12 +1,13 @@
 import crypto from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { adminClient } from './auth.js'
-import { credentialsKeyProblem, keyedHash, sameHex } from './crypto.js'
+import { adminClient, requireCaller } from './auth.js'
+import { credentialsKeyProblem, hashPassword, keyedHash, passwordMatches, sameHex } from './crypto.js'
 import { sendAsUser } from './email/sendAsUser.js'
 import { sendSms } from './sms/connectMobile.js'
 import { codeSenderOrder, deviceLabel, normaliseCode, resendDecision } from '../../src/lib/loginCode.js'
-import { portalCodeCheck, PORTAL_CODE_MESSAGE } from '../../src/lib/clientPortal.js'
+import { UNASSIGNED_MAILBOX, withLegal } from '../../src/lib/unassignedMailbox.js'
+import { portalCodeCheck, portalPasswordProblem, PORTAL_CODE_MESSAGE, PORTAL_PASSWORD_FAILURES, PORTAL_PASSWORD_LOCK_MINUTES } from '../../src/lib/clientPortal.js'
 import { computeBalance, type BalanceBreakdown } from '../../src/lib/accountBalance.js'
 import { needsApplication, proposalProblem, proposalSummary } from '../../src/lib/debtorArrangement.js'
 import { debtorLetterValues, debtorStatement, unfilledFields, type DebtorLetterInput, type DebtorStatementAccount } from '../../src/lib/debtorStatement.js'
@@ -22,10 +23,13 @@ import { balanceInputFor } from '../../src/lib/balanceInput.js'
 import { balanceAccountFromRow, fetchLedgerRows } from '../../src/lib/storedBalance.js'
 import {
   DEBTOR_CODE_MINUTES, DEBTOR_CODE_SENT, DEBTOR_SESSION_DAYS, DEBTOR_TOKEN_HEADER, codeDestination, debtorCodeEmail,
-  debtorCodeSms, debtorPayments, debtorSummary, normaliseCaseNumber, type ContactRow,
+  debtorCodeSms, debtorPayments, debtorSummary, debtorLogin, DEBTOR_LOGIN_HINT, type ContactRow, type DebtorLogin,
   DEBTOR_POP_MAX_BYTES, debtorPopClaim, debtorPopFile, debtorPopNote, debtorDispute, debtorQuestion, type DebtorTicket,
+  DEBTOR_PASSWORD_WRONG, DEBTOR_REMEMBER_DAYS, debtorInviteEmail, debtorPortalLink,
 } from '../../src/lib/debtorPortal.js'
 import { sweep } from './workflow/run.js'
+import { chargeItemWith } from '../../src/lib/chargeEngine.js'
+import { CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID } from '../../src/lib/emailRules.js'
 
 /**
  * /api/debtor/<action> -- THE DEBTOR PORTAL'S SERVER (Raptor H16). See src/lib/debtorPortal.ts.
@@ -34,8 +38,10 @@ import { sweep } from './workflow/run.js'
  * not a client. The account comes off the session row, so a debtor who edits a request can only ask about their
  * own debt. The tables behind it have RLS on and no policies, so this is the only door.
  *
- *   anonymous   request-code, verify       (the code, sent to a contact the firm holds, is the authority)
- *   debtor      account, statement, proof-of-payment, propose, dispute, ask, sign-out   (x-debtor-token)
+ *   anonymous   request-code, verify, sign-in   (the code, sent to a contact the firm holds, is the authority -- ONCE;
+ *                                               after it, the password the debtor chose)
+ *   staff       invite                     (a Raptor session: email the debtor the link to their account)
+ *   debtor      account, statement, proof-of-payment, propose, dispute, ask, set-password, sign-out   (x-debtor-token)
  */
 
 type Handler = (req: VercelRequest, res: VercelResponse, admin: SupabaseClient) => Promise<void>
@@ -52,11 +58,41 @@ const realNow = () => Date.now()
 
 /* ------------------------------------------------------------------ anonymous: the sign-in */
 
+/**
+ * THE ACCOUNT(S) A CASE NUMBER, ID NUMBER OR EMAIL ADDRESS NAMES (Raptor H16, 4 Nov; Stephan: "sign in ... with your
+ * ID number, and then a password also, your email address, or your case number"). A case number names one account;
+ * an identity number or an email may name several -- the same person owing two of the firm's clients -- and then the
+ * PASSWORD decides which (signIn), and a code is sent only where there is exactly one (requestCode). An email counts
+ * only as a CURRENT contact on the account: a retired one is an address the firm knows is wrong.
+ */
+type LoginAccount = { id: string; case_number: string; debtor_first_name: string | null; assigned_to: string | null; ended_as: string | null }
+async function accountsFor(admin: SupabaseClient, login: DebtorLogin): Promise<LoginAccount[]> {
+  const cols = 'id, case_number, debtor_first_name, assigned_to, ended_as'
+  if (login.kind === 'case') {
+    const { data } = await admin.from('debtor_accounts').select(cols).eq('case_number', login.value).limit(1)
+    return (data ?? []) as LoginAccount[]
+  }
+  if (login.kind === 'id') {
+    const { data } = await admin.from('debtor_accounts').select(cols).eq('debtor_id_number', login.value).limit(10)
+    return (data ?? []) as LoginAccount[]
+  }
+  const { data: hits } = await admin.from('account_contacts').select('account_id')
+    .eq('kind', 'email').is('retired_at', null).ilike('value', login.value.replace(/[%_\\]/g, (c) => `\\${c}`)).limit(10)
+  const ids = [...new Set((hits ?? []).map((h) => h.account_id as string))]
+  if (!ids.length) return []
+  const { data } = await admin.from('debtor_accounts').select(cols).in('id', ids)
+  return (data ?? []) as LoginAccount[]
+}
+
 const requestCode: Handler = async (req, res, admin) => {
-  const caseNumber = normaliseCaseNumber((req.body ?? {}).caseNumber)
-  if (!caseNumber) { res.status(400).json({ error: 'Type the case number on our letter or SMS, for example RAP-123456.' }); return }
-  const { data: acct } = await admin.from('debtor_accounts')
-    .select('id, case_number, debtor_first_name, assigned_to').eq('case_number', caseNumber).maybeSingle()
+  const login = debtorLogin((req.body ?? {}).login ?? (req.body ?? {}).caseNumber)
+  if (!login) { res.status(400).json({ error: DEBTOR_LOGIN_HINT }); return }
+  const found = await accountsFor(admin, login)
+  /* ONE ACCOUNT OR NONE: a code opens one account, and with several the code would have to choose -- so it does not,
+     and the answer (the same answer) tells them to use the case number. */
+  const acct = found.length === 1 ? found[0] : null
+  const caseNumber = acct?.case_number ?? `${login.kind}:${login.kind === 'case' ? login.value : '(hidden)'}`
+  if (found.length > 1) console.log(`[debtor] code asked by ${login.kind}: ${found.length} accounts match, none chosen`)
   const { data: contacts } = acct
     ? await admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', acct.id)
     : { data: [] }
@@ -86,16 +122,19 @@ const requestCode: Handler = async (req, res, admin) => {
   let sent = false
   let why = ''
   if (dest.channel === 'email') {
-    /* WHO SENDS IT: the collector on the account first -- the name the debtor already hears from -- then an
-       Administrator's mailbox. Raptor has no system mailbox (loginCode.ts says why). */
+    /* WHO SENDS IT: the collector on the account first -- the name the debtor already hears from -- then the firm's
+       legal@ mailbox where it is connected (UNASSIGNED_MAILBOX; Stephan, 4 Nov: "why did the email go out from
+       Camille"), and an Administrator's only after both. Raptor has no system mailbox (loginCode.ts says why). */
     const [{ data: staff }, { data: boxes }] = await Promise.all([
       admin.from('profiles').select('id, name, status, role').or(`role.eq.Administrator${acct.assigned_to ? `,id.eq.${acct.assigned_to}` : ''}`),
-      admin.from('email_connections').select('user_id'),
+      admin.from('email_connections').select('user_id, email'),
     ])
     const withMailbox = new Set((boxes ?? []).map((b) => b.user_id as string))
-    const order = codeSenderOrder((acct.assigned_to as string | null) ?? '', (staff ?? []).map((p) => ({
+    const ordered = codeSenderOrder((acct.assigned_to as string | null) ?? '', (staff ?? []).map((p) => ({
       id: p.id as string, name: String(p.name ?? ''), hasMailbox: withMailbox.has(p.id as string), active: p.status === 'Active',
     })))
+    const legal = (boxes ?? []).find((b) => String(b.email ?? '').toLowerCase() === UNASSIGNED_MAILBOX)?.user_id as string | undefined
+    const order = withLegal(ordered, (acct.assigned_to as string | null) ?? null, legal ?? null)
     const host = req.headers['x-forwarded-host'] ?? req.headers.host
     const mail = debtorCodeEmail({ name: String(acct.debtor_first_name ?? ''), code, caseNumber, url: host ? `https://${String(host)}/my-account` : undefined })
     why = 'Nobody at the firm has a mailbox connected to send it from.'
@@ -118,10 +157,12 @@ const requestCode: Handler = async (req, res, admin) => {
 
 const verify: Handler = async (req, res, admin) => {
   const body = req.body ?? {}
-  const caseNumber = normaliseCaseNumber(body.caseNumber)
+  const who = debtorLogin(body.login ?? body.caseNumber)
   const code = normaliseCode(body.code)
-  if (!caseNumber || !code) { res.status(400).json({ error: 'Type the six digits we sent you.' }); return }
-  const { data: acct } = await admin.from('debtor_accounts').select('id').eq('case_number', caseNumber).maybeSingle()
+  if (!who || !code) { res.status(400).json({ error: 'Type the six digits we sent you.' }); return }
+  /* The same rule as the send: a code was only sent where exactly one account matched. */
+  const found = await accountsFor(admin, who)
+  const acct = found.length === 1 ? found[0] : null
   const { data: stored } = acct
     ? await admin.from('debtor_portal_codes').select('code_hash, expires_at, attempts').eq('account_id', acct.id).maybeSingle()
     : { data: null }
@@ -135,18 +176,139 @@ const verify: Handler = async (req, res, admin) => {
   /* Spent the moment it matches, so the same six digits cannot open a second browser. */
   await admin.from('debtor_portal_codes').delete().eq('account_id', acct!.id)
 
+  /*
+   * A CODE IS THE FIRST VISIT OR THE RESET (Stephan, 3 Nov: "do one ... confirm your email address ... But not every
+   * single time"). It confirms the debtor holds the account's contact, clears any lock, and the page asks for a
+   * password next -- always where there is none yet, and when they came here because they forgot it.
+   */
+  const { data: login } = await admin.from('debtor_portal_logins').select('password_hash').eq('account_id', acct!.id).maybeSingle()
+  await admin.from('debtor_portal_logins').upsert({
+    account_id: acct!.id, confirmed_at: new Date(t).toISOString(), password_failures: 0, password_locked_until: null,
+  }, { onConflict: 'account_id' })
+  const session = await openDebtorSession(admin, req, acct!.id, t, body.remember === true, 'code')
+  if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
+  res.status(200).json({ ...session, needsPassword: !login?.password_hash || body.reset === true })
+}
+
+/**
+ * A NEW SIGNED-IN BROWSER: the token goes to it once, only its keyed hash is kept. "Keep me signed in on this device"
+ * is a month; without it, a day -- and the page keeps it for the tab only, because a debtor is as likely to be on a
+ * borrowed phone as their own. The collector sees the sign-in on the timeline (a debtor looking today is worth a call).
+ */
+async function openDebtorSession(admin: SupabaseClient, req: VercelRequest, accountId: string, t: number, remember: boolean, how: 'code' | 'password'): Promise<{ token: string; expiresAt: string } | null> {
   const token = crypto.randomBytes(32).toString('hex')
-  const expiresAt = new Date(t + DEBTOR_SESSION_DAYS * 86_400_000).toISOString()
+  const expiresAt = new Date(t + (remember ? DEBTOR_REMEMBER_DAYS : 1) * 86_400_000).toISOString()
   const { error } = await admin.from('debtor_portal_sessions').insert({
-    account_id: acct!.id, token_hash: keyedHash('debtor-session', token), expires_at: expiresAt,
+    account_id: accountId, token_hash: keyedHash('debtor-session', token), expires_at: expiresAt,
     device: deviceLabel(req.headers['user-agent'] as string | undefined),
   })
-  if (error) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
-  /* THE COLLECTOR SEES IT: a debtor who looked at their account this morning is a debtor worth calling today. */
+  if (error) return null
+  await admin.from('debtor_portal_logins').update({ last_login_at: new Date(t).toISOString() }).eq('account_id', accountId)
   await admin.from('account_notes').insert({
-    account_id: acct!.id, body: 'The debtor signed in to their account online (debtor portal).', source: 'system', author_name: 'Debtor portal',
+    account_id: accountId, source: 'system', author_name: 'Debtor portal',
+    body: how === 'code' ? 'The debtor confirmed their email (or cellphone) and signed in to their account online (debtor portal).' : 'The debtor signed in to their account online (debtor portal).',
   })
-  res.status(200).json({ token, expiresAt })
+  return { token, expiresAt }
+}
+
+/**
+ * THE EVERYDAY SIGN-IN: case number and password. One answer for a case that is not ours, a login with no password yet
+ * and a wrong password (DEBTOR_PASSWORD_WRONG). Five wrong in a row lock it for a quarter of an hour, the client
+ * portal's numbers; the code still opens it, so a locked-out debtor is never stuck.
+ */
+const signIn: Handler = async (req, res, admin) => {
+  const body = req.body ?? {}
+  const who = debtorLogin(body.login ?? body.caseNumber)
+  const password = typeof body.password === 'string' ? body.password : ''
+  if (!who || !password) { res.status(400).json({ error: `${DEBTOR_LOGIN_HINT} Then your password.` }); return }
+  const found = await accountsFor(admin, who)
+  const { data: rows } = found.length
+    ? await admin.from('debtor_portal_logins').select('account_id, password_hash, password_failures, password_locked_until, last_login_at').in('account_id', found.map((a) => a.id))
+    : { data: [] }
+  const logins = ((rows ?? []) as { account_id: string; password_hash: string | null; password_failures: number | null; password_locked_until: string | null; last_login_at: string | null }[])
+    .filter((l) => l.password_hash)
+  const t = realNow()
+  const open = logins.filter((l) => !(l.password_locked_until && Date.parse(l.password_locked_until) > t))
+  if (logins.length > 0 && open.length === 0) {
+    res.status(429).json({ error: `Too many wrong passwords. Try again in ${PORTAL_PASSWORD_LOCK_MINUTES} minutes, or send yourself a code.` }); return
+  }
+  /*
+   * WHICHEVER ACCOUNT THE PASSWORD OPENS. One identity number or email may name several accounts, each with its own
+   * password; the one whose password this is, is the one meant. Where two share a password, the one still open, then
+   * the one used last. A wrong password counts against every account it was tried on, so the lock still means five.
+   */
+  const matched = open.filter((l) => passwordMatches(password, l.password_hash as string))
+  if (matched.length === 0) {
+    for (const l of open) {
+      const failures = Number(l.password_failures ?? 0) + 1
+      await admin.from('debtor_portal_logins').update({
+        password_failures: failures >= PORTAL_PASSWORD_FAILURES ? 0 : failures,
+        password_locked_until: failures >= PORTAL_PASSWORD_FAILURES ? new Date(t + PORTAL_PASSWORD_LOCK_MINUTES * 60_000).toISOString() : null,
+      }).eq('account_id', l.account_id)
+    }
+    console.log(`[debtor] sign-in by ${who.kind} refused: ${found.length} account(s), ${logins.length} with a password`)
+    res.status(400).json({ error: DEBTOR_PASSWORD_WRONG }); return
+  }
+  const ended = new Map(found.map((a) => [a.id, !!a.ended_as]))
+  matched.sort((x, y) => Number(ended.get(x.account_id)) - Number(ended.get(y.account_id)) || String(y.last_login_at ?? '').localeCompare(String(x.last_login_at ?? '')))
+  const acct = { id: matched[0].account_id }
+  await admin.from('debtor_portal_logins').update({ password_failures: 0, password_locked_until: null }).eq('account_id', acct.id)
+  const session = await openDebtorSession(admin, req, acct.id as string, t, body.remember === true, 'password')
+  if (!session) { res.status(500).json({ error: 'You could not be signed in just now. Try again.' }); return }
+  res.status(200).json(session)
+}
+
+/** SETTING THE PASSWORD, from a browser the code just signed in. Hashed here (scrypt), never stored as typed. */
+const setPassword: Handler = async (req, res, admin) => {
+  const who = await requireDebtor(req, admin)
+  if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return }
+  const password = (req.body ?? {}).password
+  const problem = portalPasswordProblem(password, null)
+  if (problem) { res.status(400).json({ error: problem }); return }
+  const { error } = await admin.from('debtor_portal_logins').upsert({
+    account_id: who.accountId, password_hash: hashPassword(password as string), password_set_at: new Date().toISOString(),
+    password_failures: 0, password_locked_until: null,
+  }, { onConflict: 'account_id' })
+  if (error) { res.status(500).json({ error: 'Your password could not be saved just now. Try again.' }); return }
+  res.status(200).json({ ok: true })
+}
+
+/* ------------------------------------------------------------------ staff: invite the debtor */
+
+/**
+ * EMAIL THE DEBTOR THE LINK TO THEIR ACCOUNT (Stephan, 3 Nov: "I don't know how to invite someone to that"). From the
+ * account page, by anybody signed in to Raptor, from THEIR OWN mailbox -- the name the debtor hears from. To the
+ * account's own email (codeDestination's choice), never one typed here. The link carries the case number; it is
+ * directions, not a key. Noted on the timeline. NOT CHARGED: it is an invitation to see the account, not a
+ * communication about the debt (the same reasoning as the sign-in code) -- the firm's to change.
+ */
+const invite: Handler = async (req, res, admin) => {
+  const caller = await requireCaller(req, admin)
+  if (!caller) { res.status(401).json({ error: 'Sign in to Raptor again.' }); return }
+  const { data: me } = await admin.from('profiles').select('id, name, status').eq('id', caller.id).maybeSingle()
+  if (!me || me.status !== 'Active') { res.status(403).json({ error: 'Your Raptor login is not active.' }); return }
+  const accountId = (req.body ?? {}).accountId
+  if (typeof accountId !== 'string') { res.status(400).json({ error: 'Which account?' }); return }
+  const [{ data: a }, { data: contacts }] = await Promise.all([
+    admin.from('debtor_accounts').select('id, case_number, debtor_first_name, ended_as, companies(name)').eq('id', accountId).maybeSingle(),
+    admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', accountId),
+  ])
+  if (!a) { res.status(404).json({ error: 'That account could not be found.' }); return }
+  const dest = codeDestination((contacts ?? []) as ContactRow[])
+  if (!dest || dest.channel !== 'email') { res.status(400).json({ error: 'This account has no email address for the debtor. Add one under Contacts first, or copy the link and send it another way.' }); return }
+  const host = req.headers['x-forwarded-host'] ?? req.headers.host
+  const url = debtorPortalLink(`https://${String(host)}`, a.case_number as string)
+  const mail = debtorInviteEmail({
+    name: String(a.debtor_first_name ?? ''), caseNumber: a.case_number as string,
+    client: (a.companies as unknown as { name: string } | null)?.name ?? '', url, from: String(me.name ?? ''),
+  })
+  const sent = await sendAsUser(admin, me.id as string, { to: dest.to, subject: mail.subject, bodyHtml: mail.html })
+  if (!sent.ok) { res.status(502).json({ error: `The invitation could not be emailed: ${sent.error}`, url }); return }
+  await admin.from('account_notes').insert({
+    account_id: a.id, source: 'system', author_name: me.name ?? null, created_by: me.id,
+    body: `Invited the debtor to see their account online (debtor portal): emailed ${dest.to}.`,
+  })
+  res.status(200).json({ ok: true, to: dest.to, url })
 }
 
 /* ------------------------------------------------------------------ a signed-in debtor */
@@ -165,6 +327,15 @@ async function requireDebtor(req: VercelRequest, admin: SupabaseClient): Promise
 async function balanceOf(admin: SupabaseClient, accountRow: Record<string, unknown>, accountId: string, today: string): Promise<BalanceBreakdown> {
   const ledgers = await fetchLedgerRows(admin, [accountId])
   return computeBalance(balanceInputFor({ account: balanceAccountFromRow(accountRow), ledgers: ledgers.get(accountId)!, today }))
+}
+
+/** The collector assigned to the account, as the debtor may see them: a name and the ways to reach them, nothing else. */
+async function agentOf(admin: SupabaseClient, accountId: string): Promise<{ name: string; phone: string | null; email: string | null; whatsapp: string | null } | null> {
+  const { data: a } = await admin.from('debtor_accounts').select('assigned_to').eq('id', accountId).maybeSingle()
+  if (!a?.assigned_to) return null
+  const { data: p } = await admin.from('profiles').select('name, phone, email, whatsapp, status').eq('id', a.assigned_to).maybeSingle()
+  if (!p || p.status !== 'Active' || !String(p.name ?? '').trim()) return null
+  return { name: String(p.name), phone: (p.phone as string | null) || null, email: (p.email as string | null) || null, whatsapp: (p.whatsapp as string | null) || null }
 }
 
 /** What the debtor has agreed, or offered: the live promise, and the latest proposal (pending, or declined lately). */
@@ -231,6 +402,10 @@ const account: Handler = async (req, res, admin) => {
       reference: a.case_number,
     } : null,
     contact: firm ? { phone: firm.phone ?? null, email: firm.email ?? null } : null,
+    /* YOUR AGENT (3 Nov, Stephan: "speak to your agent. This is the person assigned to you"): the collector on the
+       account -- the client portal names its liaison the same way. Their name and the ways to reach them; where nobody
+       holds the account, null, and the page gives the firm's own number instead. */
+    agent: await agentOf(admin, who.accountId),
     ...(await arrangementState(admin, who.accountId)),
     tickets: await ticketsOf(admin, who.accountId),
   })
@@ -424,6 +599,9 @@ const propose: Handler = async (req, res, admin) => {
 
   let b: BalanceBreakdown
   try { b = await balanceOf(admin, a, who.accountId, today) } catch { res.status(500).json({ error: 'Your balance could not be worked out just now. Please try again later.' }); return }
+  /* A ONCE-OFF IS THE SETTLEMENT, AS THE SERVER WORKS IT OUT (Stephan, 4 Nov) -- not a figure the page sent, which
+     could be a day stale or edited. The page shows the same number; this is the one that is recorded. */
+  if (offer.arrangement === 'once_off') offer.amount = b.settlement
   const problem = proposalProblem(offer, { balance: b.balance, settlement: b.settlement }, today)
   if (problem) { res.status(400).json({ error: problem }); return }
 
@@ -486,8 +664,10 @@ async function ringAbout(admin: SupabaseClient, ids: (string | null)[], type: st
  * to the firm's categories. Given to the client's liaison -- a dispute's finding needs somebody with standing
  * (ESCALATION_KINDS.dispute.goesTo) -- or the collector where the client has none.
  *
- * NO ITEM 3. raiseQuery charges a dispute a collector raises; this one nobody at the firm has looked at yet, and a fee
- * raised with no person in the loop is the firm's decision to make, not this code's (asked in HANDOFF).
+ * ITEM 6, NOT ITEM 3. Stephan, 3 Nov: "If they raise a dispute, it's correspondence received ... because there will be
+ * action on that, just charge them for the correspondence received." So it is billed exactly as a debtor's email is --
+ * item 6, R13, chargeItemWith with every cap and ceiling, the same constants emailSync uses -- and never item 3, which
+ * recovers the time a collector spends raising one.
  */
 const dispute: Handler = async (req, res, admin) => {
   const who = await requireDebtor(req, admin)
@@ -515,6 +695,14 @@ const dispute: Handler = async (req, res, admin) => {
     account_id: a.id, query_id: q.id, kind: 'query', source: 'system', author_name: 'Debtor portal',
     body: `The debtor disputed the account in writing on the debtor portal (${d.category}): ${d.text}`,
   })
+  /* Wrapped like emailSync's: a fee that could not be raised must not lose the debtor's dispute. Raised once, after the
+     ticket is saved, so a failed save is never billed. */
+  try {
+    await chargeItemWith(admin, {
+      accountId: a.id as string, itemId: CORRESPONDENCE_ITEM_ID, actionCode: CORRESPONDENCE_ACTION_CODE,
+      description: CORRESPONDENCE_DESCRIPTION, createdBy: null, at: new Date(now),
+    })
+  } catch (e) { console.error(`[debtor] item 6 not raised on the dispute on ${a.id}: ${e instanceof Error ? e.message : e}`) }
   await ringAbout(admin, [owner, a.assigned_to as string | null], 'debtor.dispute',
     `${a.case_number}: the debtor disputed the account on the debtor portal (${d.category}). Collection is paused until it is answered.`, `/queries/${q.id}`)
   /*
@@ -560,6 +748,9 @@ const signOut: Handler = async (req, res, admin) => {
 export const DEBTOR_ROUTES: Record<string, Handler> = {
   'request-code': requestCode,
   verify,
+  'sign-in': signIn,
+  'set-password': setPassword,
+  invite,
   account,
   statement,
   'proof-of-payment': proofOfPayment,

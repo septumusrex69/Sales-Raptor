@@ -1,5 +1,7 @@
 /**
- * A LOGIN CODE BY EMAIL WHEN AN ADMINISTRATOR SIGNS IN FROM A NEW DEVICE (S10, 21 Oct).
+ * A LOGIN CODE BY EMAIL THE FIRST TIME AN ADMINISTRATOR SIGNS IN (S10, 21 Oct; ONCE PER PERSON since Raptor H16, 3 Nov
+ * -- Stephan: "not every single time". Once they have confirmed on any browser, later browsers are trusted on the
+ * password; api/_lib/email/loginCode.ts says why and what it costs).
  *
  * Agreed with the firm after the authenticator-app version was removed at their word: "just
  * remove the two-factor sign-in ... I don't want to scan anything." Nothing is scanned here. An

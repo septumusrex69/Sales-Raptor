@@ -45,7 +45,13 @@ export async function recordPromise(input: {
    * import -- record the promise and leave the sending to the sweep.
    */
   accessToken?: string | null
-}): Promise<{ promise: PromiseToPay; charge: ChargeResult }> {
+  /**
+   * WHETHER ITEM 5 IS RAISED. True for a promise a collector takes -- the ordinary case. FALSE for an arrangement
+   * the DEBTOR offered on the debtor portal and a collector accepted: Stephan, 3 Nov, "No, don't charge. Well, I
+   * mean, not yet." Everything else -- the row, the note, the confirmation -- is the same press either way.
+   */
+  charge?: boolean
+}): Promise<{ promise: PromiseToPay; charge: ChargeResult | null }> {
   const promise = await addPromise({
     accountId: input.accountId,
     amount: input.amount,
@@ -59,7 +65,7 @@ export async function recordPromise(input: {
     dayOfWeek: input.dayOfWeek,
   })
 
-  const charge = await chargeItem({
+  const charge = input.charge === false ? null : await chargeItem({
     accountId: input.accountId,
     itemId: PROMISE_ITEM_ID,
     actionCode: 'promise_to_pay',

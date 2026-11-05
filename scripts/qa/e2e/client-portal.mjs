@@ -131,6 +131,9 @@ try {
   t.ok('the eye shows the password, and again hides it', await page.getByTestId('portal-password').getAttribute('type') === 'text')
   await page.getByTestId('portal-password-show').click()
   t.ok('...', await page.getByTestId('portal-password').getAttribute('type') === 'password')
+  /* Raptor H16, 3 Nov -- Stephan: "they can have confirmed the email addresses once, and that's it. The rest is
+     irritating." A client on their own computer stays signed in unless they untick it. */
+  t.ok('Keep me signed in is ticked from the start', await page.getByTestId('portal-remember').isChecked())
   await page.getByTestId('portal-forgot').click()
   t.ok('Forgot your password? is the emailed code', await page.getByRole('button', { name: 'Email me a code' }).count() === 1)
   await page.getByRole('button', { name: 'I have a password' }).click()
@@ -311,6 +314,9 @@ try {
   await page.getByTestId('portal-book').waitFor({ timeout: 5000 })
   const verify = calls.filter((c) => c.action === 'verify').pop()
   t.ok('the code is sent with the address it was asked for', verify?.body?.email === 'jan@alianna.co.za' && verify?.body?.code === '123 456')
+  /* A FIRST VISIT IS NOT A RESET: the code no longer forces a new password on a client who has one -- only "Forgot your
+     password?" does (and the server asks anyway where there is none yet). */
+  t.ok('a code from "First time here?" is not sent as a reset', verify?.body?.reset === false)
   t.ok('the book is asked for with the session, and names no client', calls.some((c) => c.action === 'book' && c.token === TOKEN && !('companyId' in c.body) && !('client' in c.body)))
   t.ok('the client is named at the top', /Alianna Pharmacy/i.test(await page.locator('header').innerText()))
 

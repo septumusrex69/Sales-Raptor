@@ -59,7 +59,7 @@ export function codeDestination(contacts: readonly ContactRow[]): { channel: Cod
  * THE ONE ANSWER TO "SEND ME A CODE", whatever happened: a case number that is not ours, an account with no contact,
  * a closed account and a code really sent all read alike, so the page cannot be used to learn whose case is whose.
  */
-export const DEBTOR_CODE_SENT = 'If that case number is one of ours, a code is on its way to the email address (or cellphone) we have for you. It lasts 10 minutes.'
+export const DEBTOR_CODE_SENT = 'If that is one of our accounts, a code is on its way to the email address (or cellphone) we have for you. It lasts 10 minutes. If you have more than one account with us, use the case number.'
 
 /**
  * THE SMS, IN THE GSM ALPHABET ONLY: no non-breaking space, no curly quote, under 160 characters -- a single
@@ -229,3 +229,105 @@ export function debtorQuestion(input: { text?: unknown }): { ok: true; text: str
 
 /** A ticket as the debtor sees it: what, when, and whether it is still open -- never who holds it inside the firm. */
 export interface DebtorTicket { no: number | null; kind: 'dispute' | 'question'; raisedOn: string; open: boolean; about: string }
+
+/* ---------------------------------------------------------------- a code once, a password after */
+
+/**
+ * THE SAME ANSWER for a case number that is not ours, a login with no password yet and a wrong password -- so the
+ * sign-in cannot be used to learn whose case is whose (DEBTOR_CODE_SENT's rule, for the password half).
+ */
+export const DEBTOR_PASSWORD_WRONG = 'Those details and that password do not match. First time here, or forgot your password? Send yourself a code.'
+/** "Keep me signed in on this device": a month. Without it, the session ends with the day (and the tab). */
+export const DEBTOR_REMEMBER_DAYS = 30
+
+/**
+ * THE INVITATION A COLLECTOR SENDS (Stephan, 3 Nov: "I don't know how to invite someone to that"). The link carries the
+ * case number, so the debtor arrives with it already typed and only has to ask for their first code. No code and no
+ * password in the email: the link is not a key, it is directions.
+ */
+export function debtorInviteEmail(input: { name: string; caseNumber: string; client: string; url: string; from: string }): { subject: string; html: string } {
+  const first = (input.name.trim().split(' ')[0] || '').replace(/[<>&"]/g, '')
+  const esc = (s: string) => s.replace(/[<>&"]/g, '')
+  return {
+    subject: `Your account ${input.caseNumber} online`,
+    html: portalEmailHtml({
+      kicker: 'YOUR ACCOUNT',
+      lines: [
+        first ? `Dear ${first},` : 'Good day,',
+        `You can now see your account ${input.caseNumber}${input.client ? ` (on behalf of ${esc(input.client)})` : ''} online, whenever it suits you: what you owe, what you have paid and how to pay. You can also download your statement, send us a proof of payment, offer a payment arrangement or ask us a question.`,
+        'The first time, we will send you a code to confirm it is you, and you choose a password. After that you sign in with your case number and that password.',
+      ],
+      button: { url: input.url, label: 'Open my account' },
+      signOff: `Kind regards<br>${esc(input.from)}<br>Bredell Ferreira`,
+    }),
+  }
+}
+
+/** The link an invitation carries: the portal, with the case number filled in. */
+export function debtorPortalLink(origin: string, caseNumber: string): string {
+  return `${origin.replace(/\/+$/, '')}/my-account?case=${encodeURIComponent(caseNumber)}`
+}
+
+/* ---------------------------------------------------------------- signing in by case number, ID number or email */
+
+/**
+ * WHAT A DEBTOR MAY SIGN IN WITH (Raptor H16, 4 Nov). Stephan: "you should be able to sign in ... with your ID number,
+ * and then a password also, your email address, or your case number." He typed something that was not a case number
+ * and the page refused it before asking anybody -- which read as the portal being broken.
+ *
+ * READ, NOT GUESSED: an @ is an email address; thirteen digits is a South African identity number (the case number's
+ * digits are fewer, so the two cannot be mistaken); anything normaliseCaseNumber accepts is a case number. Null for
+ * the rest, and the page says what it takes. None of the three is a secret -- the password (or the code, which goes
+ * only to a contact the firm holds) is what lets anybody in.
+ */
+export type DebtorLogin = { kind: 'case'; value: string } | { kind: 'email'; value: string } | { kind: 'id'; value: string }
+
+export function debtorLogin(typed: unknown): DebtorLogin | null {
+  if (typeof typed !== 'string') return null
+  const t = typed.trim()
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return { kind: 'email', value: t.toLowerCase() }
+  const digits = t.replace(/[\s -]/g, '')
+  if (/^\d{13}$/.test(digits)) return { kind: 'id', value: digits }
+  const c = normaliseCaseNumber(t)
+  return c ? { kind: 'case', value: c } : null
+}
+
+export const DEBTOR_LOGIN_HINT = 'Type your case number (for example RAP-123456), your ID number or your email address.'
+
+/* ---------------------------------------------------------------- where the account stands */
+
+/**
+ * WHERE THE ACCOUNT STANDS, AT A GLANCE (Stephan, 4 Nov: "on the dashboard ... where the account stands ... so when
+ * they log in, that they can see that. But progress bar"). Two things: how much of the debt is behind them, and the
+ * one thing happening on it now. The share is paid over paid-plus-owed -- what a debtor means by "how far am I" --
+ * not paid over the original amount, which would read past 100% on an account where interest and fees grew it.
+ *
+ * ONE STAGE, IN THIS ORDER, because each above silences the ones below: a closed account says nothing else; an open
+ * dispute has stopped collection; a missed payment is the urgent thing on a live arrangement; then the arrangement,
+ * the offer waiting on the firm, and last, nothing agreed yet -- the only stage with a button, because it is the only
+ * one the debtor moves.
+ */
+export interface StandingInput {
+  closed: string | null
+  summary: { paid: number; balance: number }
+  live: { arrangement: string; amount: number; dueOn: string; missed: boolean } | null
+  proposal: { status: string } | null
+  tickets: { kind: 'dispute' | 'question'; open: boolean }[]
+}
+export interface Standing {
+  paidShare: number
+  stage: 'closed' | 'dispute' | 'missed' | 'arranged' | 'offered' | 'nothing'
+  headline: string
+  action: 'arrangement' | 'payments' | null
+}
+export function debtorStanding(a: StandingInput, money: (n: number) => string, day: (iso: string) => string): Standing {
+  const owed = Math.max(0, a.summary.balance)
+  const paid = Math.max(0, a.summary.paid)
+  const paidShare = a.closed ? 1 : paid + owed > 0 ? Math.min(1, paid / (paid + owed)) : 0
+  if (a.closed) return { paidShare, stage: 'closed', headline: 'This account is closed.', action: null }
+  if (a.tickets.some((t) => t.kind === 'dispute' && t.open)) return { paidShare, stage: 'dispute', headline: 'Your dispute is open. Collection is paused while we look at it.', action: null }
+  if (a.live?.missed) return { paidShare, stage: 'missed', headline: `A payment on your arrangement was missed. Please pay ${money(a.live.amount)} now, or call us.`, action: 'payments' }
+  if (a.live) return { paidShare, stage: 'arranged', headline: `Arrangement in place. Next payment: ${money(a.live.amount)} on ${day(a.live.dueOn)}.`, action: null }
+  if (a.proposal?.status === 'pending') return { paidShare, stage: 'offered', headline: 'Your offer is with us. We will reply, usually within one working day.', action: null }
+  return { paidShare, stage: 'nothing', headline: owed > 0 ? 'Nothing is agreed yet. Settle the account, or tell us what you can pay.' : 'Nothing is owed on this account.', action: owed > 0 ? 'arrangement' : null }
+}

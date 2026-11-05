@@ -2,8 +2,8 @@
  * A DEBTOR'S ARRANGEMENT OFFER, AS STAFF SEE AND DECIDE IT (Raptor H16, debtor portal part 3).
  *
  * The portal's server writes the offer; this reads it and records the decision. ACCEPTING IS recordPromise -- the very
- * press a collector makes when they take a promise on the phone: the promises_to_pay row, item 5, the timeline note,
- * and the confirmation workflow. A second, portal-only way to create a promise would be a promise that skipped one of
+ * press a collector makes when they take a promise on the phone: the promises_to_pay row, the timeline note and the
+ * confirmation workflow -- WITHOUT item 5, which Stephan does not want on a debtor's own offer (3 Nov, "not yet"). A second, portal-only way to create a promise would be a promise that skipped one of
  * those, and nobody would see which.
  */
 import { supabase } from './supabase'
@@ -53,7 +53,7 @@ const isoWeekday = (iso: string) => { const [y, m, d] = iso.split('-').map(Numbe
  * the thing that matters to the debtor; an offer left "pending" beside a live promise is refused the next time anyone
  * presses (one live promise per account) and says so, which is recoverable -- the other order is not.
  */
-export async function acceptProposal(p: DebtorProposal, accountId: string, actor: { id: string | null; name: string | null }, accessToken: string | null): Promise<ChargeResult> {
+export async function acceptProposal(p: DebtorProposal, accountId: string, actor: { id: string | null; name: string | null }, accessToken: string | null): Promise<ChargeResult | null> {
   /* AN APPLICATION IS DECIDED ON THE ASSESSMENT (Stephan, 3 Nov), so it cannot be accepted before the debtor has signed
      it. Here as well as on the card's button, because a button is a suggestion and this is the rule. */
   if (p.needsAssessment && p.assessmentState !== 'signed') {
@@ -67,6 +67,8 @@ export async function acceptProposal(p: DebtorProposal, accountId: string, actor
     dayOfWeek: p.arrangement === 'weekly' ? isoWeekday(p.firstDueOn) : null,
     notes: p.note ? `Offered by the debtor on the debtor portal: "${p.note}"` : 'Offered by the debtor on the debtor portal.',
     actor, accessToken,
+    /* NO ITEM 5 ON THE DEBTOR'S OWN OFFER -- Stephan, 3 Nov: "No, don't charge. Well, I mean, not yet." */
+    charge: false,
   })
   const { error } = await supabase.from('debtor_arrangement_proposals')
     .update({ status: 'accepted', promise_id: promise.id, decided_by: actor.id, decided_by_name: actor.name, decided_at: clockNow().toISOString() })

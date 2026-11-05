@@ -37,17 +37,21 @@ try {
   /* THE DOOR WEARS THE BROWSER'S OWN SKIN (Stephan, 30 Oct: "everyone who picks a different skin ... will see their own
      login page the next time they come in"). Each skin's own photograph, or for glass mountain its backdrop through a
      see-through page; never the default forced over somebody's choice. */
-  const PHOTO = { desert: /desert-hero/, ocean: /ocean-hero/, original: /portal-photo\.webp/, raptor: /raptor-login/, africa: /africa-hero/, forest: /forest-hero/ }
-  for (const skin of ['glass-mountain', 'desert', 'ocean', 'original', 'raptor', 'africa', 'forest']) {
+  /* SINCE 3 NOV EVERY OTHER SKIN IS ARCHIVED (Stephan: "make this the default skin for everyone and archive everything
+     else"), so a browser that had chosen one is put on Bredell Ferreira at the door as well. The loop keeps its shape:
+     `wears` is what each browser should now see. */
+  const PHOTO = { original: /portal-photo\.webp/ }
+  const wears = () => 'original'
+  for (const skin of ['original', 'africa', 'desert', 'raptor']) {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     await c.addInitScript((s) => { try { localStorage.setItem('crm.theme', s) } catch { /* ignore */ } }, skin)
     const p = await c.newPage()
     await stubSupabase(p, [])
     await p.goto(`http://localhost:${PORT}/login`)
     await p.getByRole('button', { name: 'Sign In' }).waitFor()
-    t.check(`a browser on ${skin}: sign-in wears ${skin}`, await p.evaluate(() => document.documentElement.getAttribute('data-theme') ?? 'original'), skin)
-    if (PHOTO[skin]) {
-      t.ok(`a browser on ${skin}: its own photograph`, PHOTO[skin].test(await p.evaluate(() =>
+    t.check(`a browser that had chosen ${skin}: sign-in wears ${wears(skin)}`, await p.evaluate(() => document.documentElement.getAttribute('data-theme') ?? 'original'), wears(skin))
+    if (PHOTO[wears(skin)]) {
+      t.ok(`a browser that had chosen ${skin}: the day's photograph`, PHOTO[wears(skin)].test(await p.evaluate(() =>
         getComputedStyle(document.querySelector('.login-photo')).backgroundImage)))
     }
     /* AND NOTHING DRAWN OVER IT: a fixed backdrop paints above an unpositioned page, so the shell
@@ -56,8 +60,7 @@ try {
       const shell = getComputedStyle(document.querySelector('[data-testid="auth-shell"]'))
       return shell.position !== 'static' && Number(shell.zIndex) >= 1
     }))
-    if (skin === 'glass-mountain') await t.shot(p, 'login-on-glass-mountain')
-    if (skin === 'forest') await t.shot(p, 'login-forest')
+    if (skin === 'africa') await t.shot(p, 'login-archived-skin-falls-back')
     await c.close()
   }
   /* A browser that has never chosen: the Bredell Ferreira skin at the door (the default since 31 Oct), wearing the day's

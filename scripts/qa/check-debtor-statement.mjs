@@ -9,7 +9,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-debtor-statement.mjs
  */
 import { readFileSync } from 'node:fs'
-import { debtorStatement, debtorLetterValues, unfilledFields } from '../../src/lib/debtorStatement.ts'
+import { debtorStatement, debtorLetterValues, unfilledFields, UNASSIGNED_SIGNER } from '../../src/lib/debtorStatement.ts'
 import { fillLetter } from '../../src/lib/letterDocument.ts'
 import { blanksFor, FILLABLE } from '../../src/lib/signingBlanks.ts'
 import { affordability } from '../letters/affordability.mjs'
@@ -60,6 +60,16 @@ ok('...the guard sees the fields it is meant to: the case number, the bank, the 
 ok(`and it draws (${why || 'drawn'})`, bytes !== null)
 ok('...as a PDF', bytes !== null && String.fromCharCode(...bytes.slice(0, 5)) === '%PDF-')
 ok('...on an account with no identity number, which is most of the book', ACCOUNT.debtor_id_number === null && bytes !== null)
+
+/* NOBODY HOLDS THE ACCOUNT (Raptor H16, 4 Nov): Stephan, as a debtor on an unassigned account, could not download
+   the statement -- {{collector_name}} had nothing to fill it and the guard refused. The firm's team signs instead. */
+const orphan = debtorStatement({
+  account: ACCOUNT, ledgers, firm: FIRM, contacts: [], collector: null, liaison: null, clientName: 'Alianna Pharmacy', today: '2026-11-03', money: moneyZa,
+})
+const orphanGaps = unfilledFields(orphan.doc, orphan.values)
+ok(`an account nobody holds still gets its statement (unfilled: ${orphanGaps.join(', ') || 'none'})`, orphanGaps.length === 0)
+ok('...signed by the firm\'s collections team, not a person who does not exist', orphan.values.collector_name === UNASSIGNED_SIGNER.name && orphan.values.agent_name === UNASSIGNED_SIGNER.name)
+ok('...with the office\'s email where the collector\'s would be', orphan.values.collector_email === FIRM.email && !!FIRM.email)
 
 /* ---------- THE AFFORDABILITY ASSESSMENT AN APPLICATION CARRIES (Stephan, 3 Nov: more than 12 months) ----------
    Built as createAssessment builds it: the account's values, every fillable field Raptor cannot answer plus the

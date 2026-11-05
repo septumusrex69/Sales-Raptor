@@ -34,7 +34,7 @@ import type { TemplateScope } from '../../lib/messageTemplates'
  * works the same everywhere. "Open it" is kept as well, because a real PDF viewer can zoom and
  * this cannot.
  */
-export function PreviewPdf({ doc, scope, values, name, label }: {
+export function PreviewPdf({ doc, scope, values, name, label, startFilled = false, testId }: {
   /** The live document, so a draft that has never been saved can be looked at. */
   doc: LetterDocument
   scope: TemplateScope
@@ -43,6 +43,10 @@ export function PreviewPdf({ doc, scope, values, name, label }: {
   /** Only for the filename offered when it is opened in its own tab. */
   name: string
   label?: string
+  /** Open on the filled view: a document about a real account (the statement on the account page) has no wording of
+      its own to check, only what the debtor will read. */
+  startFilled?: boolean
+  testId?: string
 }) {
   const [open, setOpen] = useState(false)
   /*
@@ -51,7 +55,7 @@ export function PreviewPdf({ doc, scope, values, name, label }: {
    * answers the other's question. Opens on the braces, because somebody pressing Preview from an
    * editor is looking at their own wording.
    */
-  const [filled, setFilled] = useState(false)
+  const [filled, setFilled] = useState(startFilled)
   const [url, setUrl] = useState<string | null>(null)
   /* The drawn PDF itself, for Open and Download (the firm, 19 Oct) -- the same bytes the sheets are. */
   const drawn = useRef<Blob | null>(null)
@@ -101,18 +105,18 @@ export function PreviewPdf({ doc, scope, values, name, label }: {
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)}
+      <button type="button" onClick={() => setOpen(true)} data-testid={testId}
         className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg
           border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
         <FileText size={13} /> {label ?? 'Preview the PDF'}
       </button>
 
       {open && (
-        <Modal title="The letter as it will print" onClose={close} width={860} padded={false}
+        <Modal title={startFilled ? `${name}, as it will print` : 'The letter as it will print'} onClose={close} width={860} padded={false}
           headerRight={
             <div className="flex items-center gap-2">
               <div className="flex rounded-lg border border-slate-200 p-0.5">
-                {([[false, 'Merge fields'], [true, 'Example data']] as const).map(([id, text]) => (
+                {([[false, 'Merge fields'], [true, startFilled ? 'This account' : 'Example data']] as const).map(([id, text]) => (
                   <button key={text} type="button" onClick={() => setFilled(id)}
                     aria-pressed={filled === id}
                     className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${

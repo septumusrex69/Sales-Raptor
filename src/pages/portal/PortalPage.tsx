@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, Headphones, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
 import { PORTAL_PASSWORD_MIN, portalPasswordProblem, type PortalTopic } from '../../lib/clientPortal'
 import {
   PortalSignedOut, fetchPortalBook, fetchPortalMe, fetchPortalTickets, portalSignInWithPassword, portalSignOut, portalToken, requestPortalCode,
-  fetchPortalDayLook, reportPortalPhotoFailure, savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
+  savePortalToken, setPortalPassword, verifyPortalCode, type PortalBook, type PortalMe,
 } from '../../lib/portalApi'
 import { PortalTickets } from './PortalTickets'
 import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
@@ -15,7 +15,9 @@ import { PortalHandovers } from './PortalHandovers'
 import { PortalLabel } from './portalStyle'
 import './portal.css'
 import { PortalSplash } from './PortalSplash'
-import { LLANDUDNO_LOOK, bandBackground, lookFromRow, photoCredit, portalPhotoLayer, portalPhotoProbe, signinBackground, type DayLook } from '../../lib/portalPhotos'
+import { PortalSignInFrame } from './PortalSignInFrame'
+import { C, DayLine, Field, PhotoCredit, SUPPORT, loadPortalLook, usePortalLook } from './portalLook'
+import { bandBackground } from '../../lib/portalPhotos'
 import { primeSplashAudio } from './portalSound'
 import '@fontsource-variable/raleway'
 import '@fontsource-variable/open-sans'
@@ -64,69 +66,6 @@ export default function PortalPage() {
   </>
 }
 
-/*
- * TODAY'S LOOK: the photograph, its framing, the side the words sit and the line -- as an Administrator approved it for
- * today at /portal-looks (Stephan, 31 Oct: "pre-choose everything and approve it ... for the month"), or Llandudno
- * where nobody did. Held here and shared by every part of the page that draws it.
- */
-let currentLook: DayLook = LLANDUDNO_LOOK
-const lookListeners = new Set<() => void>()
-let lookAsked = false
-function loadPortalLook() {
-  if (lookAsked) return
-  lookAsked = true
-  fetchPortalDayLook()
-    .then(({ row }) => { currentLook = lookFromRow(row); lookListeners.forEach((f) => f()); probeTodaysPhoto() })
-    .catch(() => { /* Llandudno stays */ })
-}
-function usePortalLook(): DayLook {
-  return useSyncExternalStore((f) => { lookListeners.add(f); return () => lookListeners.delete(f) }, () => currentLook, () => currentLook)
-}
-
-/*
- * IF UNSPLASH CANNOT SERVE IT, SAY SO (Stephan, 31 Oct: "ping me and tell me when Unsplash is off ... a notification
- * ... any administrator's dashboard"). The portal already falls back to Llandudno by itself; this is so somebody KNOWS.
- * Once per tab, a tiny copy of the day's photograph is asked for; if it does not come, the server is told, checks for
- * itself and rings every Administrator -- once a day, however many clients notice.
- */
-let photoProbed = false
-function probeTodaysPhoto() {
-  if (photoProbed || typeof Image === 'undefined') return
-  photoProbed = true
-  const p = currentLook.photo
-  /* The app's own copy needs nobody's server. */
-  if (p.local) return
-  const img = new Image()
-  const timer = setTimeout(() => { img.src = ''; report() }, 10_000)
-  function report() { void reportPortalPhotoFailure(p.id).catch(() => {}) }
-  img.onload = () => clearTimeout(timer)
-  img.onerror = () => { clearTimeout(timer); report() }
-  img.src = portalPhotoProbe(p)
-}
-
-/* THE DAY'S LINE, with the day's photograph (portalPhotos.ts): a quote from somebody worth quoting, or a line of the
-   firm's own about the place in the picture. Quiet: a thin gold rule, italic, smaller than the words around it. */
-function DayLine({ className = '', compact = false }: { className?: string; compact?: boolean }) {
-  const p = usePortalLook()
-  return (
-    <figure className={`${className} border-l-2 border-[#C69F54] pl-3`} data-testid="portal-day-line">
-      <blockquote className={`italic text-white/90 [text-shadow:0_1px_8px_rgba(16,31,44,0.55)] ${compact ? 'text-[13px]' : 'text-[15px]'}`}>“{p.line}”</blockquote>
-      {p.who && <figcaption className={`mt-1 text-[#C69F54] ${compact ? 'text-[11px]' : 'text-xs'}`}>{p.who}</figcaption>}
-    </figure>
-  )
-}
-
-/* The photographer's credit (Unsplash asks for it): small, in a corner of the photograph, never in the way. */
-function PhotoCredit({ className = 'absolute right-3 bottom-2' }: { className?: string }) {
-  const credit = photoCredit(usePortalLook().photo)
-  return (
-    <p className={`${className} text-[10px] text-white/55`} data-testid="portal-photo-credit">
-      Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">{credit.name}</a>
-      {' '}on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white underline-offset-2 hover:underline">Unsplash</a>
-    </p>
-  )
-}
-
 /* ------------------------------------------------------------------ signing in */
 
 /*
@@ -144,32 +83,21 @@ function PhotoCredit({ className = 'absolute right-3 bottom-2' }: { className?: 
  */
 type Step = 'password' | 'email' | 'code' | 'set'
 
-const C = { navy: '#101F2C', slate: '#46607B', light: '#97B4CC', gold: '#C69F54', off: '#F4F4F4' }
-const HEAD = "'Raleway Variable', 'Raleway', 'Poppins', sans-serif"
-const BODY = "'Open Sans Variable', 'Open Sans', sans-serif"
-/** Where "Need help signing in?" writes to: the firm's own address, as on every remittance advice. */
-const SUPPORT = 'mailto:info@bredellferreira.co.za?subject=Client%20portal%20sign-in'
-
-/* An input with its icon. Out here, not inside SignIn: a component defined in a render is a new component every
-   render, and React would rebuild the input under the client's fingers on every keystroke. */
-function Field({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="relative">
-      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2" style={{ color: C.slate }}>{icon}</span>
-      {children}
-    </div>
-  )
-}
-
 function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean) => void }) {
-  const look = usePortalLook()
   const [step, setStep] = useState<Step>('password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [again, setAgain] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState<string | null>(null)
-  const [remember, setRemember] = useState(false)
+  /* ON BY DEFAULT (Raptor H16, 3 Nov; Stephan: "they can have confirmed the email addresses once, and that's it. The
+     rest is irritating"). A client signs in from their own office computer, so staying signed in for the month is
+     the ordinary case; somebody on a shared machine unticks it. (The debtor portal keeps it OFF -- a debtor is often
+     on a borrowed phone.) */
+  const [remember, setRemember] = useState(true)
+  /* WHY THEY ASKED FOR A CODE: a first visit sets a password, a forgotten one resets it -- and a client who simply
+     used a code while having a password is NOT made to choose a new one, which every code used to force. */
+  const [forgot, setForgot] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   /* The session the code opened, held until the new password is saved: a client who walks away at that
      step has not been left signed in without one. */
@@ -187,8 +115,8 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
     e.preventDefault()
     primeSplashAudio()
     run(async () => {
-      /* Always asked for a password after a code: the code is the first visit or the reset. */
-      const r = await verifyPortalCode(email, code, true, remember)
+      /* A new password only where there is none yet (the server decides) or they pressed "Forgot your password?". */
+      const r = await verifyPortalCode(email, code, forgot, remember)
       if (r.needsPassword) { setPending(r.token); setStep('set') } else onSignedIn(r.token, remember)
     })
   }
@@ -206,7 +134,6 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
   const fieldStyle = { borderColor: '#DCE3EA', color: C.navy }
   const primary = 'w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white flex items-center justify-center gap-2 shadow-sm hover:brightness-125 disabled:opacity-80 disabled:cursor-not-allowed transition'
   const link = 'font-semibold underline-offset-4 hover:underline'
-  const label = 'text-[11px] font-bold uppercase tracking-[0.24em]'
   const secret = (value: string, set: (v: string) => void, placeholder: string, testId: string, auto: string) => (
     <Field icon={<Lock size={18} />}>
       <input type={showPassword ? 'text' : 'password'} required autoComplete={auto} value={value} onChange={(e) => set(e.target.value)}
@@ -220,61 +147,19 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
   )
 
   return (
-    <div className="relative min-h-screen overflow-hidden lg:flex lg:items-center lg:justify-center lg:p-8" data-testid="portal-page"
-      style={{ fontFamily: BODY, background: C.off }}>
-      {/* THE ROOM AROUND THE FRAME: the same coastline, softened -- a background, so a phone never fetches it twice. */}
-      <div aria-hidden className="hidden lg:block absolute inset-0 scale-110 blur-2xl opacity-60"
-        style={{ background: portalPhotoLayer(look.photo, 1200) }} />
-      <div className="relative w-full min-h-screen lg:max-w-[1360px] lg:min-h-[640px] lg:h-[min(860px,calc(100vh-4rem))] lg:rounded-[24px] lg:overflow-hidden
-        lg:shadow-[0_30px_80px_-20px_rgba(16,31,44,0.45)] lg:ring-1 lg:ring-white/40 flex flex-col lg:grid lg:grid-cols-[58fr_42fr] bg-[#FBFAF7]">
-        {/* LEFT: THE COASTLINE, THE MARK, THE PROMISE. The portal's own full-resolution photograph (portalPhoto.ts): the
-            old remittance strip was 1672 x 609 and this panel is taller than it is wide, so it was stretched about four
-            times over -- "Why are you using low quality one?" (Stephan, 30 Oct), until a real photograph replaced it. */}
-        <div className="relative text-white flex flex-col justify-between p-6 sm:p-10 lg:p-14 min-h-[300px] sm:min-h-[380px] lg:min-h-0"
-          data-testid="portal-sign-in-photo"
-          style={{ background: signinBackground(look) }}>
-          <div className="flex items-center gap-3.5" data-testid="portal-sign-in-logo">
-            <img src="/brand/icon-light.svg" alt="" className="h-14 w-14 sm:h-20 sm:w-20" />
-            <img src="/brand/wordmark-light.svg" alt="Bredell Ferreira" className="h-3.5 sm:h-[18px] w-auto" />
-          </div>
-          <div className="mt-10 max-w-xl">
-            <p className={label} style={{ color: C.gold, fontFamily: HEAD }}>Client portal</p>
-            <h2 className="mt-3 text-[30px] sm:text-[40px] lg:text-[46px] leading-[1.12] font-bold" style={{ fontFamily: HEAD }}>
-              Your book, where it stands, whenever you want to look.
-            </h2>
-            <div className="mt-6 h-[2px] w-16 rounded" style={{ background: C.gold }} />
-            <p className="mt-5 text-[15px] sm:text-base leading-relaxed text-white/85 max-w-lg">
-              Every account you have handed over, what has been collected, your reports and your tickets — all in one place.
-            </p>
-            <DayLine className="mt-8 max-w-lg" />
-          </div>
-          <PhotoCredit />
-        </div>
-
-        {/* RIGHT: THE DOOR. */}
-        <div className="relative flex flex-col flex-1 px-6 sm:px-12 lg:px-16 py-10 lg:py-12 overflow-hidden" style={{ background: '#FBFAF7' }}>
-          {/* The fine gold curves of the mock-up: decoration, so pointer-events off and hidden from readers. */}
-          <svg aria-hidden className="pointer-events-none absolute -left-24 -top-24 h-80 w-80" viewBox="0 0 320 320" fill="none">
-            <circle cx="160" cy="160" r="150" stroke={C.gold} strokeOpacity="0.45" strokeWidth="1" />
-          </svg>
-          <svg aria-hidden className="pointer-events-none absolute -right-28 -bottom-28 h-80 w-80" viewBox="0 0 320 320" fill="none">
-            <circle cx="160" cy="160" r="150" stroke={C.gold} strokeOpacity="0.45" strokeWidth="1" />
-          </svg>
-          <p className={`relative flex items-center justify-end gap-2 ${label} text-[10.5px]`} style={{ color: C.slate, fontFamily: HEAD }}>
-            <Lock size={14} /> Secure client portal
-          </p>
-
-          <div className="relative flex-1 flex flex-col justify-center w-full max-w-[420px] mx-auto py-10" data-testid="portal-sign-in">
-            <h1 className="text-[36px] sm:text-[42px] font-bold leading-tight" style={{ color: C.navy, fontFamily: HEAD }}>
-              {step === 'set' ? 'Choose a password' : 'Sign in'}
-            </h1>
-            <p className="mt-2 mb-8 text-[15px] leading-relaxed" style={{ color: C.slate }}>
-              {step === 'password' && 'Access your collection data, reports and support.'}
-              {step === 'email' && 'First time here, or forgot your password? We email you a code, then you choose a password.'}
-              {step === 'code' && sent}
-              {step === 'set' && `From now on you sign in with ${email} and this password. At least ${PORTAL_PASSWORD_MIN} characters; a short phrase is easiest to remember.`}
-            </p>
-
+    <PortalSignInFrame
+      kicker="Client portal"
+      promise="Your book, where it stands, whenever you want to look."
+      blurb="Every account you have handed over, what has been collected, your reports and your tickets — all in one place."
+      secure="Secure client portal"
+      title={step === 'set' ? 'Choose a password' : 'Sign in'}
+      intro={<>
+        {step === 'password' && 'Access your collection data, reports and support.'}
+        {step === 'email' && 'First time here, or forgot your password? We email you a code, then you choose a password.'}
+        {step === 'code' && sent}
+        {step === 'set' && `From now on you sign in with ${email} and this password. At least ${PORTAL_PASSWORD_MIN} characters; a short phrase is easiest to remember.`}
+      </>}
+      support={{ href: SUPPORT, title: 'Need help signing in?', sub: 'Contact our support team' }}>
             {step === 'password' && (
               <form onSubmit={signIn} className="space-y-4">
                 <Field icon={<Mail size={18} />}>
@@ -288,7 +173,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
                       className="h-[18px] w-[18px] rounded border-[#B9C6D3] accent-[#101F2C]" />
                     Keep me signed in
                   </label>
-                  <button type="button" onClick={() => go('email')} className={`${link} underline`} style={{ color: C.slate }} data-testid="portal-forgot">
+                  <button type="button" onClick={() => { setForgot(true); go('email') }} className={`${link} underline`} style={{ color: C.slate }} data-testid="portal-forgot">
                     Forgot your password?
                   </button>
                 </div>
@@ -297,7 +182,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
                 </button>
                 <p className="text-center text-sm pt-2" style={{ color: C.slate }}>
                   First time here?{' '}
-                  <button type="button" onClick={() => go('email')} className={link} style={{ color: C.navy }} data-testid="portal-use-code">Email me a sign-in code</button>
+                  <button type="button" onClick={() => { setForgot(false); go('email') }} className={link} style={{ color: C.navy }} data-testid="portal-use-code">Email me a sign-in code</button>
                 </p>
               </form>
             )}
@@ -335,19 +220,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
               </form>
             )}
             {error && <p className="text-sm text-red-700 mt-4 rounded-lg bg-red-50 border border-red-100 px-3 py-2" data-testid="portal-error">{error}</p>}
-          </div>
-
-          <a href={SUPPORT} className="relative mx-auto w-full max-w-[420px] flex items-center gap-4 group" data-testid="portal-support">
-            <span className="h-12 w-12 shrink-0 rounded-full flex items-center justify-center" style={{ background: '#F1ECE1', color: C.navy }}><Headphones size={20} /></span>
-            <span className="h-10 w-px" style={{ background: '#DCE3EA' }} />
-            <span>
-              <span className="block text-[15px] font-semibold" style={{ color: C.navy }}>Need help signing in?</span>
-              <span className="flex items-center gap-1.5 text-sm group-hover:underline" style={{ color: C.slate }}>Contact our support team <ArrowRight size={14} /></span>
-            </span>
-          </a>
-        </div>
-      </div>
-    </div>
+    </PortalSignInFrame>
   )
 }
 
