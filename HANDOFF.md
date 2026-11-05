@@ -188,6 +188,19 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   - **Preview the statement** on the account's Transactions row, beside Summary/Statement: PreviewPdf (pdf.js on a
     canvas; iPad-safe), opens on "This account" (startFilled). e2e payment-reverse 23; check-reminder-statement 14.
   - **Unassigned signer renamed "The Pre-Legal Department"** (Stephan).
+- **THE STATEMENT IS A STATEMENT (S17, 5 Nov; Stephan sent a statement template: "It's not really statementy. Make it
+  statementy ... Still use the Bredell Ferreira logos ... I don't think the letterhead is a good idea to put it on")**.
+  `statementOfAccount` rebuilt: lockup top left (`src/lib/brandLogo.ts`, the portal-email PNG inlined as a data URL so
+  browser and server both have it), STATEMENT OF ACCOUNT + Date / Our reference / Account / Position as at top right;
+  "Account holder" and "How the balance is made up" side by side under navy bars; the rounded progress bar; every
+  movement in a navy-headed, striped, ruled table; a navy BALANCE NOW OWING bar; the notes; the trust-account line and
+  a kept-together "How to pay" box (same rows and words as the summary's, two across). No Dear / Yours faithfully /
+  signature. The summary of account is unchanged (still a letter on the letterhead, `aside` reference block).
+  Letter-model additions, all in the closed set and read back by the parser: **`LetterDocument.paper: 'plain'`**
+  (letterToPdf draws on `A4_PLAIN`, never the letterhead, whatever the caller passed -- portal, reminder and preview
+  cannot disagree), **`TableCell.fill`** (hex; a shaded table is padded both sides, `.ltr-filled`), **`TableCell.image`**
+  (PNG data URL + mm size; `.ltr-cell-img`), **`RectOp.radiusMm`** (rounded bar; SVG path in the PDF, clamped).
+  Checks: check-letter-pdf 65, check-page-editor 72, check-account-documents 82 (each broken once).
 - **#17 BUILT: THE MORNING RUN MARKS PROMISES KEPT OR MISSED (S17, 2 Nov; call centre; Stephan chose "both, 2 working
   days")**: `settlePromise` (src/lib/promiseSettle.ts, pure) + `settleDuePromises` in api/_lib/workflow/promises.ts, run
   first in `sweep` (before the 48 hours are checked). KEPT on APPROVED money since the promise was made (or since the last

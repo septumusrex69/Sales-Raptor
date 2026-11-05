@@ -150,6 +150,27 @@ check('a page break starts a new page',
 check('...and one at the very start does not leave a blank sheet',
   plan({ ...blankLetter(), blocks: [{ kind: 'pagebreak' }, p('one')] }).pages.length, 1)
 
+/* A SHADED CELL AND A PICTURE IN A CELL (the statement, 4 Nov: "make it statementy"). The shade is a rect the full height
+   of its row, drawn BEFORE the row's text; the picture is an image op at its own size, and the row is as tall as it. */
+{
+  const PNG = 'data:image/png;base64,iVBORw0KGgo='
+  const rows = [[{ spans: [{ text: 'Head' }], fill: '#16324F' }, { spans: [{ text: '' }], image: { src: PNG, widthMm: 40, heightMm: 12 } }]]
+  const pl = plan({ ...blankLetter(), blocks: [{ kind: 'table', rows, widths: [50, 50] }] })
+  const ops = pl.pages[0].ops
+  const shade = ops.findIndex((o) => o.op === 'rect' && o.fill === '#16324F')
+  const text = ops.findIndex((o) => o.op === 'text' && o.text === 'Head')
+  const pic = ops.find((o) => o.op === 'image')
+  ok(`a shaded cell is a rect under its text (${shade}, ${text})`, shade >= 0 && text > shade)
+  ok('...the height of the row, which the picture makes 12mm and more', shade >= 0 && ops[shade].hMm >= 12)
+  ok('the picture is drawn at its own size', pic !== undefined && pic.wMm === 40 && pic.hMm === 12 && pic.src === PNG)
+}
+/* THE BAR IS ROUNDED ("yes you can make it rounded"): track and fill both carry a radius. */
+{
+  const pl = plan({ ...blankLetter(), blocks: [{ kind: 'progress', fraction: 0.4 }] })
+  const rects = pl.pages[0].ops.filter((o) => o.op === 'rect')
+  ok(`the progress bar's track and fill are rounded (${rects.map((r) => r.radiusMm).join(', ')})`, rects.length === 2 && rects.every((r) => r.radiusMm > 0))
+}
+
 /* `aside` DRAWS ONE VERTICAL RULE, AT THE SECOND COLUMN'S LEFT EDGE, AND NO GRID (the statement's reference block). */
 {
   const rows = [0, 1, 2].map((i) => [cell(''), cell(''), cell(`Label ${i}:`), cell('value')])

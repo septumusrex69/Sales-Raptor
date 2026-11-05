@@ -27,7 +27,8 @@
  * piece of arithmetic. Recomputed here it would be a second opinion about the same money, and the
  * drift would be invisible because both would look like figures about this account.
  */
-import type { Block, LetterDocument, TableCell } from './letterDocument.ts'
+import type { Block, LetterDocument, Span, TableCell } from './letterDocument.ts'
+import { BF_LOCKUP_PNG, BF_LOCKUP_RATIO } from './brandLogo.js'
 import type { BalanceBreakdown, StatementLine } from './accountBalance.ts'
 import { longDate } from './messageTemplates.js'
 import { moneyProgress, progressPercent } from './paymentProgress.js'
@@ -93,20 +94,155 @@ export function summaryOfAccount(input: AccountLetterInput): LetterDocument {
  * figure they are looking for is on page three. It is also what makes the first page of a
  * statement identical to the summary -- same skeleton, same numbers, one arithmetic.
  */
+/*
+ * THE STATEMENT IS A STATEMENT, NOT A LETTER (Stephan, 4 Nov, sending a statement template: "I'm not happy with how the
+ * statement looks. It's not really statementy. Make it statementy ... Still use the Bredell Ferreira logos ... but I
+ * don't think the letterhead is a good idea to put it on").
+ *
+ * So it is laid out the way an account statement is read: the firm's name and the word STATEMENT across the top, the
+ * reference facts in a box to the right; the debtor and the account summary side by side under navy bars; every
+ * movement in a ruled, striped table under a navy heading; the balance owing in a navy bar at the foot of it; then how
+ * to pay and who to ask, short. No "Dear ...", no "Yours faithfully" and no signature: a statement states. Plain
+ * paper (`paper: 'plain'`), with the lockup in the corner and the firm's details in the running foot.
+ *
+ * THE FIGURES ARE UNCHANGED -- the same breakdown and lines, the same progress arithmetic (moneyProgress) as before and
+ * as the account screen. Only the page changed.
+ */
+const STMT_NAVY = '#16324F'
+const STMT_STRIPE = '#F1F4F8'
+const STMT_SOFT = '#E6ECF2'
+const WHITE = '#FFFFFF'
+
 export function statementOfAccount(input: AccountLetterInput): LetterDocument {
   const lines = input.lines ?? []
+  const b = input.breakdown
+  const m = moneyProgress({ payments: b.payments, balance: b.balance, settlementFee: b.settlementFee })
+  const pct = progressPercent(m)
+  const feesNet = b.fees + b.receiptFees - b.vat
+  const t = (text: string, over: Partial<Span> = {}): Span => ({ text, size: 9, ...over })
+  const c = (text: string, over: Partial<TableCell> = {}, span: Partial<Span> = {}): TableCell => ({ spans: [t(text, span)], ...over })
+  const bar = (text: string, align: TableCell['align'] = 'left'): TableCell => c(text, { fill: STMT_NAVY, align }, { bold: true, colour: WHITE })
+  const blank: TableCell = { spans: [{ text: '' }] }
+
+  /* ---- the head: the lockup left; the title and the reference facts right, under it, as a statement carries them ---- */
+  const facts: [string, string][] = [
+    ['Date', '{{today}}'],
+    ['Our reference', '{{case_number}}'],
+    ['Account', '{{account_number}}'],
+    ['Position as at', longDate(input.asAt)],
+  ]
+  if (input.status) facts.push(['Status', input.status])
+  const head: Block = {
+    kind: 'table', borders: 'none', widths: [50, 50],
+    rows: [[
+      { spans: [{ text: '' }], image: { src: BF_LOCKUP_PNG, widthMm: 72, heightMm: Math.round(72 * BF_LOCKUP_RATIO * 10) / 10 } },
+      {
+        align: 'right',
+        spans: [
+          { text: 'STATEMENT OF ACCOUNT', bold: true, size: 17, colour: STMT_NAVY },
+          ...facts.flatMap(([label, value]) => [t(`\n${label}: `, { colour: '#4b5563' }), t(value, { bold: true })]),
+        ],
+      },
+    ]],
+  }
+
+  /* ---- who, and the summary, side by side ---- */
+  const summary: [string, string, boolean][] = [
+    ['Hand-over balance', input.money(input.handedOver), false],
+    ['Interest', input.money(b.interest), false],
+    ['Fees and expenses', input.money(feesNet), false],
+    ['VAT', input.money(b.vat), false],
+    ['Payments received', `- ${input.money(b.payments)}`, false],
+  ]
+  /* WHERE A RULE HELD THE BALANCE DOWN, BY HOW MUCH -- as before; without it the page does not add up. */
+  if (b.withheld > 0) summary.push([b.cappedBy === 'written off' ? 'Written off' : 'Not recoverable (in duplum)', `- ${input.money(b.withheld)}`, false])
+  summary.push(['BALANCE NOW OWING', input.money(b.balance), true])
+  const who: TableCell[] = [
+    c('{{debtor_name}}', {}, { bold: true, size: 10 }),
+    c('Creditor: {{client_name}}'),
+    /* OPTIONAL, AND ITS LINE LEAVES WITH IT (97% of the book has none): documentWithoutOptional empties this cell and
+       keeps the row, because the summary beside it is still there. Last, so the gap it leaves is at the foot. */
+    c('Identity number: {{debtor_id_masked}}'),
+  ]
+  const sideRows: TableCell[][] = [[bar('Account holder'), { spans: [{ text: '' }] }, bar('How the balance is made up'), bar('', 'right')]]
+  for (let i = 0; i < summary.length; i++) {
+    const [label, value, total] = summary[i]
+    sideRows.push([
+      who[i] ?? blank,
+      blank,
+      c(label, total ? { fill: STMT_SOFT } : {}, total ? { bold: true } : {}),
+      c(value, { align: 'right', ...(total ? { fill: STMT_SOFT } : {}) }, total ? { bold: true } : {}),
+    ])
+  }
+  const side: Block = { kind: 'table', borders: 'none', widths: [42, 4, 34, 20], headerRow: true, keepTogether: true, rows: sideRows }
+
+  /* ---- how far: the same bar as the account screen, rounded ---- */
+  const progress: Block = {
+    kind: 'progress', fraction: m.fraction,
+    note: `${pct}% paid · ${input.money(m.recovered)} of ${input.money(m.charged)}${m.owed > 0 ? ` · ${input.money(m.owed)} to settle today` : ''}`,
+  } as Block
+
+  /* ---- every movement: navy heading, striped, ruled ---- */
+  const movements: Block[] = lines.length === 0
+    ? [p('Nothing has been charged or received on this account yet.')]
+    : [{
+      kind: 'table', borders: 'all', headerRow: true, widths: [14, 46, 13, 13, 14],
+      rows: [
+        /* THE SAME FIVE COLUMNS THE SCREEN SHOWS, in the firm's words. */
+        [bar('DATE'), bar('DETAIL'), bar('DEBIT', 'right'), bar('CREDIT', 'right'), bar('BALANCE', 'right')],
+        ...lines.map((l, i) => {
+          const fill = i % 2 ? STMT_STRIPE : WHITE
+          /* A DASH, NOT R 0.00, in the column this line is not in (as before): a nought reads as a charge of nothing. */
+          return [
+            c(shortish(l.date), { fill }),
+            c(l.description, { fill }),
+            c(l.debit > 0 ? input.money(l.debit) : '—', { fill, align: 'right' }),
+            c(l.credit > 0 ? input.money(l.credit) : '—', { fill, align: 'right' }),
+            c(input.money(l.balance), { fill, align: 'right' }),
+          ]
+        }),
+      ],
+    } as Block,
+    /* THE BALANCE, IN THE BAR AT THE FOOT OF THE MOVEMENTS -- where a statement's reader's eye ends up. */
+    {
+      kind: 'table', borders: 'none', widths: [74, 26], keepTogether: true,
+      rows: [[c('BALANCE NOW OWING', { fill: STMT_NAVY, align: 'right' }, { bold: true, colour: WHITE, size: 10 }),
+        c(input.money(b.balance), { fill: STMT_NAVY, align: 'right' }, { bold: true, colour: WHITE, size: 10 })]],
+    } as Block]
+
+  /* ---- the notes, small and centred; then how to pay, the same table the summary carries ---- */
+  const small = (text: string, over: Partial<Span> = {}): Block =>
+    ({ kind: 'paragraph', align: 'center', spans: [{ text, size: 9, ...over }] } as Block)
+
   return {
-    defaults: { font: CHARTER, size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
-    runningFoot: 'Statement of account · Ref {{case_number}} · Page {{page}} of {{pages}}',
+    defaults: { font: CHARTER, size: 10, colour: '#1f2937', lineHeight: 1.35 },
+    paper: 'plain',
+    runningFoot: 'Statement of account · Ref {{case_number}} · {{firm_name}} · {{firm_phone}} · {{firm_email}} · Page {{page}} of {{pages}}',
     blocks: [
-      ...addressBlock(input, 'STATEMENT OF ACCOUNT'),
-      p('Dear {{debtor_name}} — this is a full statement of your account with {{client_name}} '
-        + `as it stands on ${longDate(input.asAt)}. Every movement on it is set out below.`),
-      ...standsBlock(input),
-      ...madeUpBlock(input),
-      ...movementsBlock(input, lines),
-      ...payBlock(),
-      ...closing(),
+      head,
+      side,
+      h(2, 'Where the account stands'),
+      progress,
+      h(2, 'Every movement on the account'),
+      ...movements,
+      small('Interest is charged at the rate on the agreement. Fees are those prescribed by Annexure B to the Debt '
+        + 'Collectors Act 114 of 1998, plus VAT. A line showing no charge is work done that earned nothing, because the '
+        + 'Annexure B ceiling for this debt had been reached.', { size: 8, colour: '#6b7280' }),
+      /* HOW TO PAY: the summary's own rows and words -- trust account, OUR reference (21% of client references are
+         shared, so a payment quoting one cannot be placed), proof of payment, who to ask -- two across in one box that
+         is never split over a page. */
+      { kind: 'spacer', mm: 2 } as Block,
+      small('PAYMENT MUST BE MADE INTO OUR LEGAL PRACTITIONER TRUST ACCOUNT', { bold: true, colour: STMT_NAVY }),
+      {
+        kind: 'table', borders: 'none', widths: [18, 32, 20, 30], headerRow: true, keepTogether: true,
+        rows: [
+          [bar('How to pay'), bar(''), bar(''), bar('')],
+          [c('BANK', {}, { bold: true }), c('{{firm_bank_name}}'), c('ACCOUNT NUMBER', {}, { bold: true }), c('{{firm_bank_account}}')],
+          [c('ACCOUNT NAME', { fill: STMT_STRIPE }, { bold: true }), c('{{firm_bank_holder}}', { fill: STMT_STRIPE }), c('BRANCH CODE', { fill: STMT_STRIPE }, { bold: true }), c('{{firm_bank_branch}}', { fill: STMT_STRIPE })],
+          [c('REFERENCE', {}, { bold: true }), c('{{case_number}}', {}, { bold: true }), c('PROOF OF PAYMENT', {}, { bold: true }), c('Email it to {{firm_email}} on the day you pay')],
+          [c('QUESTIONS', { fill: STMT_STRIPE }, { bold: true }), c('Speak to {{collector_name}}, who handles this account, on {{firm_phone}}', { fill: STMT_STRIPE }), c('SOMETHING WRONG?', { fill: STMT_STRIPE }, { bold: true }), c('If anything here does not agree with your own record, tell us in writing and we will check it.', { fill: STMT_STRIPE })],
+        ],
+      } as Block,
     ],
   }
 }
@@ -250,63 +386,6 @@ function madeUpBlock(input: AccountLetterInput): Block[] {
   ]
 }
 
-/**
- * EVERY MOVEMENT, ON THE STATEMENT ONLY.
- *
- * FIVE COLUMNS, THE SAME ONES THE SCREEN SHOWS: date, detail, debit, credit, balance. A debtor
- * holding the PDF and a collector reading the tab are looking at one table, which is the point --
- * a statement the firm cannot follow on their own screen is one nobody can answer questions about.
- *
- * NOT `keepTogether`, UNLIKE THE ARRANGEMENT LADDER. That table is five rows and an argument; this
- * one is ninety-six rows and a record, and a record is read down a page. Held together it would
- * refuse to start until a page had room for all of it.
- *
- * A ZERO-CHARGE LINE IS PRINTED, at the firm's own instruction: "the last one was charged the 13th
- * of September but a lot of things happened after that, now I can't see them... maybe we put it
- * there and we have a zero charge that reflects on the statement." Past the Annexure B ceiling
- * every further action earns nothing, and a firm that emails a debtor eleven times after that and
- * shows a page with nothing on it looks like a firm that stopped working.
- */
-function movementsBlock(input: AccountLetterInput, lines: StatementLine[]): Block[] {
-  if (lines.length === 0) {
-    return [
-      h(2, 'Every movement on the account'),
-      p('Nothing has been charged or received on this account yet.'),
-    ]
-  }
-  const cell = (text: string, bold = false): TableCell => ({ spans: [{ text, size: 9, ...(bold ? { bold: true } : {}) }] })
-  return [
-    h(2, 'Every movement on the account'),
-    {
-      kind: 'table',
-      borders: 'rows',
-      widths: [16, 44, 14, 13, 13],
-      headerRow: true,
-      rows: [
-        [cell('DATE', true), cell('DETAIL', true), cell('DEBIT', true), cell('CREDIT', true), cell('BALANCE', true)],
-        ...lines.map((l) => [
-          cell(shortish(l.date)),
-          cell(l.description),
-          /* A DASH, NOT R 0.00, in the column this line is not in. A nought in a debit column
-             reads as a charge of nothing rather than as no charge at all, and every second row of
-             a statement would carry one. */
-          cell(l.debit > 0 ? input.money(l.debit) : '—'),
-          cell(l.credit > 0 ? input.money(l.credit) : '—'),
-          cell(input.money(l.balance)),
-        ]),
-      ],
-    } as Block,
-    {
-      kind: 'paragraph',
-      spans: [{
-        text: 'A line showing no charge is work done on the account that earned nothing, because '
-          + 'the Annexure B ceiling for this debt had been reached. It is shown so that the record '
-          + 'of what was done is complete.',
-        size: 9,
-      }],
-    } as Block,
-  ]
-}
 
 /** "10 Sep 2026" -- short enough for a five-column table, long enough to be unambiguous. */
 function shortish(iso: string): string {

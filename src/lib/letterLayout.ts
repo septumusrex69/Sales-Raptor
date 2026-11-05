@@ -69,6 +69,8 @@ export interface RectOp {
   fill: string | null
   stroke: string | null
   strokeMm: number
+  /** Rounded corners (Stephan, 4 Nov: "yes you can make it rounded" -- the progress bar). Absent is square. */
+  radiusMm?: number
 }
 
 /**
@@ -487,7 +489,9 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
       case 'table': {
         const cols = block.rows[0]?.length ?? 0
         if (cols === 0) break
-        const pad = block.borders === 'all' ? CELL_PAD_MM : 0
+        /* A SHADED CELL IS PADDED, as `.ltr-filled` pads it on screen: text on the edge of its own colour reads as a misprint. */
+        const shaded = block.rows.some((r) => r.some((c) => c.fill))
+        const pad = block.borders === 'all' || shaded ? CELL_PAD_MM : 0
         /* The reference block is set tight, as a letter's is (`aside`); the screen's CSS uses the same 0.5mm. */
         const padY = block.borders === 'aside' ? ASIDE_PAD_Y_MM : CELL_PAD_Y_MM
         /*
@@ -530,7 +534,7 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
             widths[ci] - pad * 2,
             lineHeight,
           ))
-          const heights = cells.map((ls) => ls.reduce((n, l) => n + l.heightMm, 0))
+          const heights = cells.map((ls, ci) => ls.reduce((n, l) => n + l.heightMm, 0) + (row[ci]?.image?.heightMm ?? 0))
           return {
             cells,
             rowHeight: Math.max(...heights, ptToMm(base.sizePt) * lineHeight) + padY * 2,
@@ -570,8 +574,22 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
             : rowHeight
           room(keep)
           const rowTop = y
+          /* The shade first, the full height of the row, so the text lands on it. */
+          row.forEach((c, ci) => {
+            if (c.fill && /^#[0-9a-f]{6}$/i.test(c.fill)) {
+              at().ops.push({ op: 'rect', xMm: xs[ci], yMm: rowTop, wMm: widths[ci], hMm: rowHeight, fill: c.fill, stroke: null, strokeMm: 0 })
+            }
+          })
           cells.forEach((lines, ci) => {
             y = rowTop + padY
+            const img = row[ci].image
+            if (img) {
+              const align = row[ci].align ?? 'left'
+              const x = align === 'right' ? xs[ci] + widths[ci] - pad - img.widthMm
+                : align === 'center' ? xs[ci] + (widths[ci] - img.widthMm) / 2 : xs[ci] + pad
+              at().ops.push({ op: 'image', src: img.src, xMm: x, yMm: y, wMm: img.widthMm, hMm: img.heightMm })
+              y += img.heightMm
+            }
             drawLines(lines, xs[ci] + pad, widths[ci] - pad * 2, row[ci].align ?? 'left')
           })
           y = rowTop + rowHeight
@@ -667,7 +685,7 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
         }
         at().ops.push({
           op: 'rect', xMm: left, yMm: y, wMm: textWidth, hMm: BAR_MM,
-          fill: BAR_TRACK, stroke: BAR_EDGE, strokeMm: RULE_MM,
+          fill: BAR_TRACK, stroke: BAR_EDGE, strokeMm: RULE_MM, radiusMm: BAR_MM / 2,
         })
         /*
          * NOTHING DRAWN AT NOUGHT, rather than a rectangle of no width. A zero-width fill is a
@@ -679,7 +697,7 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
           at().ops.push({
             op: 'rect', xMm: left + RULE_MM, yMm: y + RULE_MM,
             wMm: (textWidth - RULE_MM * 2) * share, hMm: BAR_MM - RULE_MM * 2,
-            fill: BAR_FILL, stroke: null, strokeMm: 0,
+            fill: BAR_FILL, stroke: null, strokeMm: 0, radiusMm: (BAR_MM - RULE_MM * 2) / 2,
           })
         }
         y += BAR_MM

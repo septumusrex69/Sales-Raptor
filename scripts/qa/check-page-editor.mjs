@@ -525,6 +525,21 @@ ok('...while plain text still goes in the way the browser can undo',
   check('a reference block with its rule is still one after the trip', (back[0] ?? {}).borders, 'aside')
 }
 
+/* A SHADED CELL AND A LOGO IN A CELL SURVIVE THE TRIP (the statement's navy bars and lockup). */
+{
+  const PNG = 'data:image/png;base64,iVBORw0KGgo='
+  const doc = {
+    defaults: { font: 'Georgia, serif', size: 10.5, colour: '#1f2937', lineHeight: 1.45 },
+    blocks: [{ kind: 'table', widths: [50, 50],
+      rows: [[{ spans: [{ text: 'Account holder' }], fill: '#16324F' }, { spans: [{ text: '' }], image: { src: PNG, widthMm: 72, heightMm: 12.3 } }]] }],
+  }
+  const back = documentHtmlToBlocks(letterToHtml(parseLetter(JSON.stringify(doc)), { filled: false, values: {} }))
+  const row = back[0]?.rows?.[0] ?? []
+  check('a shaded cell keeps its shade after the trip', row[0]?.fill, '#16324F')
+  check('...and the logo its picture and size', JSON.stringify(row[1]?.image ?? null), JSON.stringify({ src: PNG, widthMm: 72, heightMm: 12.3 }))
+  check('...and the picture is not read back as text', (row[1]?.spans ?? []).map((x) => x.text).join(''), '')
+}
+
 /*
  * AND THE SELECTION IS WATCHED RATHER THAN SAMPLED. The first cut of this remembered the caret
  * from the sheet's own key and mouse events, so a selection made any other way was never seen —

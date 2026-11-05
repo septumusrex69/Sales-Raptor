@@ -174,6 +174,17 @@ check('...and a settled account is full',
 /* ------------------------------------------------ the statement is the working */
 
 ok('the statement is headed as one', /STATEMENT OF ACCOUNT/.test(tText))
+/* A STATEMENT, NOT A LETTER (Stephan, 4 Nov: "It's not really statementy. Make it statementy ... I don't think the
+   letterhead is a good idea to put it on"). Plain paper with the lockup; no salutation, no signature. */
+check('the statement is on plain paper, not the letterhead', statement.paper, 'plain')
+ok('...carrying the firm\'s lockup itself', statement.blocks.some((b) => b.kind === 'table' && b.rows.some((r) => r.some((c) => c.image?.src?.startsWith('data:image/png;base64,')))))
+ok('...with navy bars over its tables', statement.blocks.some((b) => b.kind === 'table' && b.rows[0]?.some((c) => c.fill)))
+ok('...and no "Dear", "Yours faithfully" or signature: a statement states',
+  !/Dear |Yours faithfully/.test(tText) && !statement.blocks.some((b) => b.kind === 'signature'))
+check('the summary is still a letter, on the letterhead', summary.paper, undefined)
+const pdfSrc = read('../../src/lib/letterPdf.ts')
+ok('a plain document is drawn on A4_PLAIN and never on the letterhead, whatever the caller passed',
+  /const page = plainPaper \? A4_PLAIN : input\.page/.test(pdfSrc) && /input\.letterhead && !plainPaper/.test(pdfSrc))
 ok('...and carries every movement', /Every movement on the account/.test(tText))
 for (const l of LINES) ok(`...including ${l.description} on ${l.date}`, tText.includes(l.description))
 /*

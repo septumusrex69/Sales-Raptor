@@ -36,6 +36,7 @@ import {
 } from './letterLayout.js'
 import type { SignedMark } from './signedMark.ts'
 import type { LetterDocument, PageSetup } from './letterDocument.ts'
+import { A4_PLAIN } from './letterDocument.js'
 import { printableForPdf, unprintableMessage, type FaceGaps } from './winAnsi.js'
 import { CHARTER_GAPS, isCharter, type CharterBytes } from './charter.js'
 
@@ -194,7 +195,10 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
   const measure: Measure = (text, sizePt, bold, italic) =>
     faceFor(bold, italic).widthOfTextAtSize(printableForPdf(text, gaps).text, sizePt) / (72 / 25.4)
 
-  const plan = planLetter(input.doc, input.page, {
+  /* A PLAIN DOCUMENT IS ITS OWN PAPER (LetterDocument.paper): no letterhead, plain margins, whatever the caller passed. */
+  const plainPaper = input.doc.paper === 'plain'
+  const page = plainPaper ? A4_PLAIN : input.page
+  const plan = planLetter(input.doc, page, {
     measure, filled: input.filled, values: input.values, signed: input.signed ?? null,
   })
 
@@ -223,7 +227,7 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
   if (plan.runningFoot) note(plan.runningFoot.text)
   if (unprintable.length > 0) throw new Error(unprintableMessage(unprintable))
 
-  const image = input.letterhead
+  const image = input.letterhead && !plainPaper
     ? input.letterhead.type === 'png'
       ? await pdf.embedPng(input.letterhead.bytes)
       : await pdf.embedJpg(input.letterhead.bytes)
@@ -252,8 +256,8 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
   /* The initials are not in any page's ops -- they belong to every page, like the running line. */
   if (plan.signedInitials) await embed(plan.signedInitials.src)
 
-  const wPt = mmToPt(input.page.widthMm)
-  const hPt = mmToPt(input.page.heightMm)
+  const wPt = mmToPt(page.widthMm)
+  const hPt = mmToPt(page.heightMm)
   /* mm from the TOP to PDF's points from the BOTTOM. The one place the two systems meet. */
   const yPt = (mm: number) => hPt - mmToPt(mm)
 
@@ -327,6 +331,20 @@ function draw(sheet: Sheet, op: DrawOp, k: {
   if (op.op === 'rect') {
     const f = op.fill ? hexToRgb(op.fill) : null
     const b = op.stroke ? hexToRgb(op.stroke) : null
+    /* ROUNDED: an SVG path, because pdf-lib's rectangle has no corners to round. Clamped so a sliver of a bar (2% paid)
+       is a pill rather than a shape whose arcs cross. */
+    const r = Math.min(op.radiusMm ?? 0, op.wMm / 2, op.hMm / 2)
+    if (r > 0) {
+      const [w, h, rr] = [mmToPt(op.wMm), mmToPt(op.hMm), mmToPt(r)]
+      const path = `M ${rr} 0 H ${w - rr} A ${rr} ${rr} 0 0 1 ${w} ${rr} V ${h - rr} A ${rr} ${rr} 0 0 1 ${w - rr} ${h} `
+        + `H ${rr} A ${rr} ${rr} 0 0 1 0 ${h - rr} V ${rr} A ${rr} ${rr} 0 0 1 ${rr} 0 Z`
+      sheet.drawSvgPath(path, {
+        x: mmToPt(op.xMm), y: k.yPt(op.yMm),
+        ...(f ? { color: k.rgb(f.r, f.g, f.b) } : {}),
+        ...(b ? { borderColor: k.rgb(b.r, b.g, b.b), borderWidth: mmToPt(op.strokeMm) } : {}),
+      })
+      return
+    }
     sheet.drawRectangle({
       x: mmToPt(op.xMm),
       y: k.yPt(op.yMm + op.hMm),
