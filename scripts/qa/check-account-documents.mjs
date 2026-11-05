@@ -279,6 +279,13 @@ ok('...and only the statement carries the movements',
  * page a debtor reads. The closed merge vocabulary is the real protection -- no collections field
  * names the business account -- and this is the second half of it.
  */
+/* EVERY BANK DETAIL ON BOTH (Stephan, 5 Nov: "just ensure that the banking details are on the statement of account and
+   the summary of account ... everywhere"): bank, account number, account name, branch code and our reference. */
+for (const [name, doc] of [['summary', sText], ['statement', tText]]) {
+  for (const f of ['firm_bank_name', 'firm_bank_account', 'firm_bank_holder', 'firm_bank_branch', 'case_number']) {
+    ok(`the ${name} carries {{${f}}} in How to pay`, new RegExp(`How to pay[\\s\\S]*\\{\\{${f}\\}\\}`).test(doc))
+  }
+}
 for (const doc of [sText, tText]) {
   ok('the trust account is named', /\{\{firm_bank_name\}\}/.test(doc))
   ok('...and the business account is not', !/firm_business_bank/.test(doc))

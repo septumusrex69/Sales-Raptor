@@ -1,9 +1,78 @@
-# Raptor · Handover 16 — where Raptor stands
+# Raptor · Handover 17 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 16**, written by S16, which started from Raptor Handover 15. The next session is S17 and writes
-> Handover 17; its commits start `Raptor H16: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
-> and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
+> **Raptor Handover 17**, written by S17, which started from Raptor Handover 16. The next session is S18 and writes
+> Handover 18; its commits start `Raptor H17: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct);
+> older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by
+> that name.
+
+## S17 -- WHERE IT STANDS, AND WHERE S18 STARTS (Raptor · Handover 17, 2 - 5 Nov; branch `claude/sales-raptor-review-p1pzx2`)
+
+29 commits, `Raptor H16: S17 -- ...`, all pushed; fast suite green (22 950-odd checks), build and lint clean. The detail
+of each piece is in "S17's running log" further down (it grew inside the S16 section while S17 worked).
+
+### WHAT S17 SHIPPED (staging / the preview)
+
+- **No opening animation after a Raptor sign-in.** **#16** "What is left to take" obeys in duplum, interest first,
+  never on paid fees. **#17** the morning run marks promises kept or missed (2 working days' grace). **#18** Trust >
+  Find a payment. **#19** several people per client on the portal (it already worked; the card now says so).
+- **THE DEBTOR PORTAL** (`/my-account`), built in four parts and then reworked after Stephan used it: sign in with
+  **case number, ID number or email** + password (a code once to confirm, then never; 30-day "keep me signed in");
+  where the account stands (progress bar + the one thing happening now); what is owed as a sum, the settlement figure
+  in its own box (holds **5 working days**); how to pay; **your agent** (line, email, WhatsApp, "ask X to call me back")
+  and the office beneath; the statement PDF; proof of payment upload; offer an arrangement (**once-off = settle in full**;
+  later than 5 working days is a promise with the PTP reminders; instalments up to **12 months**, longer is an
+  **application** with the affordability assessment); dispute (item 6, R13) or ask a question (not charged). Looks
+  exactly like the client portal. **Invite** a debtor from the account page (Debtor portal card).
+- **Admin sign-in code once per person**; **client portal**: stay signed in by default, a code no longer forces a new
+  password.
+- **One skin for everyone** (Bredell Ferreira; the others archived, not deleted); the day's line is the only line; the
+  photo credit sits bottom-right of the company hero. **Portal emails carry the logo.**
+- **Fail-safe on every document**: an account nobody holds is signed by **"The Pre-Legal Department"** with the office
+  email (UNASSIGNED_NAME) -- the statement was refused on 96 unassigned staging accounts before.
+- **legal@bredellferreira.co.za for accounts nobody holds** (`src/lib/unassignedMailbox.ts`): workflow emails and the
+  portal code go from it **once it is connected**; until then such workflow emails hold and say why.
+- **The arrangement reminder carries the statement** (`message_templates.attaches_statement`, staging + schema.sql).
+- **THE STATEMENT AND SUMMARY OF ACCOUNT, REDESIGNED** (Stephan chose look **B**): plain paper, the lockup, the brand
+  guide's colours (#101F2C navy, #C69F54 gold, #32404D ink, #525D66, #F4F4F4), **Open Sans + Raleway Bold embedded**
+  (`brandFonts.ts`, OFL licences beside the files), dark navy BALANCE NOW OWING band, How to pay box with every bank
+  detail; the **summary** shows **"Interest and fees (VAT included)" as one line**. The same documents everywhere: the
+  account's Transactions buttons (Open / Download / Email), **Preview the statement** (new, pdf.js, iPad-safe), the
+  portal download and the reminder attachment. New in the letter model: `paper: 'plain'`, `TableCell.fill`,
+  `TableCell.image`, `ProgressBlock.fill`, rounded bars, `borders: 'aside'`.
+- **Staging data**: Stephan's Test Client's 86 OPEN accounts set from 0% to its 24% default (Stephan: "One should always
+  have 24% on default"); the 54 closed ones left at 0% on purpose.
+- **Ryno's letter-of-demand builder (PR #3) was merged 5 Nov** (section below). His campaigns PR **#2 is still open**.
+
+### START HERE (S18)
+
+1. **THE EMAIL COMPOSE PROBLEMS (Stephan, 5 Nov) -- a helper agent was working on them in its own worktree when S17
+   ended; nothing of it is on this branch.** "I try to add Rinda ... multiple people to CC"; "the thing where I was
+   writing was going down"; "show me the email signature that I uploaded ... how it will look relative to the text".
+   Find the compose box (Mail and account), make CC take several people (chips, staff suggestions; check send.ts sends
+   them all), find why the body jumps while typing, and show the real signature under the body exactly as the send path
+   appends it. **Ryno's PR #3 changed `api/_lib/email/send.ts` (central mailbox)** -- build on it, and fit legal@
+   (unassignedMailbox.ts) and his central mailbox together rather than having two.
+2. **Things only Stephan can do -- remind him:**
+   - **GitHub: Settings > Rulesets > Staging** (should target `claude/sales-raptor-review-p1pzx2`): tick **Require a pull
+     request before merging**, **Required approvals 0**, tick **Require review from Code Owners**, Save. His last
+     screenshot showed that rule with "Require a pull request" UNTICKED -- confirm what was saved. Leave **Live** alone.
+   - **legal@**: create a Raptor login for the legal mailbox and connect legal@ under it (Settings > Email). Nothing
+     else is needed.
+   - **/portal-looks**: no day is approved, so every portal day shows Llandudno.
+3. **Open questions (ask, don't guess):** charge R13 (item 6) on a debtor's portal QUESTION? (a dispute is charged; a
+   question is not, yet). `PROPOSAL_RULES` numbers (first payment within 30 days, 12 months). The reminder now carries
+   the statement but its WORDING does not mention it -- add a line in the Library?
+4. **Traps S17 fell into, so S18 does not:**
+   - **The API typecheck**: a temp tsconfig extending `tsconfig.app.json` with `"types": []` (NOT `["node"]`, which
+     fails before checking anything) and `include` the api files you changed. S17 pushed a redeclared `const` in
+     `api/_lib/debtorPortal.ts` that way; the whole debtor API stopped bundling for ten minutes.
+   - **Standard PDF faces are not embedded**: a reader without Helvetica/Times draws a wider substitute and spaces
+     vanish ("STATEMENTOF"). Anything new and important: Charter or the brand faces, which are embedded.
+   - **Raleway's numerals are old-style**: bold at 11pt and up is drawn in Raleway (HEADING_FROM_PT), so keep figures
+     under 11pt; check-account-documents holds it.
+   - `npm run qa` e2e can collide on port 5199 when two browser tests run at once (a "First contact" timeout in
+     library.mjs was this); `pkill -f "vite --port 5199"` and rerun alone.
 
 ## RYNO · THE LETTER OF DEMAND BUILDER (Raptor · Handover 16, 3 Nov; branch `claude/s13-letter-builder`)
 
@@ -66,7 +135,7 @@ Everything below is pushed to the session branch AND fast-forwarded onto the pre
 (`claude/sales-raptor-review-p1pzx2`, https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app).
 Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); fast suite green after the last commit.
 
-### START HERE (S17)
+### S17'S RUNNING LOG (the detail behind the summary above; it began as S16's "start here")
 
 **Live and working (staging/preview):**
 - **Client portal** (`/portal`): password sign-in (code first time / reset), Bredell Ferreira palette, lean KPI tiles,
