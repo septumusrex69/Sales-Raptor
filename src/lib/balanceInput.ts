@@ -63,6 +63,11 @@ export interface LedgerRows {
     legacyName?: string | null
   }[]
   accruals: { accruedOn: string; days: number; amountAccrued: number }[]
+  /**
+   * The debtor's credit refunded, moved or released (S18), as `account_money_out` returns it.
+   * Optional so a caller that never asked behaves as before -- every real reader asks.
+   */
+  moneyOut?: { kind: 'refund' | 'moved' | 'released'; onDay: string; amount: number; detail: string | null }[]
 }
 
 /**
@@ -180,6 +185,8 @@ export function balanceInputFor(input: {
       interest: ledgers.accruals.map((i) => ({
         from: i.accruedOn, days: i.days, amount: i.amountAccrued,
       })),
+      /* ALREADY A FIRM'S DAY: the database turns each into a Johannesburg date. */
+      paidOut: (ledgers.moneyOut ?? []).map((o) => ({ date: o.onDay, amount: o.amount, kind: o.kind, detail: o.detail })),
     },
   }
 }

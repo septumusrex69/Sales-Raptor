@@ -34,10 +34,17 @@ held out of Approve all**, its badge asking: handover date wrong, handover amoun
 client -- never a refund (Stephan). Staging's live fee_split had been applied without comments; logic was identical.
 **Still open:** (1) the approval queue previews each waiting payment ALONE, so later waiting payments on an account
 whose capital an earlier one clears each split that capital again in the projection (posting in order is right);
-(2) **a refund must show on the debtor's statement** (Stephan) -- refunds sit in `trust_payments_out`
-(Administrator-only RLS) and nothing in balanceInput/computeBalance reads them, so a refunded account still shows the
-debtor in credit; needs a definer read of (account, date, amount) for anyone who may read the account, a statement
-line, and the nightly balance job reading it. A MOVED overpayment has the same gap on its source account.
+(2) DONE below.
+**SHIPPED (S18): THE DEBTOR'S CREDIT LEAVING THE ACCOUNT IS ON THE BALANCE AND THE STATEMENT** (Stephan: "a refund
+should be appearing on the debtor's statement as well"). Staging migration `s18_account_money_out`, mirrored: a
+definer read of refunds (not cancelled; instructed or paid), overpayments MOVED to another account, and overpayments
+RELEASED to the client once their payover run is issued -- day, amount, kind, never payee or bank. Read by
+`fetchLedgerRows` (list, export, nightly stored balance, debtor portal, notices) and `fetchLedgers` (account page);
+`computeBalance` adds it back (`paidOut`), the statement draws a 'paid-out' debit line ("Refund paid to you",
+"Refund to you -- instructed", "Overpayment moved to RAP-...", "Overpayment released to the client (PO-...)").
+Before this, 30 released and 2 refunded overpayments on staging still read as the debtor's credit, and a moved one
+would have counted on both accounts. check-money-out 23. NOTE: `e2e/debtor-portal.mjs` only runs with
+`--import ./scripts/qa/tsresolve.mjs` (plain node cannot resolve its `.js` imports) -- pre-existing.
 
 **DECIDED, NOT BUILT: PAYMENT DATES, AND A BACKDATED PAYMENT AFTER A PAYOVER RUN** (Stephan, 5 Nov).
 - Facts found: `account_payments.received_at` is the bank's date (import_bank_lines / place_bank_line / split use

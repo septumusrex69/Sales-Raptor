@@ -54806,3 +54806,89 @@ as $$
     coalesce(sum(now_ - was) filter (where not is_receipt), 0)
   from split
 $$;
+
+-- ============================================================================================
+-- RAPTOR H17 / S18: WHAT LEFT AN ACCOUNT'S CREDIT, FOR THE DEBTOR'S STATEMENT (Stephan, 5 Nov: "a
+-- refund should be appearing on the debtor's statement as well. That he has been refunded.")
+--
+-- An overpayment is the debtor's credit until it is decided (dispose_excess_credit). Two of those
+-- decisions take the money OFF this account: a REFUND (trust_payments_out, kind 'refund'), a MOVE
+-- to another of the debtor's accounts (the moved copy lands there as a payment), and a RELEASE to
+-- the client once the payover run carrying it is issued. Nothing that adds up
+-- a balance read either, so a refunded account went on showing the debtor in credit for ever, and a
+-- moved overpayment was counted on both accounts at once.
+--
+-- ONE READ, FOR EVERY READER OF A BALANCE: the account page, the list, the export, the nightly
+-- stored balance, the debtor portal and the notices all go through fetchLedgerRows / fetchLedgers,
+-- and all of them read this. A copy that only the account page knew about would put a different
+-- balance on the list beside it.
+--
+-- SECURITY DEFINER, AND NARROW, because trust_payments_out is Administrator-only (it holds the
+-- payee's bank details) while every signed-in person may read every account and its payments
+-- (debtor_accounts_select / account_payments_select). Read through the table, a collector and an
+-- Administrator would see two balances on one debtor. So this returns the day, the amount and what
+-- happened -- never the payee or the bank account -- to the same people who may read the account.
+--
+-- A CANCELLED REFUND IS NOT MONEY OUT and is left out; a refund instructed but not yet paid IS --
+-- the credit is committed to the debtor from the decision, which is when the trust ledger moves it.
+-- A reversed allocation's move is left out with it.
+-- ============================================================================================
+create or replace function public.account_money_out(p_accounts uuid[])
+returns table (account_id uuid, out_id uuid, kind text, on_day date, amount numeric, detail text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select t.account_id, t.id, 'refund'::text,
+         (t.instructed_at at time zone 'Africa/Johannesburg')::date,
+         t.amount,
+         case when t.paid_at is not null then 'paid' else 'instructed' end
+    from public.trust_payments_out t
+   where t.account_id = any(p_accounts)
+     and t.kind = 'refund'
+     and t.cancelled_at is null
+  union all
+  select a.account_id, a.id, 'moved'::text,
+         (coalesce(a.excess_decided_at, a.computed_at) at time zone 'Africa/Johannesburg')::date,
+         a.excess_credit,
+         (select d.case_number from public.account_payments mp
+            join public.debtor_accounts d on d.id = mp.account_id
+           where mp.moved_from_allocation_id = a.id
+           order by mp.received_at limit 1)
+    from public.payment_allocations a
+   where a.account_id = any(p_accounts)
+     and a.excess_disposal = 'moved'
+     and a.status <> 'reversed'
+     and coalesce(a.excess_credit, 0) > 0
+  union all
+  /* RELEASED TO THE CLIENT: the debtor's credit becomes the client's when the payover run that
+     carries it is issued (trust_creditors_on_run) -- not when the release is decided -- so it leaves
+     the account on that run's day, named by its invoice. A release still waiting in an open run is
+     still the debtor's. */
+  select a.account_id, a.id, 'released'::text,
+         (r.approved_at at time zone 'Africa/Johannesburg')::date,
+         a.excess_credit,
+         r.invoice_number
+    from public.payment_allocations a
+    join lateral (
+      select pr.approved_at, pr.invoice_number
+        from public.payover_run_lines l
+        join public.payover_runs pr on pr.id = l.run_id
+       where l.allocation_id = a.id and coalesce(l.excess_credit, 0) <> 0
+         and not public.payover_run_is_open(pr.status) and pr.status <> 'void'
+         and pr.approved_at is not null
+       order by pr.approved_at limit 1) r on true
+   where a.account_id = any(p_accounts)
+     and a.excess_disposal = 'released'
+     and a.status <> 'reversed'
+     and coalesce(a.excess_credit, 0) > 0
+$$;
+
+comment on function public.account_money_out(uuid[]) is
+  'What left these accounts'' credit: refunds (not cancelled; instructed or paid), overpayments moved '
+  'to another account, and overpayments released to the client in an issued payover run. Day, amount and kind only -- never the payee or bank details. Read by every '
+  'balance (fetchLedgerRows, fetchLedgers) so a refunded account no longer shows the debtor in credit. S18.';
+
+revoke all on function public.account_money_out(uuid[]) from public, anon;
+grant execute on function public.account_money_out(uuid[]) to authenticated, service_role;

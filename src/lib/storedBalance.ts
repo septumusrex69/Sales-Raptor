@@ -60,10 +60,16 @@ export const ACCOUNT_SELECT =
  */
 export function ledgerRowsByAccount(
   ids: readonly string[],
-  raw: { payments: any[]; fees: any[]; accruals: any[] },
+  raw: { payments: any[]; fees: any[]; accruals: any[]; moneyOut?: any[] },
 ): Map<string, LedgerRows> {
   const out = new Map<string, LedgerRows>()
-  for (const id of ids) out.set(id, { payments: [], fees: [], accruals: [] })
+  for (const id of ids) out.set(id, { payments: [], fees: [], accruals: [], moneyOut: [] })
+  /* THE CREDIT THAT LEFT (S18): refunded, moved or released -- see account_money_out. */
+  for (const r of raw.moneyOut ?? []) {
+    out.get(r.account_id)?.moneyOut!.push({
+      kind: r.kind, onDay: String(r.on_day), amount: Number(r.amount), detail: r.detail ?? null,
+    })
+  }
   for (const r of raw.payments) {
     /* A REJECTED RECEIPT WAS NEVER THE DEBTOR'S PAYMENT (prompt 11) -- above all the copy a reversal
        leaves behind on its way to Needs an account. It is in no total, on no screen. */
@@ -109,12 +115,27 @@ export function ledgerRowsByAccount(
 export async function fetchLedgerRows(client: BalanceClient, accountIds: readonly string[]): Promise<Map<string, LedgerRows>> {
   const ids = [...new Set(accountIds)]
   if (ids.length === 0) return new Map()
-  const [payments, fees, accruals] = await Promise.all([
+  const [payments, fees, accruals, moneyOut] = await Promise.all([
     fetchAllRows(() => client.from('account_payments').select(LEDGER_SELECT.payments).in('account_id', ids).order('id'), { table: 'payments' }),
     fetchAllRows(() => client.from('account_fees').select(LEDGER_SELECT.fees).in('account_id', ids).order('id'), { table: 'fees' }),
     fetchAllRows(() => client.from('account_interest_accruals').select(LEDGER_SELECT.accruals).in('account_id', ids).order('id'), { table: 'interest' }),
+    fetchMoneyOut(client, ids),
   ])
-  return ledgerRowsByAccount(ids, { payments: payments as any[], fees: fees as any[], accruals: accruals as any[] })
+  return ledgerRowsByAccount(ids, { payments: payments as any[], fees: fees as any[], accruals: accruals as any[], moneyOut })
+}
+
+/**
+ * WHAT LEFT THESE ACCOUNTS' CREDIT (S18): refunds, moves and releases, through `account_money_out`
+ * -- a definer read, because the refunds table is Administrator-only and every balance has to see
+ * the same refund whoever is looking. An rpc takes its ids in the BODY, so there is no URL to
+ * outgrow; a refused or failing call THROWS rather than reading as "nothing refunded", which would
+ * put a refunded debtor back in credit on the screen.
+ */
+export async function fetchMoneyOut(client: BalanceClient, ids: readonly string[]): Promise<any[]> {
+  if (ids.length === 0) return []
+  const { data, error } = await client.rpc('account_money_out', { p_accounts: [...ids] })
+  if (error) throw new Error(error.message)
+  return (data ?? []) as any[]
 }
 
 /** An account row (snake_case, as `ACCOUNT_SELECT` reads it) as balanceInputFor wants it. */

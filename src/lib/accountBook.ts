@@ -22,7 +22,7 @@ import type { ExistingAccount } from './handoverImport.ts'
 import { debtorKey, type OtherAccount } from './sameDebtor.ts'
 import { isWrittenOff } from './accountStatus.ts'
 import { fetchAllRows } from './fetchAll.ts'
-import { fetchLedgerRows, refreshOutOfDate } from './storedBalance.ts'
+import { fetchLedgerRows, fetchMoneyOut, refreshOutOfDate } from './storedBalance.ts'
 
 /** What `account_balances` holds for one account, as the list reads it. */
 export interface StoredBalance {
@@ -819,6 +819,8 @@ export interface AccountLedgers {
   payments: LedgerPayment[]
   fees: LedgerFee[]
   accruals: LedgerAccrual[]
+  /** The debtor's credit refunded, moved or released (S18) -- see account_money_out. */
+  moneyOut: { kind: 'refund' | 'moved' | 'released'; onDay: string; amount: number; detail: string | null }[]
   /** Totals over the whole ledger, not just the rows fetched. */
   totals: { paid: number; feesExclVat: number; feesInclVat: number; interest: number; feeCount: number }
 }
@@ -906,6 +908,9 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       .eq('account_id', accountId).order('accrued_on', { ascending: false }).order('id'),
       { table: 'interest' }),
   ])
+  /* THE SAME READ EVERY OTHER BALANCE MAKES (S18), so this page and the list cannot disagree about a
+     refunded debtor. */
+  const moneyOut = await fetchMoneyOut(supabase, [accountId])
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const feeRows = (fees ?? []) as any[]
@@ -962,6 +967,9 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       days: Number(r.days ?? 1),
       amountAccrued: Number(r.amount_accrued ?? 0),
       amountRecoverable: Number(r.amount_recoverable ?? 0),
+    })),
+    moneyOut: moneyOut.map((r: any) => ({
+      kind: r.kind, onDay: String(r.on_day), amount: Number(r.amount), detail: r.detail ?? null,
     })),
     totals: {
       /* Live money only: a reversed receipt is not paid, a rejected one never was. */

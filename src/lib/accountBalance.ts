@@ -90,6 +90,14 @@ export interface LedgerLines {
   }[]
   /** Every interest accrual period. */
   interest: { from: string; days: number; amount: number }[]
+  /**
+   * MONEY THAT LEFT THE DEBTOR'S CREDIT (S18; Stephan, 5 Nov: "a refund should be appearing on the
+   * debtor's statement as well. That he has been refunded"). An overpayment is the debtor's credit
+   * until it is refunded, moved to another of their accounts, or released to the client in an issued
+   * payover run -- then it is gone from THIS account, and the balance comes back up by it. Read by
+   * `account_money_out`. Optional: a projected ledger has none, and none behaves as before.
+   */
+  paidOut?: { date: string; amount: number; kind: 'refund' | 'moved' | 'released'; detail: string | null }[]
 }
 
 export interface BalanceInput {
@@ -136,6 +144,8 @@ export interface BalanceBreakdown {
    */
   vat: number
   payments: number
+  /** The debtor's credit refunded, moved to another account or released to the client (S18). */
+  paidOut: number
   /** What is owed today, before any settlement quotation. */
   balance: number
   /** Item 9 on the balance: what settling in full today would add. */
@@ -344,6 +354,7 @@ function computedReceiptFees(
     ...costRows.map((f) => ({ date: f.date, order: 0, amount: f.exclVat + f.vat })),
     ...receiptRows.map((f) => ({ date: f.date, order: 0, amount: f.exclVat + f.vat })),
     ...ledgers.payments.map((p) => ({ date: p.date, order: 1, amount: -p.amount, pay: p })),
+    ...(ledgers.paidOut ?? []).map((o) => ({ date: o.date, order: 2, amount: o.amount })),
   ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.order - b.order))
   let owed = capital
   for (const m of dated) {
@@ -379,6 +390,9 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const fees = roundToCents(chargedFees.reduce((t, f) => t + f.exclVat + f.vat, 0))
   const feeVat = roundToCents(chargedFees.reduce((t, f) => t + f.vat, 0))
   const payments = roundToCents(ledgers.payments.reduce((t, p) => t + p.amount, 0))
+  /* WHAT LEFT THE CREDIT -- refunded, moved or released. It puts back on the balance exactly what the
+     overpayment had taken below nil, so a refunded account reads nil rather than in credit for ever. */
+  const paidOut = roundToCents((ledgers.paidOut ?? []).reduce((t, o) => t + o.amount, 0))
 
   const receiptFees = roundToCents(
     /* What was actually charged... */
@@ -410,6 +424,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
       date: p.date,
       amount: -p.amount + (computed.get(p) ?? 0),
     })),
+    ...(ledgers.paidOut ?? []).map((o) => ({ date: o.date, amount: o.amount })),
   ]
 
   // Interest between the last posted accrual (or the handover) and today. Computed, never written:
@@ -502,7 +517,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     )
   }
 
-  const owed = roundToCents(capital + recoverableNonCapital - payments)
+  const owed = roundToCents(capital + recoverableNonCapital - payments + paidOut)
   /* ONLY WHAT IS STILL OWED IS WAIVED. An overpaid settled account keeps its credit: that is the
      debtor's money, and a discount below nil would be the firm giving away a refund. */
   const waived = input.settledOn && owed > 0 ? owed : 0
@@ -537,6 +552,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     receiptFees,
     vat: roundToCents(feeVat + receiptFeeVat),
     payments,
+    paidOut,
     balance,
     settlementFee,
     settlement: roundToCents(balance + settlementFee),
@@ -681,6 +697,8 @@ export type StatementKind =
   | 'payment'
   /** What the client gave up when the account was settled; the line that brings it to nil. */
   | 'settlement-discount'
+  /** A refund, a move to another account, or a release to the client of the debtor's credit (S18). */
+  | 'paid-out'
 
 export interface StatementLine {
   date: string
@@ -864,6 +882,24 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     }
   }
 
+  /* THE REFUND IS A LINE (S18; Stephan: "a refund should be appearing on the debtor's statement as
+     well"), and so is a move or a release: each is the debtor's credit leaving this account, so it is
+     a DEBIT -- the running balance climbs back from below nil. A refund not yet paid out of the bank
+     says so; the payee and bank details are never on a statement. */
+  for (const o of ledgers.paidOut ?? []) {
+    pending.push({
+      date: o.date,
+      kind: 'paid-out',
+      description: o.kind === 'refund'
+        ? (o.detail === 'instructed' ? 'Refund to you — instructed' : 'Refund paid to you')
+        : o.kind === 'moved'
+          ? `Overpayment moved to ${o.detail ?? 'another of your accounts'}`
+          : `Overpayment released to the client${o.detail ? ` (${o.detail})` : ''}`,
+      debit: o.amount,
+      credit: 0,
+    })
+  }
+
   /* THE DISCOUNT IS A LINE, NOT A FOOTNOTE: a statement's lines must add up to the figure at its
      foot, and a settled account's foot is nil. It is a credit because it reduces what is owed. */
   if (input.settledOn && breakdown.waived > 0) {
@@ -887,6 +923,8 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, 'fee-no-charge': 2, 'fee-credit': 2, payment: 3, 'receipt-fee': 4,
     /* Last on its day: it is whatever the day's other lines left owing. */
     'settlement-discount': 5,
+    /* After the payment that made the credit, on its day: it is the credit leaving. */
+    'paid-out': 5,
   }
   /*
    * Day, then kind, then the clock.
