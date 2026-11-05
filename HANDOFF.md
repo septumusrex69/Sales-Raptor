@@ -24,6 +24,21 @@ LEFT edge with the button at the right, so it ran off screen and slid sideways a
 open (right-aligned), chips on their own row. Checks: check-account-export 70, check-account-views, e2e accounts 164
 (downloads both CSVs).
 
+**SHIPPED (S18, 5 Nov):** search in suspense (one box + dates over all three lists, `suspenseSearch.ts`); **the
+receipt fee is capped at what it took to settle** (Stephan: "a cap, not a payment split") -- `finance_split` fee base
+= least(payment, interest + costs + capital), staging migration `s18_receipt_fee_capped_at_settlement`, mirrored; the
+browser's estimate for unposted payments (`computedReceiptFees`) uses the same cap but leaves out open-period interest;
+**fee_split no longer counts the new receipt fee against the in duplum room** (engine_balances never did), which is
+what made "Client share + BF share + credit = total" fail on overpayments; **a payment received before the handover is
+held out of Approve all**, its badge asking: handover date wrong, handover amount to reduce, or withdraw and charge the
+client -- never a refund (Stephan). Staging's live fee_split had been applied without comments; logic was identical.
+**Still open:** (1) the approval queue previews each waiting payment ALONE, so later waiting payments on an account
+whose capital an earlier one clears each split that capital again in the projection (posting in order is right);
+(2) **a refund must show on the debtor's statement** (Stephan) -- refunds sit in `trust_payments_out`
+(Administrator-only RLS) and nothing in balanceInput/computeBalance reads them, so a refunded account still shows the
+debtor in credit; needs a definer read of (account, date, amount) for anyone who may read the account, a statement
+line, and the nightly balance job reading it. A MOVED overpayment has the same gap on its source account.
+
 **DECIDED, NOT BUILT: PAYMENT DATES, AND A BACKDATED PAYMENT AFTER A PAYOVER RUN** (Stephan, 5 Nov).
 - Facts found: `account_payments.received_at` is the bank's date (import_bank_lines / place_bank_line / split use
   `txn_date`); PTC date is typed (RecordPaymentModal defaults to TODAY -- risk); no captured/imported column on the
