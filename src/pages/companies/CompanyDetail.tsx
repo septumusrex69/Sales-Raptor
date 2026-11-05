@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { clientTermsLink, workBlock } from '../../lib/mandateRule'
 import {
   UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
-  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy,
+  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy, FilePlus2,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useBackLink, useRecordName } from '../../lib/backLink'
@@ -880,6 +880,9 @@ export function CompanyDetail() {
               title={company.email ? 'Send from your connected mailbox' : 'No email address on this client yet'} />
             <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
               title="Write on the timeline" />
+            {/* A letter of demand for one of this client's debtors (Ryno, 3 Nov), opened with the client filled in. */}
+            <RecordAction icon={FilePlus2} label="New letter" onClick={() => navigate(`/letters/demand?client=${company.id}`)}
+              title="A letter of demand on this client's behalf: find the debtor on their book, or type it in" />
             {/*
               THE TWO WAYS AN ACCOUNT GETS ONTO THIS BOOK, both on the outside now.
               THE FIRM: "if I record a batch, that is an absolutely useless exercise. You should

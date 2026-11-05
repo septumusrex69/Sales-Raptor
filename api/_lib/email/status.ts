@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, callerIsAdmin, requireCaller } from '../auth.js'
+import { centralMailboxFor } from '../centralMailbox.js'
 
 /** Whether the caller (or, for an admin, a targetUserId query param) has a connected mailbox — never returns the password. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -16,7 +17,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const targetUserId = typeof req.query.targetUserId === 'string' ? req.query.targetUserId : undefined
   let userId = caller.id
-  if (targetUserId && targetUserId !== caller.id) {
+  /*
+   * THE FIRM'S CENTRAL MAILBOX (legal@), for the letter of demand's "Send from" (S13, Ryno, 3 Nov). Only
+   * its address and whether it is connected -- the same answer this gives anybody about their own -- and
+   * only to the people who may send from it (maySendFromCentral), so nobody else is offered a choice the
+   * send would refuse.
+   */
+  if (req.query.mailbox === 'central') {
+    const central = await centralMailboxFor(admin, caller.id)
+    if ('error' in central) { res.status(central.status).json({ error: central.error }); return }
+    userId = central.userId
+  }
+  if (req.query.mailbox !== 'central' && targetUserId && targetUserId !== caller.id) {
     if (!(await callerIsAdmin(admin, caller.id))) {
       res.status(403).json({ error: 'Only administrators can view another user’s mailbox status.' })
       return

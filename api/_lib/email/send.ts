@@ -2,17 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { credentialsKeyProblem } from '../crypto.js'
 import { sendAsUser } from './sendAsUser.js'
+import { centralMailboxFor } from '../centralMailbox.js'
 
-/**
- * Sends an email through the caller's own connected mailbox via SMTP, with their saved signature
- * appended.
- *
- * WHAT IS LEFT HERE IS THE SESSION AND THE REQUEST BODY. The sending itself moved into
- * `sendAsUser` when the workflow runner needed it: the runner sends the same templates through
- * the same mailboxes with nobody watching, and two copies of a sender would drift -- with the
- * unattended one being the copy that drifts unnoticed. This route's job is to decide WHO is
- * sending, which is the one thing the runner answers differently.
- */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
@@ -36,8 +27,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const { to, cc, subject, bodyHtml, inReplyTo, attachments: sent, calendarReply } = (req.body ?? {}) as {
+  const { to, cc, subject, bodyHtml, inReplyTo, attachments: sent, calendarReply, mailbox } = (req.body ?? {}) as {
     to?: string; subject?: string; bodyHtml?: string
+    /** 'central' sends from the firm's central mailbox instead of the caller's own; see centralMailboxFor. */
+    mailbox?: 'own' | 'central'
     /**
      * An iTIP reply to a meeting request, as a whole ICS file.
      *
@@ -97,7 +90,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const result = await sendAsUser(admin, caller.id, {
+  let senderId = caller.id
+  if (mailbox === 'central') {
+    const central = await centralMailboxFor(admin, caller.id)
+    if ('error' in central) {
+      res.status(central.status).json({ error: central.error })
+      return
+    }
+    senderId = central.userId
+  }
+
+  const result = await sendAsUser(admin, senderId, {
     to, subject, bodyHtml, cc, inReplyTo, calendarReply, attachments: files,
   })
   if (!result.ok) {
@@ -118,7 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const now = new Date().toISOString()
     const text = (result.html ?? bodyHtml).replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
     const { error: rowErr } = await admin.from('user_emails').upsert({
-      user_id: caller.id, folder: copy.folder, uid: copy.uid, message_id: result.messageId,
+      /* The mailbox it went from: the central mailbox's own Sent list when it went from there. */
+      user_id: senderId, folder: copy.folder, uid: copy.uid, message_id: result.messageId,
       from_address: result.from, subject, snippet: text.slice(0, 240) || null,
       to_address: to.split(',')[0]?.trim() || null, occurred_at: now,
       is_sent: true, read_at: now, no_record_at: now,

@@ -5,6 +5,61 @@
 > Handover 17; its commits start `Raptor H16: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word,
 > and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
 
+## RYNO · THE LETTER OF DEMAND BUILDER (Raptor · Handover 16, 3 Nov; branch `claude/s13-letter-builder`)
+
+Ryno's session (the marketer; CLAUDE.md "Working for the sales and marketing team"). **A pull request into
+`claude/sales-raptor-review-p1pzx2`, not merged.** Separate from his campaigns pull request #2 (S13 · Campaigns,
+`claude/s13-reino-campaigns`), which is also still open; the two touch no file in common.
+
+**What he asked for (3 Nov, by voice):** his own page, "Bredell Ferreira - Letter of Demand Builder", inside Raptor,
+"under clients ... a plus new letter". Find the client "like Google search"; find the debtor on that client's book or
+by "the client's reference number or the debtor's reference number ... and then he can fetch all the information";
+or "manually enter all the information"; "the person should still be able to make micro edits or edit the document as
+they go"; send it from Raptor to the debtor's email, "controlled from which email address", or download it and send
+it yourself. A copy of every letter is kept on the record (agreed with him on the call).
+
+**Shipped on the branch:**
+- **New letter** on the Clients list (top right, beside Add client) and on a client's page (the action row, beside
+  Add Note; opens with the client filled in). Route `/letters/demand?client=&account=`, behind `RequireClientAccess`.
+- **`src/pages/letters/LetterOfDemandPage.tsx`** + `letterOfDemand.css` (his styles, scoped under `.lod`, in points):
+  form left, the A4 letter and the acknowledgement of receipt right, paginated as his page did (a block that would
+  cross the margin starts the next page; a long invoice table repeats its heading). Client typeahead
+  (`rankClients`), debtor typeahead on the client's book incl. sub-accounts, a reference box (account number,
+  client's reference or legacy reference; a list when more than one account carries it; fills the client when none
+  was chosen). Every paragraph is rewordable: click it on the letter, or "Reword the letter"; `{fields}` fill in,
+  `**bold**`. Draft kept on the device per client (localStorage), date always the firm's day (`clockNow`).
+- **`src/lib/letterOfDemand.ts`** (pure): the state, amounts (cents), the mismatch warning, `numberWord`, Ryno's
+  wording word for word as `STANDARD_WORDING`, `wordingSegments`, `missingFor` (download warns, offers "Download
+  anyway"), `sendBlockers` (a send waits for everything), `fillFromAccount` (debtor, Raptor's account number as the
+  payment reference, ONE invoice line from the handover at the balance -- `account_balances.balance`, else capital
+  handed over -- marked "check against the client's statement"; Raptor keeps no invoice list), `maySendFromCentral`.
+- **`src/lib/demandLetterPdf.ts`**: the PDF is read off the sheet word by word and drawn with pdf-lib on his
+  letterhead, as his jsPDF page did -- so it IS the preview. Not `letterPdf.ts` (the collections notices). Two
+  traps found and fixed: the preview's shrink-to-fit could come back between taking it off and reading the page
+  (the sheet is now read at its MEASURED scale, and kept full size while exporting), and ligatures ("fl") differed
+  between browser and PDF (off on both). Fonts (Noto Serif, Inter -- OFL) and the letterhead are in
+  `public/letters/demand/`, extracted from his file.
+- **Send**: To from the account's email contacts or typed; From = your own mailbox, or the firm's central mailbox
+  (legal@, `firm_mailboxes`) for an Administrator or a client liaison. **Server change**: `api/_lib/email/send.ts`
+  takes `mailbox: 'central'` (`centralMailboxFor` checks the role and finds the login) and files the Sent copy under
+  the mailbox it went from; `status.ts` answers `?mailbox=central` to the same people. Both PDFs attached
+  (acknowledgement optional). On an account it is recorded with `recordSentEmail` -- **charged R25 under item 1(a)
+  like every other email to a debtor; no money code was changed**, the modal says so.
+- **Copies**: every download and send files the PDF on the account (`account_documents`, kind "Letter of Demand";
+  the acknowledgement as "Correspondence") and on the client (`client_documents`), once per distinct letter.
+  Unlike the collections notices (kept nowhere, re-drawn from template + account), these are typed by hand and the
+  copy is the only record. Nothing linked: nothing filed, and the modal says to keep your own.
+- No database change.
+
+**Waiting:** merge (Stephan: `api/` and `scripts/qa/` are his). A central mailbox must be chosen under Settings for
+the second From to appear. Test on the preview: a letter from a client's page, one by reference, one typed by hand;
+send one to your own address from your mailbox and (as a liaison) from legal@.
+
+**Checks:** new `check-letter-demand` (44) and `e2e/letter-demand` (43; reads the downloaded PDF back with pdf.js,
+two pages included). Every rule broken once and seen to fail (typed amount, cents, send with gaps, empty fields,
+the account overwriting wording or keeping a typed amount, central mailbox for everybody, the server skipping the
+rule, the Sent copy under the caller, the scale assumed, the ranking, filing twice, Send not waiting).
+
 ## S16 -- WHERE IT STANDS, AND WHERE S17 STARTS (Raptor · Handover 16, 29 Oct - 2 Nov; branch `claude/beautiful-curie-f7deq7`)
 
 Everything below is pushed to the session branch AND fast-forwarded onto the preview

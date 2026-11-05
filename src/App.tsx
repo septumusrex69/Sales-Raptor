@@ -95,6 +95,7 @@ const ContactDetail = lazy(() => import('./pages/contacts/ContactDetail').then((
 const CompaniesList = lazy(() => import('./pages/companies/CompaniesList').then((m) => ({ default: m.CompaniesList })))
 const CompanyDetail = lazy(() => import('./pages/companies/CompanyDetail').then((m) => ({ default: m.CompanyDetail })))
 const ClientUpload = lazy(() => import('./pages/companies/ClientUpload').then((m) => ({ default: m.ClientUpload })))
+const LetterOfDemandPage = lazy(() => import('./pages/letters/LetterOfDemandPage').then((m) => ({ default: m.LetterOfDemandPage })))
 const AccountsList = lazy(() => import('./pages/accounts/AccountsList').then((m) => ({ default: m.AccountsList })))
 const AccountDetail = lazy(() => import('./pages/accounts/AccountDetail').then((m) => ({ default: m.AccountDetail })))
 const DisputesBoard = lazy(() => import('./pages/accounts/DisputesBoard').then((m) => ({ default: m.DisputesBoard })))
@@ -205,6 +206,8 @@ function App() {
               {/* Loading a client's accounts, outside Settings (23 Oct): the page refuses, with a
                   sentence, anybody who may not load for this client (handoverUpload.ts). */}
               <Route path="/companies/:id/upload" element={<RequireClientAccess><ClientUpload /></RequireClientAccess>} handle={{ title: 'Upload a batch' }} />
+              {/* Ryno's letter of demand builder (S13, 3 Nov), from Clients and a client's page. */}
+              <Route path="/letters/demand" element={<RequireClientAccess><LetterOfDemandPage /></RequireClientAccess>} handle={{ title: 'Letter of demand' }} />
               {/* News & campaigns (S10). The page guards itself on marketing.send. */}
               <Route path="/news" element={<NewsPage />} handle={{ title: 'News & campaigns' }} />
               <Route path="/news/:id" element={<NewsPage />} handle={{ title: 'Campaign' }} />
