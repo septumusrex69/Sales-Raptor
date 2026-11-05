@@ -260,7 +260,12 @@ Last full `npm run qa`: **All green, 25 176 checks across 444 files** (31 Oct); 
   #525D66 #B4BFCC #D5E1EB #ECECEC #F4F4F4; headings Raleway Bold, body Open Sans, fallback Arial). Five looks were shown
   and dropped; he chose look 1 and asked for three weights of it, now `STATEMENT_LOOKS` brand / brand-band / brand-both
   (A: pale-blue balance band; B: dark navy band at the foot only; C: dark navy BALANCE NOW OWING in both places).
-  **WAITING ON HIS CHOICE** -- then delete the other two and the look parameter. Default meanwhile: `brand` (A).
+  **CHOSEN 5 Nov: B** ("number 2 looks the best") -- the looks and the look parameter are gone; one palette in
+  accountSummaryLetter.ts. **The summary of account was restyled the same way** ("You can also do something similar
+  with the summary of account") -- both through one `accountDocument(input, kind)`; the summary has no movements and
+  shows **"Interest and fees (VAT included)" as ONE line** (Stephan: "merge interest and fees as one entry in the
+  summary"); the statement keeps Interest / Fees and expenses / VAT apart. check-account-documents 89,
+  check-payment-progress (reads the shared builder).
   Fonts: `src/lib/brandFonts.ts` (BRAND_STACK, BRAND_TTF, fetchBrand); files in public/fonts/open-sans (static
   instances cut from the variable font -- Open Sans reserves no name) and public/fonts/raleway (Google Fonts' own static
   Bold, unmodified -- Raleway reserves its name), each with OFL.txt. letterPdf embeds them for a BRAND_STACK document

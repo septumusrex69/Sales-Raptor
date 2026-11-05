@@ -279,7 +279,9 @@ ok('the repayment letter counts it', /settlementFee: input\.settlementFeeToday \
  * short of the end, undone one line lower by a different denominator.
  */
 ok('the summary letter is on the same arithmetic',
-  /moneyProgress\(\{[\s\S]{0,200}?settlementFee: input\.breakdown\.settlementFee/.test(summary))
+  /moneyProgress\(\{[\s\S]{0,200}?settlementFee: input\.breakdown\.settlementFee/.test(summary)
+  /* or through `const b = input.breakdown`, as the one builder both documents share (5 Nov) writes it */
+  || (/const b = input\.breakdown\b/.test(summary) && /moneyProgress\(\{ payments: b\.payments, balance: b\.balance, settlementFee: b\.settlementFee \}\)/.test(summary)))
 ok('...and no longer measures against the hand-over balance', !/paid \/ input\.handedOver/.test(summary))
 
 console.log(`${pass} passed, ${failures.length} failed`)

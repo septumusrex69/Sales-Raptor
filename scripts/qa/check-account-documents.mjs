@@ -15,7 +15,6 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { BRAND_TTF, HEADING_FROM_PT, isBrand } from '../../src/lib/brandFonts.ts'
-import { STATEMENT_LOOKS } from '../../src/lib/accountSummaryLetter.ts'
 import { summaryOfAccount, statementOfAccount } from '../../src/lib/accountSummaryLetter.ts'
 import { lettersText, letterProblems, canUseLetter, PRINTER_FIELDS } from '../../src/lib/letterDocument.ts'
 import { MERGE_FIELDS, unknownFields } from '../../src/lib/messageTemplates.ts'
@@ -63,8 +62,7 @@ const tText = lettersText(statement)
 /* ------------------------------------------------ the firm's own three sections */
 
 ok('the summary is headed as one', /SUMMARY OF ACCOUNT/.test(sText))
-ok('...and opens with the date the figures were struck',
-  /as it stands on 27 September 2026/.test(sText))
+ok('...and carries the date the figures were struck', /Position as at: \n?27 September 2026/.test(sText))
 ok('...carrying the firm’s own three sections', /Where the account stands/.test(sText)
   && /How the balance is made up/.test(sText) && /How to pay/.test(sText))
 /* THE STATUS ROW IS THE FIRM'S WORD FOR THE RUNG, off the derived position and never a column. */
@@ -72,7 +70,7 @@ ok('...and says where the account stands in the firm’s words', /Pre-legal/.tes
 /* LEFT OUT RATHER THAN PRINTED EMPTY: a STATUS row with nothing beside it is a question the
    debtor rings about. */
 ok('...left out entirely where it cannot be read',
-  !/STATUS/.test(lettersText(summaryOfAccount({ ...INPUT, status: null }))))
+  !/Status:/i.test(lettersText(summaryOfAccount({ ...INPUT, status: null }))))
 
 /* ------------------------------------------------ the arithmetic a debtor can check */
 
@@ -82,8 +80,9 @@ ok('...left out entirely where it cannot be read',
  * adding the column up would be right to query it. So the fees row is NET and the VAT row says
  * how much tax is inside it.
  */
-ok('the fees row is net of the VAT beside it', sText.includes(money(558.90 - 72.90)))
-ok('...with the VAT said separately', sText.includes(money(72.90)))
+/* On the STATEMENT, which itemises; the summary merges them into one line at the firm's word (below). */
+ok('the fees row is net of the VAT beside it', tText.includes(money(558.90 - 72.90)))
+ok('...with the VAT said separately', tText.includes(money(72.90)))
 const addsUp = 6000 + 182.40 + (558.90 - 72.90) + 72.90 - 1000
 check('...and the column adds to the balance printed', Math.round(addsUp * 100) / 100, 5741.30)
 ok('the balance now owing is on the page', /BALANCE NOW OWING/.test(sText) && sText.includes(money(5741.30)))
@@ -94,10 +93,15 @@ ok('the balance now owing is on the page', /BALANCE NOW OWING/.test(sText) && sT
  * first movement as well, so a text search passes with the row itself showing the capital still
  * outstanding -- which is a different number on every account that has ever paid anything.
  */
+/* The label is in whichever column the layout puts it (beside the account holder now); the value is the cell after. */
+const cellIs = (cell, text) => cell?.spans?.[0]?.text === text
 const madeUp = summary.blocks.find(
-  (b) => b.kind === 'table' && b.rows.some((r) => r[0].spans[0].text === 'Hand-over balance'))
+  (b) => b.kind === 'table' && b.rows.some((r) => r.some((cell) => cellIs(cell, 'Hand-over balance'))))
 ok('the balance table is there to read', madeUp !== undefined)
-const rowFor = (label) => (madeUp.rows.find((r) => r[0].spans[0].text === label) ?? [])[1]?.spans[0].text
+const rowFor = (label) => {
+  const row = madeUp?.rows.find((r) => r.some((cell) => cellIs(cell, label))) ?? []
+  return row[row.findIndex((cell) => cellIs(cell, label)) + 1]?.spans?.[0]?.text
+}
 check('...measured from what was handed over', rowFor('Hand-over balance'), money(6000))
 check('...and not from the capital still outstanding',
   rowFor('Hand-over balance') === money(BREAKDOWN.capital), false)
@@ -183,14 +187,25 @@ ok('...carrying the firm\'s lockup itself', statement.blocks.some((b) => b.kind 
 ok('...with navy bars over its tables', statement.blocks.some((b) => b.kind === 'table' && b.rows[0]?.some((c) => c.fill)))
 ok('...and no "Dear", "Yours faithfully" or signature: a statement states',
   !/Dear |Yours faithfully/.test(tText) && !statement.blocks.some((b) => b.kind === 'signature'))
-check('the summary is still a letter, on the letterhead', summary.paper, undefined)
+/* THE SUMMARY TOO ("You can also do something similar with the summary of account", 5 Nov). */
+check('the summary is on plain paper as well', summary.paper, 'plain')
+ok('...and is no letter either', !/Dear |Yours faithfully/.test(sText) && !summary.blocks.some((b) => b.kind === 'signature'))
+/* INTEREST AND FEES AS ONE LINE ON THE SUMMARY ("merge interest and fees as one entry in the summary"), the sum of the
+   statement's three -- interest, fees net, and the VAT inside them -- so the two documents still agree to the cent. */
+{
+  const rowText = (doc) => doc.blocks.filter((b) => b.kind === 'table').flatMap((b) => b.rows.map((r) => r.map((c) => c.spans.map((x) => x.text).join('')).join(' | ')))
+  const merged = rowText(summary).find((r) => r.includes('Interest and fees (VAT included)'))
+  const feesNet = BREAKDOWN.fees + BREAKDOWN.receiptFees - BREAKDOWN.vat
+  ok(`the summary carries interest and fees as one line (${merged})`, merged !== undefined && merged.includes(money(BREAKDOWN.interest + feesNet + BREAKDOWN.vat)))
+  ok('...and no separate Interest, Fees or VAT line', !rowText(summary).some((r) => /^ \| \| (Interest|Fees and expenses|VAT) \|/.test(r) || / \| (Interest|Fees and expenses|VAT) \| R/.test(r)))
+  ok('the statement keeps them apart, with the VAT', ['Interest', 'Fees and expenses', 'VAT'].every((l) => rowText(statement).some((r) => r.includes(`| ${l} |`))))
+}
 /* NO FIGURE IN RALEWAY. Bold at HEADING_FROM_PT and up is drawn in Raleway, whose numerals are old-style -- they dip
    below the line like lowercase letters. A heading may be big; a rand amount on a statement may not, in any look. */
-for (const id of Object.keys(STATEMENT_LOOKS)) {
-  const doc = statementOfAccount(INPUT, id)
+for (const [id, doc] of [['summary', summary], ['statement', statement]]) {
   const spans = doc.blocks.flatMap((b) => [...(b.spans ?? []), ...(b.rows ?? []).flat().flatMap((c) => c.spans)])
   const big = spans.filter((sp) => sp.bold && (sp.size ?? doc.defaults.size) >= HEADING_FROM_PT && /\d/.test(sp.text))
-  check(`look ${id}: no figure is big and bold enough to be drawn in Raleway`, big.map((sp) => sp.text), [])
+  check(`the ${id}: no figure is big and bold enough to be drawn in Raleway`, big.map((sp) => sp.text), [])
 }
 /* THE FONTS SHIP WITH THEIR LICENCE, which the OFL makes a condition of shipping them. */
 ok('the brand fonts are in the repo, each family with its OFL',
@@ -298,7 +313,7 @@ for (const [name, doc] of [['summary', summary], ['statement', statement]]) {
   ok(`...naming which document it is`, /^(Summary|Statement) of account /.test(doc.runningFoot))
   /* THE FIRM'S OWN FACE. A page set in something else is visibly not theirs: the summary is a letter, in Charter; the
      statement is set as the brand guide sets things, Open Sans with Raleway headings (Stephan, 5 Nov). */
-  ok(`...set in the firm's face`, name === 'summary' ? /Charter/.test(doc.defaults.font) : isBrand(doc.defaults.font))
+  ok(`...set in the brand faces (Open Sans, Raleway headings)`, isBrand(doc.defaults.font))
 }
 
 /* THE IDENTITY NUMBER IS OPTIONAL AND ITS LINE LEAVES WITH IT -- 97% of the book has none. */
