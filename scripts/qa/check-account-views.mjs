@@ -235,7 +235,10 @@ ok('the selection survives loading more',
  * twenty-nine presses of a button at the foot of the table — which is exactly where the only
  * control used to be, so asking for more meant scrolling past everything already on screen.
  */
-ok('the page size is a choice', /const PAGE_SIZES = \[100, 500, 1000, 2000\] as const/.test(list))
+/* The firm's steps (5 Nov), and none past a thousand: PostgREST's max-rows cuts a bigger page to a
+   thousand without a word, and the next page then starts past rows nobody was shown. */
+ok('the page size is a choice', /const PAGE_SIZES = \[100, 200, 300, 500, 1000\] as const/.test(list))
+ok('...never bigger than the database hands back', !/PAGE_SIZES = \[[^\]]*2000/.test(list))
 ok('...that the list actually uses', /pageSize \}\)/.test(list))
 /* The class is chosen now, so the size control can step aside for "Reset column widths" when that
    link is showing -- it still sits at the right of the count line either way. */
@@ -244,7 +247,8 @@ ok('...offered beside the count it changes', /'ml-auto'\} flex items-center gap-
  * And only where it would do something. A "2 000" button on a client with 310 accounts does
  * nothing when pressed, and a control that does nothing is one people stop trusting the rest of.
  */
-ok('a size the book cannot fill is not offered', /PAGE_SIZES\.filter\(\(n, i\) => i === 0 \|\| n <= total \* 2\)/.test(list))
+/* Every size up to the first that holds the whole book, and none past it. */
+ok('a size the book cannot fill is not offered', /PAGE_SIZES\.filter\(\(_n, i\) => i === 0 \|\| PAGE_SIZES\[i - 1\] < total\)/.test(list))
 ok('...but the smallest always is', /i === 0 \|\|/.test(list))
 
 /* ---------------------------------------------------------------------------------------------

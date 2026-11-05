@@ -24,7 +24,7 @@ import type { Team, User } from '../../types'
  * `.filter()` over a page of fifty, which would produce a list that is correct about the fifty
  * and wrong about the book.
  */
-export function AccountFilters({ params, setParam, onClear, facets, users, teams, canSeeOthers }: {
+export function AccountFilters({ params, setParam, onClear, facets, users, teams, canSeeOthers, trailing }: {
   params: URLSearchParams
   setParam: (key: string, value: string | null) => void
   /** Drops every filter key in one navigation, rather than thirteen re-queries on the way. */
@@ -34,9 +34,29 @@ export function AccountFilters({ params, setParam, onClear, facets, users, teams
   teams: Team[]
   /** Team leaders and administrators pick a desk; an agent's book is their own. */
   canSeeOthers: boolean
+  /** Drawn right after the Filters button, before the chips' own row (the Export button). */
+  trailing?: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  /*
+   * WHICH EDGE THE PANEL HANGS FROM (Stephan, 5 Nov: "if you press on the filters, it does
+   * something weird"). It always hung from the button's LEFT edge -- and the button sits at the
+   * right of the toolbar, so most of the panel ran off the screen, the page scrolled sideways, and
+   * every filter picked added a chip that pushed the button (and the open panel with it) further
+   * left. Now it is measured on opening: right-aligned to the button where there is no room to its
+   * right, which on a normal screen is always. The chips have their own row below, so picking a
+   * filter no longer moves the button at all.
+   */
+  const [alignRight, setAlignRight] = useState(true)
+  const toggleOpen = () => {
+    if (!open && ref.current) {
+      const box = ref.current.getBoundingClientRect()
+      const panel = Math.min(352, window.innerWidth - 32)
+      setAlignRight(box.left + panel > window.innerWidth - 16 && box.right - panel >= 16)
+    }
+    setOpen((o) => !o)
+  }
 
   const chips = filterChips(params, {
     userName: (id) => users.find((u) => u.id === id)?.name,
@@ -60,7 +80,7 @@ export function AccountFilters({ params, setParam, onClear, facets, users, teams
   return (
     <>
       <div ref={ref} className="relative">
-        <button type="button" onClick={() => setOpen((o) => !o)}
+        <button type="button" onClick={toggleOpen} data-testid="filters-button"
           className={`inline-flex items-center gap-1.5 text-sm rounded-lg border px-2.5 py-1.5 ${
             chips.length > 0
               ? 'border-brand-200 bg-brand-50 text-brand-700'
@@ -76,7 +96,7 @@ export function AccountFilters({ params, setParam, onClear, facets, users, teams
         </button>
 
         {open && (
-          <div className="absolute left-0 top-full mt-1.5 w-[22rem] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto bg-white rounded-xl shadow-lg border border-slate-100 z-40">
+          <div data-testid="filters-panel" className={`absolute ${alignRight ? 'right-0' : 'left-0'} top-full mt-1.5 w-[22rem] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto bg-white rounded-xl shadow-lg border border-slate-100 z-40`}>
             <div className="p-3.5 space-y-4">
               <Group heading="Where the account stands" note="As it came across from Swordfish.">
                 <Row label="Status">
@@ -213,15 +233,22 @@ export function AccountFilters({ params, setParam, onClear, facets, users, teams
         between a person and a wrong conclusion is knowing what has been hidden — and a short
         list looks like good news whether or not it is.
       */}
-      {chips.map((c) => (
-        <button key={`${c.param}:${c.label}`} type="button"
-          onClick={() => setParam(c.param, null)}
-          title="Remove this filter"
-          className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-full pl-2.5 pr-1.5 py-1 hover:bg-brand-100">
-          {c.label}
-          <X size={12} className="opacity-60" />
-        </button>
-      ))}
+      {trailing}
+      {/* THEIR OWN ROW (basis-full breaks the toolbar's flex-wrap), so a chip added never moves the
+          Filters button out from under an open panel. */}
+      {chips.length > 0 && (
+        <div className="basis-full flex flex-wrap items-center gap-1.5" data-testid="filter-chips">
+          {chips.map((c) => (
+            <button key={`${c.param}:${c.label}`} type="button"
+              onClick={() => setParam(c.param, null)}
+              title="Remove this filter"
+              className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-full pl-2.5 pr-1.5 py-1 hover:bg-brand-100">
+              {c.label}
+              <X size={12} className="opacity-60" />
+            </button>
+          ))}
+        </div>
+      )}
     </>
   )
 }

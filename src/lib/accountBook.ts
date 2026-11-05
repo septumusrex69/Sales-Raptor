@@ -691,6 +691,23 @@ export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> 
   return { accounts, total: count ?? accounts.length }
 }
 
+/**
+ * THESE ACCOUNTS, as fetchAccounts reads a row (the client's name embedded), for the ticked rows an
+ * export was asked for. In chunks of a hundred: an `in` list is URL length, see accountAllocation's
+ * ID_CHUNK. Returned in the order asked, with any that no longer exist simply absent.
+ */
+export async function fetchAccountsByIds(ids: readonly string[]): Promise<DebtorAccount[]> {
+  const out = new Map<string, DebtorAccount>()
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100)
+    const { data, error } = await supabase.from('debtor_accounts')
+      .select('*, companies(name)').in('id', chunk)
+    if (error) throw new Error(error.message)
+    for (const r of data ?? []) out.set((r as { id: string }).id, toAccount(r))
+  }
+  return ids.map((id) => out.get(id)).filter((a): a is DebtorAccount => !!a)
+}
+
 /** How many accounts a filter actually matches. What a bulk action has to name before it runs. */
 export async function countAccounts(q: AccountQuery): Promise<number> {
   const { count, error } = await applyAccountFilters(

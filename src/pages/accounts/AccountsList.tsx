@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchReadyToClose } from '../../lib/readyToClose'
-import { AlertTriangle, Loader2, Megaphone, Search, UserCheck, X } from 'lucide-react'
+import { AlertTriangle, Download, Loader2, Megaphone, Search, UserCheck, X } from 'lucide-react'
 import { BOOK_CHOICES, CLOSURE_KINDS, bookLabel, parseBook } from '../../lib/accountBooks'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
@@ -32,6 +32,7 @@ import { departmentOf } from '../../lib/departments'
 import { CLIENT_FLAGS, DESK_POSITIONS, clientFlag, deskPosition } from '../../lib/clientPosition'
 import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
+import { ExportModal } from './ExportModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { canHandOutAccounts, canRunCampaigns } from '../../lib/permissions'
 import { mayHandOutFor } from '../../lib/handoverUpload'
@@ -51,7 +52,14 @@ import { formatCurrency, formatDate } from '../../data/mockData'
  * Offered at the TOP, next to the count it changes. It used to be only "Load 100 more" at the
  * foot of the table, which meant scrolling past everything on screen to ask for more of it.
  */
-const PAGE_SIZES = [100, 500, 1000, 2000] as const
+/*
+ * AND A THOUSAND IS THE MOST, because a thousand is what the database hands back in one go
+ * (PostgREST's max-rows). "2 000" used to be offered: the request was quietly cut to a thousand,
+ * the next page started at row 2 000, and a thousand accounts were never on screen at all -- with
+ * the count above saying they were. The steps in between are the firm's (5 Nov: "100, 200, 300,
+ * 500, 1,000").
+ */
+const PAGE_SIZES = [100, 200, 300, 500, 1000] as const
 const PAGE_SIZE = PAGE_SIZES[0]
 
 /** Who may ask for somebody else's desk. An agent's book is their own. */
@@ -117,6 +125,8 @@ export function AccountsList() {
   /* A CAMPAIGN OVER THE SAME SELECTION (S10): the ticked rows, or every account the filters match --
      the same Selection the hand-out takes, resolved through the same applyAccountFilters. */
   const [campaigning, setCampaigning] = useState<Selection | null>(null)
+  /* EXPORT TO CSV (S18): the ticked rows, or everything the filters match. See ExportModal. */
+  const [exporting, setExporting] = useState(false)
   const navigate = useNavigate()
   /** Opened once from the URL, so closing it does not have it spring straight back. */
   const [handOutOpened, setHandOutOpened] = useState(false)
@@ -162,6 +172,13 @@ export function AccountsList() {
   const canAllocate = canSeeOthers
     || (!!scopeClientId && mayHandOutFor(currentUser, companies.find((c) => c.id === scopeClientId), users))
   const mayCampaign = canRunCampaigns(currentUser)
+  /*
+   * WHO MAY EXPORT: whoever may hand the book out -- team leaders, Administrators, and a liaison on
+   * her own client's book. An export is every debtor's name and ID number in a file that leaves
+   * Raptor, so it is not offered to every desk; what the file can hold is still only what the
+   * database lets this person read.
+   */
+  const mayExport = canAllocate
 
   /*
    * THE BOOK OPENS ON YOUR OWN DESK.
@@ -739,6 +756,14 @@ export function AccountsList() {
           <AccountFilters
             params={params} setParam={setParam} onClear={clearFilters}
             facets={facets} users={users} teams={teams} canSeeOthers={canSeeOthers}
+            trailing={mayExport ? (
+              <button type="button" data-testid="export-csv" disabled={loading || total === 0}
+                onClick={() => setExporting(true)}
+                title="Export what is on screen to a CSV file"
+                className="inline-flex items-center gap-1.5 text-sm rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <Download size={14} className="opacity-70" /> Export
+              </button>
+            ) : null}
           />
         </div>
 
@@ -766,6 +791,13 @@ export function AccountsList() {
               <span className="text-xs text-brand-700">Everything these filters match, not just this page.</span>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {mayExport && (
+                <button type="button" data-testid="bulk-export"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  onClick={() => setExporting(true)}>
+                  <Download size={14} /> Export
+                </button>
+              )}
               {mayCampaign && (
                 <button type="button" data-testid="bulk-campaign"
                   className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
@@ -840,9 +872,23 @@ export function AccountsList() {
         */}
         {!loading && accounts.length > 0 && (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 py-2 border-b border-slate-100 bg-slate-50/50 text-xs text-slate-500">
-            <span className="tabular-nums">
+            <span className="tabular-nums" data-testid="accounts-showing">
               Showing {shown.toLocaleString('en-ZA')} of {total.toLocaleString('en-ZA')}
             </span>
+            {/*
+              LOAD MORE IS UP HERE, BESIDE THE COUNT IT CHANGES (the firm, 5 Nov: "it should be on
+              top. You shouldn't be able to scroll down"). It was the last thing under the table,
+              so the rest of a client's book sat below a hundred rows -- and a person ticking the
+              page could tick a hundred and never notice the fifty-seven nobody had loaded.
+            */}
+            {shown < total && (
+              <button type="button" data-testid="load-more"
+                className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline disabled:opacity-50"
+                disabled={loadingMore} onClick={() => void loadMore()}>
+                {loadingMore && <Loader2 size={12} className="animate-spin" />}
+                Load {Math.min(pageSize, total - shown).toLocaleString('en-ZA')} more
+              </button>
+            )}
             <span className="text-slate-300">·</span>
             <span>{companyName ?? 'all clients'}</span>
             {narrowed && (
@@ -873,7 +919,7 @@ export function AccountsList() {
             )}
             <span className={`${widthsChanged ? 'ml-3' : 'ml-auto'} flex items-center gap-1`}>
               <span className="text-slate-400">Show</span>
-              {PAGE_SIZES.filter((n, i) => i === 0 || n <= total * 2).map((n) => (
+              {PAGE_SIZES.filter((_n, i) => i === 0 || PAGE_SIZES[i - 1] < total).map((n) => (
                 <button key={n} type="button" onClick={() => setPageSize(n)}
                   aria-pressed={pageSize === n}
                   className={`rounded-full border px-2 py-0.5 tabular-nums ${
@@ -1118,19 +1164,28 @@ export function AccountsList() {
           </div>
         )}
 
-        {!loading && shown < total && (
-          <div className="flex flex-wrap items-center justify-between gap-2 p-4 border-t border-slate-100 text-sm">
-            <span className="text-slate-500 tabular-nums">
-              {(total - shown).toLocaleString('en-ZA')} more
-            </span>
-            <button className="btn-secondary inline-flex items-center gap-1.5"
-              disabled={loadingMore} onClick={() => void loadMore()}>
-              {loadingMore && <Loader2 size={14} className="animate-spin" />}
-              Load {Math.min(pageSize, total - shown).toLocaleString('en-ZA')} more
-            </button>
-          </div>
-        )}
       </Card>
+
+      {exporting && (
+        <ExportModal
+          ticked={allMatching ? [] : [...ticked]}
+          query={query}
+          matching={total}
+          scope={[
+            `${bookLabel(book)}${book === 'whole' ? '' : ' book'}`,
+            companyName ?? 'All clients',
+            ...filterChips(params, {
+              userName: (id) => users.find((u) => u.id === id)?.name,
+              teamName: (id) => teams.find((t) => t.id === id)?.name,
+            }).map((c) => c.label),
+            ...(query.search ? [`Search “${query.search}”`] : []),
+          ]}
+          clientName={companyName ?? null}
+          bookName={bookLabel(book)}
+          nameOf={(id) => users.find((u) => u.id === id)?.name}
+          onClose={() => setExporting(false)}
+        />
+      )}
 
       {campaigning && (
         <CampaignModal

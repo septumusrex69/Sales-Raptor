@@ -394,14 +394,19 @@ try {
    */
   const offered = (await sizes.locator('button[aria-pressed]').allInnerTexts())
     .map((x) => Number(x.replace(/\D/g, '')))
-  t.check('...offering the sizes this book can fill', offered.join(), '100,500,1000')
-  /*
-   * And NOT 2 000, which 736 accounts cannot fill. A control that does nothing when pressed is
-   * one people stop trusting the rest of.
-   */
-  t.ok('...and not one it cannot', !offered.includes(2000))
+  /* The firm's steps (5 Nov), up to the first that holds the whole book -- and never past a
+     thousand, which is all the database hands back in one go. */
+  t.check('...offering the sizes this book can fill', offered.join(), '100,200,300,500,1000')
+  t.ok('...and not one past the database’s thousand', !offered.includes(2000))
+  /* LOAD MORE IS AT THE TOP, in the count line, not under a hundred rows (the firm, 5 Nov). */
+  const more = sizes.getByTestId('load-more')
+  t.ok('Load more sits in the count line at the top', await more.isVisible())
+  t.ok('...saying how many it will add', /Load 100 more/.test(await more.innerText()))
+  await more.click()
+  await page.waitForFunction(() => /Showing 200 of 736/.test(document.body.innerText), { timeout: 15000 })
+  t.ok('...and pressing it appends the next hundred', /Showing 200 of 736/.test(await page.locator('body').innerText()))
   /* It has to actually change the request, not just light up. */
-  await sizes.locator('button[aria-pressed]').nth(1).click()
+  await sizes.locator('button[aria-pressed]').nth(3).click()
   await page.waitForFunction(() => /Showing 500 of 736/.test(document.body.innerText), { timeout: 15000 })
   t.ok('choosing a bigger page actually loads it',
     /Showing 500 of 736/.test(await page.locator('body').innerText()))
@@ -450,6 +455,28 @@ try {
   await page.getByRole('button', { name: /^Filters/ }).click()
   await page.waitForTimeout(300)
   await t.shot(page, '03-accounts-filters-open')
+  /*
+   * THE PANEL STAYS ON SCREEN (Stephan, 5 Nov: "if you press on the filters, it does something
+   * weird"). It hung from the button's left edge with the button at the right of the toolbar, so
+   * two thirds of it ran off the page; and every filter picked added a chip that shoved the
+   * button, and the open panel, sideways.
+   */
+  {
+    const vw = page.viewportSize().width
+    const box = await page.getByTestId('filters-panel').boundingBox()
+    t.ok('the filter panel opens inside the window', box.x >= 0 && box.x + box.width <= vw)
+    const before = await page.getByTestId('filters-button').boundingBox()
+    await page.getByTestId('filters-panel').locator('select').first().selectOption({ index: 1 })
+    await page.waitForTimeout(300)
+    const after = await page.getByTestId('filters-button').boundingBox()
+    /* Its RIGHT edge, which the panel hangs from: the count badge widens the button leftwards. */
+    t.ok('...and picking a filter does not move the button out from under it',
+      Math.abs((after.x + after.width) - (before.x + before.width)) < 1)
+    const box2 = await page.getByTestId('filters-panel').boundingBox()
+    t.ok('...nor the panel', Math.abs(box2.x - box.x) < 1 && box2.x + box2.width <= vw)
+    await page.getByTestId('filters-panel').locator('select').first().selectOption({ index: 0 })
+    await page.waitForTimeout(300)
+  }
   const panel = await page.locator('body').innerText()
   t.ok('the panel offers a status', panel.includes('Any status'))
   t.ok('...and a sub-status', panel.includes('Any sub-status'))
@@ -462,6 +489,31 @@ try {
   t.ok('no mandate-rate filter', !panel.includes('Off their mandate rate'))
   await page.keyboard.press('Escape')
 
+  /* ---------- export to CSV (S18) ---------- */
+  {
+    t.ok('an Export button sits beside the filters', await page.getByTestId('export-csv').isVisible())
+    await page.getByTestId('export-csv').click()
+    t.ok('...and says what will go out, in words', /Active book/.test(await page.getByTestId('export-scope').innerText()))
+    t.ok('...offering everything the filters match, not the page',
+      /All 736 accounts these filters match/.test(await page.locator('body').innerText()))
+    await page.getByTestId('export-money').uncheck()
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30000 }),
+      page.getByTestId('export-start').click(),
+    ])
+    const fs = await import('node:fs')
+    const file = await download.path()
+    const text = fs.readFileSync(file, 'utf8')
+    const lines = text.replace(/^\uFEFF/, '').trim().split('\r\n')
+    t.check('the CSV has every matching account, not the hundred on screen', lines.length - 1, 736)
+    t.ok('...headed by the case number', lines[0].startsWith('Case number,'))
+    t.ok('...named for the book and the day', /^accounts-active-\d{4}-\d{2}-\d{2}\.csv$/.test(download.suggestedFilename()))
+    await page.getByTestId('export-done').waitFor({ timeout: 5000 })
+    await t.shot(page, '03b-accounts-export-done')
+    await page.keyboard.press('Escape')
+    await page.getByTestId('export-done').waitFor({ state: 'detached', timeout: 5000 })
+  }
+
   /* ---------- selection and the bulk bar ---------- */
 
   const boxes = page.locator('table tbody input[type="checkbox"]')
@@ -471,6 +523,26 @@ try {
   t.ok('the bulk bar counts what is ticked',
     (await page.locator('text=/\\d+ selected/').first().innerText()).startsWith('3'))
   await t.shot(page, '04-accounts-selection')
+
+  /* EXPORT THE TICKED ROWS, money and all: three rows, each with computeBalance's figures. */
+  {
+    await page.getByTestId('bulk-export').click()
+    t.ok('the bulk bar’s Export offers the ticked rows first',
+      await page.getByRole('radio', { name: /The 3 ticked accounts/ }).isChecked())
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30000 }),
+      page.getByTestId('export-start').click(),
+    ])
+    const fs = await import('node:fs')
+    const lines = fs.readFileSync(await download.path(), 'utf8').replace(/^\uFEFF/, '').trim().split('\r\n')
+    const head = lines[0].split(',')
+    t.check('...and the file is those three', lines.length - 1, 3)
+    t.ok('...with the money columns', head.includes('To settle') && head.includes('Receipt fees (incl VAT)'))
+    const settle = lines.slice(1).map((l) => l.split(',')[head.indexOf('To settle')])
+    t.ok('...worked out for every row', settle.every((v) => /^\d+\.\d{2}$/.test(v)))
+    await page.keyboard.press('Escape')
+    await page.getByTestId('export-done').waitFor({ state: 'detached', timeout: 5000 })
+  }
 
   /* The page is not the book: ticking the header offers the rest. */
   await page.locator('thead input[type="checkbox"]').check()
