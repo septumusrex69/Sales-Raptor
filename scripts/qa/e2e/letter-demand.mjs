@@ -44,8 +44,8 @@ function world(profile) {
       w.accountQueries.push(decodeURIComponent(u))
       const d = decodeURIComponent(u)
       /* The reference box asks for exact matches; the debtor box searches by name on the client's book. */
-      if (/account_number\.eq\.SCL\/00042|client_reference\.eq\.SCL\/00042/.test(d) || /id=eq\./.test(d)) return { body: /id=eq\./.test(d) ? ACCOUNT : [ACCOUNT] }
-      if (/ilike\.%kar%/i.test(d) && d.includes(CLIENT.id)) return { body: [ACCOUNT] }
+      if (/account_number\.eq\."SCL\/00042"|client_reference\.eq\."SCL\/00042"/.test(d) || /id=eq\./.test(d)) return { body: /id=eq\./.test(d) ? ACCOUNT : [ACCOUNT] }
+      if (/ilike\."%kar%"/i.test(d) && d.includes(CLIENT.id)) return { body: [ACCOUNT] }
       return { body: [] }
     }],
     [(u) => /\/rest\/v1\/account_contacts/.test(u), () => ({ body: [{ value: 'accounts@karoo.example', is_primary: true }, { value: 'ceo@karoo.example', is_primary: false }] })],
@@ -172,6 +172,15 @@ try {
     await page.waitForTimeout(500)
     t.check('downloading the same letter again files nothing more', w.docs.length, 2)
 
+    /* The acknowledgement of receipt, on its own button. */
+    const [ackDl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.getByTestId('lod-download-ack').click()])
+    const ack = await pdfText(await ackDl.path())
+    if (process.env.LOD_DEBUG) (await import('node:fs')).copyFileSync(await ackDl.path(), process.env.LOD_DEBUG)
+    t.ok('the acknowledgement downloads as its own PDF, for this debtor and amount',
+      ackDl.suggestedFilename().startsWith('Acknowledgement of Receipt - Karoo Haulage') && /Acknowledgement of Receipt/.test(ack.text) && /R106,000\.00/.test(ack.text) && ack.pages === 1)
+    for (let i = 0; i < 30 && w.docs.length < 4; i += 1) await page.waitForTimeout(100)
+    t.check('...and is filed too, as correspondence', w.docs.filter((d) => d.kind === 'Correspondence').length, 2)
+
     /* 5. Send, from the central mailbox. */
     await page.getByTestId('lod-send').click()
     await page.getByTestId('lod-send-modal').waitFor({ timeout: 5000 })
@@ -189,7 +198,7 @@ try {
     t.ok('...each a PDF', (sent.attachments ?? []).every((a) => Buffer.from(a.content, 'base64').subarray(0, 5).toString() === '%PDF-'))
     await page.getByTestId('lod-status').filter({ hasText: /Sent to ceo@karoo\.example/ }).waitFor({ timeout: 10000 })
     t.ok('the screen says it went, and from where', /Sent to ceo@karoo\.example/.test(await page.getByTestId('lod-status').innerText()))
-    t.ok('the acknowledgement is filed too, the letter once', w.docs.filter((d) => d.kind === 'Correspondence').length === 2 && w.docs.filter((d) => d.kind === 'Letter of Demand').length === 2)
+    t.ok('sending files nothing twice: the letter and the acknowledgement were filed when downloaded', w.docs.filter((d) => d.kind === 'Correspondence').length === 2 && w.docs.filter((d) => d.kind === 'Letter of Demand').length === 2)
     await context.close()
   }
 
@@ -204,6 +213,12 @@ try {
     await page.getByTestId('lod-client-option').first().waitFor({ timeout: 5000 })
     t.check('the client is found as you type, by any word of the name', await page.getByTestId('lod-client-option').first().innerText().then((x) => x.split('\n')[0]), 'Northbank Properties')
     await page.getByTestId('lod-client').fill('')
+    /* A reference with dots in it is one value, not filter syntax. */
+    await page.getByTestId('lod-reference').fill('INV.2026.14')
+    await page.getByTestId('lod-reference-find').click()
+    await page.getByTestId('lod-reference-msg').waitFor({ timeout: 5000 })
+    t.ok('a reference with dots in it is asked for whole, in quotes', w.accountQueries.some((q) => q.includes('account_number.eq."INV.2026.14"')))
+    t.check('...and one nobody has says so', await page.getByTestId('lod-reference-msg').innerText(), 'No account with that reference.')
     await page.getByTestId('lod-reference').fill('SCL/00042')
     await page.getByTestId('lod-reference-find').click()
     await page.getByTestId('lod-client-linked').waitFor({ timeout: 5000 })

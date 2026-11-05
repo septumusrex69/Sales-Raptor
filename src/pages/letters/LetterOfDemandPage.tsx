@@ -53,7 +53,12 @@ function toChoice(r: AccountRow): DebtorChoice {
 }
 
 /** Words for a PostgREST or() filter: its commas and brackets are syntax, so they are taken out of what was typed. */
-const searchable = (t: string) => t.replace(/[,()*%\\]/g, ' ').trim()
+const searchable = (t: string) => t.replace(/[,()*%\\"]/g, ' ').trim()
+/*
+ * A VALUE IN DOUBLE QUOTES, so a reference with a dot or a colon in it ("INV.2026.14", "A:17") is read as one
+ * value and not as PostgREST syntax. The quotes themselves were taken out of the text by searchable().
+ */
+const quoted = (t: string) => `"${searchable(t)}"`
 
 function readDraft(): LetterState | null {
   try {
@@ -681,7 +686,7 @@ function DebtorField({ value, bookIds, linked, onType, onPick, onUnlink }: {
     setLoading(true)
     const t = setTimeout(() => {
       void supabase.from('debtor_accounts').select(ACCOUNT_COLUMNS).in('company_id', book.split(','))
-        .or(`debtor_surname.ilike.%${q}%,debtor_first_name.ilike.%${q}%,account_number.ilike.%${q}%,client_reference.ilike.%${q}%`)
+        .or(['debtor_surname', 'debtor_first_name', 'account_number', 'client_reference'].map((c) => `${c}.ilike."%${q}%"`).join(','))
         .order('debtor_surname').limit(12)
         .then(({ data }) => { if (live) { setItems(((data ?? []) as unknown as AccountRow[]).map(toChoice)); setLoading(false) } })
     }, 250)
@@ -715,7 +720,7 @@ function ReferenceField({ bookIds, onFound }: { bookIds: string[]; onFound: (d: 
     const t = ref.trim()
     setMany([]); setMsg(null)
     if (!t) return
-    let q = supabase.from('debtor_accounts').select(ACCOUNT_COLUMNS).or(`account_number.eq.${searchable(t)},client_reference.eq.${searchable(t)},legacy_reference.eq.${searchable(t)}`).limit(10)
+    let q = supabase.from('debtor_accounts').select(ACCOUNT_COLUMNS).or(['account_number', 'client_reference', 'legacy_reference'].map((c) => `${c}.eq.${quoted(t)}`).join(',')).limit(10)
     if (bookIds.length) q = q.in('company_id', bookIds)
     const { data, error } = await q
     if (error) { setMsg(error.message); return }
