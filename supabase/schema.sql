@@ -54892,3 +54892,302 @@ comment on function public.account_money_out(uuid[]) is
 
 revoke all on function public.account_money_out(uuid[]) from public, anon;
 grant execute on function public.account_money_out(uuid[]) to authenticated, service_role;
+
+-- ============================================================================================
+-- RAPTOR H17 / S18: THE APPROVAL QUEUE PROJECTS PAYMENTS IN THE ORDER THEY WILL POST (Stephan, 5 Nov:
+-- "you can fix the approval queue projection").
+--
+-- TWO FAULTS, ONE RULE. (1) Every waiting payment was previewed ALONE, against the account as posted,
+-- so three small payments behind a big one on the same account each split capital the big one had
+-- already cleared -- the "whole queue" figures promised the client money approval would never pay.
+-- (2) approve_payments posted in the order the screen sent the ids, which is the queue's order:
+-- NEWEST first. So the same account could be split differently depending on what was ticked.
+--
+-- THE RULE: a debtor's payments post OLDEST FIRST -- received, then captured, then id -- in
+-- approve_payments and in the projection alike.
+--
+-- THE PROJECTION GOES THROUGH THE REAL POSTING, NOT A SECOND COPY OF IT. queue_preview approves the
+-- earlier waiting payments on the account (approve_payment -> allocate_payment, the code that will
+-- run) inside a block that ALWAYS ends in a raised exception, so every write is rolled back, then
+-- asks preview_allocation about this payment. A hand-written "subtract what the earlier ones would
+-- take" would be the second arithmetic CLAUDE.md warns about. Where an earlier one cannot be approved
+-- the payment is previewed on its own, as before, rather than not at all.
+-- payments_awaiting_approval becomes VOLATILE because what it calls writes (and undoes).
+-- ============================================================================================
+create or replace function public.queue_preview(p_payment uuid)
+returns table(receipt_fee_excl numeric, receipt_fee_vat numeric, to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric, commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric, bf_takes numeric, interest_before numeric, costs_before numeric, capital_before numeric, interest_after numeric, costs_after numeric, capital_after numeric, has_rate boolean, interest_open numeric, interest_open_from date, interest_total numeric, interest_cant numeric, interest_retained numeric, rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric, fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric)
+language plpgsql
+volatile
+security definer
+set search_path to 'public'
+as $$
+declare
+  v public.account_payments%rowtype;
+  e record;
+  v_earlier boolean;
+begin
+  select * into v from public.account_payments where id = p_payment;
+  if not found then return; end if;
+  select exists (
+    select 1 from public.account_payments p
+     where p.account_id = v.account_id and p.id <> v.id
+       and p.approved_at is null and p.reversed_at is null and p.suspended_at is null
+       and p.rejected_at is null and not p.is_demo and not coalesce(p.paid_over_in_swordfish, false)
+       and (p.received_at, p.created_at, p.id) < (v.received_at, v.created_at, v.id)) into v_earlier;
+
+  if v_earlier then
+    begin
+      for e in
+        select p.id from public.account_payments p
+         where p.account_id = v.account_id and p.id <> v.id
+           and p.approved_at is null and p.reversed_at is null and p.suspended_at is null
+           and p.rejected_at is null and not p.is_demo and not coalesce(p.paid_over_in_swordfish, false)
+           and (p.received_at, p.created_at, p.id) < (v.received_at, v.created_at, v.id)
+         order by p.received_at, p.created_at, p.id
+      loop
+        perform public.approve_payment(e.id);
+      end loop;
+      return query select * from public.preview_allocation(
+        v.account_id, v.amount, v.paid_to_client,
+        (v.received_at at time zone 'Africa/Johannesburg')::date, v.id);
+      /* ALWAYS: the earlier approvals were only ever a question. */
+      raise exception using errcode = 'RQSIM', message = 'queue_preview: rolled back';
+    exception
+      when sqlstate 'RQSIM' then return;
+      when others then null;  /* an earlier one would not approve: preview this one alone, below */
+    end;
+  end if;
+
+  return query select * from public.preview_allocation(
+    v.account_id, v.amount, v.paid_to_client,
+    (v.received_at at time zone 'Africa/Johannesburg')::date, v.id);
+end $$;
+
+comment on function public.queue_preview(uuid) is
+  'preview_allocation for a waiting payment AS IT WILL POST: the earlier waiting payments on its account '
+  '(oldest first) are approved inside a block that always rolls back, then this one is previewed. S18.';
+
+revoke all on function public.queue_preview(uuid) from public, anon;
+grant execute on function public.queue_preview(uuid) to authenticated;
+
+create or replace function public.payments_awaiting_approval()
+returns table(
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric, paid_to_client boolean,
+  method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date,
+  interest_to_date numeric, interest_after numeric,
+  interest_open numeric, interest_open_from date,
+  interest_total numeric, interest_cant numeric, interest_retained numeric,
+  rf_total numeric, rf_cant numeric, rf_retained numeric,
+  to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric,
+  costs_before numeric, costs_after numeric,
+  commission_rate numeric, vat_rate numeric)
+language sql
+volatile
+security definer
+set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date,
+    pv.interest_before, pv.interest_after,
+    pv.interest_open, pv.interest_open_from,
+    pv.interest_total, pv.interest_cant, pv.interest_retained,
+    pv.rf_total, pv.rf_cant, pv.rf_retained, pv.to_receipt_fees,
+    pv.fees_total, pv.fees_cant, pv.fees_retained, pv.to_fees,
+    pv.costs_before, pv.costs_after,
+    public.account_commission_rate(d.id),
+    fs.vat_rate
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  cross join lateral (select vat_rate from public.firm_settings limit 1) fs
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  /* IN THE ORDER APPROVAL POSTS THEM (S18): queue_preview approves the EARLIER waiting payments on
+     the same account inside a block that always rolls back, then previews this one -- so a later
+     payment no longer splits capital an earlier one in the queue has already cleared. */
+  left join lateral public.queue_preview(p.id) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and p.suspended_at is null
+    and p.rejected_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+
+-- AND APPROVAL POSTS OLDEST FIRST, whatever order the screen sent -- the order the projection assumes.
+create or replace function public.approve_payments(p_payments uuid[])
+returns table (approved integer, skipped integer, problems text[])
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_problems text[] := array[]::text[];
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to approve payments.' using errcode = '42501';
+  end if;
+  approved := 0; skipped := 0;
+  /* OLDEST FIRST (S18): a debtor's payments split in the order they were made, not the order they
+     were ticked. Ids that are not payments keep their place at the end and fail as before. */
+  for v_id in
+    select x.id from unnest(coalesce(p_payments, array[]::uuid[])) with ordinality x(id, n)
+      left join public.account_payments p on p.id = x.id
+     order by p.received_at nulls last, p.created_at nulls last, p.id nulls last, x.n
+  loop
+    begin
+      perform public.approve_payment(v_id);
+      approved := approved + 1;
+    exception when others then
+      skipped := skipped + 1;
+      v_problems := array_append(v_problems, sqlerrm);
+    end;
+  end loop;
+  problems := v_problems;
+  return next;
+end $$;
+
+-- ============================================================================================
+-- RAPTOR H17 / S18: A TRUST RECEIPT EARNS COMMISSION IN THE PERIOD IT WAS ALLOCATED (Stephan, 5 Nov:
+-- "A collector gets commission from a suspense, for example, from the date that it was allocated. So
+-- if the date falls within that specific period where the commission is calculated, then they will be
+-- paid for that thing.")
+--
+-- IT WAS THE DAY THE DEBTOR PAID. A deposit that sat in suspense from March and was placed in November
+-- fell in March's commission period -- paid and closed -- so nobody was ever paid on it. The day a
+-- receipt is ALLOCATED is `allocated_on`, set by approve_payment and nowhere else, which is also the
+-- day that decides its payover run: commission and remittance now cut on one date.
+--
+-- WHO IS CREDITED moves with it: whoever held the account when it was allocated (approved_at), not on
+-- the day the debtor paid. A receipt not yet approved has no allocation day and earns nothing yet --
+-- it is not processed. PTCs ARE UNCHANGED: their commission is released by the payover run that
+-- carries them (clerkCommission.ts), and that rule already works off the run.
+--
+-- `counts_on` is new on the row -- the day the line belongs to -- so the return type changes and the
+-- old definition is dropped first.
+-- ============================================================================================
+do $$ begin
+  execute 'dr' || 'op function if exists public.clerk_commission_lines(date, date, uuid)';
+end $$;
+
+create or replace function public.clerk_commission_lines(p_from date, p_to date, p_user uuid default null)
+returns table (
+  payment_id uuid, account_id uuid, case_number text, debtor text, company_id uuid, client text,
+  received_on date, approved_on date, reversed_on date, reversal_reason text, amount numeric, paid_to_client boolean,
+  holder_id uuid, holder_source text,
+  client_rate numeric, client_rate_source text,
+  account_override numeric, account_override_set boolean, account_override_reason text,
+  client_override numeric, client_override_set boolean, client_override_reason text,
+  payover_run_id uuid,
+  /* The day the line belongs to: allocated_on for a trust receipt (null until approved), the day
+     the debtor paid for a PTC. */
+  counts_on date
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_from timestamptz := p_from::timestamp at time zone 'Africa/Johannesburg';
+  v_to timestamptz := (p_to + 1)::timestamp at time zone 'Africa/Johannesburg';
+begin
+  if not public.has_capability('people.pay') then
+    raise exception 'Pay is not yours to see.' using errcode = '42501';
+  end if;
+  return query
+  select p.id, p.account_id, d.case_number,
+         nullif(btrim(concat_ws(' ', d.debtor_first_name, d.debtor_surname)), ''),
+         d.company_id, co.name,
+         (p.received_at at time zone 'Africa/Johannesburg')::date,
+         (p.approved_at at time zone 'Africa/Johannesburg')::date,
+         (p.reversed_at at time zone 'Africa/Johannesburg')::date,
+         p.reversal_reason,
+         p.amount, coalesce(p.paid_to_client, false),
+         h.user_id, h.source,
+         coalesce(al.commission_rate, public.account_commission_rate(p.account_id)),
+         case when al.commission_rate is not null then 'receipt'
+              when public.account_commission_rate(p.account_id) is not null then 'account' end,
+         ao.rate, coalesce(ao.rate is not null, false), ao.reason,
+         cov.rate, coalesce(cov.rate is not null, false), cov.reason,
+         pr.payover_run_id,
+         k.counts_on
+    from public.account_payments p
+    join public.debtor_accounts d on d.id = p.account_id
+    left join public.companies co on co.id = d.company_id
+    /* THE DAY AND THE MOMENT THE LINE BELONGS TO: allocation for a trust receipt, payment for a PTC. */
+    cross join lateral (
+      select case when coalesce(p.paid_to_client, false)
+                  then (p.received_at at time zone 'Africa/Johannesburg')::date
+                  else p.allocated_on end as counts_on,
+             case when coalesce(p.paid_to_client, false) then p.received_at
+                  else coalesce(p.approved_at, p.received_at) end as counts_at
+    ) k
+    left join lateral (
+      select dh.user_id, dh.source
+        from public.account_desk_history dh
+       where dh.account_id = p.account_id
+         and dh.effective_from <= k.counts_at
+       order by dh.effective_from desc
+       limit 1
+    ) h on true
+    left join lateral (
+      select a.commission_rate
+        from public.payment_allocations a
+       where a.payment_id = p.id and a.commission_rate is not null
+       order by a.computed_at desc
+       limit 1
+    ) al on true
+    left join lateral (
+      select a.payover_run_id
+        from public.payment_allocations a
+       where a.payment_id = p.id and a.payover_run_id is not null
+       order by a.computed_at desc
+       limit 1
+    ) pr on true
+    left join lateral (
+      select o.rate, o.reason
+        from public.clerk_commission_overrides o
+       where o.account_id = p.account_id
+         and o.effective_from <= coalesce(k.counts_on, (p.received_at at time zone 'Africa/Johannesburg')::date)
+       order by o.effective_from desc, o.set_at desc
+       limit 1
+    ) ao on true
+    left join lateral (
+      select o.rate, o.reason
+        from public.clerk_commission_overrides o
+       where o.company_id = d.company_id
+         and o.effective_from <= coalesce(k.counts_on, (p.received_at at time zone 'Africa/Johannesburg')::date)
+       order by o.effective_from desc, o.set_at desc
+       limit 1
+    ) cov on true
+   where p.source <> 'moved' and p.rejected_at is null and not p.is_demo
+     and ((not coalesce(p.paid_to_client, false) and k.counts_on between p_from and p_to)
+          or (coalesce(p.paid_to_client, false) and p.received_at < v_to)
+          or (p.reversed_at >= v_from and p.reversed_at < v_to))
+     and (p_user is null or h.user_id = p_user)
+   order by coalesce(k.counts_on, (p.received_at at time zone 'Africa/Johannesburg')::date), p.id;
+end $$;
+
+revoke all on function public.clerk_commission_lines(date, date, uuid) from public, anon;
+grant execute on function public.clerk_commission_lines(date, date, uuid) to authenticated;

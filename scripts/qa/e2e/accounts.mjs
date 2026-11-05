@@ -66,7 +66,9 @@ const handlers = [
       const one = /id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
       /* The liaison is served like everybody else -- she is a colleague, she appears in pickers
          and on mail. What she must not be is a person accounts are handed to. */
-      const all = [PROFILE, COLLEAGUE, UNGRADED, LIAISON, ...BENCH]
+      /* WITH THE TRUST TICK (S18): the CSV export is offered to whoever has the Trust (Stephan: "whoever
+         accesses the trust can export that CSV"); a leader without it is held in check-account-export. */
+      const all = [{ ...PROFILE, grants: ['finance.view'] }, COLLEAGUE, UNGRADED, LIAISON, ...BENCH]
       if (one) return { body: all.filter((p) => p.id === one) }
       return { body: all }
     },

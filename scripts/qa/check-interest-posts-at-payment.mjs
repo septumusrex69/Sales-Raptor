@@ -149,8 +149,12 @@ ok('...with no current_date left in the tariff lookup',
 /* AND THE QUEUE PASSES IT. The firm's day, not the first ten characters of a UTC timestamp. */
 const queue = strip(lastFn('payments_awaiting_approval'))
 ok('payments_awaiting_approval is in the schema', queue.length > 800)
+/* THROUGH queue_preview SINCE S18, which previews each payment in posting order -- and still on the
+   day it arrived, in both of its branches. */
+const queuePreview = strip(lastFn('queue_preview'))
+ok('the queue previews through queue_preview', /public\.queue_preview\(p\.id\) pv on true/.test(queue))
 ok('the queue previews each payment on the day it arrived',
-  /preview_allocation\([\s\S]{0,200}at time zone 'Africa\/Johannesburg'\)::date, p\.id\)/.test(queue))
+  (queuePreview.match(/preview_allocation\(\s*v\.account_id, v\.amount, v\.paid_to_client,\s*\(v\.received_at at time zone 'Africa\/Johannesburg'\)::date, v\.id\)/g) ?? []).length === 2)
 /* AND THE ROW CARRIES WHAT THE INTEREST CAME OUT OF, not only what was taken. A retained figure
    with nothing beside it is a number nobody on the floor can check. */
 ok('...and returns the interest either side of the split',

@@ -296,6 +296,20 @@ export interface CommissionPayment {
   clientOverrideReason: string | null
   /** The payover run this payment rode (a PTC's commission is released by it). Null: not on one yet. */
   payoverRunId: string | null
+  /**
+   * THE DAY THE LINE BELONGS TO (S18). A trust receipt earns in the period it was ALLOCATED -- Stephan,
+   * 5 Nov: "a collector gets commission from a suspense ... from the date that it was allocated" --
+   * so a deposit placed out of suspense months later is paid in the period it was placed, not in one
+   * already paid. Null: not approved yet, so not processed and not earned. Absent (an older caller):
+   * the day the debtor paid, as before. A PTC reads its own day; its release is the run's.
+   */
+  countsOn?: string | null
+}
+
+/** The day a payment's commission line belongs to -- see `countsOn`. Null: not earned yet. */
+export function countsOnOf(p: CommissionPayment): string | null {
+  if (p.paidToClient) return p.receivedOn
+  return p.countsOn === undefined ? p.receivedOn : p.countsOn
 }
 
 /**
@@ -355,7 +369,7 @@ function lineFor(p: CommissionPayment, kind: StatementLine['kind']): StatementLi
   const reason = source === 'account' ? p.accountOverrideReason : source === 'client' ? p.clientOverrideReason : null
   return {
     payment: p, kind,
-    on: kind === 'receipt' ? p.receivedOn : (p.reversedOn as string),
+    on: kind === 'receipt' ? (countsOnOf(p) ?? p.receivedOn) : (p.reversedOn as string),
     amount: sign * p.amount,
     rate, source, reason,
     /* The reversal is the exact negative of the receipt's line, not a fresh rounding of -amount. */
@@ -610,7 +624,7 @@ export function buildStatement(input: {
   const inPeriod = (d: string | null) => d !== null && d >= period.start && d <= period.end
   const runsOf = (companyId: string | null) =>
     input.runs === null ? null : (input.runs.get(companyId ?? '') ?? [])
-  const counted = (p: CommissionPayment) => start === null || p.receivedOn >= start
+  const counted = (p: CommissionPayment) => start === null || (countsOnOf(p) ?? p.receivedOn) >= start
 
   const payments: StatementLine[] = []
   const released: StatementLine[] = []
@@ -638,9 +652,10 @@ export function buildStatement(input: {
     for (const p of input.payments) {
       if (!counted(p)) continue
       if (!p.paidToClient) {
-        if (inPeriod(p.receivedOn)) payments.push(lineFor(p, 'receipt'))
+        /* BY THE ALLOCATION DAY (S18), and a reversal names the period that line was paid in. */
+        if (inPeriod(countsOnOf(p))) payments.push(lineFor(p, 'receipt'))
         if (inPeriod(p.reversedOn)) {
-          const l = lineFor(p, 'reversal'); l.paidIn = periodKeyOf(p.receivedOn)
+          const l = lineFor(p, 'reversal'); l.paidIn = periodKeyOf(countsOnOf(p) ?? p.receivedOn)
           payments.push(l)
         }
         continue
@@ -749,8 +764,11 @@ export function summarise(input: {
   const period = periodForKey(input.periodKey)
   const start = input.commissionStart ?? null
   const unheld = sum(input.payments
-    .filter((p) => !p.holderId && p.receivedOn >= period.start && p.receivedOn <= period.end && p.reversedOn === null
-      && (start === null || p.receivedOn >= start))
+    .filter((p) => {
+      const on = countsOnOf(p)
+      return !p.holderId && on !== null && on >= period.start && on <= period.end && p.reversedOn === null
+        && (start === null || on >= start)
+    })
     .map((p) => p.amount))
   return { rows, unheld }
 }

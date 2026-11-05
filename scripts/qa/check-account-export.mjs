@@ -113,6 +113,10 @@ ok('nothing in it writes', !/\.(insert|update|upsert|delete)\(|\.rpc\(/.test(run
 
 const list = readFileSync(new URL('../../src/pages/accounts/AccountsList.tsx', import.meta.url), 'utf8')
 ok('the export is the screen’s own query', /query=\{query\}/.test(list))
+/* WHO MAY EXPORT: whoever has the Trust (Stephan, 5 Nov) -- the finance.view tick, and nothing else. */
+ok('the export is offered to whoever has the Trust', /const mayExport = canViewTrust\(currentUser\)/.test(list))
+ok('...and both Export buttons ask that one question', (list.match(/\{mayExport && \(/g) ?? []).length === 1
+  && /trailing=\{mayExport \?/.test(list))
 ok('...and "all matching" is not a list of the ticked page', /ticked=\{allMatching \? \[\] : \[\.\.\.ticked\]\}/.test(list))
 ok('Load more sits in the count line at the top', list.indexOf('data-testid="load-more"') > 0
   && list.indexOf('data-testid="load-more"') < list.indexOf('<table'))

@@ -34,7 +34,7 @@ import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
 import { ExportModal } from './ExportModal'
 import type { Selection } from '../../lib/accountAllocation'
-import { canHandOutAccounts, canRunCampaigns } from '../../lib/permissions'
+import { canHandOutAccounts, canRunCampaigns, canViewTrust } from '../../lib/permissions'
 import { mayHandOutFor } from '../../lib/handoverUpload'
 import { CampaignModal } from './CampaignModal'
 import { useColumnWidths } from '../../lib/columnWidths'
@@ -173,12 +173,12 @@ export function AccountsList() {
     || (!!scopeClientId && mayHandOutFor(currentUser, companies.find((c) => c.id === scopeClientId), users))
   const mayCampaign = canRunCampaigns(currentUser)
   /*
-   * WHO MAY EXPORT: whoever may hand the book out -- team leaders, Administrators, and a liaison on
-   * her own client's book. An export is every debtor's name and ID number in a file that leaves
-   * Raptor, so it is not offered to every desk; what the file can hold is still only what the
-   * database lets this person read.
+   * WHO MAY EXPORT: whoever has the Trust (Stephan, 5 Nov: "whoever accesses the trust can export that
+   * CSV", because what it carries -- balances, payments, receipt fees -- lives within the trust). The
+   * 'finance.view' tick, read through canViewTrust, the same one that opens /trust. An export is every
+   * debtor's name and ID number in a file that leaves Raptor, so it is not offered to every desk.
    */
-  const mayExport = canAllocate
+  const mayExport = canViewTrust(currentUser)
 
   /*
    * THE BOOK OPENS ON YOUR OWN DESK.

@@ -196,6 +196,8 @@ export function toCommissionPayment(r: any): CommissionPayment {
     clientOverride: r.client_override_set === true ? n(r.client_override) : null,
     clientOverrideReason: s(r.client_override_reason),
     payoverRunId: s(r.payover_run_id),
+    /* THE ALLOCATION DAY (S18): null on a receipt not yet approved -- it has not earned anything. */
+    countsOn: s(r.counts_on),
   }
 }
 

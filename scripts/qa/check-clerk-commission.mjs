@@ -139,6 +139,21 @@ const run = (id, end, net, approved, extra = {}) => {
 const stmt = (key, payments, runs = new Map(), extra = {}) =>
   buildStatement({ periodKey: key, basis: extra.basis ?? 'collections', basic: extra.basic ?? 4000, payments, runs, ...extra })
 
+/* 2b. OUT OF SUSPENSE (S18; Stephan, 5 Nov: "a collector gets commission from a suspense ... from the date
+   that it was allocated"). Paid 3 Mar, sat in suspense, allocated 5 Nov: it earns in November's period
+   (11 Oct - 10 Nov), not in March's, which was paid long ago. Not yet approved: it earns nowhere yet. */
+{
+  const late = { ...pay({ id: 's1', on: '2026-03-03', amount: 2000 }), countsOn: '2026-11-05' }
+  check('a receipt allocated out of suspense earns in the period it was allocated',
+    stmt('2026-11', [late]).payments.map((l) => [l.kind, l.on, l.commission]), [['receipt', '2026-11-05', 60]])
+  check('...and not in the period the debtor paid', stmt('2026-03', [late]).payments.length, 0)
+  const waiting = { ...pay({ id: 's2', on: '2026-11-01', amount: 2000 }), countsOn: null }
+  check('a receipt not yet approved earns nothing yet', stmt('2026-11', [waiting]).payments.length, 0)
+  const ptc = { ...pay({ id: 's3', on: '2026-10-20', amount: 1000, ptc: true }), countsOn: '2026-11-05' }
+  check('a PTC still reads its own day', stmt('2026-11', [ptc]).payments.length + stmt('2026-11', [ptc]).pending.length
+    + stmt('2026-11', [ptc]).released.length > 0, true)
+}
+
 /* 3. A reversal. R10 000 received 20 Sep (October period), reversed 15 Oct (November period). */
 {
   const p = pay({ id: 'p1', on: '2026-09-20', amount: 10000, reversed: '2026-10-15', caseNumber: 'BF77', reason: 'Debit order returned' })
@@ -381,11 +396,18 @@ ok('a payment carries the run it rode', /select a\.payover_run_id\s+from public\
 
 /* 4. Payment-day attribution, in SQL: the desk on the day, exactly as collector_performance reads it. */
 const DESK = /from public\.account_desk_history dh\s+where dh\.account_id = p\.account_id\s+and dh\.effective_from <= p\.received_at\s+order by dh\.effective_from desc\s+limit 1/
-ok('a payment is credited to the desk on the payment day', DESK.test(lines))
+/* SINCE S18 THE DAY IS THE ALLOCATION DAY for a trust receipt (Stephan, 5 Nov: "a collector gets
+   commission from a suspense ... from the date that it was allocated") and the payment day for a PTC --
+   k.counts_at. The floor's collections figures (collector_performance) still read the payment day. */
+const DESK_ALLOC = /from public\.account_desk_history dh\s+where dh\.account_id = p\.account_id\s+and dh\.effective_from <= k\.counts_at\s+order by dh\.effective_from desc\s+limit 1/
+ok('a payment is credited to the desk on the day it counts', DESK_ALLOC.test(lines))
+ok('...which is the allocation for a trust receipt and the payment day for a PTC',
+  /case when coalesce\(p\.paid_to_client, false\) then p\.received_at\s+else coalesce\(p\.approved_at, p\.received_at\) end as counts_at/.test(lines))
+ok('...and a trust receipt is in the period it was allocated', /not coalesce\(p\.paid_to_client, false\) and k\.counts_on between p_from and p_to/.test(lines))
 ok('...and filtered by that holder, not by today\'s', /\(p_user is null or h\.user_id = p_user\)/.test(lines) && !/assigned_to/.test(strip(lines)))
 ok('the floor reads the desk the same way', DESK.test(liveFn('collector_performance')))
-ok('overrides are read as in force on the payment day',
-  (lines.match(/o\.effective_from <= \(p\.received_at at time zone 'Africa\/Johannesburg'\)::date/g) ?? []).length === 2)
+ok('overrides are read as in force on the day the line counts',
+  (lines.match(/o\.effective_from <= coalesce\(k\.counts_on, \(p\.received_at at time zone 'Africa\/Johannesburg'\)::date\)/g) ?? []).length === 2)
 ok('the client\'s rate is the one stamped on the receipt first', /coalesce\(al\.commission_rate, public\.account_commission_rate\(p\.account_id\)\)/.test(lines))
 
 /* WHAT COUNTS AS COLLECTED: one predicate, three readers, so the floor and pay cannot disagree. */
