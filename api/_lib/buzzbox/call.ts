@@ -68,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: profile } = await admin.from('profiles').select('buzzbox_extension').eq('id', caller.id).maybeSingle()
   const from = profile?.buzzbox_extension?.trim()
   if (!from) {
-    res.status(400).json({ error: 'Pick your BuzzBox extension under Settings → Integrations before dialling.' })
+    res.status(400).json({ error: 'Your BuzzBox is not connected. Speak to an administrator.' })
     return
   }
 

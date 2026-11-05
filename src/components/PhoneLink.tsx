@@ -92,25 +92,49 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
     </>
   )
 
+  /*
+   * BUZZBOX IS THERE AND YOUR EXTENSION IS NOT: SAY SO, AND DIAL NOTHING (S18; Stephan, 5 Nov: "it
+   * should say your Buzzbox is not connected, go speak to an administrator"). It used to fall back to
+   * a tel: link, which on a computer asked to leave Raptor ("Leave site?") and on an iPad with no SIM
+   * did nothing at all -- and pointed the clerk at Settings to pick an extension themselves, which is
+   * how one clerk ended up ringing somebody else's desk. Extensions are an Administrator's to set
+   * (protect_profile_privileged_fields); nothing is logged, because no call was placed.
+   */
+  const noExtension = !!status?.connected && !status.extension
+  if (noExtension) {
+    const notConnected = 'Your BuzzBox is not connected. Speak to an administrator.'
+    const button = (
+      <button type="button" data-testid="buzzbox-not-connected"
+        className={`${block ? 'block w-full ' : ''}${className} text-left`}
+        title={notConnected}
+        onClick={() => {
+          setState({ kind: 'error', message: notConnected })
+          if (resetTimer.current) clearTimeout(resetTimer.current)
+          resetTimer.current = setTimeout(() => setState({ kind: 'idle' }), 8000)
+        }}>
+        {content}
+      </button>
+    )
+    const note = state.kind === 'error' ? <span className="text-[11px] text-red-600">{state.message}</span> : null
+    if (inActionRow) return <RecordActionNote note={note}>{button}</RecordActionNote>
+    return (
+      <span className={`${block ? 'flex w-full' : 'inline-flex'} flex-col items-start min-w-0`}>
+        {button}
+        {note}
+      </span>
+    )
+  }
+
   if (!canDial) {
-    // The device's own dialler. Still worth telling the caller it happened — an account wants
-    // the call on its timeline however it was placed — but nothing will report back on it.
-    /* SAID, NOT SILENT, WHEN BUZZBOX IS THERE AND YOUR EXTENSION IS NOT (the firm, 18 Oct: "you
-       should also be able to call from BuzzBox ... on a lead or a deal or anything"). Every Call
-       button already dials through BuzzBox -- for a person with an extension. Without one it falls
-       back to the device's phone link, which on an iPad with no SIM looks like nothing happening. */
-    const noExtension = !!status?.connected && !status.extension
-    const link = (
+    // The firm has no BuzzBox at all: the device's own dialler, as before. Still worth telling the
+    // caller it happened -- an account wants the call on its timeline however it was placed -- but
+    // nothing will report back on it.
+    return (
       <a href={`tel:${number.replace(/\s/g, '')}`} className={`${block ? 'block w-full ' : ''}${className}`}
-        title={noExtension ? 'You have no BuzzBox extension, so this uses your device\u2019s own phone. Pick yours in Settings, Integrations.' : undefined}
         onClick={() => onDialled?.({ from: '', to: number, viaPabx: false })}>
         {content}
       </a>
     )
-    if (noExtension && inActionRow) {
-      return <RecordActionNote note={<a href="/settings?tab=Integrations" className="text-[11px] text-gold-700 hover:underline">No BuzzBox extension: pick yours</a>}>{link}</RecordActionNote>
-    }
-    return link
   }
 
   async function handleClick() {

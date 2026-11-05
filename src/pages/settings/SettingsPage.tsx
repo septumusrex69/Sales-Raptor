@@ -2242,16 +2242,30 @@ function BuzzBoxIntegrationCard() {
 
       {connected && currentUser && (
         <div className="mt-4 pt-4 border-t border-slate-100 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
-            <FormField label="Your extension">
-              <ExtensionPicker value={currentUser.buzzboxExtension} options={extensionOptions} saving={savingFor === currentUser.id} onChange={(ext) => void setExtensionFor(currentUser.id, ext)} />
-            </FormField>
-            <p className="text-xs text-slate-400">
+          {/*
+            AN EXTENSION IS AN ADMINISTRATOR'S TO SET (S18; Stephan, 5 Nov: a clerk could change "its own
+            Buzzbox extension ... rather, it should say your Buzzbox is not connected, go speak to an
+            administrator"). The database reverts it for anybody else (protect_profile_privileged_fields);
+            this is the screen agreeing with it.
+          */}
+          {isAdmin ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+              <FormField label="Your extension">
+                <ExtensionPicker value={currentUser.buzzboxExtension} options={extensionOptions} saving={savingFor === currentUser.id} onChange={(ext) => void setExtensionFor(currentUser.id, ext)} />
+              </FormField>
+              <p className="text-xs text-slate-400">
+                {status?.extension
+                  ? `Clicking a number rings extension ${status.extension} first; pick up there and BuzzBox dials the number.`
+                  : 'Until you have an extension, Call says BuzzBox is not connected for you.'}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-600" data-testid="my-buzzbox-extension">
               {status?.extension
-                ? `Clicking a number rings extension ${status.extension} first; pick up and BuzzBox dials the number.`
-                : 'Until you pick an extension, phone numbers open your device’s own dialler.'}
+                ? `Your extension is ${status.extension}. Clicking a number rings it first; pick up there and BuzzBox dials the number.`
+                : 'Your BuzzBox is not connected. Speak to an administrator.'}
             </p>
-          </div>
+          )}
           {extensionsError && <p className="text-xs text-amber-600">{extensionsError} You can still type an extension number.</p>}
 
           {isAdmin && (

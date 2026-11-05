@@ -55191,3 +55191,66 @@ end $$;
 
 revoke all on function public.clerk_commission_lines(date, date, uuid) from public, anon;
 grant execute on function public.clerk_commission_lines(date, date, uuid) to authenticated;
+
+-- ============================================================================================
+-- RAPTOR H17 / S18: ONLY AN ADMINISTRATOR SETS A BUZZBOX EXTENSION. Reverted silently for anybody
+-- else, like role, team and grants beside it. The Settings card stops offering the picker too.
+-- ============================================================================================
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- AND THE DEPARTMENT (23 Oct): it carries duties, so it is a permission by another route.
+    new.department_id := old.department_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+    -- NOR WHEN THEY STARTED (23 Oct): it decides a new starter's pro-rata basic.
+    new.start_date := old.start_date;
+    -- NOR WHICH PHONE RINGS (S18; Stephan, 5 Nov: a clerk could change "its own Buzzbox extension ...
+    -- rather, it should say your Buzzbox is not connected, go speak to an administrator"). A clerk who
+    -- picks somebody else's extension rings that person's desk and logs the call as their own.
+    new.buzzbox_extension := old.buzzbox_extension;
+    return new;
+  end if;
+
+  -- S15: ONLY A BIG BOSS GIVES OR TAKES BIG BOSS. Raised, not reverted, for the reason finance is:
+  -- a silent revert reads as "saved" to the person who tried.
+  if ('raptor.boss' = any(coalesce(new.grants, array[]::text[]))) is distinct from ('raptor.boss' = any(coalesce(old.grants, array[]::text[])))
+     or ('raptor.boss' = any(coalesce(new.revokes, array[]::text[]))) is distinct from ('raptor.boss' = any(coalesce(old.revokes, array[]::text[]))) then
+    if not public.has_capability('raptor.boss') then
+      raise exception 'Only the Big Boss can make somebody Big Boss, or stop them being one.' using errcode = '42501';
+    end if;
+  end if;
+
+  -- S14: AN ADMINISTRATOR WITHOUT FINANCE (see the top of this block).
+  if not public.has_capability('finance.view') then
+    if new.id = auth.uid() and (new.role is distinct from old.role or new.grants is distinct from old.grants
+        or new.revokes is distinct from old.revokes or new.department_id is distinct from old.department_id) then
+      raise exception 'An Administrator without finance access cannot change their own permissions.'
+        using errcode = '42501';
+    end if;
+    if public.finance_held(new.role, new.grants, new.revokes, new.department_id)
+       is distinct from public.finance_held(old.role, old.grants, old.revokes, old.department_id) then
+      raise exception 'Only an Administrator with finance access can give or take away finance access (Trust, Business, pay, approving payments).'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;

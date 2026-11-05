@@ -46,6 +46,25 @@ Before this, 30 released and 2 refunded overpayments on staging still read as th
 would have counted on both accounts. check-money-out 23. NOTE: `e2e/debtor-portal.mjs` only runs with
 `--import ./scripts/qa/tsresolve.mjs` (plain node cannot resolve its `.js` imports) -- pre-existing.
 
+**SHIPPED (S18, later on 5 Nov):**
+- **Approval queue in posting order** (`queue_preview`, staging `s18_queue_projects_in_posting_order`): each waiting
+  payment is previewed after the EARLIER waiting payments on its account are approved inside a block that always
+  rolls back; `approve_payments` now posts a debtor's payments oldest first (it posted in the screen's order, newest
+  first). Probed: every row closes to the cent, nothing posted by reading the queue. check-queue-order 15.
+- **Trust commission by allocation day** (staging `s18_commission_counts_on_allocation`): `clerk_commission_lines`
+  returns `counts_on` (= `allocated_on` for a trust receipt, null until approved; the payment day for a PTC), places
+  the line in that period and credits whoever held the account at approval. Stephan: "a collector gets commission
+  from a suspense ... from the date that it was allocated". PTC release unchanged. **Collections figures
+  (collector_performance/daily) still count by the payment day** -- not asked.
+- **CSV export is for whoever has the Trust** (`canViewTrust`, Stephan).
+- **BuzzBox extension is an Administrator's to set** (staging `s18_extension_admin_only`: the profile guard reverts
+  it for anybody else; the Settings card shows non-admins their extension or "Your BuzzBox is not connected. Speak
+  to an administrator."). With BuzzBox connected and no extension, Call now says that and dials nothing -- it used
+  to fall back to tel:, which asked to leave Raptor. **Found on staging: Itumeleng's profile carries extension 140,
+  which is Barry's** -- click-to-dial rings the caller's extension first and only dials the number once that is
+  answered, so the test call rang 140. Not changed by S18; an Administrator should set the right one.
+  check-buzzbox-extension 9.
+
 **DECIDED, NOT BUILT: PAYMENT DATES, AND A BACKDATED PAYMENT AFTER A PAYOVER RUN** (Stephan, 5 Nov).
 - Facts found: `account_payments.received_at` is the bank's date (import_bank_lines / place_bank_line / split use
   `txn_date`); PTC date is typed (RecordPaymentModal defaults to TODAY -- risk); no captured/imported column on the
