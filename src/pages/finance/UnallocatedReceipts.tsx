@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Check, Loader2, Search } from 'lucide-react'
+import { AlertTriangle, Check, Loader2, Search, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass, controlClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
@@ -9,6 +9,7 @@ import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { matchReference } from '../../lib/receiptReference'
 import { SplitReceiptModal } from './SplitReceiptModal'
 import { lineNature } from '../../lib/bankLineAllocation.ts'
+import { EMPTY_SUSPENSE_QUERY, isSuspenseQueryEmpty, suspenseMatches, type SuspenseQuery } from '../../lib/suspenseSearch.ts'
 import { ReturnedReceiptPicker } from '../../components/finance/ReturnedReceiptPicker'
 import { allocateBankLine, allocateSwordfishLine } from '../../lib/bankAllocationApi'
 import { fetchSwordfishHolding } from '../../lib/trust'
@@ -70,6 +71,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   const [suspended, setSuspended] = useState<SuspendedBankLine[]>([])
   const [suspending, setSuspending] = useState<UnallocatedReceipt | null>(null)
   const [placingParked, setPlacingParked] = useState<SuspendedPayment | null>(null)
+  const [query, setQuery] = useState<SuspenseQuery>(EMPTY_SUSPENSE_QUERY)
   /* Held for Swordfish payovers (S10): which payments out may come off it, asked of the same rule the database refuses on. */
   const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
 
@@ -157,11 +159,49 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   }
 
   const waiting = rows.reduce((n, r) => n + r.amount, 0)
+  /*
+   * THE SEARCH (S18; Stephan: "a search function for the suspense account"). Over all three lists at
+   * once -- needs an account, in suspense, parked -- because whoever holds a proof of payment does not
+   * know which of the three the money went into. The totals above each card stay the WHOLE queue: a
+   * search narrows what is listed, never what is owed to nobody. See suspenseSearch.ts.
+   */
+  const searching = !isSuspenseQueryEmpty(query)
+  const shownRows = rows.filter((r) => suspenseMatches({ date: r.txnDate, amount: r.amount, words: [r.description, r.reference] }, query))
+  const shownSuspended = suspended.filter((r) => suspenseMatches({ date: r.txnDate, amount: r.amount, words: [r.description, r.reference, r.note, r.suspendedByName] }, query))
+  const shownParked = parked.filter((r) => suspenseMatches({ date: r.receivedOn, amount: r.amount, words: [r.reference, r.details, r.reason, r.caseNumber, r.debtor] }, query))
+  const queueSize = rows.length + suspended.length + parked.length
+  const shownSize = shownRows.length + shownSuspended.length + shownParked.length
 
   return (
     /* ONE COLUMN WITH ITS OWN GAPS: a fragment left the cards' spacing to whoever drew it, and the
        Payments out card sat jammed under this one (the firm, 13 Oct: "looks weird"). */
     <div className="space-y-4">
+      {queueSize > 0 && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="suspense-search">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input className={`${inputClass} pl-9`} aria-label="Search suspense"
+              placeholder="Amount, name, reference or anything the bank said"
+              value={query.text} onChange={(e) => setQuery({ ...query, text: e.target.value })} />
+          </div>
+          <input type="date" className={controlClass} aria-label="Received from" value={query.from ?? ''}
+            onChange={(e) => setQuery({ ...query, from: e.target.value || null })} />
+          <span className="text-[13px] text-slate-400">to</span>
+          <input type="date" className={controlClass} aria-label="Received up to" value={query.to ?? ''}
+            onChange={(e) => setQuery({ ...query, to: e.target.value || null })} />
+          {searching && (
+            <>
+              <span className="text-[12.5px] text-slate-500 tabular-nums" data-testid="suspense-search-count">
+                {shownSize} of {queueSize} match
+              </span>
+              <button type="button" className="inline-flex items-center gap-1 text-[12.5px] text-slate-500 hover:text-slate-700"
+                onClick={() => setQuery(EMPTY_SUSPENSE_QUERY)}>
+                <X size={13} /> Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <Card padded={false} className="border-t-[3px] border-t-gold-400">
         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-5 py-4">
           <div>
@@ -201,6 +241,10 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
 
         {loading ? (
           <div className="py-8 text-center"><Loader2 className="mx-auto w-4 h-4 animate-spin text-slate-400" /></div>
+        ) : rows.length > 0 && shownRows.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[13px] text-slate-500">
+            None of the {rows.length} receipts here matches the search.
+          </p>
         ) : rows.length === 0 ? (
           <p className="px-4 py-6 text-center text-[13px] text-slate-500">
             Nothing needs an account. Every receipt imported has been placed.
@@ -217,7 +261,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {shownRows.map((r) => (
                 <tr key={r.id} className="border-b border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.txnDate)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
@@ -325,7 +369,10 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               </tr>
             </thead>
             <tbody>
-              {suspended.map((r) => (
+              {shownSuspended.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-4 text-center text-[13px] text-slate-500">None of these matches the search.</td></tr>
+              )}
+              {shownSuspended.map((r) => (
                 <tr key={r.id} className="border-b border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.txnDate)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
@@ -399,7 +446,10 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               </tr>
             </thead>
             <tbody>
-              {parked.map((r) => (
+              {shownParked.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-4 text-center text-[13px] text-slate-500">None of these matches the search.</td></tr>
+              )}
+              {shownParked.map((r) => (
                 <tr key={r.paymentId} className="border-b border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.receivedOn)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
