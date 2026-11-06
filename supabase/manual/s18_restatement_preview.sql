@@ -47,6 +47,8 @@ declare
   v_acc_new numeric;
   v_imported boolean;
   v_restore numeric;
+  v_shadow uuid;
+  v_map jsonb := '{}'::jsonb;
   e record;
 begin
   if not public.may_approve_payment() then
@@ -75,58 +77,61 @@ begin
                     and accrued_on + days > v_day) into v_imported;
 
   begin
-    /* THE GUARDS STAND DOWN FOR THE QUESTION ONLY. protect_payover_run_lines refuses to remove the lines of a
-       PAID run -- rightly -- and the unwinding below removes allocations whose cascade would take those lines.
-       session_replication_role = replica silences triggers for THIS block; the GUC, like every write here, is
-       undone when the block raises, so nothing a paid run says is ever really touched. */
-    perform set_config('session_replication_role', 'replica', true);
+    /*
+     * NOTHING A PAID RUN SAYS IS TOUCHED, EVEN FOR THE QUESTION. protect_payover_run_lines refuses to remove an
+     * issued run's lines, and it is right to; so the allocations from this day on are SET ASIDE (marked reversed,
+     * which every sum already skips) rather than removed, and each of those payments is re-posted as a SHADOW
+     * copy, oldest first, through approve_payment -- the code that posts for real. The backdated payment itself,
+     * if it is still waiting, is approved as it is. All of it, shadows included, goes when the block raises.
+     */
     delete from public.account_interest_accruals
      where account_id = v.account_id and source = 'engine' and accrued_on + days > v_day;
 
     select coalesce(sum(a.to_capital), 0) into v_restore
-      from public.payment_allocations a
-      join public.account_payments p on p.id = a.payment_id
+      from public.payment_allocations a join public.account_payments p on p.id = a.payment_id
      where a.account_id = v.account_id and a.status <> 'reversed'
        and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day;
     update public.debtor_accounts set capital_outstanding = coalesce(capital_outstanding, 0) + v_restore
      where id = v.account_id;
 
-    delete from public.account_fees f
-     using public.account_payments p
-     where f.payment_id = p.id and f.account_id = v.account_id
-       and f.annexure_item = '9' and f.source = 'raptor'
+    delete from public.account_fees f using public.account_payments p
+     where f.payment_id = p.id and f.account_id = v.account_id and f.annexure_item = '9' and f.source = 'raptor'
        and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day;
 
-    delete from public.payment_allocations a
-     using public.account_payments p
-     where a.payment_id = p.id and a.account_id = v.account_id
+    update public.payment_allocations a set status = 'reversed'
+      from public.account_payments p
+     where a.payment_id = p.id and a.account_id = v.account_id and a.status <> 'reversed'
        and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day;
-
-    /* The backdated payment itself, if it is still waiting, is approved for the question. */
-    update public.account_payments
-       set approved_at = coalesce(approved_at, public.raptor_now()),
-           allocated_on = coalesce(allocated_on, public.raptor_today())
-     where id = v.id;
 
     for e in
-      select p.id from public.account_payments p
+      select p.* from public.account_payments p
        where p.account_id = v.account_id
          and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day
-         and p.approved_at is not null and p.reversed_at is null and p.rejected_at is null
-         and p.suspended_at is null and not p.is_demo and not coalesce(p.paid_over_in_swordfish, false)
+         and (p.approved_at is not null or p.id = v.id)
+         and p.reversed_at is null and p.rejected_at is null and p.suspended_at is null
+         and not p.is_demo and not coalesce(p.paid_over_in_swordfish, false)
        order by p.received_at, p.created_at, p.id
     loop
-      perform public.allocate_payment(e.id);
+      if e.id = v.id and e.approved_at is null then
+        perform public.approve_payment(e.id);
+        v_map := v_map || jsonb_build_object(e.id::text, e.id::text);
+      else
+        insert into public.account_payments (account_id, received_at, amount, method, reference, details, source,
+                                             paid_to_client, created_by)
+        values (e.account_id, e.received_at, e.amount, e.method, e.reference, 'restatement shadow', 'manual',
+                e.paid_to_client, e.created_by)
+        returning id into v_shadow;
+        perform public.approve_payment(v_shadow);
+        v_map := v_map || jsonb_build_object(v_shadow::text, e.id::text);
+      end if;
     end loop;
 
-    select coalesce(jsonb_object_agg(a.payment_id::text, jsonb_build_object(
+    select coalesce(jsonb_object_agg(v_map ->> a.payment_id::text, jsonb_build_object(
              'i', a.to_interest, 'c', a.to_costs, 'k', a.to_capital,
              'm', a.commission + a.commission_vat, 't', a.to_client, 'x', a.excess_credit)), '{}'::jsonb)
       into v_new
       from public.payment_allocations a
-      join public.account_payments p on p.id = a.payment_id
-     where a.account_id = v.account_id and a.status <> 'reversed'
-       and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day;
+     where a.status <> 'reversed' and v_map ? a.payment_id::text;
     select coalesce(sum(amount_recoverable), 0) into v_acc_new
       from public.account_interest_accruals where account_id = v.account_id;
 
