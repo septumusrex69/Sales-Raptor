@@ -2268,9 +2268,14 @@ function BuzzBoxIntegrationCard() {
           )}
           {extensionsError && <p className="text-xs text-amber-600">{extensionsError} You can still type an extension number.</p>}
 
+          {/* FOLDED (S18; Stephan, 6 Nov: "click a drop down button, because you have to go all the way down to
+              go down to the rest of the stuff at the bottom"). One row per colleague pushed every card under it
+              off the screen; opened, it is the same table. */}
           {isAdmin && (
-            <div>
-              <p className="text-xs font-semibold text-slate-500 mb-2">Everyone’s extensions</p>
+            <details data-testid="buzzbox-everyone">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-500 mb-2">
+                Everyone’s extensions ({activeUsers.filter((u) => u.buzzboxExtension).length} of {activeUsers.length} set)
+              </summary>
               <div className="overflow-x-auto">
                 <table className="w-full list-table whitespace-nowrap">
                   <thead>
@@ -2296,7 +2301,7 @@ function BuzzBoxIntegrationCard() {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </details>
           )}
         </div>
       )}
