@@ -119,7 +119,7 @@ export function AppLayout() {
 
   return (
     <TitleSlotProvider>
-      <div className="app-layout flex h-dvh w-full overflow-hidden">
+      <div className="app-layout flex h-dvh w-full overflow-clip">
         <Sidebar />
         <div className="app-content flex-1 flex flex-col min-w-0">
           <StagingClockBar clock={clock} />

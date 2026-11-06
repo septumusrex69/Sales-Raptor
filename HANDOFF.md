@@ -8,6 +8,9 @@
 
 ## S18 -- RUNNING LOG (Raptor · Handover 17, 5 Nov; branch `claude/upbeat-goldberg-amk2i3`, started from `claude/sales-raptor-review-p1pzx2` at 7e89084)
 
+
+**R-22 (builder, 6 Nov):** "the page scrolling is weird, Raptor goes up and the grey displays at the bottom." The DOCUMENT was scrolling under the one-window-tall app shell (something sticking out of it, or a focus(), scrolled `<html>`). `html:has(.app-layout)` is now `overflow: hidden`, `.app-layout` is `position: relative` and `overflow-clip`; pages without the shell (login, portal, signing) scroll as before. New check `scripts/qa/e2e/app-shell-scroll.mjs`, seen failing with the rule removed. `change-requests.mjs` already failed 2 checks before this change (Parked shelf, the options panel) -- not touched here.
+
 **ON STAGING (5 Nov, Stephan: "you can bring everything up to staging"):** S18's branch fast-forwarded onto
 `claude/sales-raptor-review-p1pzx2` at 249f77c (9 commits). The Staging ruleset printed "Changes must be made through
 a pull request" and let the push through on the account's bypass -- the rule is reporting, not enforcing, for this
