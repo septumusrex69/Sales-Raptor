@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from '../lib/supabase'
 import { clockNow } from '../lib/clock'
 import { johannesburgToday, lookFromRow, type DayLookRow } from '../lib/portalPhotos'
-import { setDayLook } from '../lib/dayLookState'
+import { dayLookKnown, rememberDayRow, rememberedDayRow, setDayLook } from '../lib/dayLookState'
 import { applyDayPhoto, applyTheme, readStoredTheme, storeTheme, themeById, type ThemeDefinition, type ThemeId } from '../lib/themes'
 
 interface ThemeContextValue {
@@ -17,6 +17,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Read straight out of storage on the first render rather than in an effect: applying the
   // skin a frame later would show everyone a flash of the other theme on every page load.
   const [themeId, setThemeId] = useState<ThemeId>(() => {
+    /* Today's photograph, if this device already asked today, before the first paint (dayLookState.ts). */
+    const seen = rememberedDayRow(johannesburgToday(clockNow()))
+    if (seen) setDayLook(lookFromRow(seen.row as DayLookRow | null))
     const saved = readStoredTheme()
     applyTheme(saved)
     return saved
@@ -40,13 +43,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
      re-applied; nothing approved for today leaves Llandudno, which is already on. */
   useEffect(() => {
     let live = true
-    supabase.from('portal_day_looks').select('*').eq('day', johannesburgToday(clockNow())).maybeSingle()
-      .then(({ data }) => {
+    const day = johannesburgToday(clockNow())
+    /* No answer in four seconds: Llandudno, as it always was -- a band left navy all day is worse than the old picture. */
+    const fallback = window.setTimeout(() => {
+      if (live && !dayLookKnown()) { setDayLook(lookFromRow(null)); applyDayPhoto(readStoredTheme()) }
+    }, 4000)
+    supabase.from('portal_day_looks').select('*').eq('day', day).maybeSingle()
+      .then(({ data, error }) => {
         if (!live) return
+        window.clearTimeout(fallback)
+        if (!error) rememberDayRow(day, data ?? null)
         setDayLook(lookFromRow(data as DayLookRow | null))
         applyDayPhoto(readStoredTheme())
       })
-    return () => { live = false }
+    return () => { live = false; window.clearTimeout(fallback) }
   }, [])
 
   // A second tab is the same person: changing the skin in one should carry to the others

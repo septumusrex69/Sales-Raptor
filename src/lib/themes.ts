@@ -1,5 +1,5 @@
 import { bandBackground, portalPhotoUrl } from './portalPhotos.ts'
-import { currentDayLook } from './dayLookState.ts'
+import { currentDayLook, dayLookKnown } from './dayLookState.ts'
 /**
  * The visual skins available to the application.
  *
@@ -253,6 +253,12 @@ export function applyDayPhoto(id: ThemeId) {
   if (id !== BASE_THEME) { for (const v of [...DAY_PHOTO_VARS, '--day-photo-position', '--day-photo-login-position'] as const) root.style.removeProperty(v); return }
   /* TODAY'S APPROVED LOOK (dayLookState.ts, fetched by ThemeContext) -- the same one the client portal shows, framed
      as an Administrator approved it at /portal-looks; Llandudno where today was not approved. */
+  /* Today's answer not in yet: plain navy, never yesterday's picture (dayLookState.ts). */
+  if (!dayLookKnown()) {
+    for (const v of ['--skin-collections-hero-image', '--day-photo-login'] as const) root.style.setProperty(v, 'none')
+    root.style.setProperty('--skin-hero-background', '#12212f')
+    return
+  }
   const look = currentDayLook()
   const at = (w: number) => `url('${portalPhotoUrl(look.photo, w)}'), url('/brand/portal-photo.webp')`
   root.style.setProperty('--skin-collections-hero-image', at(3200))

@@ -29,6 +29,11 @@ LEFT edge with the button at the right, so it ran off screen and slid sideways a
 open (right-aligned), chips on their own row. Checks: check-account-export 70, check-account-views, e2e accounts 164
 (downloads both CSVs).
 
+**SHIPPED (S18, 6 Nov): NO FLASH OF YESTERDAY'S PHOTOGRAPH** (Stephan: "for an instant it shows the old picture").
+Today's `portal_day_looks` row is remembered on the device (`dayLookState.rememberDayRow`) and applied before the
+first paint; until an answer is in, `applyDayPhoto` paints the band plain navy; no answer in 4 s falls back to
+Llandudno. `check-day-photo-flash`.
+
 **SHIPPED (S18, 6 Nov): REQUESTS CAN BE PARKED** (Stephan: "something that is parked for now. Until I can make
 another decision"). `change_requests.parked_at/parked_by` -- not a status, laid over Submitted or Approved. Big
 Boss only (`change_request_boss_decides`), any decision unparks it, parking takes it off Claude's queue, and
