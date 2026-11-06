@@ -480,7 +480,8 @@ ok('...the shared one', /from '\.\/ui\/Dictate'/.test(composer))
  * for nothing -- but with the page declaring lang="en" it checks an Afrikaans letter against an
  * English dictionary and underlines every word, which teaches people to ignore the underlines.
  */
-ok('the message box is spell-checked', /spellCheck onChange/.test(composer))
+/* S18: on unless the person switched spell check off (Settings → Appearance). */
+ok('the message box is spell-checked', /spellCheck=\{spellCheckEnabled\(\)\} onChange/.test(composer))
 ok('...in the language being dictated', /lang=\{lang\}/.test(composer))
 /* One source of truth for that setting: DictateButton owns the picker and remembers the choice. */
 ok('...read from the one place that owns it', /const \[lang\] = useState\(storedLanguage\)/.test(composer))

@@ -55869,3 +55869,54 @@ returns integer language sql stable security invoker set search_path to 'public'
   )::integer
 $$;
 grant execute on function public.nav_request_count() to authenticated;
+
+-- ============================================================================================
+-- S18 (6 Nov, Raptor H17): CLAUDE'S QUESTIONS GO TO THE ADMINISTRATOR WHO SENT THE REQUEST THROUGH. Stephan, on
+-- R-26 (a question Claude put to Itumeleng about a request he had approved and queued): "the question should be
+-- asked rather to the administrator who sent it through." A question with no author (by_id null: the builder or the
+-- nightly review) now notifies whoever put the request on Claude's queue, else whoever decided it, else -- nobody
+-- has yet -- the person who wrote it. The browser's questionFor() (changeRequests.ts) names the same person on the
+-- panel. A question an Administrator asks with Request info, and every comment, still goes to the person who wrote
+-- the request, as before.
+create or replace function public.change_request_event_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r public.change_requests;
+  v_who text;
+  v_for uuid;
+begin
+  if new.kind not in ('comment', 'question') then
+    return new;
+  end if;
+  select * into r from public.change_requests where id = new.request_id;
+  v_who := case when new.by_id is null then 'Claude'
+                else coalesce((select name from public.profiles where id = new.by_id), 'Somebody') end;
+  if new.kind = 'question' and new.by_id is null then
+    v_for := coalesce(r.build_requested_by, r.decided_by, r.created_by);
+    insert into public.notifications (user_id, type, message, link)
+    values (v_for, 'change_request.question',
+            'Claude has a question about R-' || r.number || case when v_for = r.created_by then ', your request' else '' end
+            || ': ' || left(btrim(new.body), 120),
+            '/requests?r=' || r.number);
+    return new;
+  end if;
+  if new.by_id is distinct from r.created_by then
+    insert into public.notifications (user_id, type, message, link)
+    values (r.created_by, 'change_request.' || new.kind,
+            case when new.kind = 'question' then v_who || ' has a question about your request R-' || r.number || ': '
+                 else v_who || ' wrote on your request R-' || r.number || ': ' end || left(btrim(new.body), 120),
+            '/requests?r=' || r.number);
+  else
+    insert into public.notifications (user_id, type, message, link)
+    select p.id, 'change_request.reply', v_who || ' replied on R-' || r.number || ': ' || left(btrim(new.body), 120), '/requests?r=' || r.number
+      from public.profiles p
+     where p.role = 'Administrator' and p.status = 'Active' and p.id is distinct from new.by_id;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.change_request_event_notify() from public, anon, authenticated;

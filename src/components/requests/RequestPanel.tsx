@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Check, ChevronLeft, ChevronRight, FileText, HelpCircle, Loader2, MessageSquare, Moon, Paperclip, X,
@@ -240,6 +240,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
             <p className="text-xs font-semibold text-slate-600">{PROMPT[composing].label}</p>
             <textarea value={words} onChange={(e) => setWords(e.target.value)} rows={3} autoFocus placeholder={PROMPT[composing].placeholder}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-compose-words" />
+            <div className="flex justify-end"><DictateButton size="small" value={words} onChange={setWords} /></div>
             {composing === 'question' && (
               <label className="block space-y-1">
                 <span className="text-xs text-slate-600">Options to tick, one per line (optional, up to {MAX_CHOICES}). They can always choose Other and write their own.</span>
@@ -355,6 +356,14 @@ function ChoiceAnswer({ q, answer, canAnswer, askerName, busy, onAnswer }: {
 }) {
   const [pick, setPick] = useState<string | null>(null)
   const [other, setOther] = useState('')
+  /*
+   * ONE PRESS, ONE ANSWER (S18). Stephan's Other on R-22 was saved twice, 0.8 s apart: `busy` comes back from the
+   * panel a render later, and a second tap on the iPad landed before it did. A ref is set in the same tick as the
+   * press, so the second one finds it set. Cleared again once the panel is no longer busy and there is still no
+   * answer -- the save failed and the error says so -- so it can be pressed again.
+   */
+  const sentRef = useRef(false)
+  useEffect(() => { if (!busy && !answer) sentRef.current = false }, [busy, answer])
   const choices = q.choices ?? []
   const open = canAnswer && !answer
   const ticked = answer ? tickedOf(choices, answer.body) : pick
@@ -371,11 +380,16 @@ function ChoiceAnswer({ q, answer, canAnswer, askerName, busy, onAnswer }: {
           </button>
         )
       })}
+      {/* DICTATE ON OTHER (S18, Stephan: "when you say other and Claude asks, there should also be a dictate
+          option so you can speak"). The same button as everywhere else; speech is added onto what is typed. */}
       {open && pick === OTHER_CHOICE && (
-        <textarea value={other} onChange={(e) => setOther(e.target.value)} rows={2} autoFocus placeholder="Your suggestion…"
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-choice-other" />
+        <>
+          <textarea value={other} onChange={(e) => setOther(e.target.value)} rows={2} autoFocus placeholder="Your suggestion… type it, or press Dictate and say it"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" data-testid="request-choice-other" />
+          <div className="flex justify-end"><DictateButton size="small" value={other} onChange={setOther} /></div>
+        </>
       )}
-      {open && <Button size="sm" variant="primary" disabled={busy || !send} onClick={() => { if (send) onAnswer(send) }} data-testid="request-choice-send">Send answer</Button>}
+      {open && <Button size="sm" variant="primary" disabled={busy || !send} onClick={() => { if (send && !sentRef.current) { sentRef.current = true; onAnswer(send) } }} data-testid="request-choice-send">Send answer</Button>}
       {answer && ticked === OTHER_CHOICE && <p className="text-[13px] text-emerald-900" data-testid="request-choice-other-said">{answer.body}</p>}
       {!answer && !canAnswer && <p className="text-xs text-slate-500">Waiting for {askerName} to choose.</p>}
     </div>

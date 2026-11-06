@@ -13,6 +13,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-change-requests.mjs
  */
 import { readFileSync } from 'node:fs'
+import { questionFor, waitingOn } from '../../src/lib/changeRequests.ts'
 import {
   MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
   STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, mayEdit, onShelf, SHELVES, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
@@ -310,3 +311,23 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(`check-change-requests: ${pass} passed, 0 failed`)
+
+/* S18 (Stephan): "the question should be asked rather to the administrator who sent it through." */
+{
+  const R = { id: 'r', created_by: 'asker', status: 'accepted', build_requested_by: 'boss', decided_by: 'admin' }
+  check('Claude\'s question is for whoever put it on the queue', questionFor(R, { by_id: null }), 'boss')
+  check('...else whoever approved it', questionFor({ ...R, build_requested_by: null }, { by_id: null }), 'admin')
+  check('...else, nobody yet, the person who wrote it', questionFor({ ...R, build_requested_by: null, decided_by: null }, { by_id: null }), 'asker')
+  check('an Administrator\'s Request info is still for the person who wrote it', questionFor(R, { by_id: 'admin' }), 'asker')
+  const q = { id: 'q', request_id: 'r', kind: 'question', by_id: null, at: '2026-11-06T08:00:00Z', answers: null, choices: null }
+  check('a question for words waits on the one it is for', waitingOn(R, [q]), 'boss')
+  check('...and the asker writing does not answer it', waitingOn(R, [q, { ...q, id: 'c', kind: 'comment', by_id: 'asker', at: '2026-11-06T09:00:00Z' }]), 'boss')
+  check('...the one it is for does', waitingOn(R, [q, { ...q, id: 'c', kind: 'comment', by_id: 'boss', at: '2026-11-06T09:00:00Z' }]), null)
+  const sch = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+  const at = sch.lastIndexOf('create or replace function public.change_request_event_notify(')
+  const fn = at < 0 ? '' : sch.slice(at, sch.indexOf('$$;', at))
+  ok('the notification goes to the same person', /v_for := coalesce\(r\.build_requested_by, r\.decided_by, r\.created_by\)/.test(fn)
+    && /if new\.kind = 'question' and new\.by_id is null then/.test(fn))
+}
+console.log(`${pass} passed after S18 additions, ${failures.length} failed`)
+if (failures.length) process.exit(1)

@@ -8,6 +8,7 @@ import { scheduleFor } from '../../lib/annexureB'
 import { missingFieldsNote } from '../../lib/messageTemplates'
 import { UseTemplate } from '../../components/library/UseTemplate'
 import { clockNow } from '../../lib/clock.ts'
+import { useSpellGate } from '../../components/SpellGate'
 
 /**
  * Write a debtor an SMS.
@@ -83,12 +84,14 @@ export function SmsModal({ accountId, debtorKind, numbers, values, initialText, 
     [values],
   )
 
+  const spell = useSpellGate()
   const cost = smsCost(text)
   const rate = scheduleFor(clockNow()).items.find((i) => i.id === '1c')?.amount ?? 0
   const price = rate * Math.max(1, cost.segments)
 
   async function send() {
     if (!session?.access_token || !text.trim() || !to) return
+    if (!(await spell.clear([text]))) return
     setBusy(true)
     setError(null)
     try {
@@ -194,6 +197,7 @@ export function SmsModal({ accountId, debtorKind, numbers, values, initialText, 
             <p className="text-[11px] text-[var(--c-rust-deep)]">{missingFieldsNote(missing)}</p>
           )}
 
+          {spell.panel([{ value: text, set: setText }])}
           {error && <p className="text-sm text-negative-700">{error}</p>}
 
           <div className="flex items-center gap-2 pt-1">

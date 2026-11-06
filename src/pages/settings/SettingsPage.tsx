@@ -3,7 +3,7 @@ import { CentralMailboxCard } from '../../components/settings/CentralMailboxCard
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound, MonitorSmartphone } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, SpellCheck, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound, MonitorSmartphone } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -29,6 +29,7 @@ import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { ACTIVE_THEMES } from '../../lib/themes'
 import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
 import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
+import { setSpellCheckEnabled, spellCheckEnabled } from '../../lib/spellCheck'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
@@ -1833,7 +1834,9 @@ function AppearanceTab() {
   const { themeId, setTheme, theme } = useTheme()
   const { celebrate } = useAppStore()
   const [sound, setSound] = useState(celebrationSoundEnabled)
+  const [spelling, setSpelling] = useState(spellCheckEnabled)
   return (
+    <>
     <Card>
       <CardHeader title="Appearance" subtitle={ACTIVE_THEMES.length === 1
         ? `${theme.productName} wears the firm's own skin, ${ACTIVE_THEMES[0].name}: a new photograph of South Africa and a new line every day.`
@@ -1925,6 +1928,27 @@ function AppearanceTab() {
         </div>
       </div>
     </Card>
+    {/*
+      SPELL CHECK, ON UNLESS YOU SWITCH IT OFF (S18, Stephan: "by default it's on, but the user can switch it off").
+      One switch for both halves: the underlines while typing, and the list before an email or SMS goes. Kept on
+      this device, like the milestone sound.
+    */}
+    <Card className="mt-4">
+      <CardHeader title="Spell check" subtitle="Red underlines while you type, and a check for misspelled words before an email or SMS is sent. South African / British spelling. Nothing you type leaves Raptor to be checked." />
+      <button
+        type="button"
+        data-testid="spell-check-switch"
+        onClick={() => { const next = !spelling; setSpelling(next); setSpellCheckEnabled(next) }}
+        aria-pressed={spelling}
+        className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors ${
+          spelling ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+        }`}
+      >
+        <SpellCheck size={14} />
+        Spell check {spelling ? 'on' : 'off'}
+      </button>
+    </Card>
+    </>
   )
 }
 

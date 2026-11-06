@@ -16,6 +16,8 @@ import { FIRM_UNSET, emailBodyCss, fetchFirmSettings, type FirmSettings } from '
 import { emailBodyHtml } from '../lib/emailStyle.ts'
 import { fetchAttachment } from '../lib/userMail'
 import { fetchForwardAttachments, leftOffNote } from '../lib/forwardAttachments'
+import { useSpellGate } from './SpellGate'
+import { spellCheckEnabled } from '../lib/spellCheck'
 
 /**
  * How much may travel with one message.
@@ -239,6 +241,7 @@ export function ComposeEmailModal({
   const [showCc, setShowCc] = useState(initialCc !== undefined)
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
+  const spell = useSpellGate()
   /*
    * THE FIRM'S OWN FACE, IN THE BOX SOMEBODY TYPES IN.
    *
@@ -478,6 +481,8 @@ export function ComposeEmailModal({
       setError('Your session has expired. Sign in again — what you have typed stays in this box.')
       return
     }
+    /* THE SPELL CHECK (S18) says its own sentence when it stops the press: the list, right above this button. */
+    if (!(await spell.clear([subject, body]))) { setError(null); return }
     setSubmitting(true)
     setError(null)
     try {
@@ -649,7 +654,7 @@ export function ComposeEmailModal({
           */}
           <textarea className={inputClass} rows={quotedHtml ? 7 : 12} value={body} lang={lang}
             style={emailBodyCss(firm) as CSSProperties}
-            spellCheck onChange={(e) => { touch(); setBody(e.target.value) }} required={!quotedHtml}
+            spellCheck={spellCheckEnabled()} onChange={(e) => { touch(); setBody(e.target.value) }} required={!quotedHtml}
             placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
             /* ONLY ONCE SOMEBODY IS ADDRESSED (the firm, 23 Oct: a forward "starts typing with
                message. It doesn't say who do I want to send it to"). A forward has a subject and no
@@ -784,6 +789,7 @@ export function ComposeEmailModal({
         {missingFieldsNote(missing) && (
           <p className="text-xs text-[var(--c-rust-deep)] mb-3">{missingFieldsNote(missing)}</p>
         )}
+        {spell.panel([{ value: subject, set: setSubject }, { value: body, set: setBody }])}
         {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="text-sm font-medium px-4 py-2 rounded-lg text-slate-500 hover:bg-slate-100">

@@ -29,6 +29,18 @@ LEFT edge with the button at the right, so it ran off screen and slid sideways a
 open (right-aligned), chips on their own row. Checks: check-account-export 70, check-account-views, e2e accounts 164
 (downloads both CSVs).
 
+**SHIPPED (S18, 6 Nov): SPELL CHECK, ON UNLESS SWITCHED OFF** (Stephan: "we can do number 1 and 2 ... by default
+it's on, but the user can switch it off"). (1) `<html lang="en-ZA" spellcheck>` -- the browser's underlines in every
+box; (2) `useSpellGate` (`src/components/SpellGate.tsx`) checks an email or SMS against Hunspell en_GB-ise
+(`public/dictionaries/en-gb`, licence beside it; nspell, loaded on first send) before it goes: suggestions to press,
+"Add to my words", Send again sends as it is; a dictionary that will not load never holds a message. Capitalised
+words, digits, merge fields, emails and URLs are never checked; `FIRM_WORDS` covers the rest -- the 114 English
+templates on staging raise nothing. Switch: Settings -> Appearance, per device. Nothing is sent anywhere to check.
+`check-spell-check`. **Claude's questions now go to the administrator who sent the request through**
+(`questionFor`, `change_request_event_notify`, migration `s18_claude_questions_go_to_who_sent_it_through`); the
+skill says so. **Dictate** on a question's Other box and the panel's note box. **One tap, one answer** on a ticked
+question (R-22 got Stephan's Other twice; harmless, left in the history).
+
 **SHIPPED (S18, 6 Nov): NO FLASH OF YESTERDAY'S PHOTOGRAPH** (Stephan: "for an instant it shows the old picture").
 Today's `portal_day_looks` row is remembered on the device (`dayLookState.rememberDayRow`) and applied before the
 first paint; until an answer is in, `applyDayPhoto` paints the band plain navy; no answer in 4 s falls back to

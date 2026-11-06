@@ -4,6 +4,7 @@ import { Modal } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { smsCost } from '../../lib/smsSegments'
 import { sendCrmSms, crmSmsActivity, type CrmSmsTarget } from '../../lib/crmSms'
+import { useSpellGate } from '../SpellGate'
 
 /**
  * Text a lead, a client, or the person on a deal.
@@ -39,9 +40,11 @@ export function CrmSmsModal({ numbers, target, who, onClose, onSent }: {
   const [sent, setSent] = useState<{ segments: number } | null>(null)
 
   const cost = smsCost(text)
+  const spell = useSpellGate()
 
   async function send() {
     if (!session?.access_token || !text.trim() || !to) return
+    if (!(await spell.clear([text]))) return
     setBusy(true)
     setError(null)
     try {
@@ -123,6 +126,7 @@ export function CrmSmsModal({ numbers, target, who, onClose, onSent }: {
             to do with a lead or a client.
           </p>
 
+          {spell.panel([{ value: text, set: setText }])}
           {error && <p className="text-sm text-negative-700">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-1">

@@ -152,8 +152,11 @@ have to be able to ... click on it and say, okay, well, Claude, please do this."
    ```
    **When the answer is one of a few, ask it with options to tick** (Raptor H12 -- the firm: "choose the
    option by means of a tick. Or choose other"): a `question` with 2-6 `choices`; the person who asked
-   ticks one or writes their own under Other, and the answer arrives as a comment with `answers` = the
-   question's id. One question per event; ask the person who ASKED (they are notified), not Stephan:
+   the administrator who sent it through ticks one or writes their own under Other, and the answer arrives as a comment with `answers` = the
+   question's id. One question per event. **It goes to the administrator who sent the request through to you**
+   (`build_requested_by`, else `decided_by`) -- Stephan, 6 Nov: "the question should be asked rather to the
+   administrator who sent it through" -- and they are notified; write it so they can answer without asking the
+   person who wrote the request:
    ```sql
    insert into public.change_request_events (request_id, kind, body, choices, by_id)
    select id, 'question', $q$Which reference should the diary show?$q$,

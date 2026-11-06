@@ -18,6 +18,10 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
+import { applySpellCheckAttribute } from './lib/spellCheck'
+
+/* The spell-check switch (Settings → Appearance), before the first box is drawn. index.html says on. */
+applySpellCheckAttribute()
 import { RouteError } from './components/RouteError.tsx'
 import { reloadOnceForStaleChunk } from './lib/staleChunk.ts'
 
