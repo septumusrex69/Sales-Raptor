@@ -9,7 +9,7 @@ import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, isParked, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw,
+  MAX_CHOICES, OTHER_CHOICE, waitingOn, questionFor, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, isParked, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw,
   parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
@@ -109,7 +109,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
       data-testid="request-panel" data-number={r.number} aria-label={`Request ${requestLabel(r)}`}>
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
         <span className="whitespace-nowrap rounded-md bg-navy-900 px-2 py-1 font-mono text-xs font-bold text-white">{requestLabel(r)}</span>
-        <StagePill r={r} feedbackFrom={events && waitingOnAsker(r, events) ? (asker?.name.split(' ')[0] ?? 'them') : null} />
+        <StagePill r={r} feedbackFrom={(() => { const w = events ? waitingOn(r, events) : null; return w ? (userOf(w)?.name.split(' ')[0] ?? 'them') : null })()} />
         <div className="ml-auto flex items-center gap-1">
           <IconButton label="Previous request" disabled={!onPrev} onClick={() => onPrev?.()}><ChevronLeft size={16} /></IconButton>
           <IconButton label="Next request" disabled={!onNext} onClick={() => onNext?.()}><ChevronRight size={16} /></IconButton>
@@ -221,7 +221,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
               {events.map((e) => (
                 <EventLine key={e.id} e={e} who={userOf(e.by_id)?.name ?? null}>
                   {(e.choices?.length ?? 0) >= 2 && (
-                    <ChoiceAnswer q={e} answer={answerTo(e, events)} canAnswer={mayAnswer(me, r, e)} askerName={asker?.name ?? 'the person who asked'}
+                    <ChoiceAnswer q={e} answer={answerTo(e, events)} canAnswer={mayAnswer(me, r, e)} askerName={userOf(questionFor(r, e))?.name ?? 'the person who asked'}
                       busy={busy} onAnswer={(body) => { if (me) void act(() => answerQuestion(r.id, e.id, body, me.id)) }} />
                   )}
                 </EventLine>

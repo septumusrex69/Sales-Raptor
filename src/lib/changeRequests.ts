@@ -144,9 +144,10 @@ export function tickedOf(choices: string[], body: string | null): string | null 
  */
 export function mayAnswer(
   user: (Pick<User, 'id'> & NonNullable<Parameters<typeof can>[0]>) | null | undefined,
-  r: Pick<ChangeRequest, 'created_by'>, q: Pick<RequestEvent, 'kind' | 'choices'>,
+  r: Pick<ChangeRequest, 'created_by'> & Partial<Pick<ChangeRequest, 'build_requested_by' | 'decided_by'>>,
+  q: Pick<RequestEvent, 'kind' | 'choices'> & Partial<Pick<RequestEvent, 'by_id'>>,
 ): boolean {
-  return !!user && (user.id === r.created_by || can(user, 'raptor.boss'))
+  return !!user && (user.id === r.created_by || user.id === questionFor(r, { by_id: q.by_id ?? '' }) || can(user, 'raptor.boss'))
     && q.kind === 'question' && (q.choices?.length ?? 0) >= 2
 }
 
@@ -286,19 +287,41 @@ export function onShelf(r: Pick<ChangeRequest, 'status' | 'build_requested_at' |
   }
 }
 
-/**
- * Is an open request waiting for the person who asked to answer a question? A question with options
- * waits until it is ticked; a question for words waits until they write anything after it. Questions
- * answer themselves no other way -- an Administrator's own note does not answer for them.
+/*
+ * WHO A QUESTION IS FOR (S18). Stephan, on R-26 -- a question Claude put to Itumeleng about a request he had sent
+ * through: "the question should be asked rather to the administrator who sent it through." So CLAUDE'S questions
+ * (by_id null: the builder or the nightly review) go to whoever put the request on Claude's queue, else whoever
+ * approved it, else -- a request nobody has decided yet -- the person who wrote it. A question an Administrator
+ * asks with Request info is still for the person who wrote the request: that is what the button is for.
+ * change_request_event_notify sends the notification to the same person.
  */
-export function waitingOnAsker(
-  r: Pick<ChangeRequest, 'id' | 'created_by' | 'status'>,
+export function questionFor(
+  r: Pick<ChangeRequest, 'created_by'> & Partial<Pick<ChangeRequest, 'build_requested_by' | 'decided_by'>>,
+  q: Pick<RequestEvent, 'by_id'>,
+): string {
+  return q.by_id === null ? (r.build_requested_by ?? r.decided_by ?? r.created_by) : r.created_by
+}
+
+/**
+ * Who an open request is waiting on to answer a question, or null. A question with options waits until it is
+ * ticked (by anyone allowed to); a question for words waits until the person it is for writes after it. An
+ * Administrator's own note does not answer a question put to somebody else.
+ */
+export function waitingOn(
+  r: Pick<ChangeRequest, 'id' | 'created_by' | 'status'> & Partial<Pick<ChangeRequest, 'build_requested_by' | 'decided_by'>>,
   events: Pick<RequestEvent, 'id' | 'request_id' | 'kind' | 'by_id' | 'at' | 'answers' | 'choices'>[],
-): boolean {
-  if (!isOpen(r.status)) return false
+): string | null {
+  if (!isOpen(r.status)) return null
   const mine = events.filter((e) => e.request_id === r.id)
-  return mine.some((q) => q.kind === 'question' && !mine.some((a) => a.kind === 'comment' && (
-    (q.choices?.length ?? 0) >= 2 ? a.answers === q.id : (a.by_id === r.created_by && a.at > q.at))))
+  const open = mine.find((q) => q.kind === 'question' && !mine.some((a) => a.kind === 'comment' && (
+    (q.choices?.length ?? 0) >= 2 ? a.answers === q.id : (a.by_id === questionFor(r, q) && a.at > q.at))))
+  return open ? questionFor(r, open) : null
+}
+/** Is it waiting on anybody's answer? (The name is older than questionFor: it is no longer always the asker.) */
+export function waitingOnAsker(
+  r: Parameters<typeof waitingOn>[0], events: Parameters<typeof waitingOn>[1],
+): boolean {
+  return waitingOn(r, events) !== null
 }
 
 /** A night's tiles: how many of the requests it read are ready, need a decision, or are blocked. */

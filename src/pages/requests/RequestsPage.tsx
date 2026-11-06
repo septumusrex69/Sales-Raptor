@@ -10,7 +10,7 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate, formatDateTime } from '../../data/mockData'
 import {
-  REQUEST_DEPARTMENTS, SHELVES, VERDICT_LABEL, onShelf, waitingOnAsker, requestLabel, reviewTiles, sortRequests, titleOf,
+  REQUEST_DEPARTMENTS, SHELVES, VERDICT_LABEL, onShelf, waitingOn, requestLabel, reviewTiles, sortRequests, titleOf,
   type ChangeRequest, type RequestDepartment, type RequestFileMeta, type RequestReview, type ReviewVerdict, type Shelf,
 } from '../../lib/changeRequests'
 import { listFiles, listQuestionThreads, listRequests, listReviews } from '../../lib/changeRequestsApi'
@@ -95,7 +95,8 @@ export function RequestsPage() {
   const feedbackFrom = useMemo(() => {
     const m = new Map<string, string>()
     for (const r of rows ?? []) {
-      if (waitingOnAsker(r, threads)) m.set(r.id, users.find((u) => u.id === r.created_by)?.name.split(' ')[0] ?? 'them')
+      const w = waitingOn(r, threads)
+      if (w) m.set(r.id, users.find((u) => u.id === w)?.name.split(' ')[0] ?? 'them')
     }
     return m
   }, [rows, threads, users])
