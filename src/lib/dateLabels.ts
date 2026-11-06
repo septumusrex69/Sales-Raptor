@@ -20,11 +20,22 @@ export function relativeDayLabel(iso?: string): string {
 
   if (dayDiff === 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
-  if (dayDiff > 1 && dayDiff < 7) return date.toLocaleDateString('en-ZA', { weekday: 'long' })
-  if (dayDiff >= 7 && dayDiff < 14) return 'Last week'
-
+  /*
+   * PAST YESTERDAY, ALWAYS A REAL DATE (S18; Stephan, 6 Nov, on an email: "It says last week at
+   * 13:40. When was it received? There's no actual date"). "Last week" named no day at all, and on
+   * staging the clock runs ahead of the real date -- so mail from this Thursday read "Last week". A
+   * weekday keeps its name for the week just gone, because "Thursday" lands faster than a number, but
+   * the date rides with it; beyond that it is the date. Months written out by hand: en-ZA renders
+   * September as "Sept".
+   */
+  const month = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December'][date.getMonth()]
   const sameYear = date.getFullYear() === clockNow().getFullYear()
-  return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: sameYear ? undefined : 'numeric' })
+  const dayMonth = `${date.getDate()} ${month}${sameYear ? '' : ` ${date.getFullYear()}`}`
+  if (dayDiff > 1 && dayDiff < 7) {
+    return `${date.toLocaleDateString('en-ZA', { weekday: 'long' })} ${date.getDate()} ${month.slice(0, 3)}`
+  }
+  return dayMonth
 }
 
 /**
