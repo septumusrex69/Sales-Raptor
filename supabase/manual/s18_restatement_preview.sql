@@ -79,10 +79,9 @@ begin
   begin
     /*
      * NOTHING A PAID RUN SAYS IS TOUCHED, EVEN FOR THE QUESTION. protect_payover_run_lines refuses to remove an
-     * issued run's lines, and it is right to; so the allocations from this day on are SET ASIDE (marked reversed,
-     * which every sum already skips) rather than removed, and each of those payments is re-posted as a SHADOW
-     * copy, oldest first, through approve_payment -- the code that posts for real. The backdated payment itself,
-     * if it is still waiting, is approved as it is. All of it, shadows included, goes when the block raises.
+     * issued run's lines, and it is right to; so the allocations from this day on are SET ASIDE (parked on a
+     * placeholder, below) rather than removed, and each payment is split again, oldest first, through
+     * allocate_payment / approve_payment -- the code that posts for real. All of it goes when the block raises.
      */
     delete from public.account_interest_accruals
      where account_id = v.account_id and source = 'engine' and accrued_on + days > v_day;
@@ -98,10 +97,26 @@ begin
      where f.payment_id = p.id and f.account_id = v.account_id and f.annexure_item = '9' and f.source = 'raptor'
        and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day;
 
-    update public.payment_allocations a set status = 'reversed'
-      from public.account_payments p
-     where a.payment_id = p.id and a.account_id = v.account_id and a.status <> 'reversed'
-       and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day;
+    /*
+     * EACH ORIGINAL IS RE-SPLIT ITSELF, NOT A COPY. A copy left the original row counting in account_movements
+     * (which reads every payment not reversed), so on its own day the money was in twice and the interest came out
+     * R0.59 short on a probe (S18, 6 Nov). So the existing split of every payment from this day on is moved onto a
+     * placeholder payment that is born reversed -- counted nowhere, its split marked reversed so no sum reads it, the
+     * paid run's lines still pointing at it untouched -- and the original is free to be split again.
+     */
+    for e in
+      select p.* from public.account_payments p
+       where p.account_id = v.account_id
+         and (p.received_at at time zone 'Africa/Johannesburg')::date >= v_day
+         and exists (select 1 from public.payment_allocations a where a.payment_id = p.id)
+    loop
+      insert into public.account_payments (account_id, received_at, amount, method, reference, details, source,
+                                           paid_to_client, created_by, reversed_at)
+      values (e.account_id, e.received_at, e.amount, e.method, e.reference, 'restatement placeholder', 'manual',
+              e.paid_to_client, e.created_by, public.raptor_now())
+      returning id into v_shadow;
+      update public.payment_allocations set payment_id = v_shadow, status = 'reversed' where payment_id = e.id;
+    end loop;
 
     for e in
       select p.* from public.account_payments p
@@ -112,18 +127,12 @@ begin
          and not p.is_demo and not coalesce(p.paid_over_in_swordfish, false)
        order by p.received_at, p.created_at, p.id
     loop
-      if e.id = v.id and e.approved_at is null then
+      if e.approved_at is null then
         perform public.approve_payment(e.id);
-        v_map := v_map || jsonb_build_object(e.id::text, e.id::text);
       else
-        insert into public.account_payments (account_id, received_at, amount, method, reference, details, source,
-                                             paid_to_client, created_by)
-        values (e.account_id, e.received_at, e.amount, e.method, e.reference, 'restatement shadow', 'manual',
-                e.paid_to_client, e.created_by)
-        returning id into v_shadow;
-        perform public.approve_payment(v_shadow);
-        v_map := v_map || jsonb_build_object(v_shadow::text, e.id::text);
+        perform public.allocate_payment(e.id);
       end if;
+      v_map := v_map || jsonb_build_object(e.id::text, e.id::text);
     end loop;
 
     select coalesce(jsonb_object_agg(v_map ->> a.payment_id::text, jsonb_build_object(
