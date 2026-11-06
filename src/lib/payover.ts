@@ -20,6 +20,7 @@
 import { supabase } from './supabase'
 import { allocationOf, type Allocation } from './allocationRules'
 import { clockToday } from './clock.ts'
+import { inRunningOrder } from './runOrder.ts'
 import { firstLineAfter } from './bankStatement.ts'
 import type { ClosedAs } from './paymentsQueue.ts'
 
@@ -270,7 +271,7 @@ export async function fetchTiles(periodStart?: string | null): Promise<CycleTile
 export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
   const { data, error } = await supabase.rpc('payover_run_payments', { p_run: runId })
   if (error) throw new Error(error.message)
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  return inRunningOrder(((data ?? []) as Record<string, unknown>[]).map((r) => ({
     lineId: String(r.line_id),
     allocationId: s(r.allocation_id),
     paymentId: s(r.payment_id),
@@ -301,7 +302,7 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     capitalHandedOver: n(r.capital_handed_over),
     paidInFull: Boolean(r.paid_in_full),
     excessDisposal: s(r.excess_disposal),
-  }))
+  })))
 }
 
 export async function fetchExceptions(): Promise<ExceptionJob[]> {
