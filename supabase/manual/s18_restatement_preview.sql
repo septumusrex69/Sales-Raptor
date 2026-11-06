@@ -115,7 +115,7 @@ begin
       values (e.account_id, e.received_at, e.amount, e.method, e.reference, 'restatement placeholder', 'manual',
               e.paid_to_client, e.created_by, public.raptor_now())
       returning id into v_shadow;
-      update public.payment_allocations set payment_id = v_shadow, status = 'reversed' where payment_id = e.id;
+      update public.payment_allocations pa set payment_id = v_shadow, status = 'reversed' where pa.payment_id = e.id;
     end loop;
 
     for e in
