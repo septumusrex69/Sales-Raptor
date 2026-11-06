@@ -9,11 +9,11 @@ import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw,
+  MAX_CHOICES, OTHER_CHOICE, waitingOnAsker, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, isParked, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw,
   parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
-import { addEvent, answerQuestion, answerTest, askClaude, editRequest, fileDataUrl, listEvents, updateRequest, withdrawRequest } from '../../lib/changeRequestsApi'
+import { addEvent, answerQuestion, answerTest, askClaude, editRequest, fileDataUrl, listEvents, updateRequest, withdrawRequest, parkRequest } from '../../lib/changeRequestsApi'
 import type { User } from '../../types'
 import { refreshNavCounts } from '../../lib/navCounts'
 
@@ -53,7 +53,7 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /* One box for words, used by whichever action needs them: a decline's reason, a question, how to test. */
-  const [composing, setComposing] = useState<null | 'decline' | 'question' | 'comment' | 'sendback'>(null)
+  const [composing, setComposing] = useState<null | 'decline' | 'question' | 'comment' | 'sendback' | 'park'>(null)
   const [words, setWords] = useState('')
   /* A question's options, one per line; empty is a question that wants words. */
   const [choiceWords, setChoiceWords] = useState('')
@@ -93,12 +93,15 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
     else if (composing === 'comment') void act(() => addEvent(r.id, 'comment', w, me.id))
     else if (composing === 'sendback') void act(() => answerTest(r.number, false, w))
   }
+  /* Parking needs no reason, so it is sent from here rather than from submitWords' "nothing typed" guard. */
+  const park = () => { if (me) void act(() => parkRequest(r, me, true, words)) }
 
   const PROMPT: Record<NonNullable<typeof composing>, { label: string; placeholder: string; button: string }> = {
     decline: { label: 'Why not? They are told.', placeholder: 'e.g. Covered by R-8, which does the same.', button: 'Decline' },
     question: { label: `Ask ${asker?.name ?? 'them'} — they are notified and can answer here.`, placeholder: 'e.g. Which reference do you mean: ours or the client’s?', button: 'Send question' },
     comment: { label: 'Add a note to the history.', placeholder: 'Write a note…', button: 'Add note' },
     sendback: { label: 'What is still not right?', placeholder: 'e.g. The reference is still missing on disputes.', button: 'Send it back' },
+    park: { label: 'Parked for now, until you decide. A note for later, if you like.', placeholder: 'e.g. After the month-end run.', button: 'Park it' },
   }
 
   return (
@@ -247,8 +250,8 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
               </label>
             )}
             <div className="flex gap-2">
-              <Button size="sm" variant={composing === 'decline' || composing === 'sendback' ? 'danger' : 'primary'} disabled={busy || !words.trim() || (composing === 'question' && !choicesOk(choices))}
-                onClick={submitWords} data-testid="request-compose-send">{PROMPT[composing].button}</Button>
+              <Button size="sm" variant={composing === 'decline' || composing === 'sendback' ? 'danger' : 'primary'} disabled={busy || (composing !== 'park' && !words.trim()) || (composing === 'question' && !choicesOk(choices))}
+                onClick={composing === 'park' ? park : submitWords} data-testid="request-compose-send">{PROMPT[composing].button}</Button>
               <Button size="sm" variant="ghost" onClick={() => setComposing(null)}>Cancel</Button>
             </div>
           </div>
@@ -266,6 +269,18 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
             the work is on the preview -- there is no button here for them, so nothing reads as
             released that nobody built.
           */}
+          {/*
+            PARKED (S18, Stephan: "something that is parked for now. Until I can make another decision").
+            While parked the only moves are to take it out again or decide it there and then; any decision
+            unparks it in the database. A parked request is never on Claude's queue.
+          */}
+          {isParked(r) && <>
+            <span className="text-xs text-slate-600" data-testid="request-parked">Parked since {formatDateTime(r.parked_at!)}</span>
+            {boss && <Button variant="secondary" disabled={busy} onClick={() => void act(() => parkRequest(r, me, false))} data-testid="request-unpark">Take out of Parked</Button>}
+          </>}
+          {!isParked(r) && boss && (r.status === 'new' || r.status === 'accepted') && (
+            <Button variant="ghost" disabled={busy} onClick={() => setComposing('park')} data-testid="request-park">Park</Button>
+          )}
           {r.status === 'new' && <>
             {boss && <>
               <Button variant="primary" disabled={busy} onClick={() => void approveAndBuild()} data-testid="request-approve-build">Approve &amp; ask Claude</Button>
@@ -321,6 +336,7 @@ export function StagePill({ r, feedbackFrom }: { r: ChangeRequest; feedbackFrom?
   return (
     <span className="inline-flex items-center gap-1">
       <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`} data-testid="request-status">{stage}</span>
+      {isParked(r) && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700" data-testid="request-parked-pill">Parked</span>}
       {r.status === 'accepted' && r.build_requested_at && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800" data-testid="request-queued-pill">Queued for Claude</span>}
       {feedbackFrom && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900" data-testid="request-feedback">Needs feedback from {feedbackFrom}</span>}
       {test === 'works' && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">Tested ✓</span>}

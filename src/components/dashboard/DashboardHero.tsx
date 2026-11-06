@@ -11,11 +11,21 @@ import { useTheme } from '../../store/ThemeContext'
  */
 export function DashboardHero({
   children,
+  aside,
   eyebrow,
   title = 'Sales Dashboard',
   subtitle = 'Real-time overview of your sales performance',
 }: {
   children?: ReactNode
+  /*
+   * A PANE THAT STAYS ON THE RIGHT (R-26, S18). `children` shares a wrapping row with the title, so on
+   * a page whose title line is long -- a debtor's name, then the client, account number, client ref
+   * and handover date -- the whole controls row dropped UNDER the title, and the pre-legal agent with
+   * it. Itumeleng asked for the agent on the right of the band and Stephan saw it "down there at the
+   * bottom". With `aside` the title takes the width that is left and wraps inside itself instead, and
+   * the aside keeps the top right. Below md there is no room for both and it wraps, which is right.
+   */
+  aside?: ReactNode
   eyebrow?: ReactNode
   title?: ReactNode
   subtitle?: ReactNode
@@ -46,8 +56,8 @@ export function DashboardHero({
         />
       </svg>
       )}
-      <div className="relative z-[1] flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3.5">
+      <div className={`relative z-[1] flex flex-wrap items-start justify-between gap-4${aside ? ' md:flex-nowrap' : ''}`}>
+        <div className={`flex items-center gap-3.5${aside ? ' min-w-0 flex-1' : ''}`}>
           {raptor ? (
             <img src="/brand/raptor-mark.png" alt="" className="h-11 w-auto shrink-0" />
           ) : (
@@ -70,13 +80,14 @@ export function DashboardHero({
           </defs>
         </svg>
           )}
-        <div>
+        <div className={aside ? 'min-w-0' : undefined}>
           <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gold-500 mb-1">{eyebrow ?? `Bredell Ferreira · ${theme.productName}`}</p>
           <h2 className="text-2xl font-extrabold tracking-tight text-white">{title}</h2>
           <p className="text-[13px] text-white/80 mt-0.5">{subtitle}</p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">{children}</div>
+        {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+        {aside && <div className="shrink-0 md:ml-auto" data-testid="hero-aside">{aside}</div>}
       </div>
     </div>
   )

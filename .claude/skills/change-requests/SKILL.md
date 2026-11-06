@@ -23,6 +23,7 @@ select r.number, r.status, r.priority, r.department, r.pane, r.tested_ok, r.test
        p.name as asked_by, p.role
   from public.change_requests r join public.profiles p on p.id = r.created_by
  where r.status in ('new', 'accepted', 'building')
+   and r.parked_at is null   -- PARKED (S18): Stephan has put it off; it is not tonight's to read or build
  order by (r.tested_ok = false) desc, r.number;   -- sent back after testing comes first
 ```
 
@@ -53,7 +54,7 @@ about.
 2. Find the requests not yet in any review:
    ```sql
    select r.* from public.change_requests r
-    where r.status = 'new'
+    where r.status = 'new' and r.parked_at is null
       and not exists (select 1 from public.change_request_reviews v where r.id = any(v.request_ids));
    ```
    **None: stop. Write nothing** -- an empty review every morning is a notification people learn to ignore.

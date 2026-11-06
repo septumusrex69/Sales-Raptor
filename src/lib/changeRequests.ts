@@ -61,6 +61,9 @@ export interface ChangeRequest {
   /** On Claude's build queue since (Raptor H12): set by "Ask Claude to build it", cleared by the builder. */
   build_requested_at: string | null
   build_requested_by: string | null
+  /** Parked by the Big Boss (S18): "not now", laid over a Submitted or Approved request. Not a status. */
+  parked_at?: string | null
+  parked_by?: string | null
 }
 
 export type ReviewVerdict = 'ready' | 'decision' | 'blocked'
@@ -132,8 +135,19 @@ export function tickedOf(choices: string[], body: string | null): string | null 
 }
 
 /** The person who asked answers their own request's questions; an Administrator answers for nobody. */
-export function mayAnswer(user: Pick<User, 'id'> | null | undefined, r: Pick<ChangeRequest, 'created_by'>, q: Pick<RequestEvent, 'kind' | 'choices'>): boolean {
-  return !!user && user.id === r.created_by && q.kind === 'question' && (q.choices?.length ?? 0) >= 2
+/*
+ * WHO MAY TICK AN ANSWER: the person who asked, and the Big Boss (S18). Stephan, on R-26, a question
+ * Claude put to Itumeleng: "I can't click on any of these ... Maybe I should be able to also approve
+ * this or change this ... or put other". He decides what gets built, so his answer settles the
+ * question as well as theirs; the history says it was his. The database already allows an
+ * Administrator's answer (change_request_events_insert); this is the browser drawing the boxes.
+ */
+export function mayAnswer(
+  user: (Pick<User, 'id'> & NonNullable<Parameters<typeof can>[0]>) | null | undefined,
+  r: Pick<ChangeRequest, 'created_by'>, q: Pick<RequestEvent, 'kind' | 'choices'>,
+): boolean {
+  return !!user && (user.id === r.created_by || can(user, 'raptor.boss'))
+    && q.kind === 'question' && (q.choices?.length ?? 0) >= 2
 }
 
 export interface RequestFileMeta {
@@ -228,6 +242,7 @@ export const STATUS_LABEL: Record<RequestStatus, string> = {
 
 /** Where a request stands in the workflow, Reviewed included. */
 export function stageOf(r: Pick<ChangeRequest, 'status' | 'reviewed_at'>): string {
+  /* Parked is drawn as a pill of its own beside the stage (StagePill), not instead of it. */
   return r.status === 'new' && r.reviewed_at ? 'Reviewed' : STATUS_LABEL[r.status]
 }
 
@@ -245,13 +260,22 @@ export function titleOf(r: Pick<ChangeRequest, 'review_title' | 'description'>):
  *   claude    -- With Claude: on the build queue, or being built
  *   test      -- To test: released and not yet tested ("Not right yet" sends it back to approved)
  *   finished  -- Done: released and tested ✓
+ *   parked    -- Parked (S18, Stephan: "something that is parked for now. Until I can make another
+ *                decision"): off "Needs a decision" and off the sidebar count, kept whole, back where
+ *                it was the moment it is unparked or decided.
  * The stored statuses are unchanged; this is only how the list sorts them.
  */
-export type Shelf = 'decide' | 'claude' | 'test' | 'finished' | 'declined' | 'all'
+export type Shelf = 'decide' | 'claude' | 'test' | 'finished' | 'parked' | 'declined' | 'all'
 export const SHELVES: readonly [Shelf, string][] = [
-  ['decide', 'Needs a decision'], ['claude', 'With Claude'], ['test', 'To test'], ['finished', 'Done'], ['declined', 'Declined'], ['all', 'All'],
+  ['decide', 'Needs a decision'], ['claude', 'With Claude'], ['test', 'To test'], ['finished', 'Done'], ['parked', 'Parked'], ['declined', 'Declined'], ['all', 'All'],
 ]
-export function onShelf(r: Pick<ChangeRequest, 'status' | 'build_requested_at' | 'tested_ok'>, shelf: Shelf): boolean {
+/** Parked: only ever on a request still waiting on a decision; any decision clears it in the database. */
+export function isParked(r: Pick<ChangeRequest, 'parked_at'>): boolean {
+  return !!r.parked_at
+}
+export function onShelf(r: Pick<ChangeRequest, 'status' | 'build_requested_at' | 'tested_ok' | 'parked_at'>, shelf: Shelf): boolean {
+  if (shelf === 'parked') return isParked(r)
+  if (shelf !== 'all' && isParked(r)) return false
   switch (shelf) {
     case 'all': return true
     case 'decide': return r.status === 'new' || (r.status === 'accepted' && !r.build_requested_at)

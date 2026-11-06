@@ -133,7 +133,7 @@ ok('/requests is routed and in the menu for everybody', /path="\/requests" eleme
 const page = code('src/pages/requests/RequestsPage.tsx')
 const panel = code('src/components/requests/RequestPanel.tsx')
 ok('the panel offers decisions only to an Administrator', /const admin = mayDecide\(me\)/.test(panel) && /\{admin && composing === null && \(/.test(panel))
-ok('...a decline and a question each need words', /disabled=\{busy \|\| !words\.trim\(\) \|\| \(composing === 'question' && !choicesOk\(choices\)\)\}/.test(panel)
+ok('...a decline and a question each need words (a park alone may go without)', /disabled=\{busy \|\| \(composing !== 'park' && !words\.trim\(\)\) \|\| \(composing === 'question' && !choicesOk\(choices\)\)\}/.test(panel)
   && /composing === 'decline'\) void move\('declined', w\)/.test(panel))
 /*
  * YOU DECIDE, CLAUDE BUILDS (Raptor H12). The firm: "it should only be released ... if you have told
@@ -163,7 +163,31 @@ check('the title is the night\'s where there is one, else the first line', [titl
     R('new'), R('accepted'), R('accepted', { build_requested_at: '2026-10-27T08:00:00Z' }), R('building'),
     R('done'), R('done', { tested_ok: true }), R('accepted', { tested_ok: false }), R('declined'),
   ].map((r) => where(r).join('+')), ['decide', 'decide', 'claude', 'claude', 'test', 'finished', 'decide', 'declined'])
-  check('...in this order, All last', SHELVES.map(([s]) => s), ['decide', 'claude', 'test', 'finished', 'declined', 'all'])
+  check('...in this order, All last', SHELVES.map(([s]) => s), ['decide', 'claude', 'test', 'finished', 'parked', 'declined', 'all'])
+  /* S18 (Stephan): "something that is parked for now. Until I can make another decision." */
+  const P = '2026-11-06T08:00:00Z'
+  check('a parked request is on Parked and nowhere else but All', [R('new', { parked_at: P }), R('accepted', { parked_at: P })]
+    .map((r) => ['decide', 'claude', 'test', 'finished', 'parked', 'declined', 'all'].filter((sh) => onShelf(r, sh)).join('+')), ['parked+all', 'parked+all'])
+}
+{
+  const sql = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+  const at = sql.lastIndexOf('create or replace function public.change_request_boss_decides(')
+  const fn = at < 0 ? '' : sql.slice(at, sql.indexOf('end $$;', at))
+  ok('parking is the Big Boss\'s alone', fn.length > 0 && /or \(new\.parked_at is distinct from old\.parked_at\)\) then/.test(fn))
+  ok('...any decision unparks it', /if new\.status is distinct from old\.status then\s+new\.parked_at := null/.test(fn))
+  ok('...only a request waiting on a decision can be parked, and parking takes it off Claude\'s queue',
+    /if new\.status not in \('new', 'accepted'\) then/.test(fn) && /new\.build_requested_at := null/.test(fn))
+  ok('...and the trigger fires on parked_at', /before update of status, build_requested_at, parked_at on public\.change_requests/.test(sql))
+  const nav = sql.slice(sql.lastIndexOf('create or replace function public.nav_request_count('))
+  ok('a parked request leaves the sidebar count', /status = 'new' and parked_at is null/.test(nav.slice(0, 600)))
+}
+/* S18, R-26: the Big Boss may tick an answer to a question put to somebody else. */
+{
+  const q = { kind: 'question', choices: ['a', 'b'] }
+  const boss = { id: 'b', role: 'Administrator', grants: ['raptor.boss'], revokes: [] }
+  const admin = { id: 'x', role: 'Administrator', grants: [], revokes: [] }
+  check('who may tick an answer: the asker and the Big Boss, nobody else',
+    [mayAnswer({ id: 'u', role: 'Collector', grants: [], revokes: [] }, { created_by: 'u' }, q), mayAnswer(boss, { created_by: 'u' }, q), mayAnswer(admin, { created_by: 'u' }, q)].join(), 'true,true,false')
 }
 check('a night\'s tiles count only the requests it read, by verdict', reviewTiles([
   { id: 'a', review_verdict: 'ready' }, { id: 'b', review_verdict: 'decision' }, { id: 'c', review_verdict: 'decision' }, { id: 'd', review_verdict: 'blocked' },
@@ -270,7 +294,7 @@ check('only the person who asked answers, and only a question with choices',
   const sch = read('supabase/schema.sql')
   const fn = sch.slice(sch.lastIndexOf('create or replace function public.nav_request_count('))
   check('the count: undecided requests for an Administrator, my untested releases for anybody', [
-    /where status = 'new' and coalesce\(public\.current_user_role\(\), ''\) = 'Administrator'/.test(fn),
+    /where status = 'new' and parked_at is null and coalesce\(public\.current_user_role\(\), ''\) = 'Administrator'/.test(fn),
     /where created_by = auth\.uid\(\) and status = 'done' and tested_ok is null/.test(fn),
   ].join(), 'true,true')
   check('...drawn on the sidebar, and refreshed the moment one is decided or tested', [

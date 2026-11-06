@@ -29,6 +29,18 @@ LEFT edge with the button at the right, so it ran off screen and slid sideways a
 open (right-aligned), chips on their own row. Checks: check-account-export 70, check-account-views, e2e accounts 164
 (downloads both CSVs).
 
+**SHIPPED (S18, 6 Nov): REQUESTS CAN BE PARKED** (Stephan: "something that is parked for now. Until I can make
+another decision"). `change_requests.parked_at/parked_by` -- not a status, laid over Submitted or Approved. Big
+Boss only (`change_request_boss_decides`), any decision unparks it, parking takes it off Claude's queue, and
+`nav_request_count` and the nightly skill's queries leave parked ones out. A **Parked** shelf; Park / Take out of
+Parked in the panel. **The Big Boss may also tick an answer** to a question Claude put to somebody else (`mayAnswer`;
+the database already allowed it). **R-26 built:** the account hero's pre-legal agent now holds the band's top
+right (`DashboardHero aside`) instead of wrapping under a long reference line. R-26's question about the
+"Active: Activated" label is still unanswered -- the status pill is untouched. Staging migration
+`s18_requests_can_be_parked`, mirrored. **"Payments found late" for Camille** is a Claude Doc
+(https://claude.ai/artifact/AnryHybwQ7ktF8dnbQZrNQ) and was sent to Stephan as a PDF; phases 1b-3 of backdated
+payments wait for her approval.
+
 **SHIPPED (S18, 5 Nov):** search in suspense (one box + dates over all three lists, `suspenseSearch.ts`); **the
 receipt fee is capped at what it took to settle** (Stephan: "a cap, not a payment split") -- `finance_split` fee base
 = least(payment, interest + costs + capital), staging migration `s18_receipt_fee_capped_at_settlement`, mirrored; the

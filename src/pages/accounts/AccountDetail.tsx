@@ -1706,6 +1706,23 @@ function AccountPage() {
             {account.handoverDate && <><span className="text-white/45">·</span><span>handed over {formatDate(account.handoverDate)}</span></>}
           </span>
         }
+        /* R-26 (S18): the agent holds the band's top right, however long the line under the name runs. */
+        aside={
+          <div data-testid="hero-agent" className="text-right leading-tight rounded-xl bg-black/30 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm">
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
+            {mayHandOut ? (
+              <button type="button" onClick={() => setHandOut(true)}
+                /* The name IS the button. A separate "reassign" link beside it would be a second
+                   thing to find, and the firm pointed at the name itself. */
+                className="text-sm font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
+                title={assignedName ? `${assignedName} holds this account. Give it to somebody else.` : 'Nobody holds this account. Give it to somebody.'}>
+                {assignedName ?? 'Unassigned'}
+              </button>
+            ) : (
+              <p className="text-sm font-semibold text-white">{assignedName ?? 'Unassigned'}</p>
+            )}
+          </div>
+        }
       >
         <div className="flex items-center gap-2">
           {/* HOW IT ENDED, NOT THE COLUMN IT CAME IN ON. A withdrawn account kept its green
@@ -1752,20 +1769,6 @@ function AccountPage() {
         */}
         {/* ON A SMALL PANE OF ITS OWN (S15): over a photograph the name floated on whatever part of the
             picture happened to be behind it, and on the Africa band that was a tree trunk. */}
-        <div data-testid="hero-agent" className="text-right leading-tight ml-1 rounded-xl bg-black/30 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm">
-          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
-          {mayHandOut ? (
-            <button type="button" onClick={() => setHandOut(true)}
-              /* The name IS the button. A separate "reassign" link beside it would be a second
-                 thing to find, and the firm pointed at the name itself. */
-              className="text-sm font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
-              title={assignedName ? `${assignedName} holds this account. Give it to somebody else.` : 'Nobody holds this account. Give it to somebody.'}>
-              {assignedName ?? 'Unassigned'}
-            </button>
-          ) : (
-            <p className="text-sm font-semibold text-white">{assignedName ?? 'Unassigned'}</p>
-          )}
-        </div>
       </DashboardHero>
 
       {/*

@@ -12,7 +12,7 @@ import {
  * screenshots to draw forty titles.
  */
 
-const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by, assigned_to, review_title, review_verdict, review_size, review_summary, review_questions, reviewed_at, build_requested_at, build_requested_by'
+const REQUEST_COLUMNS = 'id, number, description, page_path, page_title, pane, department, status, priority, admin_note, done_in, created_by, created_at, decided_by, decided_at, closed_at, tested_ok, tested_note, tested_at, tested_by, assigned_to, review_title, review_verdict, review_size, review_summary, review_questions, reviewed_at, build_requested_at, build_requested_by, parked_at, parked_by'
 
 export async function listRequests(): Promise<ChangeRequest[]> {
   const { data, error } = await supabase.from('change_requests').select(REQUEST_COLUMNS).order('created_at', { ascending: false }).limit(500)
@@ -131,3 +131,17 @@ export async function askClaude(r: Pick<ChangeRequest, 'id'>, me: { id: string }
   await addEvent(r.id, 'comment', on ? 'Asked Claude to build this.' : 'Took it off Claude\u2019s queue.', me.id)
 }
 
+
+/**
+ * PARK OR UNPARK (S18): "not now" from the Big Boss. The database clears it on any decision, takes a
+ * parked request off Claude's queue, and refuses it from anybody else. Said on the history in his name.
+ */
+export async function parkRequest(r: Pick<ChangeRequest, 'id'>, me: { id: string } | null, on: boolean, why = ''): Promise<void> {
+  if (!me) throw new Error('Sign in again.')
+  const { error } = await supabase.from('change_requests')
+    .update(on ? { parked_at: clockNow().toISOString(), parked_by: me.id } : { parked_at: null, parked_by: null })
+    .eq('id', r.id)
+  if (error) throw new Error(error.message)
+  const w = why.trim()
+  await addEvent(r.id, 'comment', on ? `Parked for now.${w ? ` ${w}` : ''}` : 'Taken out of Parked.', me.id)
+}

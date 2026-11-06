@@ -55814,3 +55814,58 @@ comment on function public.backdated_payments() is
   'and splits were worked out without them. The Trust control list. S18.';
 revoke all on function public.backdated_payments() from public, anon;
 grant execute on function public.backdated_payments() to authenticated;
+
+-- ============================================================================================
+-- S18 (6 Nov, Raptor H17): A REQUEST CAN BE PARKED. Stephan: "Put one folder where I can just say like
+-- parked. So something that is parked for now. Until I can make another decision."
+-- PARKED IS NOT A STATUS. It is "not now" laid over a request that is still Submitted or Approved, so the
+-- status, its policies, its triggers and the history keep meaning what they meant; unparking puts it back
+-- exactly where it was. Two columns, and three rules held here rather than only in the browser:
+--   * parking and unparking are the Big Boss's -- putting a decision off is part of making it;
+--   * only a request still waiting on a decision may be parked (Submitted or Approved), and parking one on
+--     Claude's queue takes it off the queue: a parked request is one nobody builds;
+--   * any decision (approved, declined, reopened) unparks it, so a parked flag never outlives the question.
+-- The sidebar count leaves parked requests out: a count is what one person can clear today.
+alter table public.change_requests add column if not exists parked_at timestamptz;
+alter table public.change_requests add column if not exists parked_by uuid references public.profiles (id) on delete set null;
+
+create or replace function public.change_request_boss_decides()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if new.status is distinct from old.status then
+    new.parked_at := null; new.parked_by := null;
+  end if;
+  if new.parked_at is not null and old.parked_at is null then
+    if new.status not in ('new', 'accepted') then
+      raise exception 'Only a request still waiting on a decision can be parked.' using errcode = '22023';
+    end if;
+    new.build_requested_at := null; new.build_requested_by := null;
+  end if;
+  if coalesce(current_setting('role', true), '') = 'service_role' then return new; end if;
+  if not public.has_capability('raptor.boss') and (
+       (new.status is distinct from old.status
+        and ((old.status in ('new', 'declined') and new.status = 'accepted') or new.status = 'declined'))
+    or (old.build_requested_at is null and new.build_requested_at is not null)
+    or (new.parked_at is distinct from old.parked_at)) then
+    raise exception 'Only the Big Boss approves, declines or parks what gets built in Raptor.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists change_request_boss_decides on public.change_requests;
+create trigger change_request_boss_decides before update of status, build_requested_at, parked_at on public.change_requests
+  for each row execute function public.change_request_boss_decides();
+
+create or replace function public.nav_request_count()
+returns integer language sql stable security invoker set search_path to 'public' as $$
+  select (
+    (select count(*) from public.change_requests
+      where status = 'new' and parked_at is null and coalesce(public.current_user_role(), '') = 'Administrator')
+    + (select count(*) from public.change_requests
+      where created_by = auth.uid() and status = 'done' and tested_ok is null)
+  )::integer
+$$;
+grant execute on function public.nav_request_count() to authenticated;
