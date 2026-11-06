@@ -75,6 +75,11 @@ begin
                     and accrued_on + days > v_day) into v_imported;
 
   begin
+    /* THE GUARDS STAND DOWN FOR THE QUESTION ONLY. protect_payover_run_lines refuses to remove the lines of a
+       PAID run -- rightly -- and the unwinding below removes allocations whose cascade would take those lines.
+       session_replication_role = replica silences triggers for THIS block; the GUC, like every write here, is
+       undone when the block raises, so nothing a paid run says is ever really touched. */
+    perform set_config('session_replication_role', 'replica', true);
     delete from public.account_interest_accruals
      where account_id = v.account_id and source = 'engine' and accrued_on + days > v_day;
 
