@@ -55920,3 +55920,76 @@ begin
 end
 $$;
 revoke all on function public.change_request_event_notify() from public, anon, authenticated;
+
+-- ============================================================================================
+-- S18 (6 Nov, Raptor H17): THE APPROVAL QUEUE IS LISTED IN THE ORDER IT POSTS. Body unchanged but for the order by.
+create or replace function public.payments_awaiting_approval()
+returns table(
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric, paid_to_client boolean,
+  method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date,
+  interest_to_date numeric, interest_after numeric,
+  interest_open numeric, interest_open_from date,
+  interest_total numeric, interest_cant numeric, interest_retained numeric,
+  rf_total numeric, rf_cant numeric, rf_retained numeric,
+  to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric,
+  costs_before numeric, costs_after numeric,
+  commission_rate numeric, vat_rate numeric)
+language sql
+volatile
+security definer
+set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date,
+    pv.interest_before, pv.interest_after,
+    pv.interest_open, pv.interest_open_from,
+    pv.interest_total, pv.interest_cant, pv.interest_retained,
+    pv.rf_total, pv.rf_cant, pv.rf_retained, pv.to_receipt_fees,
+    pv.fees_total, pv.fees_cant, pv.fees_retained, pv.to_fees,
+    pv.costs_before, pv.costs_after,
+    public.account_commission_rate(d.id),
+    fs.vat_rate
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  cross join lateral (select vat_rate from public.firm_settings limit 1) fs
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  /* IN THE ORDER APPROVAL POSTS THEM (S18): queue_preview approves the EARLIER waiting payments on
+     the same account inside a block that always rolls back, then previews this one -- so a later
+     payment no longer splits capital an earlier one in the queue has already cleared. */
+  left join lateral public.queue_preview(p.id) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and p.suspended_at is null
+    and p.rejected_at is null
+    and not p.is_demo
+  /* IN POSTING ORDER (S18, 6 Nov). Stephan, on a queue with several payments on one account: "if there are two
+     payments from the same person on the same day, for the same account ... it should still do them differently" --
+     the order Swordfish could not decide is what broke its remittances. Raptor's order was always fixed (received,
+     then captured, then id: queue_preview and approve_payments), but the screen drew newest day first and biggest
+     amount first, so a day's rows read in a different order from the one they post in. Now the screen IS the order:
+     oldest at the top, each row worked out after the row above it on the same account. */
+  order by p.received_at, p.created_at, p.id
+$$;
+

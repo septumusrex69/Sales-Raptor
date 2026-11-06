@@ -29,6 +29,16 @@ LEFT edge with the button at the right, so it ran off screen and slid sideways a
 open (right-aligned), chips on their own row. Checks: check-account-export 70, check-account-views, e2e accounts 164
 (downloads both CSVs).
 
+**SHIPPED (S18, 6 Nov): THE APPROVAL QUEUE IS LISTED IN POSTING ORDER** (Stephan, on several payments on one
+account: "if there are two payments from the same person on the same day ... it should still do them differently" --
+Swordfish's undecided order broke its remittances). Raptor's order was already fixed and strict (received_at, then
+created_at, then id, in queue_preview and approve_payments; each payment split on its own, never summed); the screen
+now lists in that order, oldest first (`payments_awaiting_approval`, migration `s18_approval_queue_in_posting_order`).
+"Approve all 2" on 6 Nov was right: three of five were paid the day before the handover and are held.
+**TO SORT NO LONGER SLIDES SIDEWAYS**: the Needs an account table's description wraps, every table there scrolls inside
+its own card, the actions wrap, and Move to suspense is a button like Place it / Split it. e2e
+`trust-sort-statement` measures every sideways-scrolling panel at iPad width (it named the trust pane on broken code).
+
 **SHIPPED (S18, 6 Nov): SPELL CHECK, ON UNLESS SWITCHED OFF** (Stephan: "we can do number 1 and 2 ... by default
 it's on, but the user can switch it off"). (1) `<html lang="en-ZA" spellcheck>` -- the browser's underlines in every
 box; (2) `useSpellGate` (`src/components/SpellGate.tsx`) checks an email or SMS against Hunspell en_GB-ise

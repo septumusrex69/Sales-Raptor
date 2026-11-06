@@ -25,7 +25,9 @@ const STATEMENT = [
 const handlers = [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rpc\/trust_bank_statement/.test(u), () => ({ body: STATEMENT })],
-  [(u) => /\/rpc\/unallocated_receipts/.test(u), () => ({ body: [{ id: 's4', txn_date: '2026-08-22', amount: 750, description: 'CAPITEC P NAIDOO', reference: null, bank_account: '1', imported_at: '2026-10-13T06:00:00Z', had_reference: false }] })],
+  [(u) => /\/rpc\/unallocated_receipts/.test(u), () => ({ body: [{ id: 's4', txn_date: '2026-08-22', amount: 750, description: 'CAPITEC P NAIDOO', reference: null, bank_account: '1', imported_at: '2026-10-13T06:00:00Z', had_reference: false },
+    /* S18: a long one with a reference that matched two accounts -- what pushed the page sideways on the iPad. */
+    { id: 's5', txn_date: '2026-08-23', amount: 1113.2, description: 'ADT CASH DEPO00447001 DLZ0008 CAPITEC RSW1266 FNB APP PAYMENT FROM SEA0001', reference: 'DLZ0008', bank_account: '1', imported_at: '2026-10-13T06:00:00Z', had_reference: true }] })],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
@@ -51,6 +53,40 @@ try {
     await rail.getByRole('link', { name: 'Overpayments', exact: true }).count(),
   ]), '[1,0,0]')
   await t.shot(page, 'trust-to-sort')
+
+  /*
+   * THE PAGE NEVER SLIDES SIDEWAYS (S18, 6 Nov). On Stephan's iPad a long bank description made the Needs an account
+   * table wider than its card: the page scrolled, the left edge was cut off and Move to suspense sat on the grey.
+   * Measured on an iPad-sized window, with the long line in the fixture.
+   */
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await page.waitForTimeout(300)
+  /* Any panel the page scrolls in counts, not only the document: the layout scrolls an inner pane, which is what
+     slid on the iPad. The tables' own scroll boxes are allowed -- that is where a too-wide table is meant to go. */
+  const wide = await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => {
+    const o = getComputedStyle(el).overflowX
+    if (!(o === 'auto' || o === 'scroll')) return false
+    if (el.querySelector(':scope > table')) return false
+    return el.scrollWidth > el.clientWidth + 1
+  }).map((el) => el.tagName + '.' + String(el.className).slice(0, 40)))
+  t.ok(`nothing on the page scrolls sideways on an iPad but a table inside its own card (${JSON.stringify(wide)})`, wide.length === 0)
+  /* With the menus narrowed, as Stephan works: the whole row fits its card, Move to suspense included. */
+  await page.setViewportSize({ width: 1366, height: 900 })
+  await page.waitForTimeout(300)
+  const inCard = await page.evaluate(() => {
+    const btn = document.querySelector('[data-testid="move-to-suspense"]')
+    const box = document.querySelector('[data-testid="needs-account-scroll"]')
+    if (!btn || !box) return null
+    return box.scrollWidth <= box.clientWidth + 1 && btn.getBoundingClientRect().right <= box.getBoundingClientRect().right + 1
+  })
+  t.ok('...and on a laptop the whole row fits its card, Move to suspense included', inCard === true)
+  const looks = await page.evaluate(() => {
+    const [a, b] = ['move-to-suspense', null].map((id) => id && document.querySelector(`[data-testid="${id}"]`))
+    const place = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Place it')
+    return a && place ? getComputedStyle(a).borderTopWidth === getComputedStyle(place).borderTopWidth && getComputedStyle(a).textDecorationLine === 'none' : null
+  })
+  t.ok('...and looks like Place it and Split it: a button, not an underlined link', looks === true)
+  await t.shot(page, 'trust-to-sort-ipad')
 
   await page.goto(`http://127.0.0.1:${PORT}/trust/overpayments`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('overpayments').waitFor({ timeout: 15000 })

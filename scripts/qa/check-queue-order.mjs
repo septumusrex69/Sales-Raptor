@@ -52,5 +52,14 @@ ok('...and is volatile, because what it calls writes and undoes', /language sql\
 ok('queue_preview is not offered to anyone signed out',
   /revoke all on function public\.queue_preview\(uuid\) from public, anon;/.test(sql))
 
+/* S18, 6 Nov: the screen IS the posting order -- same-day payments on one account read top to bottom as they post. */
+{
+  const list = lastFn('payments_awaiting_approval') + '\n$$'
+  const post = lastFn('approve_payments')
+  ok('the queue is listed oldest first, received then captured then id', /order by p\.received_at, p\.created_at, p\.id\s*\$\$/.test(list))
+  ok('...the order approval posts them in', /order by p\.received_at nulls last, p\.created_at nulls last, p\.id nulls last/.test(post))
+  ok('...and the one each row is previewed in', /order by p\.received_at, p\.created_at, p\.id/.test(lastFn('queue_preview')))
+}
+
 console.log(`${pass} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.log(`  FAIL ${f}`); process.exit(1) }

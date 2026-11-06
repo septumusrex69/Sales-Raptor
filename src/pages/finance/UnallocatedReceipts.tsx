@@ -250,6 +250,14 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
             Nothing needs an account. Every receipt imported has been placed.
           </p>
         ) : (
+          /*
+            THE PAGE SLID SIDEWAYS (S18, 6 Nov, Stephan: "there's like a whole entire glitch on that page ... it's like
+            gray on the right"). The table was nowrap throughout, so a long bank description with "matched more than
+            one account" beside it made it wider than its card: the page scrolled sideways, cutting off the left edge
+            and leaving Move to suspense out on the grey. The description wraps now, and the table scrolls inside its
+            own card if a screen is narrower still -- the page itself never moves.
+          */
+          <div className="overflow-x-auto" data-testid="needs-account-scroll">
           <table className="w-full list-table whitespace-nowrap">
             <thead className="text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-100">
@@ -265,7 +273,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                 <tr key={r.id} className="border-b border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.txnDate)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
-                  <td className="px-3 py-2 text-slate-600">
+                  <td className="px-3 py-2 text-slate-600 whitespace-normal min-w-[14rem]" data-testid="bank-said">
                     <span className="wrap-anywhere">{r.description}</span>
                     {/*
                       THE TWO REASONS A RECEIPT IS HERE ARE DIFFERENT PROBLEMS. No reference means
@@ -274,7 +282,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                       because both candidates look right.
                     */}
                     {r.hadReference && (
-                      <span className="ml-2 text-[11px] text-amber-700">
+                      <span className="block text-[11px] text-amber-700">
                         {r.reference} matched more than one account
                       </span>
                     )}
@@ -286,7 +294,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                         <input value={typed[r.id] ?? ''} data-testid="receipt-reference" aria-label="Account reference"
                           onChange={(e) => setTyped((t) => ({ ...t, [r.id]: e.target.value }))}
                           onKeyDown={(e) => { if (e.key === 'Enter') void placeTyped(r) }}
-                          placeholder="Reference" className={`${controlClass} w-36 py-1 text-[13px]`} />
+                          placeholder="Reference" className={`${controlClass} w-28 py-1 text-[13px]`} />
                         <button type="button" disabled={tying === r.id || !(typed[r.id] ?? '').trim()}
                           onClick={() => void placeTyped(r)} data-testid="place-by-reference" title="Book to the typed reference"
                           className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-brand-600 text-white disabled:opacity-40">
@@ -310,7 +318,8 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                         Book as bank interest
                       </button>
                     ) : (
-                    <span className="inline-flex gap-1.5">
+                    /* Wraps under itself on a narrow screen rather than widening the table (S18). */
+                    <span className="inline-flex max-w-[15rem] flex-wrap justify-end gap-1.5">
                       <button type="button" onClick={() => setPlacing(r)}
                         className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
                           text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
@@ -324,9 +333,10 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                       </button>
                       {/* "I LOOKED AND COULD NOT PLACE IT" (S10, prompt 13 item 13): off this list,
                           with the note, into In suspense below. */}
+                      {/* A button like its two neighbours (S18: "it doesn't look the same as place it or split it"). */}
                       <button type="button" onClick={() => setSuspending(r)} data-testid="move-to-suspense"
-                        className="text-xs font-medium px-2.5 py-1 rounded-md text-slate-400
-                          hover:text-slate-700 underline underline-offset-2">
+                        className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
                         Move to suspense
                       </button>
                     </span>
@@ -336,6 +346,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 
@@ -358,6 +369,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               {rand(suspended.reduce((n, x) => n + x.amount, 0))}
             </span>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full list-table whitespace-nowrap" data-testid="suspended-bank-lines">
             <thead className="text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-100">
@@ -410,6 +422,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
 
@@ -435,6 +448,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               against that account until they are placed.
             </p>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full list-table whitespace-nowrap">
             <thead className="text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-100">
@@ -496,6 +510,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
 
@@ -511,6 +526,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               bank charge is booked to the firm, and a debit order that came back is reversed on the debtor&rsquo;s account.
             </p>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full list-table whitespace-nowrap">
             <tbody>
               {payouts.map((p) => (
@@ -567,6 +583,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
 
