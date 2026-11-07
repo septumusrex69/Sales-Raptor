@@ -28,6 +28,20 @@ dark glass pill (a white-on-white one vanished against the photograph's sky). Th
 unchanged. Check: `e2e/workspace-split` (seen failing without it). Not asked about the other Trust screens -- ask
 before giving every rail page a band.
 
+**Payments in was slow on the iPad -- and suspense was counted short** (Stephan, 7 Nov: "very slow and lagging").
+Staging held 1 805 receipts needing an account (R 2 244 757.51); the tile said 1 000 (R 1 473 001.96) because
+`unallocated_receipts` came back through PostgREST's 1 000-row cap, newest first, so the oldest 805 were never
+listed, counted or found by the suspense search. The Trust overview's "677 receipts in suspense" and "323 lines to
+allocate" were the same cap on `bank_lines_to_allocate` (really 1 805 and 330). Both reads go through `fetchAllRows`
+now, and both functions end their order on `l.id` so pages cannot skip or repeat a line (staging migration
+`s19_suspense_reads_every_page`, mirrored). And Needs an account DREW all of them -- a reference box and four buttons
+each, ten thousand elements under the approval queue: now 100 at a time, Show 100 more / Show all; tile, totals and
+search still cover every receipt. Checks: `e2e/payments-in-suspense-pages` (stub caps at 1 000 like the server; fails
+on the old code with "1 000 receipts in suspense"), `check-row-cap` (both reads paged, ties broken),
+`check-suspense-search` updated for the slice. NOT done: `BankLinesToAllocate` (To sort) still draws every line --
+330 today; give it the same pages if it grows. Other trust RPCs (`suspended_bank_lines`, `suspended_payments`,
+`unreconciled_payouts`, payments out) are unpaged but far under 1 000 today.
+
 ## S18 -- WHERE IT STANDS, AND WHERE S19 STARTS (Raptor · Handover 18, 5 - 7 Nov; branch `claude/upbeat-goldberg-amk2i3`)
 
 Every commit is `Raptor H17: S18 -- ...`, pushed to the branch AND fast-forwarded onto the preview/staging branch

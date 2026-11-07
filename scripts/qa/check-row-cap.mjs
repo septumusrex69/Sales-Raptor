@@ -181,6 +181,23 @@ for (const f of libs) {
 }
 check('no limit asks for more than one page', tooBig, [])
 
+/*
+ * SUSPENSE AND THE LINES TO ALLOCATE (S19, 7 Nov). 1 805 receipts on staging, 1 000 on Payments in; the
+ * Trust overview's 677 + 323 lines were the same thousand. Both reads go through the pager, and both
+ * functions end their order on l.id -- without a tie-break a page boundary can skip or repeat a line.
+ */
+for (const [file, fn, rpc] of [
+  ['src/lib/payover.ts', 'fetchUnallocatedReceipts', 'unallocated_receipts'],
+  ['src/lib/bankAllocationApi.ts', 'fetchLinesToAllocate', 'bank_lines_to_allocate'],
+]) {
+  const code = read(file)
+  const body = code.slice(code.indexOf(`export async function ${fn}`), code.indexOf('\n}\n', code.indexOf(`export async function ${fn}`)))
+  ok(`${fn} reads every page`, /fetchAllRows/.test(body) && body.includes(`rpc('${rpc}')`))
+  const schema = read('supabase/schema.sql')
+  const def = schema.slice(schema.lastIndexOf(`function public.${rpc}()`))
+  ok(`...and ${rpc} orders with no ties (l.id last)`, /order by [^;$]*, l\.id\s*\n\$\$/.test(def.slice(0, def.indexOf('$$;') + 3)))
+}
+
 console.log(`check-row-cap: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 if (failures.length) process.exit(1)

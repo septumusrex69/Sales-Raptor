@@ -55993,3 +55993,40 @@ as $$
   order by p.received_at, p.created_at, p.id
 $$;
 
+
+-- =====================================================================================================
+-- S19 (Raptor · Handover 18, 7 Nov): SUSPENSE AND THE LINES TO ALLOCATE ARE READ A PAGE AT A TIME.
+-- Staging held 1 805 receipts needing an account; Payments in said 1 000 (R 1 473 001.96 of
+-- R 2 244 757.51) and the Trust overview 677 + 323 = 1 000 lines -- PostgREST's max-rows, silently.
+-- The screens now read every page (fetchAllRows), and paging needs an order with no ties: l.id last.
+-- Migration s19_suspense_reads_every_page.
+-- =====================================================================================================
+create or replace function public.unallocated_receipts()
+returns table(id uuid, txn_date date, amount numeric, description text, reference text, bank_account text,
+              imported_at timestamptz, had_reference boolean)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description, l.reference, l.bank_account,
+         l.imported_at, l.reference is not null
+    from public.bank_statement_lines l
+   where public.current_user_role() = 'Administrator'
+     and l.status = 'unallocated'
+     and l.direction = 'credit'
+     and l.suspended_at is null
+   order by l.txn_date desc, l.amount desc, l.id
+$$;
+
+create or replace function public.bank_lines_to_allocate()
+returns table(id uuid, txn_date date, amount numeric, description text, direction text, reference text,
+              bank_account text, bank_account_label text, status text)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description, l.direction, l.reference,
+         l.bank_account, l.bank_account_label, l.status
+    from public.bank_statement_lines l
+   where public.has_capability('finance.view')
+     and l.direction in ('credit', 'debit')
+     and l.allocation_kind is null
+     and l.status not in ('allocated', 'reconciled')
+   order by l.txn_date desc, l.amount, l.id
+$$;

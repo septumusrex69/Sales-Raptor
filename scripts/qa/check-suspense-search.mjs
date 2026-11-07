@@ -34,7 +34,8 @@ ok('a timestamp is read as its day', suspenseMatches({ ...row, date: '2026-10-22
 ok('a reference typed without its dash', suspenseMatches({ ...row, words: ['RAP-100001'] }, q('rap100001')))
 
 const page = readFileSync(new URL('../../src/pages/finance/UnallocatedReceipts.tsx', import.meta.url), 'utf8')
-ok('all three suspense lists are searched', ['shownRows.map', 'shownSuspended.map', 'shownParked.map'].every((s) => page.includes(s)))
+/* Needs an account draws a hundred at a time (S19) -- still of the SEARCHED rows, so it reads shownRows.slice(...). */
+ok('all three suspense lists are searched', [/shownRows(\.slice\([^)]*\))?\.map/, /shownSuspended\.map/, /shownParked\.map/].every((r) => r.test(page)))
 no('...and none still draws its unfiltered list', /\{(rows|suspended|parked)\.map\(/.test(page))
 ok('an empty result says the search found nothing, not that suspense is empty', page.includes('matches the search'))
 

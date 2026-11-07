@@ -39,6 +39,9 @@ import {
  * a person deciding. A wrong placement credits the wrong debtor AND remits the wrong client, and
  * a payment is immutable once processed -- reversal leaves both rows on the ledger for ever.
  */
+/** How many receipts Needs an account draws before "Show more" (S19). */
+const RECEIPTS_PER_PAGE = 100
+
 export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayouts = false }: {
   /* On To sort the money out is under Statement lines to allocate, so it is not listed twice. */
   hidePayouts?: boolean
@@ -72,6 +75,14 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   const [suspending, setSuspending] = useState<UnallocatedReceipt | null>(null)
   const [placingParked, setPlacingParked] = useState<SuspendedPayment | null>(null)
   const [query, setQuery] = useState<SuspenseQuery>(EMPTY_SUSPENSE_QUERY)
+  /*
+   * A HUNDRED DRAWN AT A TIME (S19, Stephan on the iPad, 7 Nov: "very slow and lagging"). All 1 805 receipts were
+   * drawn at once, each with a reference box and four buttons -- over ten thousand elements under the approval
+   * queue, and every letter typed in one box redrew them all. The totals, the tile and the search still cover
+   * every receipt; only the drawing is a page. A new search starts again at the first hundred.
+   */
+  const [drawn, setDrawn] = useState(RECEIPTS_PER_PAGE)
+  const search = (q: SuspenseQuery) => { setQuery(q); setDrawn(RECEIPTS_PER_PAGE) }
   /* Held for Swordfish payovers (S10): which payments out may come off it, asked of the same rule the database refuses on. */
   const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
 
@@ -182,20 +193,20 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className={`${inputClass} pl-9`} aria-label="Search suspense"
               placeholder="Amount, name, reference or anything the bank said"
-              value={query.text} onChange={(e) => setQuery({ ...query, text: e.target.value })} />
+              value={query.text} onChange={(e) => search({ ...query, text: e.target.value })} />
           </div>
           <input type="date" className={controlClass} aria-label="Received from" value={query.from ?? ''}
-            onChange={(e) => setQuery({ ...query, from: e.target.value || null })} />
+            onChange={(e) => search({ ...query, from: e.target.value || null })} />
           <span className="text-[13px] text-slate-400">to</span>
           <input type="date" className={controlClass} aria-label="Received up to" value={query.to ?? ''}
-            onChange={(e) => setQuery({ ...query, to: e.target.value || null })} />
+            onChange={(e) => search({ ...query, to: e.target.value || null })} />
           {searching && (
             <>
               <span className="text-[12.5px] text-slate-500 tabular-nums" data-testid="suspense-search-count">
                 {shownSize} of {queueSize} match
               </span>
               <button type="button" className="inline-flex items-center gap-1 text-[12.5px] text-slate-500 hover:text-slate-700"
-                onClick={() => setQuery(EMPTY_SUSPENSE_QUERY)}>
+                onClick={() => search(EMPTY_SUSPENSE_QUERY)}>
                 <X size={13} /> Clear
               </button>
             </>
@@ -269,7 +280,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               </tr>
             </thead>
             <tbody>
-              {shownRows.map((r) => (
+              {shownRows.slice(0, drawn).map((r) => (
                 <tr key={r.id} className="border-b border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.txnDate)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
@@ -346,6 +357,22 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               ))}
             </tbody>
           </table>
+          {shownRows.length > drawn && (
+            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-4 py-3 text-[13px]" data-testid="receipts-more">
+              <span className="text-slate-500">
+                Showing {drawn.toLocaleString('en-ZA')} of {shownRows.length.toLocaleString('en-ZA')}
+              </span>
+              <button type="button" onClick={() => setDrawn((n) => n + RECEIPTS_PER_PAGE)}
+                className="font-medium px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                Show {Math.min(RECEIPTS_PER_PAGE, shownRows.length - drawn)} more
+              </button>
+              <button type="button" onClick={() => setDrawn(shownRows.length)}
+                title="Every one at once is slow on an iPad. The search above finds one without drawing them all."
+                className="font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2">
+                Show all
+              </button>
+            </div>
+          )}
           </div>
         )}
       </Card>

@@ -18,6 +18,7 @@
  * browser is a courtesy, not a boundary.
  */
 import { supabase } from './supabase'
+import { fetchAllRows } from './fetchAll.ts'
 import { allocationOf, type Allocation } from './allocationRules'
 import { clockToday } from './clock.ts'
 import { inRunningOrder } from './runOrder.ts'
@@ -904,9 +905,11 @@ export async function importBankLines(input: {
 }
 
 export async function fetchUnallocatedReceipts(): Promise<UnallocatedReceipt[]> {
-  const { data, error } = await supabase.rpc('unallocated_receipts')
-  if (error) throw new Error(error.message)
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  /* EVERY PAGE (S19): 1 805 receipts on staging, 1 000 on Payments in -- the oldest 805 were never listed,
+     searched or counted. Ordered with l.id last in the function, so the pages are stable. */
+  const data = await fetchAllRows<Record<string, unknown>>(
+    () => supabase.rpc('unallocated_receipts'), { table: 'unallocated_receipts' })
+  return data.map((r) => ({
     id: String(r.id),
     txnDate: String(r.txn_date),
     amount: Number(r.amount),

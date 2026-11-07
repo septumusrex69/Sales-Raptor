@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { referenceIn, toPaidOut, toPaymentToMake, type PaidOut, type PaymentToMake } from './paymentsOut.ts'
 import { lineNature, toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
 import type { SwordfishKind } from './swordfishHolding.ts'
+import { fetchAllRows } from './fetchAll.ts'
 
 /**
  * ALLOCATING TRUST STATEMENT LINES, THE CALLS (prompt 12). The rules are in bankLineAllocation.ts
@@ -11,9 +12,11 @@ import type { SwordfishKind } from './swordfishHolding.ts'
 
 /** Every line that moved money and is not yet accounted for. Empty for anybody without the trust tick. */
 export async function fetchLinesToAllocate(): Promise<StatementLine[]> {
-  const { data, error } = await supabase.rpc('bank_lines_to_allocate')
-  if (error) throw new Error(error.message)
-  return ((data ?? []) as Record<string, unknown>[]).map(toStatementLine)
+  /* EVERY PAGE (S19): staging had 2 135 lines and the Trust overview counted 1 000 -- PostgREST's cap,
+     silently. The function orders with l.id last, so pages neither skip nor repeat a line. */
+  const data = await fetchAllRows<Record<string, unknown>>(
+    () => supabase.rpc('bank_lines_to_allocate'), { table: 'bank_lines_to_allocate' })
+  return data.map(toStatementLine)
 }
 
 export async function fetchAllocationCandidates(): Promise<Candidate[]> {
