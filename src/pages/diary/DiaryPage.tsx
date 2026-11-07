@@ -572,7 +572,7 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
         row stacks and each value sits next to its own label's worth of context, so a header
         would be pointing at nothing.
       */}
-      <div className={`${DIARY_GRID} hidden @3xl:grid px-1 py-1.5 border-b border-slate-100`}>
+      <div className={`${DIARY_GRID} hidden @5xl:grid px-1 py-1.5 border-b border-slate-100`}>
         <span className={COL_HEAD}>
           {/* Select all — and "all" means exactly what is on screen, nothing below the fold. */}
           {picked && onPick && rows.length > 0 && (
@@ -614,7 +614,7 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
  * quarter of a rem and the whole list stops reading as a table.
  *
  * Two shapes, and a container query decides which — NOT a window query. This list is full width
- * on the diary page and could sit in a panel half that wide; `@3xl` asks how much room the list
+ * on the diary page and could sit in a panel half that wide; `@5xl` asks how much room the list
  * itself has, which is the question. Asking the window instead is what put a details grid off
  * the edge of its card twice already in this codebase.
  *
@@ -636,8 +636,16 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
  * the position has a column of its own. Narrow, the row still folds -- a list in half a panel has
  * no width for six columns, and a sideways scroll in a diary is worse than a second line.
  */
+/*
+ * COLUMNS FROM 64rem (@5xl), NOT 48rem (R-25, Raptor H18). The five fixed tracks and their gaps take
+ * about 47rem, so at @3xl the Account column was a sliver and its case number, name and "Carried 14
+ * days" painted over Work and Position (the call centre's screenshot, a 1220px window). From 64rem the
+ * Account column has at least ~17rem. Between 48 and 64rem a row is TWO lines: the account across the
+ * top, and work, position, client, money and buttons in columns under it -- the window most desks have
+ * with the menu open. Below 48rem it folds as described above. e2e/diary-row-fit measures all three.
+ */
 const DIARY_GRID =
-  'grid gap-x-3 gap-y-1 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_10rem_7rem_9.5rem] @3xl:items-center'
+  'grid gap-x-3 gap-y-1 grid-cols-2 @3xl:grid-cols-[8.5rem_8.5rem_minmax(0,1fr)_7rem_9.5rem] @3xl:items-center @5xl:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_10rem_7rem_9.5rem]'
 
 const COL_HEAD = 'text-[12.5px] font-medium text-slate-400'
 
@@ -701,7 +709,7 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
     <li className="px-1 py-1.5 text-[12.5px] hover:bg-slate-50">
       <div className={DIARY_GRID}>
         {/* The account: who, and why it is back -- on one line, the why after a dot. */}
-        <div className="col-span-2 @3xl:col-span-1 min-w-0 flex items-center gap-x-2 whitespace-nowrap">
+        <div className="col-span-2 @3xl:col-span-5 @5xl:col-span-1 min-w-0 overflow-hidden flex items-center gap-x-2 whitespace-nowrap">
           {onPick && (
             <input type="checkbox" checked={!!picked} onChange={onPick}
               className="rounded border-slate-300 shrink-0"
@@ -714,8 +722,9 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
               {row.account.caseNumber}
             </span>
           )}
+          {/* The name gives way first (R-25): truncated, never below a readable 4.5rem; the badges keep their size. */}
           <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
-            className="font-medium text-slate-800 hover:text-[var(--c-steel)] truncate max-w-[16rem] shrink-0"
+            className="font-medium text-slate-800 hover:text-[var(--c-steel)] truncate max-w-[16rem] min-w-[4.5rem]"
             title={debtorName(row)}>
             {debtorName(row)}
           </Link>
@@ -725,7 +734,8 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
               prescribing
             </span>
           )}
-          {late && (
+          {/* A carried new account says so in working days below; "3 weeks late" beside it was the same fact twice (R-25). */}
+          {late && carriedFor === 0 && (
             <span className="shrink-0 text-[11px] font-medium text-[var(--c-rust)]"
               title={`Was due ${longDate(row.dueOn)}`}>
               {late}

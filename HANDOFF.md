@@ -6,6 +6,22 @@
 > older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by
 > that name.
 
+## S19 -- RUNNING LOG (Raptor · Handover 18, 7 Nov; branch `claude/ecstatic-feynman-emzuez`, started from `claude/sales-raptor-review-p1pzx2` at 512ef1d)
+
+**The build queue on 7 Nov was empty**: R-23, R-24 and R-25 were all `accepted` with `build_requested_at` cleared by
+earlier builder runs, each waiting on a ticked answer (R-23: does the refund now show after S18's money-out fix; R-24:
+"what does Record transfer mean" -- rename, help line, tooltip or nothing). R-13 (Mail subfolders, conversation mode)
+is still `new` with four questions for Stephan.
+
+**R-25 (call centre, Diary: "Please look at how this displays") -- built.** The builder had asked what was wrong;
+the screenshot answers it: at a 1220px window "Carried 14 days" sat on "In progress" and the names were cut under
+the Work chip. The row went into columns at a 48rem LIST, but the five fixed tracks take ~47rem, so the Account
+column was a sliver and its shrink-0 contents painted over the next two columns (it still spilled at 1440px). Now:
+one line from 64rem (`@5xl`); 48-64rem two lines (account on top, the rest in columns under it); below that the old
+fold. The name gives way first (min 4.5rem) and the cell clips. "3 weeks late" is no longer drawn beside "Carried N
+days" -- the same fact twice, in calendar and working days. Check `scripts/qa/e2e/diary-row-fit.mjs` (7 widths;
+8 failures on the old code).
+
 ## S18 -- WHERE IT STANDS, AND WHERE S19 STARTS (Raptor · Handover 18, 5 - 7 Nov; branch `claude/upbeat-goldberg-amk2i3`)
 
 Every commit is `Raptor H17: S18 -- ...`, pushed to the branch AND fast-forwarded onto the preview/staging branch
