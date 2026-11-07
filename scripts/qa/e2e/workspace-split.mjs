@@ -238,6 +238,11 @@ try {
     const { context, page } = await open(browser, ADMIN, '/trust')
     await page.waitForSelector('text=Trust overview', { timeout: 15000 })
 
+    /* THE FIRM'S BAND, as on every dashboard (Stephan, 7 Nov), with today's date in it. */
+    const hero = page.locator('.app-hero').filter({ hasText: 'Trust overview' })
+    t.check('the Trust overview wears the hero band', await hero.count(), 1)
+    t.ok('...with "As at" in the band', (await hero.getByTestId('trust-as-at').count()) === 1)
+
     /* THE RAIL DREW, with its name and the line saying whose money this is. */
     const rail = page.locator('nav').filter({ hasText: 'Money held for other people' }).first()
     t.ok('the trust rail is on the page', (await rail.count()) > 0)

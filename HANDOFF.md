@@ -22,6 +22,12 @@ fold. The name gives way first (min 4.5rem) and the cell clips. "3 weeks late" i
 days" -- the same fact twice, in calendar and working days. Check `scripts/qa/e2e/diary-row-fit.mjs` (7 widths;
 8 failures on the old code).
 
+**Trust overview wears the hero band** (Stephan, 7 Nov, on the iPad: "perhaps here should also be a hero banner").
+The plain title and the "As at" box are now a `DashboardHero` ("Finance · Trust"), "As at" in its `aside` on a
+dark glass pill (a white-on-white one vanished against the photograph's sky). The black figures band under it is
+unchanged. Check: `e2e/workspace-split` (seen failing without it). Not asked about the other Trust screens -- ask
+before giving every rail page a band.
+
 ## S18 -- WHERE IT STANDS, AND WHERE S19 STARTS (Raptor · Handover 18, 5 - 7 Nov; branch `claude/upbeat-goldberg-amk2i3`)
 
 Every commit is `Raptor H17: S18 -- ...`, pushed to the branch AND fast-forwarded onto the preview/staging branch

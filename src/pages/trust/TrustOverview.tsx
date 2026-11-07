@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
+import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { rand } from '../../lib/money'
 import {
   fetchClientsOwing, fetchFirmTrustSplit, fetchOverpaymentsKept, fetchTrustCashByCycle, fetchTrustCycles,
@@ -146,16 +147,15 @@ export function TrustOverview() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-800">Trust overview</h1>
-          <p className="text-sm text-slate-500 mt-1">Today: whose money is in the account, and what needs doing</p>
-        </div>
-        {/* A STATEMENT, NOT A PICKER: the position is today's. History is on Bank statement. */}
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
-          As at {longDate(today)}
-        </div>
-      </div>
+      {/* THE FIRM'S BAND, as on every dashboard (Stephan, 7 Nov: "perhaps here should also be a hero banner"). */}
+      <DashboardHero eyebrow="Finance · Trust" title="Trust overview"
+        subtitle="Today: whose money is in the account, and what needs doing"
+        aside={
+          /* A STATEMENT, NOT A PICKER: the position is today's. History is on Bank statement. */
+          <div className="rounded-lg border border-white/25 bg-navy-950/60 backdrop-blur-sm px-4 py-2 text-sm font-medium text-white" data-testid="trust-as-at">
+            As at {longDate(today)}
+          </div>
+        } />
 
       {/* THE MONEY FIRST, THEN HOW MUCH OF IT HAS A NAME ON IT (the firm, 10 Oct). */}
       <div className="rounded-2xl bg-navy-950 text-white px-6 sm:px-8 py-6 grid grid-cols-1 sm:grid-cols-3 gap-6" data-testid="trust-headline">
