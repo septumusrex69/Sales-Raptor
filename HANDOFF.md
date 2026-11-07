@@ -49,6 +49,18 @@ pill (and in duplum / prescribed / the ended pill) moved from beside the title t
 band's top right. `StatusPill` is shared, so the Accounts list reads "Active" too. Checks: `check-status-word`,
 `e2e/account-hero-state` (seen failing on the old code).
 
+**Trust overview's figures band is the firm's colours** (Stephan: "it's black and it doesn't look good"): brand navy
+into steel (`--c-navy-deep` -> `--c-navy` -> `--c-navy-mid`), gold labels, a gold top edge; the "As at" pill lost its blur.
+
+**Who may export the book: a tick of its own, `book.export`** (Stephan, 7 Nov: "team leaders, the call center manager
+... the client liaison manager, administrators ... The sales team doesn't have anything to do with this really, and
+the collectors also not"). Replaces S18's "whoever has the Trust". By default Administrator, Liaison Manager, Call
+Centre Manager, Pre-legal Team Leader; grantable/revokable per person on the users screen. A screen gate (not
+`inDatabase`). Staging migration `s19_book_export_tick` (role_capabilities), mirrored; check-account-export holds the
+gate and the four roles, check-capabilities the two template copies.
+
+**e2e/people fails 2 checks on code BEFORE S19 too** (commission R300, payable) -- not touched; looks date-dependent.
+
 **Trust area "lagging" (Stephan, 7 Nov) -- NOT FINISHED.** With empty fixtures every trust page scrolls at a steady
 60fps at 4x CPU throttle, no polling, no idle re-renders, no long tasks (scratch probe, not committed); the skin puts
 no blur on trust pages. So it is real-data size or slow RPCs. Next: time each trust RPC as Stephan (a DO block that

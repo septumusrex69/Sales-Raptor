@@ -152,16 +152,20 @@ export function TrustOverview() {
         subtitle="Today: whose money is in the account, and what needs doing"
         aside={
           /* A STATEMENT, NOT A PICKER: the position is today's. History is on Bank statement. */
-          <div className="rounded-lg border border-white/25 bg-navy-950/60 backdrop-blur-sm px-4 py-2 text-sm font-medium text-white" data-testid="trust-as-at">
+          <div className="rounded-lg border border-white/25 bg-navy-950/70 px-4 py-2 text-sm font-medium text-white" data-testid="trust-as-at">
             As at {longDate(today)}
           </div>
         } />
 
       {/* THE MONEY FIRST, THEN HOW MUCH OF IT HAS A NAME ON IT (the firm, 10 Oct). */}
-      <div className="rounded-2xl bg-navy-950 text-white px-6 sm:px-8 py-6 grid grid-cols-1 sm:grid-cols-3 gap-6" data-testid="trust-headline">
+      {/* THE FIRM'S BLUES AND GOLD, NOT BLACK (Stephan, 7 Nov: "make it more relative to Raptor ... like coloring and
+          stuff, because it's black and it doesn't look good"): the brand navy into steel, gold labels, a gold edge. */}
+      <div className="rounded-2xl text-white px-6 sm:px-8 py-6 grid grid-cols-1 sm:grid-cols-3 gap-6 ring-1 ring-gold-500/40
+        bg-[linear-gradient(135deg,var(--c-navy-deep)_0%,var(--c-navy)_55%,var(--c-navy-mid)_100%)] shadow-[inset_0_3px_0_var(--c-gold-brand)]"
+        data-testid="trust-headline">
         <div>
           <Figure label="In the trust account" value={rand(head.inTrust)} />
-          <div className={clsx('mt-2 text-xs', openingSet ? 'text-slate-300' : 'text-amber-300 font-semibold')}>
+          <div className={clsx('mt-2 text-xs', openingSet ? 'text-white/75' : 'text-amber-200 font-semibold')}>
             {openingSet && opening?.amount !== null && opening?.asAt
               ? `Opening ${rand(opening.amount)} at ${longDate(opening.asAt)}, plus statements since`
               : 'Statement lines only \u2014 no opening balance captured'}
@@ -169,7 +173,7 @@ export function TrustOverview() {
         </div>
         <div>
           <Figure label="Accounted for" value={rand(head.accounted)} />
-          <div className="mt-2 text-xs text-slate-300">Clients, Bredell Ferreira and debtors{swordfishLeft(swordfish) !== 0 ? ', and what Swordfish still pays' : ''}</div>
+          <div className="mt-2 text-xs text-white/75">Clients, Bredell Ferreira and debtors{swordfishLeft(swordfish) !== 0 ? ', and what Swordfish still pays' : ''}</div>
         </div>
         {/* THE FIGURE OPENS EVERY ITEM BEHIND IT (S7). */}
         <Link to="/trust/unaccounted" data-testid="open-unaccounted" className="block rounded-xl -m-2 p-2 hover:bg-white/5 transition-colors">
@@ -298,7 +302,7 @@ function Subtotal({ label, value, strong }: { label: string; value: number; stro
 function Figure({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-300 mb-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-gold-400 mb-2">
         {label}
       </div>
       <div className={clsx('text-3xl lg:text-4xl font-semibold tabular-nums leading-none', tone)}>

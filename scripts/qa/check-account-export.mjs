@@ -113,8 +113,14 @@ ok('nothing in it writes', !/\.(insert|update|upsert|delete)\(|\.rpc\(/.test(run
 
 const list = readFileSync(new URL('../../src/pages/accounts/AccountsList.tsx', import.meta.url), 'utf8')
 ok('the export is the screen’s own query', /query=\{query\}/.test(list))
-/* WHO MAY EXPORT: whoever has the Trust (Stephan, 5 Nov) -- the finance.view tick, and nothing else. */
-ok('the export is offered to whoever has the Trust', /const mayExport = canViewTrust\(currentUser\)/.test(list))
+/* WHO MAY EXPORT (S19, Stephan 7 Nov): the book.export tick -- leaders, managers, Administrators; not sales, not collectors. */
+ok('the export is offered on the book.export tick', /const mayExport = can\(currentUser, 'book\.export'\)/.test(list))
+{
+  const { ROLE_CAPABILITIES } = await import('../../src/lib/capabilities.ts')
+  const has = Object.keys(ROLE_CAPABILITIES).filter((r) => ROLE_CAPABILITIES[r].includes('book.export')).sort()
+  ok(`...which by default the four roles Stephan named hold, and nobody else (${has.join(', ')})`,
+    JSON.stringify(has) === JSON.stringify(['Administrator', 'Call Centre Manager', 'Liaison Manager', 'Pre-legal Team Leader']))
+}
 ok('...and both Export buttons ask that one question', (list.match(/\{mayExport && \(/g) ?? []).length === 1
   && /trailing=\{mayExport \?/.test(list))
 ok('...and "all matching" is not a list of the ticked page', /ticked=\{allMatching \? \[\] : \[\.\.\.ticked\]\}/.test(list))

@@ -56030,3 +56030,41 @@ as $$
      and l.status not in ('allocated', 'reconciled')
    order by l.txn_date desc, l.amount, l.id
 $$;
+
+-- =====================================================================================================
+-- S19 (Raptor · Handover 18, 7 Nov): book.export -- WHO MAY EXPORT THE BOOK TO A CSV. Stephan: "team leaders, the
+-- call center manager ... the client liaison manager, administrators, yeah, that's it. The sales team doesn't have
+-- anything to do with this really, and the collectors also not." Replaces S18's "whoever has the Trust".
+-- Migration s19_book_export_tick.
+-- =====================================================================================================
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','people.leave','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','book.export','floor.lead','campaign.run','handover.upload','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze','book.export','campaign.run','handover.upload',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','campaign.run','handover.upload','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','book.export','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','book.export','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+

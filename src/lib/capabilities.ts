@@ -80,6 +80,7 @@ export type Capability =
   | 'book.hand_out'
   | 'book.reassign'
   | 'book.freeze'
+  | 'book.export'
   | 'floor.lead'
   | 'campaign.run'
   | 'handover.upload'
@@ -260,6 +261,19 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     group: 'The book',
   },
   /*
+   * EXPORTING THE BOOK TO A CSV (S19). Stephan, 7 Nov, replacing "whoever has the Trust": "team leaders, the call
+   * center manager ... the client liaison manager, administrators, yeah, that's it. The sales team doesn't have
+   * anything to do with this really, and the collectors also not." A file of every debtor's name and ID number that
+   * leaves Raptor, so it is a tick of its own -- grantable to one more person, or taken from one -- not a role test.
+   * A screen gate: the rows themselves stay readable to whoever may already see them.
+   */
+  'book.export': {
+    label: 'Export the book to a CSV',
+    blurb: 'Download the accounts on screen -- names, ID numbers, balances -- as a spreadsheet. The firm: '
+      + 'leaders and managers, not the sales team and not the collectors.',
+    group: 'The book',
+  },
+  /*
    * LOADING A CLIENT'S ACCOUNTS (23 Oct). THE FIRM: "any person in the client liaison department can
    * upload a handover sheet" -- the sheet (a batch) and the single account a client phones in. Both
    * liaison roles by template; anybody else through their department's `load_handovers` duty or a
@@ -435,7 +449,7 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
   /* campaign.run for both liaison roles: "even liaisons can run campaigns over their own clients"
      (the firm, 21 Oct). mayCampaignOn keeps them to those clients. */
   'Liaison Manager': [
-    'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze', 'campaign.run', 'handover.upload',
+    'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze', 'book.export', 'campaign.run', 'handover.upload',
     'client.view', 'dispute.write_to_client', 'settlement.approve', 'marketing.send', 'library.view',
   ],
   /* handover.upload for both liaison roles (23 Oct): "any person in the client liaison department
@@ -445,10 +459,10 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'library.view',
   ],
   'Call Centre Manager': [
-    'payment.record', 'book.hand_out', 'floor.lead', 'campaign.run', 'client.view', 'library.view',
+    'payment.record', 'book.hand_out', 'book.export', 'floor.lead', 'campaign.run', 'client.view', 'library.view',
   ],
   'Pre-legal Team Leader': [
-    'payment.record', 'book.hand_out', 'book.freeze', 'floor.lead', 'campaign.run', 'client.view',
+    'payment.record', 'book.hand_out', 'book.freeze', 'book.export', 'floor.lead', 'campaign.run', 'client.view',
     'library.view',
   ],
   /* NO client.view, and that is the firm's rule rather than an omission: a pre-legal agent works
