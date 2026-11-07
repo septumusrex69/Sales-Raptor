@@ -39,7 +39,21 @@ each, ten thousand elements under the approval queue: now 100 at a time, Show 10
 search still cover every receipt. Checks: `e2e/payments-in-suspense-pages` (stub caps at 1 000 like the server; fails
 on the old code with "1 000 receipts in suspense"), `check-row-cap` (both reads paged, ties broken),
 `check-suspense-search` updated for the slice. NOT done: `BankLinesToAllocate` (To sort) still draws every line --
-330 today; give it the same pages if it grows. Other trust RPCs (`suspended_bank_lines`, `suspended_payments`,
+330 today; give it the same pages if it grows.
+
+**R-26's open question answered: "Active: Activated"** (Stephan, 7 Nov: "what does that mean? ... it's a live
+account ... put that maybe right under the pre-legal agent"). It is Swordfish's status with its provenance in it --
+Activated / Re-opened / Unfrozen all mean live and differ only in history. `statusWord` (accountStatus.ts) gives the
+pill "Active" (Frozen, Written off as they are) with the history on the hover; the stored status is untouched. The
+pill (and in duplum / prescribed / the ended pill) moved from beside the title to directly under the agent in the
+band's top right. `StatusPill` is shared, so the Accounts list reads "Active" too. Checks: `check-status-word`,
+`e2e/account-hero-state` (seen failing on the old code).
+
+**Trust area "lagging" (Stephan, 7 Nov) -- NOT FINISHED.** With empty fixtures every trust page scrolls at a steady
+60fps at 4x CPU throttle, no polling, no idle re-renders, no long tasks (scratch probe, not committed); the skin puts
+no blur on trust pages. So it is real-data size or slow RPCs. Next: time each trust RPC as Stephan (a DO block that
+sets request.jwt.claims; do NOT use `truncate` or `delete` -- the Supabase tool then asks for a confirmation his iPad
+cannot show, and it timed out once here), and give every big trust list the Payments-in treatment. Other trust RPCs (`suspended_bank_lines`, `suspended_payments`,
 `unreconciled_payouts`, payments out) are unpaged but far under 1 000 today.
 
 ## S18 -- WHERE IT STANDS, AND WHERE S19 STARTS (Raptor · Handover 18, 5 - 7 Nov; branch `claude/upbeat-goldberg-amk2i3`)

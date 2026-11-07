@@ -1708,6 +1708,9 @@ function AccountPage() {
         }
         /* R-26 (S18): the agent holds the band's top right, however long the line under the name runs. */
         aside={
+          /* THE AGENT, AND UNDER IT THE ACCOUNT'S STATE (S19; Stephan, 7 Nov: "we can put that maybe right under the
+             pre-legal agent ... it just looks up there"). One stack in the band's top right. */
+          <div className="flex flex-col items-end gap-2">
           <div data-testid="hero-agent" className="text-right leading-tight rounded-xl bg-black/30 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm">
             <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-gold-500">Pre-legal agent</p>
             {mayHandOut ? (
@@ -1722,26 +1725,27 @@ function AccountPage() {
               <p className="text-sm font-semibold text-white">{assignedName ?? 'Unassigned'}</p>
             )}
           </div>
+          <div className="flex items-center gap-2" data-testid="hero-state">
+            {/* HOW IT ENDED, NOT THE COLUMN IT CAME IN ON. A withdrawn account kept its green
+                'Active' pill from Swordfish; the pill is the first thing read on the page. */}
+            {account.endedAs
+              ? <span data-testid="account-ended-pill"
+                  className="whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                  {/* ONE WORD (the firm, 12 Oct: "you only have to say withdrawn, not withdrawn by the
+                      client"): the long label wrapped under the debtor's name on the iPad. */}
+                  {ENDING_SHORT[account.endedAs] ?? ENDING_LABEL[account.endedAs]}{account.endedOn ? ` · ${formatDate(account.endedOn)}` : ''}
+                </span>
+              : <StatusPill status={account.status} inDuplum={account.inDuplum} />}
+            {account.prescribed && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
+                title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
+                prescribed
+              </span>
+            )}
+          </div>
+          </div>
         }
       >
-        <div className="flex items-center gap-2">
-          {/* HOW IT ENDED, NOT THE COLUMN IT CAME IN ON. A withdrawn account kept its green
-              'Active' pill from Swordfish; the pill is the first thing read on the page. */}
-          {account.endedAs
-            ? <span data-testid="account-ended-pill"
-                className="whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                {/* ONE WORD (the firm, 12 Oct: "you only have to say withdrawn, not withdrawn by the
-                    client"): the long label wrapped under the debtor's name on the iPad. */}
-                {ENDING_SHORT[account.endedAs] ?? ENDING_LABEL[account.endedAs]}{account.endedOn ? ` · ${formatDate(account.endedOn)}` : ''}
-              </span>
-            : <StatusPill status={account.status} inDuplum={account.inDuplum} />}
-          {account.prescribed && (
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
-              title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">
-              prescribed
-            </span>
-          )}
-        </div>
         {/*
           Whoever is working this debtor. "Pre-legal agent" rather than "Client Liaison": a
           liaison looks after the client relationship, and this is the person chasing the debt.

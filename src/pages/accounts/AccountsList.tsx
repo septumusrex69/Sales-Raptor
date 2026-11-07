@@ -20,7 +20,7 @@ import { computeBalance, type BalanceBreakdown } from '../../lib/accountBalance.
 import { balanceInputFor } from '../../lib/balanceInput.ts'
 import { recordBalances, storedAgrees, storedRow, type StoredBalanceRow } from '../../lib/storedBalance.ts'
 import { supabase } from '../../lib/supabase'
-import { accountEnded, isWrittenOff } from '../../lib/accountStatus.ts'
+import { accountEnded, isWrittenOff, statusWord } from '../../lib/accountStatus.ts'
 import { firmToday } from '../../lib/dateLabels.ts'
 import { fetchLateNewAccountIds } from '../../lib/diary.ts'
 import { todayIso } from '../../lib/diaryPriority.ts'
@@ -1295,7 +1295,9 @@ export function StatusPill({ status, inDuplum }: { status: string; inDuplum?: bo
       : 'bg-slate-100 text-slate-600'
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tone}`}>{status || '—'}</span>
+      {/* The state, not Swordfish's provenance (S19): "Active", with how it became live on the hover. */}
+      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tone}`} title={statusWord(status).meaning}
+        data-testid="status-pill">{statusWord(status).word}</span>
       {inDuplum && (
         <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700" title="Non-capital has reached the capital handed over; it may not grow further.">
           in duplum

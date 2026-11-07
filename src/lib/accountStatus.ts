@@ -43,3 +43,29 @@ export function accountEnded(
   if (!account) return false
   return !!account.endedAs || isWrittenOff(account.status)
 }
+
+/**
+ * WHAT THE STATUS PILL SAYS: THE STATE, NOT HOW IT GOT THERE (S19; Stephan, 7 Nov, on the account banner:
+ * "Active: Activated, what does that mean? ... it's a live account, it's not been archived?").
+ *
+ * Yes. The book carries Swordfish's five statuses, and the three Active ones differ only in history --
+ * Activated (loaded live), Re-opened (closed, then opened again), Unfrozen (frozen, then restarted). That is
+ * provenance baked into a label (accountFreeze.ts says the same), so the pill says "Active" and the history
+ * moves to the hover. The stored status is untouched: imported history is frozen at what was imported.
+ */
+export function statusWord(status: string | null | undefined): { word: string; meaning: string } {
+  const s = (status ?? '').trim()
+  if (!s) return { word: '—', meaning: 'No status recorded' }
+  if (isWrittenOff(s)) return { word: 'Written off', meaning: 'Closed: written off. Nothing more is charged on it.' }
+  if (/^frozen$/i.test(s)) return { word: 'Frozen', meaning: 'On hold: no notices and no charges until it is unfrozen.' }
+  const active = s.match(/^active\s*:\s*(.+)$/i)
+  if (active || /^active$/i.test(s)) {
+    const how = (active?.[1] ?? '').toLowerCase()
+    const since = how === 'activated' ? 'live since it was loaded'
+      : how === 're-opened' ? 'closed once, then opened again'
+        : how === 'unfrozen' ? 'frozen once, then restarted'
+          : null
+    return { word: 'Active', meaning: `A live account, being worked${since ? ` (${since})` : ''}.` }
+  }
+  return { word: s, meaning: s }
+}
