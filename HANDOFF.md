@@ -1,10 +1,64 @@
-# Raptor · Handover 17 — where Raptor stands
+# Raptor · Handover 18 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 17**, written by S17, which started from Raptor Handover 16. The next session is S18 and writes
-> Handover 18; its commits start `Raptor H17: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct);
+> **Raptor Handover 18**, written by S18, which started from Raptor Handover 17. The next session is S19 and writes
+> Handover 19; its commits start `Raptor H18: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct);
 > older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by
 > that name.
+
+## S18 -- WHERE IT STANDS, AND WHERE S19 STARTS (Raptor · Handover 18, 5 - 7 Nov; branch `claude/upbeat-goldberg-amk2i3`)
+
+Every commit is `Raptor H17: S18 -- ...`, pushed to the branch AND fast-forwarded onto the preview/staging branch
+`claude/sales-raptor-review-p1pzx2` (Stephan: "you can bring everything up to staging"; the ruleset prints "Bypassed
+rule violations" -- expected). Last state: fast suite green (23 188 checks, 377 files), build and lint clean. Every
+staging migration is mirrored at the end of `supabase/schema.sql`. The detail of each piece is in the running log below.
+
+### WHAT S18 SHIPPED (staging / the preview)
+
+- **Accounts**: export the book to CSV (whoever has Trust); page sizes 100-1000, Load more at the top, filters tidied.
+- **Trust / payments**: search in suspense; receipt fee capped at what it took to settle; the debtor's money leaving
+  the account (refund, move, release) on the balance and statement; payments from BEFORE the handover held out of
+  Approve all (investigate: handover date / amount / withdraw -- never a refund); the approval queue projects and
+  posts in order and is now LISTED in that order (received, captured, id -- same-day payments are never summed);
+  suspense commission counts on the allocation date; RAP case numbers match on statement import; To sort no longer
+  slides sideways on the iPad.
+- **Backdated payments, phase 1 only**: `restatement_preview` / `backdated_payments` (calculator, rolled back, changes
+  nothing) live on staging, v5, verified to the cent. The worked example for approval is a Claude Doc
+  (https://claude.ai/artifact/AnryHybwQ7ktF8dnbQZrNQ) and a PDF Stephan has, **for Camille to approve**.
+- **BuzzBox**: the extension is an Administrator's to set; no extension says "Your BuzzBox is not connected. Speak to
+  an administrator." **Central mailbox (legal@)**: one form under Settings -> Integrations.
+- **Requests**: Parked (Big Boss only); the Big Boss may tick an answer; Claude's questions go to (and notify) the
+  administrator who sent the request through; dictate on Other and notes; one tap, one answer. R-26 (agent on the
+  right of the account banner) released.
+- **Spell check**, on by default with a per-device switch (Settings -> Appearance): browser underlines + a check before
+  every email and SMS (Hunspell en_GB, nothing leaves the browser).
+- **No flash of yesterday's photograph**; email dates say "Thursday 5 Nov" instead of "Last week".
+- **For people**: `docs/testing/bank-statement-test-prompt.md` (testers' prompt for statement imports); the light-bulb
+  guide "How to send a request" (Claude Doc https://claude.ai/artifact/M1LNk96f8hhofN3kB5gjjD, and a letterhead PDF).
+
+### START HERE (S19)
+
+1. **Backdated payments, phases 2-3, ONLY after Camille approves the calculation** (Stephan sends her the PDF). Phase
+   1b: the Trust list "Backdated payments" on `backdated_payments()`. Phase 2: post the interest correction and the
+   re-split of every later payment. Phase 3: the adjustment line on the next payover run and the remittance, and the
+   commission correction. Rules: nothing paid over is edited; corrections are new lines dated the day approved; the
+   debtor's statement shows the payment on its real date. Her eight questions are at the end of the doc.
+2. **Open decisions (ask, do not guess):** the three dates per payment (paid / captured / processed) and a compulsory
+   PTC date; collections figures by captured or paid date; R-26's "Active: Activated" label (question on the request).
+3. **Not started:** debtor offers under Disputes (Sonia's email; Stephan said "not as important"). S17's email-compose
+   items (several CC, the body jumping, the signature preview) were not worked on in S18 -- check whether the helper's
+   worktree ever landed before starting them.
+4. **Requests waiting:** R-25 approved and on Claude's queue.
+
+### TRAPS SEEN IN S18
+
+- **The Supabase tool asks for confirmation on any SQL containing "delete"**, and Stephan's iPad cannot show the
+  prompt. Put such SQL in `supabase/manual/` and ask him to paste it into the SQL editor.
+- **This repo is public**: a push was refused twice for debtor names and staging figures in a commit / HANDOFF. Keep
+  both generic.
+- `restatement_preview` undoes its writes by always raising SQLSTATE 'RQSIM' -- read it before reusing the trick.
+- An e2e that measures only `document.scrollingElement` misses the layout's own scrolling pane; measure every
+  overflow-x panel (see `e2e/trust-sort-statement.mjs`).
 
 ## S18 -- RUNNING LOG (Raptor · Handover 17, 5 Nov; branch `claude/upbeat-goldberg-amk2i3`, started from `claude/sales-raptor-review-p1pzx2` at 7e89084)
 
@@ -76,9 +130,7 @@ browser's estimate for unposted payments (`computedReceiptFees`) uses the same c
 what made "Client share + BF share + credit = total" fail on overpayments; **a payment received before the handover is
 held out of Approve all**, its badge asking: handover date wrong, handover amount to reduce, or withdraw and charge the
 client -- never a refund (Stephan). Staging's live fee_split had been applied without comments; logic was identical.
-**Still open:** (1) the approval queue previews each waiting payment ALONE, so later waiting payments on an account
-whose capital an earlier one clears each split that capital again in the projection (posting in order is right);
-(2) DONE below.
+**Was open, now done:** (1) the queue's projection is in posting order (`queue_preview`, S18); (2) done below.
 **SHIPPED (S18): THE DEBTOR'S CREDIT LEAVING THE ACCOUNT IS ON THE BALANCE AND THE STATEMENT** (Stephan: "a refund
 should be appearing on the debtor's statement as well"). Staging migration `s18_account_money_out`, mirrored: a
 definer read of refunds (not cancelled; instructed or paid), overpayments MOVED to another account, and overpayments
