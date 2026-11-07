@@ -59,6 +59,18 @@ Centre Manager, Pre-legal Team Leader; grantable/revokable per person on the use
 `inDatabase`). Staging migration `s19_book_export_tick` (role_capabilities), mirrored; check-account-export holds the
 gate and the four roles, check-capabilities the two template copies.
 
+**Payment dates: Paid / Captured / Processed, one tap away; the PTC date is typed** (Stephan, 7 Nov: "important to
+have the paid, captured, and processed data ... it doesn't need to be in your face" and "the PTC date. It should be
+compulsory"). `lib/paymentDates.ts` (Paid = received_at, Captured = created_at, Processed = allocated_on else
+approved_at, all Johannesburg days; "captured more than a week after it was paid" flagged); `components/finance/
+PaymentDates.tsx` -- a small calendar button beside the date on the account's payments and on Payments in -> History,
+opening the three on a TAP (iPad), read for that one payment when opened (no migration). RecordPaymentModal: a PTC's
+date starts EMPTY (was today), "Date the debtor paid the client *", nothing records without it; a trust receipt still
+starts at today. Commission and collections STILL count by paid date -- Stephan did not answer that question; ask
+before moving them. Checks: `check-payment-three-dates`, `e2e/payment-dates` (both seen failing). TRAP: a Write to
+`check-payment-dates.mjs` overwrote an existing 212-line check (Swordfish import dating) -- restored; look before
+naming a new check.
+
 **e2e/people fails 2 checks on code BEFORE S19 too** (commission R300, payable) -- not touched; looks date-dependent.
 
 **Trust area "lagging" (Stephan, 7 Nov) -- the browser, not the database.** Every trust RPC timed as Stephan (a plain

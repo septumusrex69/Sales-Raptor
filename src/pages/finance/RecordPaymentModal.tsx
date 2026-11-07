@@ -57,8 +57,18 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
   const [uploading, setUploading] = useState(false)
 
   const [amount, setAmount] = useState('')
-  const [receivedOn, setReceivedOn] = useState(today)
+  const [trustOn, setTrustOn] = useState(today)
+  /*
+   * THE PTC DATE IS TYPED, NEVER ASSUMED (S19; Stephan, 7 Nov: "you should put in the PTC date. It should be
+   * compulsory because we need to know when the date is when the payment was made from the debtor"). It used to
+   * default to TODAY, so a PTC the client reported three weeks late was quietly dated the day somebody typed it --
+   * the wrong payover cycle, and interest run to the wrong day. So it starts EMPTY and nothing records without it.
+   * A trust receipt keeps today as its start: the statement is the witness for those, and it says the bank's day.
+   */
+  const [ptcOn, setPtcOn] = useState('')
   const [paidToClient, setPaidToClient] = useState(false)
+  const receivedOn = paidToClient ? ptcOn : trustOn
+  const setReceivedOn = paidToClient ? setPtcOn : setTrustOn
   const [method, setMethod] = useState('EFT')
   const [reference, setReference] = useState('')
 
@@ -299,15 +309,23 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
               inputMode="decimal" placeholder="0.00" className={`${inputClass} tabular-nums`} />
           </label>
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Received on</span>
+            <span className="text-sm font-medium text-slate-700">
+              {paidToClient ? <>Date the debtor paid the client <span className="text-negative-700">*</span></> : 'Received on'}
+            </span>
             {/*
               THE DAY THE MONEY CAME IN, not today. The payover cycle is cut on this date, so a PTC
               a client reports three weeks late belongs in the month the debtor actually paid.
               max is today: a payment dated forward lands in a cycle that has not been cut.
             */}
-            <input type="date" value={receivedOn} max={today}
+            <input type="date" value={receivedOn} max={today} required={paidToClient} data-testid="received-on"
+              aria-label={paidToClient ? 'Date the debtor paid the client' : 'Received on'}
               onChange={(e) => { setReceivedOn(e.target.value); setDuplicate(null) }}
               className={inputClass} />
+            {paidToClient && !receivedOn && (
+              <span className="mt-1 block text-[11.5px] text-slate-500" data-testid="ptc-date-needed">
+                The day the money left the debtor, off the client&rsquo;s confirmation &mdash; not today.
+              </span>
+            )}
           </label>
         </div>
 

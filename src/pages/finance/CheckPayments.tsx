@@ -11,6 +11,7 @@ import { formatDate } from '../../data/mockData'
 import {
   fetchPostedPayments, postedAllocation, type PostedPayment,
 } from '../../lib/payover'
+import { PaymentDates } from '../../components/finance/PaymentDates'
 import { ReversePaymentModal } from '../../components/finance/ReversePaymentModal'
 import { matchesPayment, reverseBlocked } from '../../lib/paymentSearch'
 import { fetchClientReferences } from '../../lib/paymentReverse'
@@ -376,7 +377,8 @@ function PostedRow({ r, a, problems, opened, isOpen, onOpen, mayReverse, onRever
             {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           </button>
         </td>
-        <td className="px-2 py-1.5 text-slate-600">{formatDate(r.receivedOn)}</td>
+        {/* Paid, captured and processed, one tap away (S19): the date shown is PAID. */}
+        <td className="px-2 py-1.5 text-slate-600">{formatDate(r.receivedOn)}<PaymentDates paymentId={r.paymentId} /></td>
         {/* THE CLIENT'S NUMBER FIRST (prompt 11): KLR/1005 is the one on the statement and the
             one the client quotes; our RAP- reference sits under it in grey. */}
         <td className="px-2 py-1 text-slate-700 leading-tight" data-testid="history-account">

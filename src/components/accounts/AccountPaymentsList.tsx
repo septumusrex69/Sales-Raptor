@@ -4,6 +4,7 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { firmDay } from '../../lib/dateLabels'
 import { fetchAccountPayments, type AccountPaymentRow } from '../../lib/paymentReverse'
+import { PaymentDates } from '../finance/PaymentDates'
 import { reverseBlocked } from '../../lib/paymentSearch'
 import { ReversePaymentModal } from '../finance/ReversePaymentModal'
 
@@ -59,7 +60,8 @@ export function AccountPaymentsList({ accountId, mayReverse, onReversed }: {
               return (
                 <tr key={p.id} data-testid="account-payment"
                   className={`border-b border-slate-50 last:border-0 ${p.reversedOn ? 'text-slate-400' : ''}`}>
-                  <td className="px-3 py-1.5 text-slate-600">{formatDate(p.receivedOn)}</td>
+                  {/* Paid, captured and processed, one tap away (S19): see PaymentDates. */}
+                  <td className="px-3 py-1.5 text-slate-600">{formatDate(p.receivedOn)}<PaymentDates paymentId={p.id} /></td>
                   {/* STRUCK THROUGH WHEN REVERSED: it is in no total (prompt 11). */}
                   <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${p.reversedOn ? 'line-through text-slate-400' : 'text-slate-800'}`}>{rand(p.amount)}</td>
                   <td className="px-2 py-1.5 text-slate-600">{p.paidToClient ? 'Paid to the client' : 'Into trust'}</td>
