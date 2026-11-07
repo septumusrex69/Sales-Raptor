@@ -570,7 +570,8 @@ ok('...and the list is fetched at that size', /offset: at \* pageSize, limit: pa
  * a control that does nothing when you press it, which is worse than not offering it.
  */
 ok('...and refetched when it changes',
-  /\[currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere\]/.test(page))
+  /* ...and when the folder changes (R-13, S19). */
+  /\[currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere, folderId\]/.test(page))
 /*
  * `asked`, NOT `search`, AND THE DIFFERENCE IS THE WHOLE OF A BUG THE FIRM REPORTED.
  *

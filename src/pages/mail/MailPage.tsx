@@ -1,4 +1,8 @@
 import { dropDraft, listDrafts, type MailDraft } from '../../lib/mailDrafts'
+import {
+  createMailFolder, fetchMailFolders, folderNameProblem, moveMailToFolder, removeMailFolder, updateMailFolder,
+  type MailFolder,
+} from '../../lib/mailFolders'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -6,12 +10,12 @@ import {
   Inbox, Link2, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
-  Filter, Info, UserPlus,
+  Filter, Info, UserPlus, Folder, FolderInput, FolderPlus, Settings2,
 } from 'lucide-react'
 import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
 import { RowMenu, type RowMenuItem } from '../../components/ui/RowMenu'
-import { Modal } from '../../components/ui/Modal'
+import { Modal, inputClass } from '../../components/ui/Modal'
 import {
   inviteHeadline, inviteInstant, inviteWhen, parseInvite, type CalendarInvite,
 } from '../../lib/calendarInvite.ts'
@@ -42,7 +46,7 @@ import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
   blockedBy, blockSender,
-  countUnreadByTab, debtorFileFor, deleteMail, fetchMailItem, fetchSenderRules, tabOf,
+  countUnread, countUnreadByTab, debtorFileFor, deleteMail, fetchMailItem, fetchSenderRules, tabOf,
   domainBlockProblem, domainOf, emptyJunk, fetchAttachment, fetchBlockedSenders, fetchMail,
   isSharedDomain,
   fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailDone, markMailNotDone, markMailRead, markMailUnread, moveFiledMail,
@@ -211,7 +215,21 @@ export function MailPage() {
   // Only for logging a reply on a lead, deal, client or contact — see the reply handler.
   const { addActivity } = useAppStore()
   const navigate = useNavigate()
-  const [filter, setFilter] = useState<Pane>('all')
+  const [filter, setFilterOnly] = useState<Pane>('all')
+  /*
+   * ONE OF THE PERSON'S OWN FOLDERS, IN PLACE OF A TAB (R-13, S19). Choosing a tab leaves the folder, so the two can
+   * never both look chosen; see lib/mailFolders.ts for what a folder is and is not.
+   */
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const setFilter = useCallback((p: Pane) => { setFilterOnly(p); setFolderId(null) }, [])
+  const [folders, setFolders] = useState<MailFolder[]>([])
+  const [foldersVersion, setFoldersVersion] = useState(0)
+  /** The messages being filed, while the box asks which folder. */
+  const [foldering, setFoldering] = useState<MailItem[] | null>(null)
+  /** The folder whose name or client is being changed, or 'new'. */
+  const [managing, setManaging] = useState<MailFolder | 'new' | null>(null)
+  const { companies } = useAppStore()
+  const folder = folders.find((f) => f.id === folderId) ?? null
   /*
    * Unread, and whether the list is narrowed to it.
    *
@@ -534,7 +552,7 @@ export function MailPage() {
         return
       }
       const res = await fetchMail({
-        userId: currentUser.id, filter, search: asked, unreadOnly, everywhere: searchEverywhere,
+        userId: currentUser.id, filter, search: asked, unreadOnly, everywhere: searchEverywhere, folderId,
         offset: at * pageSize, limit: pageSize,
       })
       setItems(res.items)
@@ -562,9 +580,59 @@ export function MailPage() {
     } finally {
       setLoading(false)
     }
-  }, [currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere])
+  }, [currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere, folderId])
 
   useEffect(() => { void load(0) }, [load])
+
+  /*
+   * UNREAD IN EACH FOLDER (R-13). Filed mail has left the Inbox and the sidebar badge with it, so a folder says itself
+   * when something in it is unread -- the firm's own rule about Junk: unread mail somewhere must say so somewhere.
+   * Recounted whenever the list changes, which is after every load and every filing.
+   */
+  const [folderUnread, setFolderUnread] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!currentUser || folders.length === 0) { setFolderUnread({}); return }
+    let live = true
+    void Promise.all(folders.map((f) => countUnread(currentUser.id, { filter: 'all', folderId: f.id }).catch(() => 0)))
+      .then((ns) => { if (live) setFolderUnread(Object.fromEntries(folders.map((f, i) => [f.id, ns[i]]))) })
+    return () => { live = false }
+  }, [currentUser, folders, items])
+
+  /* The person's folders (R-13). A failure leaves the strip empty rather than taking the mailbox with it. */
+  useEffect(() => {
+    if (!currentUser) return
+    let live = true
+    void fetchMailFolders(currentUser.id).then((f) => { if (live) setFolders(f) }).catch(() => {})
+    return () => { live = false }
+  }, [currentUser, foldersVersion])
+
+  /*
+   * FILING INTO A FOLDER, OR BACK TO THE INBOX (null). A folder linked to a client also files on that client what is
+   * not on any record yet -- onto the client's timeline, charging nothing (linkMailToRecord). A message already on a
+   * record keeps it: a folder is where the person keeps their mail, not a decision about whose it is.
+   */
+  async function fileInto(mails: MailItem[], target: MailFolder | null) {
+    setError(null)
+    try {
+      await moveMailToFolder(mails.map((m) => m.id), target?.id ?? null)
+      let onClient = 0
+      const client = target?.companyId ? companies.find((c) => c.id === target.companyId) : null
+      if (client && currentUser) {
+        for (const m of mails.filter((x) => !x.isFiled)) {
+          await linkMailToRecord({ mail: m, to: { kind: 'client', id: client.id, label: client.name },
+            actor: { id: currentUser.id, name: currentUser.name } }).then(() => { onClient += 1 }).catch(() => {})
+        }
+      }
+      const n = mails.length
+      setStatus(`${n} message${n === 1 ? '' : 's'} ${target ? `filed in ${target.name}` : 'back in the inbox'}`
+        + (onClient ? `, ${onClient} also put on ${client?.name}` : '') + '.')
+      setFoldering(null)
+      if (open && mails.some((m) => m.id === open)) setOpen(null)
+      await load(page)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   /*
    * WARMING THE TOP OF THE LIST, WHICH IS WHAT MAKES THE BACKLOG FAST TOO.
@@ -758,6 +826,13 @@ export function MailPage() {
     if (loading || !currentUser) return
 
     if (wantedRow) {
+      /* FILED IN A FOLDER (R-13): the message is in its folder and no tab, so that is where the link opens. */
+      if (wantedRow.folderId) {
+        if (folderId !== wantedRow.folderId) { setFilterOnly('all'); setFolderId(wantedRow.folderId); return }
+        if (loadedTab !== 'all') return
+        setItems((list) => [wantedRow, ...list.filter((m) => m.id !== wantedRow.id)])
+        return
+      }
       const tab = tabOf(wantedRow)
       if (filter !== tab) { setFilter(tab); return }
       if (loadedTab !== tab) return
@@ -783,7 +858,7 @@ export function MailPage() {
     })
     // toggleTo is redeclared each render; the guards above are what stop a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wanted, items, loading, wantedRow, filter, loadedTab, currentUser])
+  }, [wanted, items, loading, wantedRow, filter, loadedTab, currentUser, folderId])
 
   /**
    * Open a message and read it.
@@ -1340,10 +1415,10 @@ export function MailPage() {
         <div className="border-b border-slate-200 flex items-center gap-2 pr-5">
           <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px min-w-0 flex-1">
             {TABS.map((t) => (
-              <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint} aria-pressed={filter === t.id}
+              <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint} aria-pressed={filter === t.id && !folderId}
                 data-testid={`mail-tab-${t.id}`} style={{ order: t.id === 'done' ? 2 : 0 }}
                 className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
-                  filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                  filter === t.id && !folderId ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                 {t.label}
                 {/*
                   TWO DIFFERENT NUMBERS, and they answer different questions.
@@ -1441,6 +1516,46 @@ export function MailPage() {
           </div>
         </div>
 
+        {/*
+          YOUR FOLDERS (R-13, S19). Rinda: "file our emails into the relevant subfolder keeping our inbox to a minimum";
+          Stephan: "an option for people to have the folders ... and they can ... link a folder with a client." A row of
+          their own under the tabs, quiet until somebody makes one: New folder is the only thing on it until then.
+        */}
+        {filter !== 'blocked' || folderId ? (
+          <div className="px-5 py-1.5 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto" data-testid="mail-folders">
+            <span className="shrink-0 text-[11.5px] font-medium uppercase tracking-wide text-slate-400 mr-1">Folders</span>
+            {folders.map((f) => {
+              const client = f.companyId ? companies.find((c) => c.id === f.companyId) : null
+              const on = folderId === f.id
+              return (
+                <button key={f.id} type="button" onClick={() => { setFilterOnly('all'); setFolderId(on ? null : f.id) }}
+                  aria-pressed={on} data-testid="mail-folder" title={client ? `Linked to ${client.name}` : f.name}
+                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] ${
+                    on ? 'border-gold-500 bg-gold-50 text-navy-950 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                  <Folder size={12} className={on ? 'text-gold-600' : 'text-slate-400'} /> {f.name}
+                  {client && <span className="text-[11px] text-slate-400">· {client.name}</span>}
+                  {(folderUnread[f.id] ?? 0) > 0 && (
+                    <span title="Unread" data-testid="mail-folder-unread"
+                      className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold inline-flex items-center justify-center tabular-nums bg-brand-500 text-white">
+                      {folderUnread[f.id] > 99 ? '99+' : folderUnread[f.id]}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+            {folder && (
+              <button type="button" onClick={() => setManaging(folder)} data-testid="mail-folder-manage"
+                className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-slate-500 hover:bg-slate-100">
+                <Settings2 size={12} /> Rename or link
+              </button>
+            )}
+            <button type="button" onClick={() => setManaging('new')} data-testid="mail-folder-new"
+              className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-slate-500 hover:bg-slate-100">
+              <FolderPlus size={13} /> New folder
+            </button>
+          </div>
+        ) : null}
+
         {/* The bulk bar only exists once something is selected — an always-visible row of
             disabled buttons is furniture. */}
         {chosen.size > 0 && (
@@ -1512,6 +1627,11 @@ export function MailPage() {
                 <ShieldAlert size={14} /> Move to junk
               </button>
             )}
+            {/* INTO A FOLDER, IN BULK (R-13): a morning's mail for one client filed in one press. */}
+            <button onClick={() => setFoldering(items.filter((m) => chosen.has(m.id)))} data-testid="mail-bulk-folder"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
+              <FolderInput size={14} /> {folderId ? 'Move to another folder' : 'Move to a folder'}
+            </button>
             <button onClick={() => void bin()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-negative-700 hover:bg-white">
               <Trash2 size={14} /> Delete from Raptor
@@ -1558,7 +1678,7 @@ export function MailPage() {
             <MailSearchBar search={search} onSearch={setSearch}
               unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
               everywhere={searchEverywhere} onEverywhere={setSearchEverywhere}
-              tabLabel={TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
+              tabLabel={folder ? folder.name : TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
           </div>
         )}
 
@@ -1625,6 +1745,10 @@ export function MailPage() {
               <div className="py-14 grid place-items-center text-slate-400">
                 <Loader2 size={18} className="animate-spin" />
               </div>
+            ) : folder ? (
+              <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid="mail-folder-empty">
+                Nothing in {folder.name} yet. Open a message and choose Move to a folder, or select several.
+              </p>
             ) : (
               <Empty filter={filter} searching={!!asked.trim()} />
             )}
@@ -1632,7 +1756,7 @@ export function MailPage() {
               <MailSearchBar search={search} onSearch={setSearch}
                 unreadOnly={unreadOnly} onUnreadOnly={setUnreadOnly} unread={unread}
                 everywhere={searchEverywhere} onEverywhere={setSearchEverywhere}
-                tabLabel={TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
+                tabLabel={folder ? folder.name : TABS.find((t) => t.id === filter)?.label ?? 'this tab'} />
             }
             renderLead={(m) => (
               /* Collapses with the gutter: padding on an empty span is the gap all over again. */
@@ -1756,6 +1880,7 @@ export function MailPage() {
                   onDone={canBeDone(m) ? (d) => void doneOne(m, d) : null}
                   onLink={() => startLink(m)}
                   onCreateLead={() => setCreatingLead(m)}
+                  onFolder={() => setFoldering([m])}
                   sticky
                   fetchAttachment={(f) => attachmentOf(m, f)} />
               </div>
@@ -1766,7 +1891,11 @@ export function MailPage() {
             <Loader2 size={18} className="animate-spin" />
           </div>
         ) : items.length === 0 ? (
-          <Empty filter={filter} searching={!!asked.trim()} />
+          folder
+            ? <p className="py-14 text-center text-sm text-slate-400" data-testid="mail-folder-empty">
+                Nothing in {folder.name} yet. Open a message and choose Move to a folder, or select several.
+              </p>
+            : <Empty filter={filter} searching={!!asked.trim()} />
         ) : (
           <>
             <ul className="divide-y divide-slate-100">
@@ -1807,6 +1936,7 @@ export function MailPage() {
                   onUnread={() => void unreadOne(m)}
                   onDone={canBeDone(m) ? (d) => void doneOne(m, d) : null}
                   onCreateLead={() => setCreatingLead(m)}
+                  onFolder={() => setFoldering([m])}
                   fetchAttachment={(f) => attachmentOf(m, f)} />
               ))}
             </ul>
@@ -1867,6 +1997,20 @@ export function MailPage() {
       )}
 
 
+      {foldering && (
+        <FolderPicker folders={folders} current={folderId} count={foldering.length}
+          companies={companies}
+          onPick={(f) => void fileInto(foldering, f)}
+          onNew={() => setManaging('new')}
+          onClose={() => setFoldering(null)} />
+      )}
+      {managing && currentUser && (
+        <FolderManager folder={managing === 'new' ? null : managing} folders={folders} companies={companies}
+          onClose={() => setManaging(null)}
+          onSaved={(f) => { setManaging(null); setFoldersVersion((v) => v + 1); if (f && !foldering) { setFilterOnly('all'); setFolderId(f.id) } }}
+          onRemoved={() => { setManaging(null); setFolderId(null); setFoldersVersion((v) => v + 1); setStatus('Folder deleted. Its mail is back in the inbox.') }}
+          userId={currentUser.id} />
+      )}
       {junking && junking.length > 0 && (
         <JunkModal
           mails={junking}
@@ -2740,8 +2884,10 @@ function MailBody({
   mail, body, html, showPictures, onShowPictures,
   images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onDone,
-  onLink, onCreateLead, fetchAttachment, sticky,
+  onLink, onCreateLead, fetchAttachment, sticky, onFolder,
 }: {
+  /** Into one of the person's own folders, or out of them (R-13, S19). */
+  onFolder?: () => void
   mail: MailItem
   body?: string
   /**
@@ -2884,6 +3030,8 @@ function MailBody({
       ? [{ label: 'Unmatch', icon: <Undo2 size={15} />, onClick: onMove }]
       : []),
     { label: 'Create a lead', icon: <UserPlus size={15} />, onClick: onCreateLead },
+    /* R-13 (S19): file it into one of your own folders -- off the Inbox, as Outlook's subfolders were. */
+    ...(onFolder ? [{ label: mail.folderId ? 'Move to another folder' : 'Move to a folder', icon: <FolderInput size={15} />, onClick: onFolder }] : []),
     ...(!mail.isFiled
       ? [mail.isJunk
         ? { label: 'Not junk', icon: <Undo2 size={15} />, onClick: () => onJunk(false) }
@@ -3407,8 +3555,9 @@ function MailRow({
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
-  onUnread, onDone, fetchAttachment,
+  onUnread, onDone, fetchAttachment, onFolder,
 }: {
+  onFolder?: () => void
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
   calendar?: string
@@ -3519,7 +3668,7 @@ function MailRow({
             loadingBody={loadingBody}
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onJunk={onJunk}
-            onMove={onMove} onUnread={onUnread} onDone={onDone}
+            onMove={onMove} onUnread={onUnread} onDone={onDone} onFolder={onFolder}
             onLink={onLink} onCreateLead={onCreateLead} fetchAttachment={fetchAttachment} />
         </div>
       )}
@@ -4883,6 +5032,133 @@ function MoveModal({ mail, mayRematch, actor, onClose, onDone }: {
         The R13 already on {was} is not reversed either way, and the email stays on that account
         so the fee still has the correspondence behind it. Finance corrects it in the remittance.
       </p>
+    </Modal>
+  )
+}
+
+/* ---------- R-13 (S19): the person's own folders ---------- */
+
+/**
+ * WHICH FOLDER. The person's folders, the way back to the inbox when the message is already in one, and a new folder
+ * without leaving the box. A folder linked to a client says so, because choosing it also files the message on them.
+ */
+function FolderPicker({ folders, current, count, companies, onPick, onNew, onClose }: {
+  folders: MailFolder[]
+  current: string | null
+  count: number
+  companies: { id: string; name: string }[]
+  onPick: (f: MailFolder | null) => void
+  onNew: () => void
+  onClose: () => void
+}) {
+  return (
+    <Modal title={count === 1 ? 'Move to a folder' : `Move ${count} messages to a folder`} onClose={onClose} width={420}>
+      <div className="space-y-1.5" data-testid="folder-picker">
+        {folders.length === 0 && <p className="text-sm text-slate-500">You have no folders yet. Make one and it is ready to use.</p>}
+        {folders.map((f) => {
+          const client = f.companyId ? companies.find((c) => c.id === f.companyId) : null
+          return (
+            <button key={f.id} type="button" disabled={f.id === current} onClick={() => onPick(f)} data-testid="folder-pick"
+              className="w-full flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-40">
+              <Folder size={15} className="mt-0.5 text-slate-400" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-slate-800">{f.name}{f.id === current ? ' (here now)' : ''}</span>
+                {client && <span className="block text-[11.5px] text-slate-500">Linked to {client.name}: a message on no record yet is filed on them too.</span>}
+              </span>
+            </button>
+          )
+        })}
+        {current && (
+          <button type="button" onClick={() => onPick(null)} data-testid="folder-pick-inbox"
+            className="w-full flex items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
+            <Inbox size={15} className="text-slate-400" /> Out of the folder, back to the inbox
+          </button>
+        )}
+        <button type="button" onClick={onNew}
+          className="inline-flex items-center gap-1.5 pt-1 text-[13px] font-medium text-gold-700 hover:text-gold-800">
+          <FolderPlus size={14} /> New folder
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * MAKE, RENAME, LINK OR DELETE A FOLDER. Deleting takes nothing but the folder: its mail goes back to the inbox. The
+ * client is optional and chosen from the firm's clients by name.
+ */
+function FolderManager({ folder, folders, companies, userId, onClose, onSaved, onRemoved }: {
+  folder: MailFolder | null
+  folders: MailFolder[]
+  companies: { id: string; name: string }[]
+  userId: string
+  onClose: () => void
+  onSaved: (f: MailFolder | null) => void
+  onRemoved: () => void
+}) {
+  const [name, setName] = useState(folder?.name ?? '')
+  const [companyId, setCompanyId] = useState<string>(folder?.companyId ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const problem = folderNameProblem(name, folders, folder?.id)
+  const sorted = useMemo(() => [...companies].sort((a, b) => a.name.localeCompare(b.name)), [companies])
+
+  async function save() {
+    if (problem) { setError(problem); return }
+    setBusy(true); setError(null)
+    try {
+      if (folder) {
+        await updateMailFolder(folder.id, { name, companyId: companyId || null })
+        onSaved(null)
+      } else {
+        onSaved(await createMailFolder(userId, name, companyId || null))
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  async function remove() {
+    if (!folder) return
+    setBusy(true); setError(null)
+    try { await removeMailFolder(folder.id); onRemoved() }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal title={folder ? `Folder: ${folder.name}` : 'New folder'} onClose={onClose} width={440}
+      footer={
+        <div className="flex items-center gap-2">
+          {folder && (confirming
+            ? <button type="button" disabled={busy} onClick={() => void remove()} data-testid="folder-delete-confirm"
+                className="text-sm font-medium text-negative-700 hover:underline">Yes, delete it</button>
+            : <button type="button" onClick={() => setConfirming(true)} data-testid="folder-delete"
+                className="text-sm text-slate-500 hover:text-negative-700">Delete folder</button>)}
+          <button type="button" onClick={onClose} className="ml-auto text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5">Cancel</button>
+          <button type="button" disabled={busy || !!problem} onClick={() => void save()} data-testid="folder-save"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gold-500 bg-gold-400 px-3.5 py-1.5 text-sm font-medium text-navy-950 hover:bg-gold-500 disabled:opacity-50">
+            {busy && <Loader2 size={13} className="animate-spin" />} {folder ? 'Save' : 'Make the folder'}
+          </button>
+        </div>
+      }>
+      <div className="space-y-3" data-testid="folder-manager">
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} autoFocus maxLength={60} aria-label="Folder name"
+            placeholder="e.g. Alianna Pharmacy, or Statements" className={inputClass} />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Linked to a client <span className="font-normal text-slate-400">(optional)</span></span>
+          <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} aria-label="Linked client" className={`${inputClass} bg-white`}>
+            <option value="">No client</option>
+            {sorted.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <span className="mt-1 block text-[11.5px] text-slate-500">
+            A message filed here that is on no record yet goes onto this client&rsquo;s timeline too. Nothing is charged.
+          </span>
+        </label>
+        {confirming && <p className="text-[12.5px] text-slate-600">Its mail goes back to your inbox; nothing is deleted but the folder.</p>}
+        {(error || (name.trim() && problem)) && <p className="text-[12.5px] text-negative-700">{error ?? problem}</p>}
+        <p className="text-[11.5px] text-slate-400">Your folders are yours: nobody else sees them, and nothing moves in Outlook.</p>
+      </div>
     </Modal>
   )
 }

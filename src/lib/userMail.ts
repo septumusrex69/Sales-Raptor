@@ -93,6 +93,8 @@ export interface MailItem {
    * All. Not `isSettled`, which the sync can set on its own; this only a person sets. See markMailDone.
    */
   doneAt: string | null
+  /** The person's own folder it is filed in (R-13, S19), or null: in the Inbox / Archive as before. */
+  folderId: string | null
   /**
    * What this person told the organiser, where the message was a meeting request.
    *
@@ -135,6 +137,7 @@ interface MailRow {
   occurred_at: string
   read_at: string | null
   done_at: string | null
+  folder_id: string | null
   linked_account_id: string | null
   linked_lead_id: string | null
   linked_deal_id: string | null
@@ -189,7 +192,7 @@ interface MailRow {
 const COLUMNS = `
   id, folder, is_sent, to_address, to_name, to_recipients, cc_recipients,
   uid, message_id, from_address, from_name, subject, snippet,
-  attachment_names, is_junk, occurred_at, read_at, done_at, is_filed, is_settled, no_record_at,
+  attachment_names, is_junk, occurred_at, read_at, done_at, folder_id, is_filed, is_settled, no_record_at,
   invite_response, body_cached_at,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
@@ -283,6 +286,7 @@ function toItem(r: MailRow): MailItem {
     isSettled: r.is_settled,
     /* By hand like every other column: missing here, every done message would read as still in All. */
     doneAt: r.done_at ?? null,
+    folderId: r.folder_id ?? null,
     inviteResponse: r.invite_response ?? null,
     linkedTo: linkedRecord(r),
   }
@@ -319,6 +323,12 @@ export interface MailScope {
    * folded in, which is not a view anybody asked for.
    */
   everywhere?: boolean
+  /**
+   * ONE OF THE PERSON'S OWN FOLDERS (R-13, S19), in place of a tab. A message filed into a folder has left the Inbox
+   * -- Rinda: "file our emails into the relevant subfolder keeping our inbox to a minimum" -- so the folder is the
+   * only tab that shows it (a search across the whole mailbox still finds it).
+   */
+  folderId?: string | null
 }
 
 /**
@@ -369,6 +379,7 @@ export function scope<Q>(q: Q, input: MailScope): Q {
    * part of the incoming working list; a Sent folder emptied into "All" is two thousand messages
    * nobody is looking for on top of the ones they are.
    */
+  else if (input.folderId) out = out.eq('folder_id', input.folderId)
   else if (input.filter === 'sent') out = out.eq('is_sent', true)
   /*
    * AND THERE IS NO CLAUSE FOR BEING MATCHED, which is the whole of the firm's change.
@@ -404,8 +415,10 @@ export function scope<Q>(q: Q, input: MailScope): Q {
    * NOTHING IS LOST: a search reaches the whole mailbox (`everywhere`, above), done mail included, and
    * "Not done" puts a message back.
    */
-  else if (input.filter === 'done') out = out.not('done_at', 'is', null).eq('is_junk', false).eq('is_sent', false)
-  else if (input.filter === 'all') out = out.eq('is_junk', false).eq('is_sent', false).is('done_at', null)
+  /* NOT WHAT IS FILED IN A FOLDER (R-13): filing is how somebody keeps the inbox short, so the Inbox and the Archive
+     leave a foldered message to its folder. */
+  else if (input.filter === 'done') out = out.not('done_at', 'is', null).eq('is_junk', false).eq('is_sent', false).is('folder_id', null)
+  else if (input.filter === 'all') out = out.eq('is_junk', false).eq('is_sent', false).is('done_at', null).is('folder_id', null)
 
   /*
    * Unread NARROWS whichever tab you are on rather than being a sixth tab of its own.

@@ -71,6 +71,19 @@ before moving them. Checks: `check-payment-three-dates`, `e2e/payment-dates` (bo
 `check-payment-dates.mjs` overwrote an existing 212-line check (Swordfish import dating) -- restored; look before
 naming a new check.
 
+**R-13 built: mail folders of one's own** (Rinda; Stephan, 7 Nov: "an option for people to have the folders ... to take
+and create folders ... and they can, for example, link a folder with a client"). `mail_folders` (per person, RLS owner
+only, name unique per person, optional `company_id`); `user_emails.folder_id` (on delete set null) with trigger
+`user_emails_folder_is_theirs`. Staging migrations `s19_mail_folders`, `s19_nav_counts_leaves_folders`, mirrored.
+Raptor's own folders -- NOT Outlook's, nothing moves on the mail server. A filed message leaves the Inbox, the Archive
+and the sidebar badge; the folder row under the tabs carries each folder's unread; Move to a folder from the message's
+More menu or the bulk bar; Rename or link / Delete (mail goes back to the inbox). A folder linked to a client also
+files a message on no record yet onto that client's timeline (linkMailToRecord, nothing charged). A link to a filed
+message opens its folder; reading one moves no tab's count (bumpUnread). NOT built: R-13's conversation mode (Stephan
+did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-mail-folders`, `e2e/mail-folders` (both
+seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
+`check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
+
 **e2e/people fails 2 checks on code BEFORE S19 too** (commission R300, payable) -- not touched; looks date-dependent.
 
 **Trust area "lagging" (Stephan, 7 Nov) -- the browser, not the database.** Every trust RPC timed as Stephan (a plain

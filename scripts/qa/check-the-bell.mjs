@@ -128,7 +128,8 @@ const navCounts = schema.slice(
     schema.lastIndexOf('create function public.nav_counts(')))
 ok('the nav badge was found', navCounts.includes('user_emails'))
 const mail = navCounts.slice(navCounts.indexOf('from public.user_emails'),
-  navCounts.indexOf('from public.user_emails') + 220)
+  /* To the end of the mail count, not a fixed width: R-13's folder clause and its note (S19) made it longer. */
+  navCounts.indexOf('),', navCounts.indexOf('from public.user_emails')))
 ok('...and mail is still counted on the Mail badge', /read_at is null/.test(mail))
 
 /*

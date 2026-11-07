@@ -56068,3 +56068,103 @@ as $$
   end
 $$;
 
+
+-- =====================================================================================================
+-- S19 (Raptor · Handover 18, 7 Nov): R-13, MAIL FOLDERS OF ONE'S OWN. Rinda: "carry over the subfolders from the
+-- outlook email ... file our emails into the relevant subfolder keeping our inbox to a minimum." Stephan: "as an
+-- option for people to have the folders ... to take and create folders ... and they can, for example, link a folder
+-- with a client." Raptor's own folders, per person (mail is per person); NOT a mirror of Outlook and nothing moves
+-- on the mail server. A message in a folder leaves the Inbox and Archive; deleting a folder sends its mail back to
+-- the Inbox (on delete set null). A folder may name a client (company_id). The trigger keeps a message to its
+-- owner's folders. Migration s19_mail_folders.
+-- =====================================================================================================
+create table public.mail_folders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null check (length(btrim(name)) between 1 and 60),
+  company_id uuid references public.companies(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create unique index mail_folders_user_name_idx on public.mail_folders (user_id, lower(btrim(name)));
+alter table public.mail_folders enable row level security;
+create policy mail_folders_own on public.mail_folders for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+grant select, insert, update, delete on public.mail_folders to authenticated;
+
+alter table public.user_emails add column folder_id uuid references public.mail_folders(id) on delete set null;
+create index user_emails_folder_idx on public.user_emails (user_id, folder_id) where folder_id is not null;
+
+create or replace function public.user_emails_folder_is_theirs()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if new.folder_id is not null and new.folder_id is distinct from old.folder_id
+     and not exists (select 1 from public.mail_folders f where f.id = new.folder_id and f.user_id = new.user_id) then
+    raise exception 'That folder is not yours.';
+  end if;
+  return new;
+end
+$$;
+create trigger user_emails_folder_is_theirs before update of folder_id on public.user_emails
+  for each row execute function public.user_emails_folder_is_theirs();
+
+-- =====================================================================================================
+-- S19 (Raptor · Handover 18, 7 Nov): R-13 -- the sidebar's Mail badge stands for the Inbox, and mail filed in a
+-- person's own folder has left the Inbox. Migration s19_nav_counts_leaves_folders.
+-- =====================================================================================================
+create or replace function public.nav_counts()
+returns table (mail integer, tasks integer, disputes integer, diary integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- UNREAD mail, whether or not it has been matched. Junk excluded: it is not work. Sent
+    -- excluded: we wrote it, and it is not waiting on anybody. DONE excluded (S16): somebody has
+    -- said it is dealt with, and it has left the inbox this badge stands for.
+    --
+    -- This used to count only mail that still needed matching, on the theory that a matched
+    -- message is already dealt with. In practice almost everything matches itself on arrival --
+    -- every message in the book did -- so the badge sat at nought for ever and a new email
+    -- arrived with nothing on the sidebar to say so. Unread is the thing a person actually
+    -- clears, by reading it, and it is what somebody means when they ask whether mail has come.
+    (select count(*)::integer from public.user_emails
+      where user_id = auth.uid()
+        and is_junk = false
+        and is_sent = false
+        and done_at is null
+        -- NOT FILED IN ONE OF THE PERSON'S OWN FOLDERS (R-13, S19): the badge stands for the Inbox, and the Inbox
+        -- leaves a foldered message to its folder, whose own chip carries its unread.
+        and folder_id is null
+        and read_at is null),
+    -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a
+    -- permanent number nobody could ever clear.
+    (select count(*)::integer from public.tasks
+      where owner_id = auth.uid()
+        and status not in ('Completed', 'Cancelled')
+        and due_date < date_trunc('day', public.raptor_now()) + interval '1 day'),
+    -- Disputes waiting on ME, not every dispute the firm has open. The difference between a
+    -- number somebody works and a number that sits at 20 forever.
+    -- Lowercase 'closed'. account_queries.status is one of open / with_client / answered /
+    -- closed, so "not closed" is the whole of the open book, not just stage 'open'.
+    (select count(*)::integer from public.account_queries
+      where owner_id = auth.uid()
+        and status <> 'closed'),
+    -- My diary: what is due today, plus what I am already behind on.
+    --
+    -- The arrears are INCLUDED on purpose, even though including them risks exactly the failure
+    -- this file warns about -- a badge that never reaches zero stops being read. The alternative
+    -- is worse: a book arrived here with 279 overdue entries, and a badge that showed only
+    -- today's work would read "4" to somebody three months behind. The number has to be able to
+    -- frighten, or it is not telling the truth. It reaches zero when the diary is genuinely
+    -- clear, which is the condition the firm actually wants to manage towards.
+    (select count(*)::integer from public.diary_entries
+      where owner_id = auth.uid()
+        and state = 'open'
+        and due_on <= public.raptor_today());
+$$;
+

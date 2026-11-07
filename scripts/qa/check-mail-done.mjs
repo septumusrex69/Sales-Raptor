@@ -57,7 +57,8 @@ ok('...which holds only done mail', /\.not\('done_at', 'is', null\)/.test(doneCl
 ok('...and only mail that would otherwise be in All', /\.eq\('is_junk', false\)/.test(doneClause) && /\.eq\('is_sent', false\)/.test(doneClause))
 /* NOTHING IS LOST: a search that reaches the whole mailbox applies no tab clause, done included. */
 ok('a whole-mailbox search applies no tab clause, so done mail is found',
-  /if \(wholeMailbox\) \{\s*\}\s*else if \(input\.filter === 'sent'\)/.test(userMail))
+  /* A folder (R-13, S19) is asked next, and it too is skipped by a whole-mailbox search. */
+  /if \(wholeMailbox\) \{\s*\}\s*(else if \(input\.folderId\)[^\n]*\s*)?else if \(input\.filter === 'sent'\)/.test(userMail))
 ok('Done is counted with the other tabs', /const tabs: MailFilter\[\] = \[[^\]]*'done'/.test(userMail))
 ok('the list reads done_at', /read_at, done_at,/.test(userMail) && /doneAt: r\.done_at/.test(userMail))
 

@@ -559,6 +559,9 @@ export interface TabFacts {
   /* REQUIRED, not optional (S16). Optional would let a caller that forgot it read every done message as
      All -- the hand-written-mapper trap CLAUDE.md names, moved into a type. */
   doneAt: string | null
+  /* R-13 (S19): filed in one of the person's own folders. Optional because only the mailbox's own rows carry it;
+     a folder's mail is in no tab -- see bumpUnread. */
+  folderId?: string | null
 }
 
 /**
@@ -581,6 +584,9 @@ export function tabOf(mail: TabFacts): MailFilter {
 export function bumpUnread(
   counts: Record<MailFilter, number>, mail: TabFacts, by: number,
 ): Record<MailFilter, number> {
+  /* A FILED MESSAGE IS IN NO TAB (R-13): the Inbox and Archive leave it to its folder, so reading it moves no tab's
+     number -- the folder's chip is recounted from the database instead. */
+  if (mail.folderId) return counts
   const tab = tabOf(mail)
   return { ...counts, [tab]: Math.max(0, counts[tab] + by) }
 }
