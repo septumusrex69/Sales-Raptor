@@ -198,6 +198,15 @@ for (const [file, fn, rpc] of [
   ok(`...and ${rpc} orders with no ties (l.id last)`, /order by [^;$]*, l\.id\s*\n\$\$/.test(def.slice(0, def.indexOf('$$;') + 3)))
 }
 
+
+/* THE BANK STATEMENT (S19): 2 160 lines on staging, 1 000 on the page. Paged; trust_bank_statement ends on line_key, unique. */
+{
+  const code = read('src/lib/trust.ts')
+  const at = code.indexOf('export async function fetchTrustBankStatement')
+  const body = code.slice(at, code.indexOf('\n}\n', at))
+  ok('fetchTrustBankStatement reads every page', at >= 0 && /fetchAllRows/.test(body) && body.includes("rpc('trust_bank_statement'"))
+}
+
 console.log(`check-row-cap: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 if (failures.length) process.exit(1)

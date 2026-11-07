@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ShowMore, useDrawn } from '../../components/ui/ShowMore'
 import { AlertTriangle, Check, Loader2, Search, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass, controlClass } from '../../components/ui/Modal'
@@ -39,9 +40,6 @@ import {
  * a person deciding. A wrong placement credits the wrong debtor AND remits the wrong client, and
  * a payment is immutable once processed -- reversal leaves both rows on the ledger for ever.
  */
-/** How many receipts Needs an account draws before "Show more" (S19). */
-const RECEIPTS_PER_PAGE = 100
-
 export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayouts = false }: {
   /* On To sort the money out is under Statement lines to allocate, so it is not listed twice. */
   hidePayouts?: boolean
@@ -81,8 +79,10 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
    * queue, and every letter typed in one box redrew them all. The totals, the tile and the search still cover
    * every receipt; only the drawing is a page. A new search starts again at the first hundred.
    */
-  const [drawn, setDrawn] = useState(RECEIPTS_PER_PAGE)
-  const search = (q: SuspenseQuery) => { setQuery(q); setDrawn(RECEIPTS_PER_PAGE) }
+  const [drawn, setDrawn] = useDrawn(query)
+  const search = setQuery
+  /* Payments out to allocate: 330 on staging, every one a row of buttons -- the same hundred at a time. */
+  const [payoutsDrawn, setPayoutsDrawn] = useDrawn(null)
   /* Held for Swordfish payovers (S10): which payments out may come off it, asked of the same rule the database refuses on. */
   const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
 
@@ -357,22 +357,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
               ))}
             </tbody>
           </table>
-          {shownRows.length > drawn && (
-            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-4 py-3 text-[13px]" data-testid="receipts-more">
-              <span className="text-slate-500">
-                Showing {drawn.toLocaleString('en-ZA')} of {shownRows.length.toLocaleString('en-ZA')}
-              </span>
-              <button type="button" onClick={() => setDrawn((n) => n + RECEIPTS_PER_PAGE)}
-                className="font-medium px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-                Show {Math.min(RECEIPTS_PER_PAGE, shownRows.length - drawn)} more
-              </button>
-              <button type="button" onClick={() => setDrawn(shownRows.length)}
-                title="Every one at once is slow on an iPad. The search above finds one without drawing them all."
-                className="font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2">
-                Show all
-              </button>
-            </div>
-          )}
+          <ShowMore total={shownRows.length} drawn={drawn} setDrawn={setDrawn} testId="receipts-more" />
           </div>
         )}
       </Card>
@@ -556,7 +541,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
           <div className="overflow-x-auto">
           <table className="w-full list-table whitespace-nowrap">
             <tbody>
-              {payouts.map((p) => (
+              {payouts.slice(0, payoutsDrawn).map((p) => (
                 <tr key={p.id} className="border-t border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(p.txnDate)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(Math.abs(p.amount))}</td>
@@ -611,6 +596,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
             </tbody>
           </table>
           </div>
+          <ShowMore total={payouts.length} drawn={payoutsDrawn} setDrawn={setPayoutsDrawn} testId="payouts-more" />
         </Card>
       )}
 

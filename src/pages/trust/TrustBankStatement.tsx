@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Loader2, Search } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
+import { ShowMore, useDrawn } from '../../components/ui/ShowMore'
 import { rand } from '../../lib/money'
 import { fetchTrustBankStatement, type StatementEntry } from '../../lib/trust'
 
@@ -22,6 +23,9 @@ export function TrustBankStatement() {
   const [q, setQ] = useState('')
   const [month, setMonth] = useState('')
   const [dir, setDir] = useState<'all' | 'credit' | 'debit'>('all')
+  /* A HUNDRED AT A TIME (S19): 2 160 lines on staging, all drawn at once. A new search, month or direction starts
+     again at the first hundred; the In / Out totals still add up everything that matches. */
+  const [drawn, setDrawn] = useDrawn(`${q}|${month}|${dir}`)
 
   useEffect(() => {
     let live = true
@@ -85,7 +89,7 @@ export function TrustBankStatement() {
             </tr>
           </thead>
           <tbody>
-            {shown.map((r) => (
+            {shown.slice(0, drawn).map((r) => (
               <tr key={r.id} className="border-b border-slate-50" data-testid="statement-line">
                 <td className="px-4 py-1.5 tabular-nums text-slate-500">{day(r.txnDate)}</td>
                 <td className="px-2 py-1.5 max-w-[22rem] truncate text-slate-700" title={r.description ?? ''}>{r.description ?? '—'}</td>
@@ -103,6 +107,7 @@ export function TrustBankStatement() {
             {shown.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-400">No line matches.</td></tr>}
           </tbody>
         </table>
+        <ShowMore total={shown.length} drawn={drawn} setDrawn={setDrawn} testId="statement-more" />
       </Card>
     </div>
   )

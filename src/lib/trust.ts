@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { fetchAllRows } from './fetchAll.ts'
 import type { TrustCycle } from './trustCycles.ts'
 import { toFirmHeld, type FirmHeld } from './firmHeld.ts'
 import { toSwordfishHolding, type SwordfishHolding } from './swordfishHolding.ts'
@@ -514,9 +515,12 @@ export interface StatementEntry {
 }
 
 export async function fetchTrustBankStatement(from: string | null, to: string | null): Promise<StatementEntry[]> {
-  const { data, error } = await supabase.rpc('trust_bank_statement', { p_from: from, p_to: to })
-  if (error) throw new Error(error.message)
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  /* EVERY PAGE (S19): 2 160 lines on staging and the page showed the newest 1 000 -- PostgREST's cap, silently, so
+     the older months were simply not on the statement. trust_bank_statement ends its order on line_key, which is
+     unique, so the pages neither skip nor repeat a line. */
+  const data = await fetchAllRows<Record<string, unknown>>(
+    () => supabase.rpc('trust_bank_statement', { p_from: from, p_to: to }), { table: 'trust_bank_statement' })
+  return data.map((r) => ({
     id: String(r.id), txnDate: String(r.txn_date), amount: n(r.amount),
     balance: r.balance === null || r.balance === undefined ? null : n(r.balance),
     description: (r.description as string | null) ?? null, direction: String(r.direction ?? ''),

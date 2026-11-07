@@ -61,12 +61,16 @@ gate and the four roles, check-capabilities the two template copies.
 
 **e2e/people fails 2 checks on code BEFORE S19 too** (commission R300, payable) -- not touched; looks date-dependent.
 
-**Trust area "lagging" (Stephan, 7 Nov) -- NOT FINISHED.** With empty fixtures every trust page scrolls at a steady
-60fps at 4x CPU throttle, no polling, no idle re-renders, no long tasks (scratch probe, not committed); the skin puts
-no blur on trust pages. So it is real-data size or slow RPCs. Next: time each trust RPC as Stephan (a DO block that
-sets request.jwt.claims; do NOT use `truncate` or `delete` -- the Supabase tool then asks for a confirmation his iPad
-cannot show, and it timed out once here), and give every big trust list the Payments-in treatment. Other trust RPCs (`suspended_bank_lines`, `suspended_payments`,
-`unreconciled_payouts`, payments out) are unpaged but far under 1 000 today.
+**Trust area "lagging" (Stephan, 7 Nov) -- the browser, not the database.** Every trust RPC timed as Stephan (a plain
+`select` with `query_to_xml` per function -- no temp table, no truncate, so no confirmation prompt) answers in under
+150 ms. The lag was drawing: To sort 2 135 statement lines (each a suggestion and drop-downs), Bank statement 2 160,
+Payments in 330 payments out, a ledger balance up to 500 entries. `components/ui/ShowMore.tsx` (`useDrawn` +
+`ShowMore`): a hundred at a time, Show N more / Show all, resetting on a new search; counts and totals still cover
+every row. On Needs an account, Payments out to allocate, To sort's lines, the Bank statement and ledger entries. And
+the BANK STATEMENT was capped too: the newest 1 000 of 2 160 lines, the older months absent -- now `fetchAllRows`
+(trust_bank_statement ends on `line_key`, unique, so no migration). Checks: `e2e/trust-big-lists` (staging sizes,
+stub capped at 1 000; fails on the old code), `check-row-cap`. Not changed: TrustLayout's `overflow-x-auto` wrapper
+(a nested scroller on iOS) -- no evidence it costs anything; look there if the iPad still drags.
 
 ## S18 -- WHERE IT STANDS, AND WHERE S19 STARTS (Raptor · Handover 18, 5 - 7 Nov; branch `claude/upbeat-goldberg-amk2i3`)
 

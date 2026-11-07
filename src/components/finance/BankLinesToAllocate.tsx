@@ -3,6 +3,7 @@ import { ReturnedReceiptPicker } from './ReturnedReceiptPicker'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { Card } from '../ui/Card'
+import { ShowMore, useDrawn } from '../ui/ShowMore'
 import { controlClass } from '../ui/Modal'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
@@ -45,6 +46,7 @@ export function BankLinesToAllocate() {
   const [matching, setMatching] = useState(false)
   const [matchNote, setMatchNote] = useState<string | null>(null)
   const [swordfish, setSwordfish] = useState<SwordfishHolding | null>(null)
+  const [drawn, setDrawn] = useDrawn(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -119,10 +121,13 @@ export function BankLinesToAllocate() {
       {matchNote && <p className="px-4 py-2 text-[12.5px] text-slate-600" data-testid="match-note">{matchNote}</p>}
       {error && <p className="px-4 py-3 text-sm text-negative-700">{error}</p>}
       <div className="divide-y divide-slate-100">
-        {lines.map((l) => (
+        {/* A HUNDRED AT A TIME (S19): 2 135 lines on staging, each with its own suggestion and drop-downs, made To
+            sort the slowest page in the trust area. The count and the totals above still cover every line. */}
+        {lines.slice(0, drawn).map((l) => (
           <LineRow key={l.id} line={l} candidates={candidates} business={business} swordfish={swordfish} onDone={load} />
         ))}
       </div>
+      <ShowMore total={lines.length} drawn={drawn} setDrawn={setDrawn} testId="lines-more" />
     </Card>
   )
 }

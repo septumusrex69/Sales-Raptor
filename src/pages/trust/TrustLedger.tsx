@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
+import { ShowMore, useDrawn } from '../../components/ui/ShowMore'
 import { PayoverCheck } from './TrustPtc'
 import { rand } from '../../lib/money'
 import {
@@ -247,6 +248,8 @@ function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; 
 function Entries({ party, who }: { party: TrustParty; who: string }) {
   const [entries, setEntries] = useState<TrustEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /* A hundred at a time (S19): one balance on staging carries 633 entries, of which the latest 500 come back. */
+  const [drawn, setDrawn] = useDrawn(`${party}|${who}`)
   useEffect(() => {
     let live = true
     fetchTrustEntries(party, who)
@@ -270,7 +273,7 @@ function Entries({ party, who }: { party: TrustParty; who: string }) {
           </tr>
         </thead>
         <tbody>
-          {entries.map((e) => (
+          {entries.slice(0, drawn).map((e) => (
             <tr key={e.id} className="border-t border-slate-100">
               <td className="whitespace-nowrap px-3 py-1.5 text-slate-500">{fmtDay(e.at)}</td>
               <td className="px-3 py-1.5 text-slate-700">
@@ -295,6 +298,7 @@ function Entries({ party, who }: { party: TrustParty; who: string }) {
           ))}
         </tbody>
       </table>
+      <ShowMore total={entries.length} drawn={drawn} setDrawn={setDrawn} testId="entries-more" />
       {entries.length === 500 && (
         <p className="border-t border-slate-100 px-3 py-1.5 text-[12px] text-slate-400">The latest 500 entries; the balance carries everything before them.</p>
       )}
