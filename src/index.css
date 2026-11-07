@@ -283,6 +283,21 @@ body,
   height: 100%;
 }
 
+/*
+ * THE APP IS ONE WINDOW TALL AND NEVER SCROLLS AS A PAGE (R-22: "Raptor goes up and the grey displays
+ * at the bottom"). Only <main> scrolls. Anything that sticks out of the shell -- a menu, a popover
+ * portalled to <body>, a focus() on something off-screen -- used to make the DOCUMENT scroll, sliding
+ * the whole app up and showing the grey page below it. Pages with no app shell (login, portal,
+ * signing) are not matched and scroll as pages do.
+ */
+html:has(.app-layout) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.app-layout {
+  position: relative;
+}
+
 body {
   margin: 0;
   background-color: var(--color-surface);

@@ -24,6 +24,7 @@
  */
 import { paymentReference } from './paymentsOut.ts'
 import type { RunPayment } from './payover'
+import { inRunningOrder } from './runOrder.ts'
 import { rand } from './money.js'
 import { buildXlsx, type Cell } from './xlsxWrite.js'
 import { clockNow } from './clock.js'
@@ -203,7 +204,9 @@ export function buildRemittanceAdvice(input: {
   run: RemittanceRun
   lines: RunPayment[]
 }): RemittanceAdvice {
-  const { firm, client, run, lines } = input
+  const { firm, client, run } = input
+  /* R-21: an account's payments read in the order they came off its balance (runOrder.ts). */
+  const lines = inRunningOrder(input.lines)
 
   const problems: string[] = []
   if (!firm.vatNumber) problems.push('The firm has no VAT number on file, and a tax invoice must carry one.')

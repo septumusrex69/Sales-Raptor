@@ -346,6 +346,16 @@ ok('...and keeps the OUTSTANDING column', /\{ head: 'VAT', width: 48, right: tru
 const vatAdvSrc = readFileSync(new URL('../../src/lib/remittanceAdvice.ts', import.meta.url), 'utf8')
 ok('the spreadsheet carries it too', /\{ n: c\.vat \}, \{ n: c\.capitalOutstanding \}, c\.vatLine,/.test(vatAdvSrc))
 
+/* ---------------- R-21: two payments on one account read in the order they came off its balance ---------------- */
+// Boitshoko Mose, as Finance saw it: both paid 22 Oct, the database returned the later posting first.
+const second = line({ lineId: 'b', accountId: 'bm', debtor: 'Boitshoko Mose', toCapital: 307.11, capitalAfter: 288.39 })
+const first = line({ lineId: 'a', accountId: 'bm', debtor: 'Boitshoko Mose', toCapital: 221.25, capitalAfter: 374.25 })
+const other = line({ lineId: 'c', accountId: 'zz', debtor: 'Zed', toCapital: 100, capitalAfter: 50 })
+check('the balance runs down the page, whatever order the rows arrived in',
+  build([second, first, other]).collections.map((c) => c.capitalOutstanding), [374.25, 288.39, 50])
+check('...and another account keeps its place',
+  build([other, second, first]).collections.map((c) => c.debtor), ['Zed', 'Boitshoko Mose', 'Boitshoko Mose'])
+
 console.log(`\ncheck-remittance-advice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

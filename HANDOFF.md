@@ -62,6 +62,11 @@ staging migration is mirrored at the end of `supabase/schema.sql`. The detail of
 
 ## S18 -- RUNNING LOG (Raptor · Handover 17, 5 Nov; branch `claude/upbeat-goldberg-amk2i3`, started from `claude/sales-raptor-review-p1pzx2` at 7e89084)
 
+
+**R-21 (builder, 6 Nov):** Finance · Trust, a remittance listing one debtor twice with the outstanding reading backwards (top row R67.14, row under it R288.39). Each figure was that payment's own capital_after; the ROWS were ordered by surname/received date, so same-day or out-of-order postings came out upside down. `src/lib/runOrder.ts` `inRunningOrder` re-slots an account's paid lines by capital_after descending (no figure recomputed -- posted history stays frozen), used by `fetchRunPayments` and `buildRemittanceAdvice`. Check: check-remittance-advice (broken once, seen failing).
+
+**R-22 (builder, 6 Nov):** "the page scrolling is weird, Raptor goes up and the grey displays at the bottom." The DOCUMENT was scrolling under the one-window-tall app shell (something sticking out of it, or a focus(), scrolled `<html>`). `html:has(.app-layout)` is now `overflow: hidden`, `.app-layout` is `position: relative` and `overflow-clip`; pages without the shell (login, portal, signing) scroll as before. New check `scripts/qa/e2e/app-shell-scroll.mjs`, seen failing with the rule removed. `change-requests.mjs` already failed 2 checks before this change (Parked shelf, the options panel) -- not touched here.
+
 **ON STAGING (5 Nov, Stephan: "you can bring everything up to staging"):** S18's branch fast-forwarded onto
 `claude/sales-raptor-review-p1pzx2` at 249f77c (9 commits). The Staging ruleset printed "Changes must be made through
 a pull request" and let the push through on the account's bypass -- the rule is reporting, not enforcing, for this
