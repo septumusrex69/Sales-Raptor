@@ -8,7 +8,7 @@ import { formatCurrency } from '../../data/mockData'
 import { clockNow } from '../../lib/clock.ts'
 import { BASE_THEME } from '../../lib/themes.ts'
 import { photoCredit } from '../../lib/portalPhotos.ts'
-import { currentDayLook, subscribeDayLook } from '../../lib/dayLookState.ts'
+import { currentDayLook, dayLookKnown, subscribeDayLook } from '../../lib/dayLookState.ts'
 import { useSyncExternalStore } from 'react'
 
 /**
@@ -328,9 +328,12 @@ const signedPct = (v: number): string => `${v >= 0 ? '+' : '−'}${Math.abs(Math
 function DayLine() {
   /* Today's APPROVED look (dayLookState.ts) -- the same one the client portal shows; Llandudno where none was approved. */
   const look = useSyncExternalStore(subscribeDayLook, currentDayLook, currentDayLook)
+  /* NOT LLANDUDNO'S WORDS FIRST (S19): until today's answer is in, the line keeps its room and shows nothing -- the
+     words changing under somebody's eyes is the same hop as the photograph changing. */
+  const known = useSyncExternalStore(subscribeDayLook, dayLookKnown, dayLookKnown)
   const photo = { ...look.photo, line: look.line, who: look.who }
   return (
-    <figure className="mt-4 max-w-3xl" data-testid="hero-day-line">
+    <figure className={`mt-4 max-w-3xl ${known ? '' : 'invisible'}`} data-testid="hero-day-line" aria-hidden={!known}>
       {/* THE HEADLINE, in the weight the firm chose for the old one ("make the font thicker"), a size down because a
           sentence is longer than a slogan. No quotation marks: it is the firm saying it, not somebody quoted. */}
       <h1 className="text-[26px] sm:text-[34px] lg:text-[40px] font-bold leading-[1.15] text-white" data-testid="hero-day-headline">
@@ -349,7 +352,9 @@ function DayLine() {
  */
 function HeroPhotoCredit() {
   const look = useSyncExternalStore(subscribeDayLook, currentDayLook, currentDayLook)
+  const known = useSyncExternalStore(subscribeDayLook, dayLookKnown, dayLookKnown)
   const credit = photoCredit({ ...look.photo, line: look.line, who: look.who })
+  if (!known) return null
   return (
     <p className="pointer-events-auto absolute bottom-2 right-4 z-10 max-w-[70%] truncate text-right text-[10px] text-white/55" data-testid="hero-photo-credit">
       {look.photo.title}, {look.photo.place}. Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">{credit.name}</a> on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">Unsplash</a>

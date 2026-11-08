@@ -84,6 +84,14 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**The day's photograph no longer hops** (Stephan, 8 Nov: "The pictures still keep hopping ... It would show
+yesterday's picture or something, and then another one"). S18 fixed the ANSWER; the PHOTOGRAPH still hopped: every slot
+painted `url(today), url(Llandudno)` and the local Llandudno showed until Unsplash answered, and the dashboard (3 200)
+and bands (2 400) were two downloads. `lib/dayPhotoLoad.ts` fetches today's photograph once, off-screen, at one size
+(DAY_PHOTO_WIDTH 2400); applyDayPhoto paints navy until it has arrived, then every slot at once, Llandudno only when it
+FAILED; remembered per device per URL so later pages paint it on the first frame. The dashboard's day line and credit
+stay invisible until today's answer is in (they showed Llandudno's words first). check-day-photo-flash extended (20).
+
 **Mail folders moved to a pane on the left; a client's folder is named after the client** (Stephan, 8 Nov: "there
 are going to be many of them, so maybe to the left you can have like a little pane expand that says folders ... If
 you link it to a client, it should be the client name"). `FolderPane` (MailPage.tsx): folded to a narrow "Folders"

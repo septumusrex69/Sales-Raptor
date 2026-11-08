@@ -1,4 +1,5 @@
-import { bandBackground, portalPhotoUrl } from './portalPhotos.ts'
+import { LLANDUDNO_LOOK, bandBackground, portalPhotoUrl } from './portalPhotos.ts'
+import { loadPhoto, photoState } from './dayPhotoLoad.ts'
 import { currentDayLook, dayLookKnown } from './dayLookState.ts'
 /**
  * The visual skins available to the application.
@@ -259,11 +260,30 @@ export function applyDayPhoto(id: ThemeId) {
     root.style.setProperty('--skin-hero-background', '#12212f')
     return
   }
-  const look = currentDayLook()
-  const at = (w: number) => `url('${portalPhotoUrl(look.photo, w)}'), url('/brand/portal-photo.webp')`
-  root.style.setProperty('--skin-collections-hero-image', at(3200))
+  /*
+   * AND NAVY UNTIL TODAY'S PHOTOGRAPH ITSELF HAS ARRIVED (S19; Stephan: "It would show yesterday's picture or
+   * something, and then another one"). It was painted with Llandudno underneath, which showed until Unsplash
+   * answered -- a hop on every page. Now fetched once, off-screen, at ONE size for every slot (the dashboard asked for
+   * 3 200 and the bands for 2 400: two downloads, two hops), and put on everywhere at once; Llandudno only if it
+   * FAILED. See dayPhotoLoad.ts.
+   */
+  const today = currentDayLook()
+  const url = portalPhotoUrl(today.photo, DAY_PHOTO_WIDTH)
+  const stand = today.photo.local ? 'loaded' : photoState(url)
+  if (stand === undefined || stand === 'loading') {
+    loadPhoto(url, () => applyDayPhoto(readStoredTheme()))
+    for (const v of ['--skin-collections-hero-image', '--day-photo-login'] as const) root.style.setProperty(v, 'none')
+    root.style.setProperty('--skin-hero-background', '#12212f')
+    return
+  }
+  const look = stand === 'failed' ? LLANDUDNO_LOOK : today
+  const one = `url('${portalPhotoUrl(look.photo, DAY_PHOTO_WIDTH)}')`
+  root.style.setProperty('--skin-collections-hero-image', one)
   root.style.setProperty('--day-photo-position', `${look.band.x}% ${look.band.y}%`)
-  root.style.setProperty('--day-photo-login', at(2400))
+  root.style.setProperty('--day-photo-login', one)
   root.style.setProperty('--day-photo-login-position', `${look.signin.x}% ${look.signin.y}%`)
-  root.style.setProperty('--skin-hero-background', `${bandBackground(look, 2400)}, #12212f`)
+  root.style.setProperty('--skin-hero-background', `${bandBackground(look, DAY_PHOTO_WIDTH, false)}, #12212f`)
 }
+
+/** One size for every slot, so the photograph is downloaded once: wide enough for the dashboard on a big screen. */
+const DAY_PHOTO_WIDTH = 2400

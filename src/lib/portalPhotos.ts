@@ -114,9 +114,11 @@ export function portalPhotoUrl(p: PortalPhoto, width: number): string {
 }
 
 /** As a CSS background: the photograph framed at `position`, with Llandudno underneath for a day Unsplash fails. */
-export function portalPhotoLayer(p: PortalPhoto, width: number, position = 'center'): string {
+export function portalPhotoLayer(p: PortalPhoto, width: number, position = 'center', underlay = true): string {
   const own = `url('${portalPhotoUrl(p, width)}') ${position} / cover no-repeat`
-  return p.local ? own : `${own}, url('${FALLBACK}') center / cover no-repeat`
+  /* `underlay` false where the caller has already seen the photograph arrive (themes.applyDayPhoto, S19): Llandudno
+     underneath is then only a second picture to flash while the first one decodes. */
+  return p.local || !underlay ? own : `${own}, url('${FALLBACK}') center / cover no-repeat`
 }
 
 export function photoCredit(p: PortalPhoto) {
@@ -213,11 +215,11 @@ export function draftRowFor(day: string): DayLookRow {
 }
 
 /** The wide band's background: a shade from the words' side, the photograph framed where it was approved. */
-export function bandBackground(look: DayLook, width = 3200): string {
+export function bandBackground(look: DayLook, width = 3200, underlay = true): string {
   const a = look.shade
   const toward = look.side === 'left' ? '90deg' : '270deg'
   const shade = `linear-gradient(${toward}, rgba(16,31,44,${a}) 0%, rgba(16,31,44,${(a * 0.66).toFixed(2)}) 30%, rgba(16,31,44,${(a * 0.15).toFixed(2)}) 58%, rgba(16,31,44,0) 80%)`
-  return `${shade}, ${portalPhotoLayer(look.photo, width, `${look.band.x}% ${look.band.y}%`)}`
+  return `${shade}, ${portalPhotoLayer(look.photo, width, `${look.band.x}% ${look.band.y}%`, underlay)}`
 }
 
 /** The tall sign-in panel's background: darker towards the foot, where its words are. */
