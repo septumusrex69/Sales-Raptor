@@ -27,6 +27,34 @@
 
 const SWITCH_KEY = 'crm.spellCheck'
 const MY_WORDS_KEY = 'crm.spellCheck.myWords'
+const LANGUAGES_KEY = 'crm.spellCheck.languages'
+
+/*
+ * ENGLISH AND AFRIKAANS (S19, 8 Nov; Stephan: "Can we also integrate Afrikaans and English?"). The firm writes to
+ * debtors in both, often in one message, so a word is right if EITHER dictionary knows it, and a misspelling is offered
+ * corrections from both. Each person may untick one (kept on this device); both is the start. Afrikaans is Hunspell
+ * af_ZA from Translate.org.za (LGPL, its licence beside it in public/dictionaries/af-za), the dictionary LibreOffice
+ * ships.
+ */
+export type SpellLanguage = 'en' | 'af'
+export const SPELL_LANGUAGES: { id: SpellLanguage; label: string; dir: string; file: string }[] = [
+  { id: 'en', label: 'English (South African / British)', dir: '/dictionaries/en-gb/', file: 'en_GB' },
+  { id: 'af', label: 'Afrikaans', dir: '/dictionaries/af-za/', file: 'af_ZA' },
+]
+
+/** The languages this person checks in. Both unless they unticked one; never none -- unticking the last one is refused. */
+export function spellLanguages(): SpellLanguage[] {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(LANGUAGES_KEY) ?? 'null') as unknown
+    const ok = Array.isArray(v) ? (v as string[]).filter((x): x is SpellLanguage => x === 'en' || x === 'af') : []
+    return ok.length ? ok : ['en', 'af']
+  } catch { return ['en', 'af'] }
+}
+export function setSpellLanguages(langs: SpellLanguage[]) {
+  const ok = SPELL_LANGUAGES.map((l) => l.id).filter((id) => langs.includes(id))
+  if (ok.length === 0) return
+  try { window.localStorage.setItem(LANGUAGES_KEY, JSON.stringify(ok)) } catch { /* lasts this visit */ }
+}
 
 /** On unless this person switched it off on this device. */
 export function spellCheckEnabled(): boolean {
@@ -57,10 +85,18 @@ export const FIRM_WORDS: readonly string[] = [
   'enkosi', 'thobela', 'dumela', 'lekker', 'eish', 'howzit', 'shame',
   // Found by running the 114 English templates on staging through it (6 Nov): the only two words it raised.
   'ombud', 'ombuds', 'ombudsman', 'diarise', 'diarised', 'diarising', 'rediarise', 'rediarised',
+  // Afrikaans compounds of the trade the af_ZA dictionary does not carry (S19).
+  'betalingsooreenkoms', 'betalingsreëling', 'betalingsreëlings', 'skuldinvordering', 'invorderingskoste',
 ]
 
 export function myWords(): string[] {
   try { return JSON.parse(window.localStorage.getItem(MY_WORDS_KEY) ?? '[]') as string[] } catch { return [] }
+}
+/** Take one back out of "my words" (Settings -> Spelling). */
+export function removeMyWord(word: string) {
+  try {
+    window.localStorage.setItem(MY_WORDS_KEY, JSON.stringify(myWords().filter((w) => w !== word.trim().toLowerCase())))
+  } catch { /* nowhere to keep it */ }
 }
 export function addMyWord(word: string) {
   const w = word.trim().toLowerCase()
@@ -99,6 +135,24 @@ export interface Speller {
 
 export interface Unknown { word: string; suggestions: string[] }
 
+/**
+ * Several dictionaries as one: a word is right if ANY knows it; corrections come from each in turn, so the first
+ * suggestion of each language is offered before the second of either.
+ */
+export function eitherSpeller(spellers: Speller[]): Speller {
+  return {
+    correct: (w) => spellers.some((sp) => sp.correct(w)),
+    suggest: (w) => {
+      const lists = spellers.map((sp) => sp.suggest(w))
+      const out: string[] = []
+      for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i += 1) {
+        for (const l of lists) if (l[i] && !out.includes(l[i])) out.push(l[i])
+      }
+      return out
+    },
+  }
+}
+
 /** The words the dictionary, the firm's list and this person's own words all do not know. */
 export function unknownWords(text: string, speller: Speller, extra: Iterable<string> = []): Unknown[] {
   const known = new Set([...FIRM_WORDS, ...extra].map((w) => w.toLowerCase()))
@@ -120,23 +174,31 @@ export function replaceWord(text: string, word: string, by: string): string {
 }
 
 /*
- * THE DICTIONARY, FETCHED THE FIRST TIME SOMEBODY SENDS -- about 550 kB, which nobody who only reads the diary
- * should download. Hunspell's en_GB-ise from wordlist.sourceforge.net (the npm package dictionary-en-gb), served
- * from public/dictionaries/en-gb with its licence beside it; nspell builds the speller once per visit.
+ * THE DICTIONARIES, FETCHED THE FIRST TIME SOMEBODY SENDS -- about 550 kB of English and 1.2 MB of Afrikaans, which
+ * nobody who only reads the diary should download. Each built once per visit by nspell (a quarter of a second each);
+ * a language that will not load is left out rather than holding the message (see SpellGate).
  */
-const DICTIONARY = '/dictionaries/en-gb/'
-let speller: Promise<Speller> | null = null
-export function loadSpeller(): Promise<Speller> {
-  if (!speller) {
-    speller = (async () => {
+const built = new Map<SpellLanguage, Promise<Speller>>()
+function loadOne(lang: SpellLanguage): Promise<Speller> {
+  let p = built.get(lang)
+  if (!p) {
+    const def = SPELL_LANGUAGES.find((l) => l.id === lang)!
+    p = (async () => {
       const [{ default: nspell }, aff, dic] = await Promise.all([
         import('nspell'),
-        fetch(DICTIONARY + 'en_GB.aff').then((r) => { if (!r.ok) throw new Error('dictionary'); return r.text() }),
-        fetch(DICTIONARY + 'en_GB.dic').then((r) => { if (!r.ok) throw new Error('dictionary'); return r.text() }),
+        fetch(def.dir + def.file + '.aff').then((r) => { if (!r.ok) throw new Error('dictionary'); return r.text() }),
+        fetch(def.dir + def.file + '.dic').then((r) => { if (!r.ok) throw new Error('dictionary'); return r.text() }),
       ])
       return nspell(aff, dic) as Speller
     })()
-    speller.catch(() => { speller = null })              // a failed fetch is tried again next time
+    p.catch(() => { built.delete(lang) })              // a failed fetch is tried again next time
+    built.set(lang, p)
   }
-  return speller
+  return p
+}
+export async function loadSpeller(): Promise<Speller> {
+  const got = await Promise.allSettled(spellLanguages().map(loadOne))
+  const ok = got.flatMap((g) => (g.status === 'fulfilled' ? [g.value] : []))
+  if (ok.length === 0) throw new Error('dictionary')
+  return eitherSpeller(ok)
 }

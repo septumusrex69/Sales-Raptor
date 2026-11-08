@@ -29,7 +29,10 @@ import { useBuzzBox } from '../../store/BuzzBoxContext'
 import { ACTIVE_THEMES } from '../../lib/themes'
 import { DEAL_MILESTONE_EVERY, MANDATE_MILESTONE_EVERY } from '../../lib/celebration'
 import { celebrationSoundEnabled, setCelebrationSoundEnabled } from '../../lib/chime'
-import { setSpellCheckEnabled, spellCheckEnabled } from '../../lib/spellCheck'
+import {
+  SPELL_LANGUAGES, myWords, removeMyWord, setSpellCheckEnabled, setSpellLanguages, spellCheckEnabled, spellLanguages,
+  type SpellLanguage,
+} from '../../lib/spellCheck'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
@@ -47,7 +50,7 @@ import { saveStartDate } from '../../lib/peopleApi'
  * this should live in the same environment." Teams are under Users -> Departments & teams now, and an
  * old ?tab=Teams link lands there (see SettingsPage) rather than on Profile.
  */
-const TABS = ['Profile', 'Appearance', 'Users', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
+const TABS = ['Profile', 'Appearance', 'Spelling', 'Users', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
 const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
@@ -141,6 +144,7 @@ export function SettingsPage() {
         )}
         {tab === 'Profile' && <ProfileTab />}
         {tab === 'Appearance' && <AppearanceTab />}
+        {tab === 'Spelling' && <SpellingTab />}
         {tab === 'Users' && <UsersSection />}
         {tab === 'Targets' && <TargetsTab />}
         {tab === 'Pipelines' && <PipelinesTab />}
@@ -1834,7 +1838,6 @@ function AppearanceTab() {
   const { themeId, setTheme, theme } = useTheme()
   const { celebrate } = useAppStore()
   const [sound, setSound] = useState(celebrationSoundEnabled)
-  const [spelling, setSpelling] = useState(spellCheckEnabled)
   return (
     <>
     <Card>
@@ -1928,26 +1931,78 @@ function AppearanceTab() {
         </div>
       </div>
     </Card>
-    {/*
-      SPELL CHECK, ON UNLESS YOU SWITCH IT OFF (S18, Stephan: "by default it's on, but the user can switch it off").
-      One switch for both halves: the underlines while typing, and the list before an email or SMS goes. Kept on
-      this device, like the milestone sound.
-    */}
-    <Card className="mt-4">
-      <CardHeader title="Spell check" subtitle="Red underlines while you type, and a check for misspelled words before an email or SMS is sent. South African / British spelling. Nothing you type leaves Raptor to be checked." />
-      <button
-        type="button"
-        data-testid="spell-check-switch"
-        onClick={() => { const next = !spelling; setSpelling(next); setSpellCheckEnabled(next) }}
-        aria-pressed={spelling}
-        className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors ${
-          spelling ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-        }`}
-      >
-        <SpellCheck size={14} />
-        Spell check {spelling ? 'on' : 'off'}
-      </button>
-    </Card>
+    </>
+  )
+}
+
+/*
+ * SPELLING, A PLACE OF ITS OWN (S19; Stephan, 8 Nov: "spell checker is an appearance. Shouldn't it be at another
+ * place? Can we also integrate Afrikaans and English?"). It was a card under Appearance, which is about how Raptor
+ * looks; this is about what you write. The switch (S18: "by default it's on, but the user can switch it off"), the
+ * languages to check in -- English and Afrikaans, both unless unticked -- and the words you taught it. All kept on this
+ * device, like the milestone sound.
+ */
+function SpellingTab() {
+  const [spelling, setSpelling] = useState(spellCheckEnabled)
+  const [langs, setLangs] = useState<SpellLanguage[]>(spellLanguages)
+  const [words, setWords] = useState<string[]>(myWords)
+  const toggleLang = (id: SpellLanguage) => {
+    const next = langs.includes(id) ? langs.filter((l) => l !== id) : [...langs, id]
+    if (next.length === 0) return            // never none: untick the switch instead
+    setLangs(next); setSpellLanguages(next)
+  }
+  return (
+    <>
+      <Card>
+        <CardHeader title="Spell check" subtitle="Red underlines while you type, and a check for misspelled words before an email or SMS is sent. Nothing you type leaves Raptor to be checked." />
+        <button
+          type="button"
+          data-testid="spell-check-switch"
+          onClick={() => { const next = !spelling; setSpelling(next); setSpellCheckEnabled(next) }}
+          aria-pressed={spelling}
+          className={`inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg border transition-colors ${
+            spelling ? 'border-gold-500 bg-gold-500/5 text-gold-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <SpellCheck size={14} />
+          Spell check {spelling ? 'on' : 'off'}
+        </button>
+      </Card>
+      <Card className="mt-4">
+        <CardHeader title="Languages" subtitle="A word is right if any language you tick knows it, so a message in English and Afrikaans together is checked in both." />
+        <div className="space-y-2" data-testid="spell-languages">
+          {SPELL_LANGUAGES.map((l) => {
+            const on = langs.includes(l.id)
+            return (
+              <label key={l.id} className={`flex items-center gap-2.5 text-sm ${spelling ? 'text-slate-700' : 'text-slate-400'}`}>
+                <input type="checkbox" checked={on} disabled={!spelling || (on && langs.length === 1)}
+                  onChange={() => toggleLang(l.id)} data-testid={`spell-language-${l.id}`} />
+                {l.label}
+              </label>
+            )
+          })}
+          <p className="text-[12px] text-slate-400">
+            The red underlines while you type come from your device, in the languages it is set up for -- on an iPad, add
+            an Afrikaans keyboard (Settings, General, Keyboard) to have them in Afrikaans too.
+          </p>
+        </div>
+      </Card>
+      <Card className="mt-4">
+        <CardHeader title="My words" subtitle="Words you added with Add to my words when a check stopped on them. Remove one and it is checked again." />
+        {words.length === 0
+          ? <p className="text-sm text-slate-400">None yet.</p>
+          : (
+            <ul className="flex flex-wrap gap-1.5" data-testid="spell-my-words">
+              {words.map((w) => (
+                <li key={w} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 pl-2.5 pr-1 py-0.5 text-[13px] text-slate-700">
+                  {w}
+                  <button type="button" aria-label={`Remove ${w}`} onClick={() => { removeMyWord(w); setWords(myWords()) }}
+                    className="rounded-full p-0.5 text-slate-400 hover:bg-white hover:text-negative-700"><X size={12} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+      </Card>
     </>
   )
 }

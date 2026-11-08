@@ -84,6 +84,15 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**Spell check: Afrikaans beside English, and a Settings tab of its own** (Stephan, 8 Nov: "spell checker is an
+appearance. Shouldn't it be at another place? Can we also integrate Afrikaans and English?"). Hunspell af_ZA
+(Translate.org.za, LGPL; the copy LibreOffice ships, fetched from github.com/LibreOffice/dictionaries) in
+`public/dictionaries/af-za` with its licence. `spellCheck.ts`: languages per device (`crm.spellCheck.languages`,
+both by default, never none), `eitherSpeller` -- a word is right if either knows it, suggestions interleaved; a
+language that will not load is left out. Settings -> Spelling (new tab after Appearance): the switch, the languages,
+and "My words" (now listable and removable). The browser's own underlines follow the DEVICE's keyboard languages --
+on an iPad add an Afrikaans keyboard; the tab says so. Checks: check-spell-check (35), e2e/spelling-settings (11).
+
 **The day's photograph no longer hops** (Stephan, 8 Nov: "The pictures still keep hopping ... It would show
 yesterday's picture or something, and then another one"). S18 fixed the ANSWER; the PHOTOGRAPH still hopped: every slot
 painted `url(today), url(Llandudno)` and the local Llandudno showed until Unsplash answered, and the dashboard (3 200)

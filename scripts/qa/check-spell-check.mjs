@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs'
 import nspell from 'nspell'
-import { FIRM_WORDS, replaceWord, tokens, unknownWords } from '../../src/lib/spellCheck.ts'
+import { FIRM_WORDS, eitherSpeller, replaceWord, tokens, unknownWords } from '../../src/lib/spellCheck.ts'
 
 let pass = 0
 const failures = []
@@ -56,12 +56,39 @@ for (const f of ['src/components/ComposeEmailModal.tsx', 'src/pages/accounts/Sms
 const lib = read('src/lib/spellCheck.ts')
 ok('the switch is on unless switched off', /getItem\(SWITCH_KEY\) !== 'off'/.test(lib))
 ok('the underlines follow the switch, from <html>', /documentElement\.setAttribute\('spellcheck'/.test(lib))
-ok('nothing is sent anywhere to be checked: the dictionary is Raptor\'s own file', /const DICTIONARY = '\/dictionaries\/en-gb\/'/.test(lib) && !/https?:\/\//.test(lib.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')))
+/* Both dictionaries are Raptor's own files (S19 added Afrikaans beside English). */
+ok('nothing is sent anywhere to be checked: the dictionaries are Raptor\'s own files',
+  /dir: '\/dictionaries\/en-gb\/'/.test(lib) && /dir: '\/dictionaries\/af-za\/'/.test(lib)
+  && !/https?:\/\//.test(lib.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')))
 const gate = read('src/components/SpellGate.tsx')
 ok('a dictionary that will not load never stops a message', /catch \{\s*return true\s*\}/.test(gate))
 ok('pressing Send again on the same text sends it as it is', /if \(shownFor === key\) return true/.test(gate))
 ok('the page is South African English', /<html lang="en-ZA"/.test(read('index.html')))
 ok('the licence sits beside the dictionary', /wordlist|Hunspell|SCOWL/i.test(read('public/dictionaries/en-gb/LICENCE.txt')))
+
+/*
+ * ENGLISH AND AFRIKAANS (S19; Stephan, 8 Nov: "Can we also integrate Afrikaans and English?"). The firm writes in
+ * both, often in one message: a word is right if EITHER knows it, and corrections come from both.
+ */
+{
+  const afDir = new URL('../../public/dictionaries/af-za/', import.meta.url)
+  const af = nspell(readFileSync(new URL('af_ZA.aff', afDir), 'utf8'), readFileSync(new URL('af_ZA.dic', afDir), 'utf8'))
+  const both = eitherSpeller([speller, af])
+  const unknown = (t) => unknownWords(t, both).map((u) => u.word)
+  check('a message in Afrikaans raises nothing', unknown('Geagte meneer, ons het u betaling ontvang. Die agterstallige bedrag op u rekening is betaal. Vriendelike groete.'), [])
+  check('...nor one in both languages at once', unknown('Dear sir, thank you for your payment. Baie dankie vir die betaling.'), [])
+  check('an Afrikaans typo is caught', unknown('Ons het u betaaling ontvang, asseblif bel ons.'), ['betaaling', 'asseblif'])
+  ok('...and corrected from the Afrikaans dictionary', unknownWords('u betaaling', both)[0].suggestions.includes('betaling'))
+  check('an English typo is still caught beside it', unknown('We recieved u betaling.'), ['recieved'])
+  ok('...and corrected from English', unknownWords('recieved', both)[0].suggestions.includes('received'))
+  ok('the trade\'s Afrikaans compounds are the firm\'s own words', FIRM_WORDS.includes('betalingsooreenkoms'))
+  ok('Afrikaans\' licence sits beside its dictionary', /Translate\.org\.za/.test(read('public/dictionaries/af-za/LICENCE.txt')) && /LGPL|Lesser General Public/.test(read('public/dictionaries/af-za/LICENCE.txt')))
+  ok('both languages are checked unless one is unticked', /return ok\.length \? ok : \['en', 'af'\]/.test(lib))
+  ok('a language that will not load is left out rather than holding the message', /Promise\.allSettled\(spellLanguages\(\)\.map\(loadOne\)\)/.test(lib))
+  const settings = read('src/pages/settings/SettingsPage.tsx')
+  ok('spell check has its own place in Settings, not Appearance', /'Spelling'/.test(settings) && /tab === 'Spelling' && <SpellingTab \/>/.test(settings)
+    && !/spell-check-switch/.test(settings.slice(settings.indexOf('function AppearanceTab'), settings.indexOf('function SpellingTab'))))
+}
 
 console.log(`${pass} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.log(`  FAIL ${f}`); process.exit(1) }
