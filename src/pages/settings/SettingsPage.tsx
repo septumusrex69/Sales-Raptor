@@ -3,7 +3,7 @@ import { CentralMailboxCard } from '../../components/settings/CentralMailboxCard
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, SpellCheck, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound, MonitorSmartphone } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, SpellCheck, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound, MonitorSmartphone, ExternalLink } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -22,7 +22,7 @@ import { can, hasFinanceAccess } from '../../lib/capabilities.ts'
 import { useAppStore } from '../../store/AppStore'
 import { byDepartment, departmentOf, matchesPerson, teamKindForRole, teamsForRole } from '../../lib/departments'
 import { groupByStoredDepartment, placeInDepartment, placeInTeam, sortDepartments, teamsIn } from '../../lib/orgStructure'
-import { canLeadCollections } from '../../lib/permissions'
+import { canEditLibrary, canLeadCollections, canViewLibrary, canViewPay } from '../../lib/permissions'
 import { COLLECTING_ROLES } from '../../lib/collectorGrade'
 import { useTheme } from '../../store/ThemeContext'
 import { useBuzzBox } from '../../store/BuzzBoxContext'
@@ -56,6 +56,53 @@ type Tab = (typeof TABS)[number]
 
 const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
 
+/*
+ * THE MENU, BY WHOSE SETTINGS THEY ARE (S19 · Raptor H18). Stephan, 8 Nov: "rejection reasons, lead sources, custom
+ * fields, pipelines ... Some of that stuff could be specific to other departments ... it should live in the settings
+ * pane ... But under like departmental things. So the settings for a specific department. You can also build that
+ * out for all the other departments."
+ *
+ * So: what is yours, what is the firm's, then one heading per department (the firm's own four, departments.ts).
+ * A department's settings that already have a page of their own elsewhere -- Trust settings, Commission rules, the
+ * workflows, the letterhead -- are gathered under its heading as links rather than moved, because those pages are
+ * where the work is and their addresses are in mail already sent. A link is offered only to somebody who may open
+ * it. Targets belongs to Sales AND the call centre (a team's or a person's month), so both headings carry it.
+ *
+ * NOT SAVED YET (`unsaved`): five tabs came over from the demo the app started as and keep what is typed in the page
+ * only -- nothing reaches the database, and the lists the app uses are fixed in code. Marked, and said inside each, so
+ * nobody edits a pipeline and believes it changed. Connecting each is a decision for the firm.
+ */
+type NavItem =
+  | { kind: 'tab'; tab: Tab; label?: string; unsaved?: boolean }
+  | { kind: 'link'; to: string; label: string; show: (u: Parameters<typeof can>[0]) => boolean }
+const NAV: { heading: string; items: NavItem[] }[] = [
+  { heading: 'You', items: [
+    { kind: 'tab', tab: 'Profile' }, { kind: 'tab', tab: 'Appearance' }, { kind: 'tab', tab: 'Spelling' },
+    { kind: 'tab', tab: 'Notifications', unsaved: true },
+  ] },
+  { heading: 'The firm', items: [
+    { kind: 'tab', tab: 'Users' }, { kind: 'tab', tab: 'Integrations' }, { kind: 'tab', tab: 'Data Import' },
+    { kind: 'link', to: '/library/firm', label: 'The firm\u2019s details', show: (u) => canEditLibrary(u) },
+  ] },
+  { heading: 'Sales', items: [
+    { kind: 'tab', tab: 'Targets' }, { kind: 'tab', tab: 'Pipelines', unsaved: true }, { kind: 'tab', tab: 'Lead Sources', unsaved: true },
+    { kind: 'tab', tab: 'Rejection Reasons', unsaved: true }, { kind: 'tab', tab: 'Custom Fields', unsaved: true },
+  ] },
+  { heading: 'Call centre', items: [
+    { kind: 'tab', tab: 'Targets', label: 'Collection targets' },
+    { kind: 'link', to: '/library/workflows', label: 'Notice workflows', show: (u) => canViewLibrary(u) },
+  ] },
+  { heading: 'Communications', items: [
+    { kind: 'link', to: '/library', label: 'Message templates', show: (u) => canViewLibrary(u) },
+    { kind: 'link', to: '/library/letterhead', label: 'Letterhead', show: (u) => canEditLibrary(u) },
+    { kind: 'link', to: '/portal-looks', label: 'Portal photographs', show: (u) => u?.role === 'Administrator' },
+  ] },
+  { heading: 'Finance', items: [
+    { kind: 'link', to: '/trust/settings', label: 'Trust settings', show: (u) => can(u, 'finance.view') },
+    { kind: 'link', to: '/people/commission', label: 'Commission rules', show: (u) => canViewPay(u) },
+  ] },
+]
+
 export function SettingsPage() {
   /*
    * THE TAB IS IN THE URL, so another screen can send somebody straight to one.
@@ -68,6 +115,7 @@ export function SettingsPage() {
    *
    * A tab nobody recognises falls back to Profile rather than rendering an empty pane.
    */
+  const { currentUser } = useAuth()
   const [navCollapsed, toggleNav] = useSettingsNavCollapsed()
   const [params, setParams] = useSearchParams()
   const fromUrl = params.get('tab')
@@ -107,16 +155,35 @@ export function SettingsPage() {
         read the handover table still wants the main menu where they left it.
       */}
       {!navCollapsed && (
-        <nav className="w-52 shrink-0 space-y-0.5">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium ${tab === t ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
-            >
-              {t}
-            </button>
-          ))}
+        <nav className="w-52 shrink-0" data-testid="settings-nav">
+          {NAV.map((g) => {
+            const items = g.items.filter((i) => i.kind === 'tab' || i.show(currentUser))
+            if (items.length === 0) return null
+            return (
+              <div key={g.heading} className="mb-3" data-testid={`settings-group-${g.heading}`}>
+                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{g.heading}</p>
+                <div className="space-y-0.5">
+                  {items.map((i) => i.kind === 'tab' ? (
+                    <button
+                      key={`${g.heading}-${i.tab}`}
+                      onClick={() => setTab(i.tab)}
+                      className={`w-full flex items-center gap-2 text-left px-3 py-1.5 rounded-lg text-sm font-medium ${tab === i.tab ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
+                    >
+                      <span className="min-w-0 truncate">{i.label ?? i.tab}</span>
+                      {i.unsaved && <span title="Not saved yet: changes here are not kept" data-testid="settings-unsaved"
+                        className="ml-auto shrink-0 rounded px-1 text-[9.5px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50">not saved</span>}
+                    </button>
+                  ) : (
+                    <Link key={i.to} to={i.to}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100">
+                      <span className="min-w-0 truncate">{i.label}</span>
+                      <ExternalLink size={12} className="ml-auto shrink-0 text-slate-300" aria-hidden />
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
           {/* At the bottom, under the list, which is where the main menu keeps its own. */}
           <button type="button" onClick={toggleNav} aria-expanded="true"
             title="Narrow the settings menu"
@@ -142,6 +209,12 @@ export function SettingsPage() {
               font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700">
             <PanelLeftOpen size={15} /> {tab}
           </button>
+        )}
+        {(['Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications'] as Tab[]).includes(tab) && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="settings-not-saved">
+            <b>Not saved yet.</b> This page came over from the demo Raptor started as: what you change here lasts until you
+            leave the page and is not used anywhere else. Ask for it to be connected before relying on it.
+          </div>
         )}
         {tab === 'Profile' && <ProfileTab />}
         {tab === 'Appearance' && <AppearanceTab />}

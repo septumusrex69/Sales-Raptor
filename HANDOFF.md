@@ -84,6 +84,17 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**Settings grouped by department** (Stephan, 8 Nov: "rejection reasons, lead sources, custom fields, pipelines ... under
+like departmental things ... You can also build that out for all the other departments"). `NAV` in SettingsPage:
+You (Profile, Appearance, Spelling, Notifications) / The firm (Users, Integrations, Data Import, The firm's details)
+/ Sales (Targets, Pipelines, Lead Sources, Rejection Reasons, Custom Fields) / Call centre (Collection targets = the
+Targets tab, Notice workflows) / Communications (Message templates, Letterhead, Portal photographs) / Finance (Trust
+settings, Commission rules). Pages that live elsewhere are LINKS, each shown only to who may open it (canViewLibrary,
+canEditLibrary, finance.view, canViewPay, Administrator for portal looks). **FOUND, NOT FIXED -- ASK STEPHAN:**
+Pipelines, Custom Fields, Lead Sources, Rejection Reasons and Notifications are demo leftovers that keep changes in
+the page only (useState over constants; REJECTION_REASONS in lib/rejection.ts is what the app uses). Now marked "not
+saved" in the menu and on the page. Connecting each needs a table and the app reading it. e2e/settings-departments (12).
+
 **Small rings beside a collector's promises, day and traces** (Stephan, 8 Nov: "little pie charts to show ... how many
 are kept, how many are taken ... keep it there, but just on the side of it"). CollectorProfile (My collections):
 each card's figures stay; a `SideRing` sits at the right on wide screens, under them on narrow. `RingDonut` got
