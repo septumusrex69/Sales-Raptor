@@ -89,10 +89,13 @@ for (const [n, b] of [['raise_client_charge', raise], ['cancel_client_charge', c
 
 /* ---------------- raising, cancelling, settling ---------------- */
 
-for (const [n, b] of [['raise_client_charge', raise], ['cancel_client_charge', cancel],
-  ['mark_client_charge_paid', paid]]) {
-  ok(`${n} is Administrator only`,
-    /current_user_role\(\) is distinct from 'Administrator'|current_user_role\(\) = 'Administrator'/.test(b ?? ''))
+/* S20 review: capabilities, not the role -- a charge changes what a payover pays (payover.approve); marking one
+   paid is paying out (payover.pay). Both with the trust account. */
+for (const [n, b, cap] of [['raise_client_charge', raise, 'payover.approve'], ['cancel_client_charge', cancel, 'payover.approve'],
+  ['mark_client_charge_paid', paid, 'payover.pay']]) {
+  ok(`${n} needs ${cap} with finance`,
+    new RegExp(`if not \\(public\\.has_capability\\('finance\\.view'\\) and public\\.has_capability\\('${cap.replace('.', '\\.')}'\\)\\) then\\s+raise exception`).test(b ?? ''))
+  no(`...and no longer asks the role`, /current_user_role\(\)/.test(b ?? ''))
 }
 /* S20: the client's running statement is a READ, so it asks finance.view rather than the role. */
 ok('client_account is finance\'s to read', /public\.has_capability\('finance\.view'\)/.test(account ?? ''))

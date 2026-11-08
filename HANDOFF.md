@@ -15,6 +15,59 @@ raising if the text had moved on) and the full definitions mirrored; each was ve
 -- with comments and whitespace ignored, because **15 trust functions already differed from schema.sql in comments
 only** before S20 (pre-existing drift, code identical).
 
+### S20 REVIEW -- THE INDEPENDENT REVIEW, FIXED (8 Nov; migrations `s20_payment_lines_read_only` (the coordinator), `s20_review_fixes`, `s20_review_restatement_grants`)
+Read this before Parts 1-3: it changes some of what they say. Held by **`check-s20-review`** (61) plus the existing
+checks moved to it; every new assertion seen failing on broken code. Staging functions edited in place again and the
+18 mirrored bodies verified by md5 (comments ignored) -- all match.
+1. **No direct money writes from the browser.** `account_payments_insert`: an Administrator with finance, `source
+   'swordfish'` only (the Swordfish import -- the one browser path that inserts receipts), never an approved receipt
+   Swordfish did not remit, never `cycle_test_on` / `corrects_payment_id` / `restatement_id` (so never a correction).
+   Every other receipt arrives through a guarded definer function. `payment_allocations_insert`,
+   `payover_run_lines_insert`: `with check (false)`; `payover_runs_write`: `using (false) with check (false)` -- the
+   screens already used functions only (grep: no insert/update on those tables in src/ or api/). The import now says,
+   before writing, that receipts need an Administrator with the trust account.
+   `payment_cycle_day` honours `cycle_test_on` only where `deployment.kind = 'staging'` (definer, to read it);
+   `payment_counts_at` goes through it.
+2. **The view** `account_payment_lines`: SELECT only (the coordinator revoked every write grant -- a one-table view is
+   auto-updatable, so it was a write path with the owner's rights) and `security_barrier`. The two S20 tables
+   (`payment_restatements`, `payment_restatement_events`) had Supabase's default write grants too: now SELECT for
+   signed-in users only. (Every older table still carries the project-wide defaults, answered by RLS.)
+3. **Capabilities, not the role** (answers Part 1's open question): reallocate_account = finance + reverse/move/approve
+   a payment; raise/cancel_client_charge = payover.approve; mark_client_charge_paid = payover.pay (all with finance);
+   credit_fee, discard_import_batch = an Administrator WITH the trust account (the firm's rule); set_trust_opening_balance
+   lost its fail-open `<>`; bring_forward_client_balances and set_swordfish_holding already asked an Administrator
+   with finance (`is distinct from`), so unchanged. `finance_setting_changes_insert`: anyone with finance **as themselves** (`changed_by =
+   auth.uid()`, never checked before) -- NOT Administrator-only, because commission is edited under finance.view
+   (CommissionCard) and an Administrator-only log would silently lose those rows.
+4. **receipts_on_file**: finance, or whoever `may_close_account` this account; `to_client` only for finance (the
+   withdraw box then says "the client owes back what it was paid from them"); correction receipts left out.
+5. **One correction at a time**: propose and approve take `select ... for update` on the debtor_accounts row; approval
+   works the figures out again after the lock and compares capital, client and firm figures.
+6. **A later receipt on a corrected account reverses again** (it was refused). The account is NOT replayed: the
+   receipt's un-invoiced split, and every correction of it, get capital back and every trust entry answered by its
+   opposite, then are marked reversed; an invoiced split takes the existing invoiced path. Proved:
+   `scripts/qa/live/s20-later-receipt-reversal.sql` (worked example, correction posted, May R1 000 approved -- R543.95 onto
+   the open run -- then reversed: capital 8 933.05, client 821.55, firm 1 178.45 and the open run 821.55, all exactly as
+   before May; March and the correction untouched; failures []). **Still refused, said on screen**: the payment a
+   POSTED correction placed, and a correction receipt -- "Finance reverses it by hand." Known limit: reversing an
+   EARLIER receipt on a corrected account does not re-split the later ones (no replay); its own split goes back exactly.
+7. **The engine's figure**: `restatement_figures` sums what the engine posts for the client (Δto_client; a PTC's
+   -Δdue_to_bf) as `client_engine` and blocks when it differs from capital less commission; it also blocks any
+   overpayment that would move (so no phantom overpayment blocker on a run). The figures panel shows **What approving
+   posts**: the R0.00 correction receipt per payment, the trust pair, the engine figure, the interest line, and the
+   reversal rule. The worked example still gives client_engine 51.55 = client_correction.
+8. **Smaller**: anon lost EXECUTE on payment_is_invoiced, allocation_is_invoiced, finance_held, profile_has_finance,
+   finance_split, finance_commission, in_duplum_cost_room, in_duplum_reached, account_charge_basis; close_payover_cycle
+   and recompute_payover_run are not callable from the API at all. **The nightly close** (pg_cron `close-payover-cycle`,
+   user postgres) gets through build/recompute via `payover_cron_caller()` (no auth.uid() and session_user postgres /
+   supabase_admin -- an API call is always 'authenticator'); probed: close ran as postgres; a liaison was refused.
+   payover_run_blockers: finance or the close. account_money_out: `money_reader()` (a profile, the service role, the
+   close -- the debtor statement keeps working; anon gets nothing). restatement_preview / backdated_payments need finance.
+   payments_in_month leaves correction receipts out. The calculator's placeholder rows are `source 'restatement'`.
+- **Found on the way**: `schema.sql`'s S10 copy of `discard_import_batch` had lost its `end $$;`, so its body ran on into
+  the next section and a fresh build of the file would have failed. Closed (comment at the spot); held by the check.
+- `src/lib/backdatedPayments.ts` and `src/lib/restatement.ts` are now in CODEOWNERS (check-codeowners was red on it).
+
 ### PART 1 -- PERMISSIONS
 - **The payment split is finance's** (`s20_payment_split_finance_only`). `account_payments` and `payment_allocations`
   select policies are `has_capability('finance.view')` (were "signed in"). Non-finance screens read the view
@@ -37,9 +90,7 @@ only** before S20 (pre-existing drift, code identical).
   payover.approve). Screens: RunDetail, the queue's bulk buttons, Payments out, Overpayments.
 - **Moving a receipt is `payment.move`** (`set_payment_account`; it asked payment.approve). `move_payment_to_cycle`
   (staging tool) asks finance.view + staging instead of payment.move. Move / Place it (parked) gated in the UI.
-- NOT CHANGED (still role = 'Administrator'): raise/cancel/mark_client_charge_paid, credit_fee, reallocate_account,
-  discard_import_batch, bring_forward_client_balances, set_swordfish_holding, set_trust_opening_balance. Ask Stephan
-  whether these become capabilities too.
+- ~~NOT CHANGED (still role = 'Administrator')~~ -- changed by the S20 REVIEW above (item 3).
 
 ### PART 2 -- CYCLE DATES (replaces "the approval date decides the cycle")
 - `payment_cycle_day(p)`: a trust receipt's BANK date (received_at, Johannesburg day); a PTC's CAPTURE date
@@ -80,8 +131,9 @@ only** before S20 (pre-existing drift, code identical).
   commission and the control list.
 - BLOCKED (decide by hand, said on the row): Swordfish interest after the day, a later receipt Swordfish paid over
   (imported history frozen), account in duplum, a receipt fee that would change, an overpayment already
-  refunded/moved/released. A payment carrying a correction cannot be reversed, nor its account re-split
-  (`reverse_payment_allocation`, `reallocate_account` refuse).
+  refunded/moved/released, or any overpayment that would move / an engine figure that disagrees (S20 review). The
+  payment a posted correction placed cannot be reversed here, nor its account re-split; a later receipt can (S20 review,
+  item 6).
 - The calculator (`restatement_compute`) is S18's rolled-back trick, but it removes NO rows and re-splits each payment
   AS ITSELF (old split parked on an R0.00 placeholder, payment unapproved and approved again). Two bugs found doing
   it: interest parked in 1900 became the coverage (fixed: day before the handover); S18's full-amount copies left the
@@ -94,6 +146,7 @@ only** before S20 (pre-existing drift, code identical).
 - The collector's commission is NOT corrected: clerk commission is on the amount collected, which does not change.
 
 ### CHECKS ADDED (each seen failing on broken code)
+S20 review: check-s20-review; live probe s20-later-receipt-reversal.sql; e2e/backdated-payments +2. Then S20:
 check-payment-split-access, check-payover-capabilities, check-cycle-dates, check-backdated-payments;
 e2e/payment-split-collector, e2e/run-late-lines, e2e/backdated-payments. Twenty-odd existing checks moved to the new
 rules (named in the commits). e2e/performance (8) and e2e/people (2) fail identically on the base commit 34e3f08
@@ -113,7 +166,10 @@ rules (named in the commits). e2e/performance (8) and e2e/people (2) fail identi
    - A run is now blocked by unapproved receipts dated in its cycle -- right, or a warning only?
    - Collector credit for a late trust receipt stays with whoever held the account at approval (commission) and at the
      bank date (collections figures) -- unify?
-   - The client-charge and other Administrator-role writes listed under Part 1.
+   - ~~The client-charge and other Administrator-role writes~~ -- capabilities now (S20 review, item 3). Confirm with
+     Stephan that a charge is payover.approve's and the settings log is any finance holder's.
+   - Reversing an earlier receipt on a corrected account does not re-split the later ones (S20 review, item 6) --
+     acceptable, or should such a reversal go to finance by hand too?
 3. **Before production**: none of S20 is on production. The migrations are additive except the policy changes; apply in
    the order listed in the commits; production's 15 drifted trust functions need the same md5 check.
 

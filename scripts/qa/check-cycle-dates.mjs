@@ -41,13 +41,22 @@ function lastFn(name) {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/\s+/g, ' ')
 }
 
+function lastPolicyText(name) {
+  const re = new RegExp(`(create|alter) policy ${name}\\b[^;]*;`, 'g')
+  let m; let last = ''
+  while ((m = re.exec(schema))) last = m[0]
+  return last
+}
+
 /* ---- the one rule, and its switch ---- */
 const day = lastFn('payment_cycle_day')
 ok('payment_cycle_day is defined', day.length > 0)
 ok('...a PTC (with the switch on) is its CAPTURE day, captured_on first', /when coalesce\(p\.paid_to_client, false\) and public\.ptc_cycle_on_capture\(\) then coalesce\(p\.captured_on, \(p\.created_at at time zone 'Africa\/Johannesburg'\)::date\)/.test(day))
 ok('...anything else its BANK day, in Johannesburg', /else \(p\.received_at at time zone 'Africa\/Johannesburg'\)::date end/.test(day))
 ok('...never the approval day', !/allocated_on|approved_at/.test(day))
-ok('...and the staging tool\'s column, set by nothing else, wins', /coalesce\(p\.cycle_test_on,/.test(day))
+ok('...and the staging tool\'s column wins -- ON STAGING ONLY (S20 review: deployment.kind)',
+  /case when p\.cycle_test_on is not null and exists \(select 1 from public\.deployment where kind = 'staging'\)\s+then p\.cycle_test_on end/.test(day))
+ok('...nor can a user write it: the insert policy refuses it', /cycle_test_on is null/.test(lastPolicyText('account_payments_insert')))
 ok('the switch Stephan asked to keep is ON (capture date)', /select true/.test(lastFn('ptc_cycle_on_capture')))
 ok('...and ptc_on_next_payover stays OFF: a PTC runs in its capture cycle', /select false/.test(lastFn('ptc_on_next_payover')))
 ok('captured_on is the staging clock\'s day at insert', /alter column captured_on set default public\.raptor_today\(\)/.test(schema))

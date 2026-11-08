@@ -64,7 +64,7 @@ const perf = liveFn('collector_performance')
 /* S20: the filter also leaves out correction receipts now -- p.source not in ('moved', 'correction'). */
 ok('the collectors are not credited with it', (perf.match(/p\.source not in \('moved', 'correction'\)/g) ?? []).length === 2)
 ok('...nor the day by day', /p\.source not in \('moved', 'correction'\)/.test(liveFn('collector_daily')))
-ok('...nor the Payments in tiles', /p\.source <> 'moved'/.test(liveFn('payments_in_month')))
+ok('...nor the Payments in tiles (nor a correction receipt, S20 review)', /p\.source not in \('moved', 'correction'\)/.test(liveFn('payments_in_month')))
 ok('...nor a client\'s payments to date', /p\.source <> 'moved'/.test(liveFn('client_book_totals')))
 ok('the account\'s own settlement still counts it', !/p\.source <> 'moved'/.test(liveFn('account_settlement')))
 

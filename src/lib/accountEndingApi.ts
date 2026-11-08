@@ -118,22 +118,23 @@ export interface ReceiptOnFile {
    * paid over last month would read "Not on a run yet" to them.
    */
   onRun: boolean
-  /** What the client was paid from it: owed back if refunded after its run went out. */
-  toClient: number
+  /** What the client was paid from it -- null unless the reader has the trust account (S20 review: the split is
+   *  finance's; the withdraw box only needs to know a receipt was paid over). */
+  toClient: number | null
 }
 
 export async function fetchReceiptsOnFile(accountId: string): Promise<ReceiptOnFile[]> {
   /* ONE DEFINER READ (S20). The allocation and the run are finance.view's to read, and a liaison may withdraw:
-     receipts_on_file gives them the run and what the client was paid from each receipt -- the one figure off
-     the split a refund decision needs -- and nothing else of it. */
+     receipts_on_file gives them the receipts and whether each went out on a run. What the client was paid from
+     each (to_client) comes to finance only -- S20 review: no part of the split for anyone else. */
   const { data, error } = await supabase.rpc('receipts_on_file', { p_account: accountId })
   if (error) throw new Error(error.message)
   return ((data ?? []) as { id: string; received_at: string; amount: number; paid_to_client: boolean
-    paid_over_in_swordfish: boolean; run_invoice: string | null; run_status: string | null; on_run: boolean; to_client: number }[])
+    paid_over_in_swordfish: boolean; run_invoice: string | null; run_status: string | null; on_run: boolean; to_client: number | null }[])
     .map((r) => ({
       id: r.id, receivedOn: firmDay(r.received_at), amount: Number(r.amount), paidToClient: !!r.paid_to_client,
       swordfish: !!r.paid_over_in_swordfish, runInvoice: r.run_invoice ?? null, runStatus: r.run_status ?? null,
-      onRun: !!r.on_run, toClient: Number(r.to_client ?? 0),
+      onRun: !!r.on_run, toClient: r.to_client === null || r.to_client === undefined ? null : Number(r.to_client),
     }))
 }
 

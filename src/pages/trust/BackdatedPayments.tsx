@@ -251,9 +251,54 @@ function Figures({ r }: { r: Restatement }) {
         Interest charged to the debtor goes from {rand(f.interest_before)} to {rand(f.interest_after)} ({sign(f.interest_correction)});
         capital outstanding from {rand(f.capital_before)} to {rand(f.capital_after)}.
       </p>
+      <WhatPosts r={r} />
       <p className="text-[11.5px] text-slate-400">
         Proposed {formatDate(r.proposedAt.slice(0, 10))}{r.proposedByName ? ` by ${r.proposedByName}` : ''}
         {r.postedAt ? ` · posted ${formatDate(r.postedAt.slice(0, 10))}${r.postedByName ? ` by ${r.postedByName}` : ''}` : ''}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * EXACTLY WHAT APPROVING POSTS (S20 review). Each changed payment gets a R0.00 correction receipt carrying the
+ * difference -- these are the engine's own figures, the ones the run will pay -- and the trust ledger moves the
+ * client's share between the client and the firm. Nothing already posted is edited. Approval is refused when the
+ * engine's figure for the client and capital less commission disagree (restatement_figures blocks it).
+ */
+function WhatPosts({ r }: { r: Restatement }) {
+  const f = r.figures
+  const sign = (x: number) => (x > 0 ? `+${rand(x)}` : rand(x))
+  const posts = f.lines.filter((l) => l.was_split && l.changed)
+  const engine = f.client_engine
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2" data-testid="backdated-what-posts">
+      <p className="font-medium text-slate-800">{r.status === 'posted' ? 'What was posted' : 'What approving posts'}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600">
+        {posts.map((l) => (
+          <li key={l.payment_id}>
+            A correction receipt of R0.00 against the payment of {formatDate(l.day)}: interest {sign(l.delta.to_interest)},
+            fees {sign(l.delta.to_costs)}, capital {sign(l.delta.to_capital)},
+            commission incl. VAT {sign(l.delta.commission + l.delta.commission_vat)},
+            {l.ptc ? ` owed to the firm by the client (it holds the money) ${sign(Number(l.delta.due_to_bf ?? 0))}` : ` to the client ${sign(l.delta.to_client)}`}
+            {' '}— its own line on the next payover run.
+          </li>
+        ))}
+        <li>
+          The trust ledger: the client {sign(f.client_correction)}, the firm {sign(f.firm_correction)}
+          {engine !== undefined && (
+            <span data-testid="backdated-engine"> (the engine's figure for the client: {sign(engine)}
+              {Math.round(engine * 100) !== Math.round(f.client_correction * 100) ? ' — it differs, so this cannot be approved' : ', the same'})</span>
+          )}.
+        </li>
+        {f.interest_correction !== 0 && (
+          <li>The debtor: one interest line of {sign(f.interest_correction)}, shown on the statement as "Interest corrected".</li>
+        )}
+        <li>The payment found late is approved with its own split, in date order.</li>
+      </ul>
+      <p className="mt-1.5 text-[11.5px] text-slate-500" data-testid="backdated-reverse-note">
+        Once posted, the payment found late (and its correction receipts) can be reversed only by finance, by hand.
+        A later receipt on the same account still reverses in the ordinary way.
       </p>
     </div>
   )

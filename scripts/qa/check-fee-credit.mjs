@@ -51,7 +51,7 @@ const lastFn = (name) => {
   return (m?.[2] ?? '').replace(/--[^\n]*/g, '')
 }
 const fn = lastFn('credit_fee')
-ok('Administrator only, by role', /if public\.current_user_role\(\) is distinct from 'Administrator' then/.test(fn))
+ok('an Administrator with the trust account (the firm\'s rule, S20 review)', /if public\.current_user_role\(\) is distinct from 'Administrator' or not public\.has_capability\('finance\.view'\) then/.test(fn))
 ok('a reason is required', /if v_reason is null then\s+raise exception 'Say why the fee is being credited\.'/.test(fn))
 ok('never more than is still owing on the fee', /if round\(p_amount, 2\) > round\(v_unpaid, 2\) then/.test(fn)
   && /v_unpaid := v_net - least\(greatest\(v_taken - v_settled_before, 0\), v_net\)/.test(fn))

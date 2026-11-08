@@ -35,7 +35,7 @@ const FIGURES = {
       delta: split({ to_interest: -307.16, to_costs: 240.21, to_capital: 66.95, commission: 13.39, commission_vat: 2.01, to_client: 51.55 }) },
   ],
   interest_correction: -17.59, recoverable_correction: -17.59, interest_before: 622.89, interest_after: 605.3,
-  capital_before: 9500, capital_after: 8933.05, capital_correction: -566.95, client_correction: 51.55, firm_correction: -51.55, blocked: null,
+  capital_before: 9500, capital_after: 8933.05, capital_correction: -566.95, client_correction: 51.55, firm_correction: -51.55, client_engine: 51.55, blocked: null,
 }
 const RESTATEMENT = {
   id: 'rs-1', payment_id: 'pay-mar', account_id: 'acc-swx', status: 'proposed', blocked_reason: null, figures: FIGURES,
@@ -76,6 +76,11 @@ try {
       /-R\s?307\.16/.test(corr) && /\+R\s?240\.21/.test(corr) && /\+R\s?66\.95/.test(corr) && /\+R\s?15\.40/.test(corr) && /\+R\s?51\.55/.test(corr))
     const sum = (await page.getByTestId('backdated-summary').innerText()).replace(/\s+/g, ' ')
     t.ok('...and says who gains and who gives back', /receives R\s?51\.55/.test(sum) && /keeps R\s?51\.55 less/.test(sum) && /622\.89/.test(sum) && /605\.30/.test(sum))
+    /* S20 review: exactly what approving posts, the engine's own figure for the client, and who reverses it later. */
+    const posts = (await page.getByTestId('backdated-what-posts').innerText()).replace(/\s+/g, ' ')
+    t.ok(`what approving posts: a R0.00 correction receipt for April, +51.55 to the client, the engine agreeing (${posts.slice(0, 200)})`,
+      /correction receipt of R0\.00/.test(posts) && /to the client \+R\s?51\.55/.test(posts) && /engine's figure for the client: \+R\s?51\.55, the same/.test(posts))
+    t.ok('...and that the payment found late is finance\'s to reverse once posted', /reversed only by finance, by hand/.test(posts))
     await page.getByTestId('backdated-approve').click()
     await page.waitForTimeout(500)
     t.ok('Approve and post asks the database to post THIS correction', calls.some((c) => c.fn === 'approve_restatement' && c.p_id === 'rs-1'))

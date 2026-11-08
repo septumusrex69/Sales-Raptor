@@ -111,7 +111,31 @@ ok('...the debtor portal too', /\.neq\('source', 'correction'\)/.test(read('api/
 ok('...collections and commission do not count it', ['collector_performance', 'collector_daily', 'clerk_commission_lines']
   .every((f) => /p\.source not in \('moved', 'correction'\)/.test(lastFn(f))))
 ok('...nor the control list', (lastFn('backdated_payments').match(/source <> 'correction'/g) ?? []).length === 2)
-ok('a payment carrying a correction is not reversed blind', /This payment carries a posted correction for a payment found late/.test(lastFn('reverse_payment_allocation')))
+/* S20 review: only the payment a POSTED correction placed (and a correction receipt) is refused -- finance, by hand.
+   A later receipt on a corrected account reverses: opposite entries, no replay (the probe s20-later-receipt-reversal). */
+const revAlloc = lastFn('reverse_payment_allocation')
+ok('the payment a posted correction placed is not reversed blind',
+  /new\.source = 'correction'\s+or exists \(select 1 from public\.payment_restatements r where r\.payment_id = new\.id and r\.status = 'posted'\) then\s+raise exception 'This payment was placed by a correction for a payment found late\. Finance reverses it by hand\.'/.test(revAlloc))
+ok('...but a later receipt on the account is not refused for the account\'s corrections',
+  !/c\.corrects_payment_id = new\.id and c\.reversed_at is null\) then\s+raise/.test(revAlloc))
+const noReplay = revAlloc.slice(revAlloc.indexOf("c.account_id = new.account_id and c.source = 'correction'"))
+ok('a corrected account is NOT replayed: its branch returns before reallocate_account',
+  revAlloc.indexOf("c.account_id = new.account_id and c.source = 'correction'") > 0
+  && noReplay.indexOf('return new;') >= 0 && noReplay.indexOf('return new;') < noReplay.indexOf('perform public.reallocate_account'))
+ok('...capital back for the payment\'s un-invoiced split and every correction of it',
+  /set capital_outstanding = coalesce\(d\.capital_outstanding, 0\) \+ x\.cap[\s\S]*a\.payment_id = new\.id and not public\.allocation_is_invoiced\(a\.payover_run_id\)\)\s+or a\.payment_id in \(select c\.id from public\.account_payments c where c\.corrects_payment_id = new\.id\)/.test(noReplay))
+ok('...every trust entry answered by its opposite, never edited',
+  /insert into public\.trust_creditor_entries \(party, company_id, account_id, amount, reason, payment_id, allocation_id\)\s+select e\.party, e\.company_id, e\.account_id, -e\.amount/.test(noReplay)
+  && !/update public\.trust_creditor_entries/.test(noReplay))
+ok('...and the splits marked reversed, not removed', /update public\.payment_allocations\s+set status = 'reversed'\s+where payment_id = new\.id\s+or payment_id in/.test(noReplay))
+const later = read('scripts/qa/live/s20-later-receipt-reversal.sql')
+ok('the later-receipt probe is on file and checks capital, both trust balances and the open run to the cent',
+  /a\.cap <> b\.cap/.test(later) && /a\.client <> b\.client/.test(later) && /a\.firm <> b\.firm/.test(later)
+  && /run_after <> run_before/.test(later) && /run_mid - run_before <> may\.to_client/.test(later))
+ok('...and that the payment found late is still refused', /reverse_payment\(v_mar, 'probe'\)[\s\S]*Finance reverses it by hand/.test(later))
+ok('...and its last recorded run passed', /Last run: [^\n]*failures \[\]/.test(later))
+ok('the screen says the payment found late is finance\'s to reverse',
+  /can be reversed only by finance, by hand/.test(read('src/pages/trust/BackdatedPayments.tsx')))
 ok('...nor is its account re-split', /is not re-split/.test(lastFn('reallocate_account')))
 ok('Clear staging empties the correction tables with the payments', /public\.payment_restatement_events, public\.payment_restatements/.test(lastFn('clear_staging')))
 ok('the debtor\'s statement says what the negative interest row is', /Interest corrected: a payment found late/.test(read('src/lib/accountBalance.ts')))

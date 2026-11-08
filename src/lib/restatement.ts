@@ -57,6 +57,9 @@ export interface RestatementFigures {
   capital_correction: number
   client_correction: number
   firm_correction: number
+  /** S20 review: what the ENGINE posts for the client (to_client, or -due_to_bf for a PTC), summed. Approval is
+   *  refused unless it equals client_correction -- older proposals do not carry it. */
+  client_engine?: number
   blocked: string | null
 }
 

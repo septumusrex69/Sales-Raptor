@@ -73,7 +73,12 @@ const rof = (() => {
   return at < 0 ? '' : schema.slice(at, schema.indexOf('\n$$;', at))
 })()
 ok('receipts_on_file is defined (the liaison\'s withdraw box)', rof.length > 0)
-ok('...and asks for a signed-in caller', /auth\.uid\(\) is not null/.test(rof))
+/* S20 review: for finance, or whoever may close THIS account (the liaison's withdraw box) -- and the one figure off
+   the split it carried (to_client) for finance only. Correction receipts are not receipts on file. */
+ok('...and asks for finance or the right to close this account', /where \(public\.has_capability\('finance\.view'\) or public\.may_close_account\(p_account\)\)/.test(rof))
+ok('...gives what the client was paid only to finance', /case when public\.has_capability\('finance\.view'\) then coalesce\(a\.to_client, 0\) end/.test(rof))
+ok('...and leaves correction receipts out', /p\.source <> 'correction'/.test(rof))
+ok('the withdraw box copes without the figure', /owedBackUnknown/.test(read('src/components/accounts/EndAccountModal.tsx')))
 for (const col of ['commission', 'due_to_bf', 'to_interest', 'to_capital', 'to_fees', 'half_a']) {
   ok(`...and returns no ${col}`, !new RegExp(`\\b${col}\\b`).test(rof.slice(0, rof.indexOf('language'))))
 }

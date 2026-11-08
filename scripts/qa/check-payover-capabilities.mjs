@@ -93,7 +93,8 @@ for (const p of ['bank_statement_lines_read', 'client_charges_select', 'payover_
 }
 for (const p of ['payover_runs_write', 'payover_run_lines_insert']) {
   const pol = lastPolicy(p)
-  ok(`${p} writes on payover.approve with finance`, /payover\.approve/.test(pol) && /finance\.view/.test(pol) && !ROLE.test(pol))
+  /* S20 review: nobody writes a run or its lines directly -- every change goes through the guarded functions. */
+  ok(`${p} lets nobody write directly`, /with check \(false\)/.test(pol) && !/has_capability/.test(pol))
 }
 
 /* ---- the template and the finance set ---- */
