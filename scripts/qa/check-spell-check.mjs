@@ -84,10 +84,41 @@ ok('the licence sits beside the dictionary', /wordlist|Hunspell|SCOWL/i.test(rea
   ok('the trade\'s Afrikaans compounds are the firm\'s own words', FIRM_WORDS.includes('betalingsooreenkoms'))
   ok('Afrikaans\' licence sits beside its dictionary', /Translate\.org\.za/.test(read('public/dictionaries/af-za/LICENCE.txt')) && /LGPL|Lesser General Public/.test(read('public/dictionaries/af-za/LICENCE.txt')))
   ok('both languages are checked unless one is unticked', /return ok\.length \? ok : \['en', 'af'\]/.test(lib))
-  ok('a language that will not load is left out rather than holding the message', /Promise\.allSettled\(spellLanguages\(\)\.map\(loadOne\)\)/.test(lib))
+  ok('a language that will not load is left out rather than holding the message', /Promise\.allSettled\(langs\.map\(loadOne\)\)/.test(lib))
   const settings = read('src/pages/settings/SettingsPage.tsx')
   ok('spell check has its own place in Settings, not Appearance', /'Spelling'/.test(settings) && /tab === 'Spelling' && <SpellingTab \/>/.test(settings)
     && !/spell-check-switch/.test(settings.slice(settings.indexOf('function AppearanceTab'), settings.indexOf('function SpellingTab'))))
+}
+
+/*
+ * THE ELEVEN OFFICIAL WRITTEN LANGUAGES (S19; Stephan: "make all 11 official languages"). Every dictionary is Raptor's
+ * own file with its licence beside it; each loads and knows the words people write; isiZulu, whose rules take ten
+ * seconds to build, is held to its files here (the browser builds it in the background -- e2e/spelling-settings).
+ */
+{
+  const { SPELL_LANGUAGES } = await import('../../src/lib/spellCheck.ts')
+  check('eleven languages are offered', SPELL_LANGUAGES.length, 11)
+  const everyday = { xh: ['imali', 'intlawulo'], nso: ['leboga', 'tefo'], tn: ['madi', 'dumela'], st: ['tefo'], ts: ['mali', 'khensa'],
+    ss: ['imali'], ve: ['tshelede', 'livhuwa'], nr: ['imali'] }
+  for (const l of SPELL_LANGUAGES) {
+    const dirUrl = new URL(`../../public${l.dir}`, import.meta.url)
+    let aff = '', dic = '', lic = ''
+    try { aff = readFileSync(new URL(`${l.file}.aff`, dirUrl), 'utf8'); dic = readFileSync(new URL(`${l.file}.dic`, dirUrl), 'utf8'); lic = readFileSync(new URL('LICENCE.txt', dirUrl), 'utf8') } catch { /* reported below */ }
+    ok(`${l.label}: dictionary and licence are Raptor's own files`, aff.length > 100 && dic.length > 1000 && lic.length > 100)
+    if (l.id !== 'en' && l.id !== 'af') ok(`${l.label}: read as UTF-8 (the browser reads it so)`, /^SET UTF-8/m.test(aff) && !/\uFFFD/.test(aff + dic))
+    if (!everyday[l.id]) continue
+    const sp = nspell(aff, dic)
+    for (const w of everyday[l.id]) ok(`${l.label} knows "${w}"`, sp.correct(w))
+  }
+  const ve = SPELL_LANGUAGES.find((l) => l.id === 've')
+  const veDir = new URL(`../../public${ve.dir}`, import.meta.url)
+  const tshi = nspell(readFileSync(new URL('ve_ZA.aff', veDir), 'utf8'), readFileSync(new URL('ve_ZA.dic', veDir), 'utf8'))
+  ok('a Tshivenda typo is corrected', tshi.suggest('tshelde').includes('tshelede'))
+  ok('English and Afrikaans only, until somebody ticks more', /return ok\.length \? ok : \['en', 'af'\]/.test(lib))
+  const gate2 = read('src/components/SpellGate.tsx')
+  ok('the check before Send runs in the background, so no dictionary freezes the page', /await checkSpelling\(/.test(gate2) && !/loadSpeller\(\)/.test(gate2))
+  ok('...in a worker', /new Worker\(new URL\('\.\/spellWorker\.ts', import\.meta\.url\)/.test(read('src/lib/spellClient.ts')))
+  ok('...whose dictionaries are built soon after the app is up', /setTimeout\(warmSpelling, \d+\)/.test(read('src/main.tsx')))
 }
 
 console.log(`${pass} passed, ${failures.length} failed`)

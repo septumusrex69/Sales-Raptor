@@ -19,9 +19,13 @@ import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import { applySpellCheckAttribute } from './lib/spellCheck'
+import { warmSpelling } from './lib/spellClient'
 
-/* The spell-check switch (Settings → Appearance), before the first box is drawn. index.html says on. */
+/* The spell-check switch (Settings → Spelling), before the first box is drawn. index.html says on. */
 applySpellCheckAttribute()
+/* AND THE DICTIONARIES BUILT IN THE BACKGROUND a few seconds after the app is up (S19), so the first Send does not
+   wait for them -- isiZulu's take ten seconds. Off the page's thread (spellWorker.ts): nothing freezes. */
+window.setTimeout(warmSpelling, 4000)
 import { RouteError } from './components/RouteError.tsx'
 import { reloadOnceForStaleChunk } from './lib/staleChunk.ts'
 

@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { SpellCheck } from 'lucide-react'
-import { addMyWord, loadSpeller, myWords, replaceWord, spellCheckEnabled, unknownWords, type Unknown } from '../lib/spellCheck'
+import { addMyWord, replaceWord, spellCheckEnabled, type Unknown } from '../lib/spellCheck'
+import { checkSpelling } from '../lib/spellClient'
 
 /**
  * THE CHECK BEFORE A MESSAGE LEAVES (S18; spellCheck.ts has the why). Used by every box that sends to a debtor
@@ -24,8 +25,8 @@ export function useSpellGate() {
     if (shownFor === key) return true
     let words: Unknown[]
     try {
-      const speller = await loadSpeller()
-      words = unknownWords(texts.join('\n'), speller, myWords())
+      /* In the background (spellWorker.ts), so no dictionary -- isiZulu's takes ten seconds -- can freeze the page. */
+      words = await checkSpelling(texts.join('\n'))
     } catch {
       return true
     }

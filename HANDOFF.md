@@ -84,6 +84,16 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**Spell check in all eleven official written languages, in the background** (Stephan, 8 Nov: "make all 11 official
+languages"). isiZulu, isiXhosa, Sepedi, Setswana, Sesotho, Xitsonga, siSwati, Tshivenda, isiNdebele: Translate.org.za's
+Hunspell lists via Ubuntu's myspell-* packages (source zaf, LGPL 2.1), converted to UTF-8 (ve_ZA.aff had one stray
+byte in its TRY line, dropped), each in `public/dictionaries/<code>-za` with a LICENCE.txt. OFF until ticked; English
+and Afrikaans remain the default. They are small lists ("enkosi", "dumela" were missing -- common greetings added to
+FIRM_WORDS). isiZulu's rules take ~8-10 s to build, so the check now runs in a Web Worker (`spellWorker.ts`,
+`spellClient.ts`; SpellGate uses checkSpelling) and is warmed 4 s after the app starts (main.tsx) and when languages
+change; page's longest pause 52 ms. The twelfth official language, SA Sign Language, has no written form to check.
+Checks: check-spell-check (74), e2e/spelling-settings (18).
+
 **Spell check: Afrikaans beside English, and a Settings tab of its own** (Stephan, 8 Nov: "spell checker is an
 appearance. Shouldn't it be at another place? Can we also integrate Afrikaans and English?"). Hunspell af_ZA
 (Translate.org.za, LGPL; the copy LibreOffice ships, fetched from github.com/LibreOffice/dictionaries) in

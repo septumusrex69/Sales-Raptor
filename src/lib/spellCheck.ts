@@ -36,17 +36,34 @@ const LANGUAGES_KEY = 'crm.spellCheck.languages'
  * af_ZA from Translate.org.za (LGPL, its licence beside it in public/dictionaries/af-za), the dictionary LibreOffice
  * ships.
  */
-export type SpellLanguage = 'en' | 'af'
+/*
+ * AND THE NINE OTHER OFFICIAL WRITTEN LANGUAGES (S19, 8 Nov; Stephan: "if you can add the other ... official languages
+ * of South Africa"). Translate.org.za's Hunspell dictionaries (LGPL), as Debian and Ubuntu package them (myspell-zu and
+ * the rest, source package zaf), converted to UTF-8, each with its licence beside it. They are small community lists,
+ * so they know fewer words than English's; a person writing in one ticks it. OFF until ticked -- English and Afrikaans
+ * are what the firm writes in most, and isiZulu's rules take ten seconds to build (in the background: spellClient.ts).
+ */
+export type SpellLanguage = 'en' | 'af' | 'zu' | 'xh' | 'nso' | 'tn' | 'st' | 'ts' | 'ss' | 've' | 'nr'
 export const SPELL_LANGUAGES: { id: SpellLanguage; label: string; dir: string; file: string }[] = [
   { id: 'en', label: 'English (South African / British)', dir: '/dictionaries/en-gb/', file: 'en_GB' },
   { id: 'af', label: 'Afrikaans', dir: '/dictionaries/af-za/', file: 'af_ZA' },
+  { id: 'zu', label: 'isiZulu', dir: '/dictionaries/zu-za/', file: 'zu_ZA' },
+  { id: 'xh', label: 'isiXhosa', dir: '/dictionaries/xh-za/', file: 'xh_ZA' },
+  { id: 'nso', label: 'Sepedi', dir: '/dictionaries/nso-za/', file: 'ns_ZA' },
+  { id: 'tn', label: 'Setswana', dir: '/dictionaries/tn-za/', file: 'tn_ZA' },
+  { id: 'st', label: 'Sesotho', dir: '/dictionaries/st-za/', file: 'st_ZA' },
+  { id: 'ts', label: 'Xitsonga', dir: '/dictionaries/ts-za/', file: 'ts_ZA' },
+  { id: 'ss', label: 'siSwati', dir: '/dictionaries/ss-za/', file: 'ss_ZA' },
+  { id: 've', label: 'Tshivenda', dir: '/dictionaries/ve-za/', file: 've_ZA' },
+  { id: 'nr', label: 'isiNdebele', dir: '/dictionaries/nr-za/', file: 'nr_ZA' },
 ]
+const LANGUAGE_IDS = SPELL_LANGUAGES.map((l) => l.id) as string[]
 
 /** The languages this person checks in. Both unless they unticked one; never none -- unticking the last one is refused. */
 export function spellLanguages(): SpellLanguage[] {
   try {
     const v = JSON.parse(window.localStorage.getItem(LANGUAGES_KEY) ?? 'null') as unknown
-    const ok = Array.isArray(v) ? (v as string[]).filter((x): x is SpellLanguage => x === 'en' || x === 'af') : []
+    const ok = Array.isArray(v) ? (v as string[]).filter((x): x is SpellLanguage => LANGUAGE_IDS.includes(x)) : []
     return ok.length ? ok : ['en', 'af']
   } catch { return ['en', 'af'] }
 }
@@ -87,6 +104,8 @@ export const FIRM_WORDS: readonly string[] = [
   'ombud', 'ombuds', 'ombudsman', 'diarise', 'diarised', 'diarising', 'rediarise', 'rediarised',
   // Afrikaans compounds of the trade the af_ZA dictionary does not carry (S19).
   'betalingsooreenkoms', 'betalingsreëling', 'betalingsreëlings', 'skuldinvordering', 'invorderingskoste',
+  // Greetings and thanks the small official-language dictionaries lack (S19, checked against each).
+  'ndiyabulela', 'lebohang', 'lotjhani', 'ngiyathokoza', 'dumelang', 'ndaa', 'aa',
 ]
 
 export function myWords(): string[] {
@@ -197,7 +216,11 @@ function loadOne(lang: SpellLanguage): Promise<Speller> {
   return p
 }
 export async function loadSpeller(): Promise<Speller> {
-  const got = await Promise.allSettled(spellLanguages().map(loadOne))
+  return loadSpellerFor(spellLanguages())
+}
+/** For the background checker (spellWorker.ts), which has no browser storage to read the languages from. */
+export async function loadSpellerFor(langs: SpellLanguage[]): Promise<Speller> {
+  const got = await Promise.allSettled(langs.map(loadOne))
   const ok = got.flatMap((g) => (g.status === 'fulfilled' ? [g.value] : []))
   if (ok.length === 0) throw new Error('dictionary')
   return eitherSpeller(ok)

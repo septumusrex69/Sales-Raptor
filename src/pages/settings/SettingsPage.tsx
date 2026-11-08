@@ -33,6 +33,7 @@ import {
   SPELL_LANGUAGES, myWords, removeMyWord, setSpellCheckEnabled, setSpellLanguages, spellCheckEnabled, spellLanguages,
   type SpellLanguage,
 } from '../../lib/spellCheck'
+import { warmSpelling } from '../../lib/spellClient'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
 import type { CustomField, CustomFieldType, Team, User, UserRole } from '../../types'
 import { DEAL_STAGES } from '../../types'
@@ -1949,7 +1950,7 @@ function SpellingTab() {
   const toggleLang = (id: SpellLanguage) => {
     const next = langs.includes(id) ? langs.filter((l) => l !== id) : [...langs, id]
     if (next.length === 0) return            // never none: untick the switch instead
-    setLangs(next); setSpellLanguages(next)
+    setLangs(next); setSpellLanguages(next); warmSpelling()
   }
   return (
     <>
@@ -1969,8 +1970,8 @@ function SpellingTab() {
         </button>
       </Card>
       <Card className="mt-4">
-        <CardHeader title="Languages" subtitle="A word is right if any language you tick knows it, so a message in English and Afrikaans together is checked in both." />
-        <div className="space-y-2" data-testid="spell-languages">
+        <CardHeader title="Languages" subtitle="A word is right if any language you tick knows it, so a message in two languages is checked in both. South Africa's eleven official written languages; English and Afrikaans are on to start. The other nine dictionaries are smaller community lists and know fewer words." />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2" data-testid="spell-languages">
           {SPELL_LANGUAGES.map((l) => {
             const on = langs.includes(l.id)
             return (
@@ -1981,7 +1982,7 @@ function SpellingTab() {
               </label>
             )
           })}
-          <p className="text-[12px] text-slate-400">
+          <p className="sm:col-span-2 text-[12px] text-slate-400">
             The red underlines while you type come from your device, in the languages it is set up for -- on an iPad, add
             an Afrikaans keyboard (Settings, General, Keyboard) to have them in Afrikaans too.
           </p>
