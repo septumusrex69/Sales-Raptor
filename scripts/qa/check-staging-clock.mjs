@@ -280,10 +280,12 @@ check('no other file reads the machine\'s clock', offenders, [])
    staging it read "14 days ago" a minute after a check.
    57 since 29 Oct (S16): when a message was marked DONE -- userMail's markMailDone and the match-and-done
    claim, and the Mail page's own row while the write is on its way. Stamped on the real clock exactly as
-   read_at beside it is: mail arrives and is dealt with in real time, not on staging's day. */
+   read_at beside it is: mail arrives and is dealt with in real time, not on staging's day.
+   58 since 8 Nov (S19): conversation mode's row for a message opened from the trail is marked read on the real
+   clock while markMailRead is on its way -- the same stamp toggleTo gives any message it opens. */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 57)
+check('...and the allowed files keep exactly their real-world reads', realReads, 58)
 
 /* ---------- 7. the arithmetic ---------- */
 

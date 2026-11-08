@@ -525,6 +525,25 @@ export async function fetchMailItem(userId: string, id: string): Promise<MailIte
 }
 
 
+/**
+ * THE REST OF A TRAIL, from anywhere in the mailbox (conversation mode, S19). Sent replies live on the Sent tab and an
+ * older message may be on another page, so what the open list holds is not the whole conversation. Asked of the
+ * whole mailbox by the core of the subject, and then narrowed by mailConversations.inConversation -- the same rule the
+ * list groups by, so the trail never names a message the list would not have put with it. Fifty, newest first: a
+ * trail longer than that is read on the account, not in a strip above a message.
+ */
+export async function fetchConversationMail(userId: string, coreSubject: string): Promise<MailItem[]> {
+  const core = coreSubject.trim()
+  if (!core) return []
+  /* ilike's own wildcards, escaped: an underscore in a subject is a character, not "any character". */
+  const like = core.replace(/[\\%_]/g, (c) => `\\${c}`)
+  const { data, error } = await supabase.from('user_emails').select(COLUMNS)
+    .eq('user_id', userId).ilike('subject', `%${like}%`)
+    .order('occurred_at', { ascending: false }).limit(50)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as unknown as MailRow[]).map(toItem)
+}
+
 /*
  * THE "NEEDS NO RECORD" FUNCTIONS WENT WITH THE QUEUE.
  *

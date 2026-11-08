@@ -1,4 +1,6 @@
 import { dropDraft, listDrafts, type MailDraft } from '../../lib/mailDrafts'
+import { groupConversations, type Conversation } from '../../lib/mailConversations'
+import { ConversationTrail } from '../../components/email/ConversationTrail'
 import {
   createMailFolder, fetchMailFolders, folderNameProblem, moveMailToFolder, removeMailFolder, updateMailFolder,
   type MailFolder,
@@ -10,7 +12,7 @@ import {
   Inbox, Link2, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
-  Filter, Info, UserPlus, Folder, FolderInput, FolderPlus, Settings2,
+  Filter, Info, UserPlus, Folder, FolderInput, FolderPlus, Settings2, MessagesSquare,
 } from 'lucide-react'
 import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
@@ -230,6 +232,22 @@ export function MailPage() {
   const [managing, setManaging] = useState<MailFolder | 'new' | null>(null)
   const { companies } = useAppStore()
   const folder = folders.find((f) => f.id === folderId) ?? null
+  /*
+   * CONVERSATION MODE (R-13's second half, S19; Rinda: "have all the emails together that is in a trail"; Stephan:
+   * "You can build in the conversation mode"). A switch, remembered per person on this device, OFF until somebody
+   * turns it on -- the firm reads a mailbox one way today and a list that regroups itself unasked is a surprise. See
+   * lib/mailConversations.ts for what a trail is.
+   */
+  const convKey = `raptor.mail.conversations.${currentUser?.id ?? 'anon'}`
+  const [conversations, setConversationsState] = useState<boolean>(() => {
+    try { return window.localStorage.getItem(convKey) === '1' } catch { return false }
+  })
+  const setConversations = (on: boolean) => {
+    setConversationsState(on)
+    try { window.localStorage.setItem(convKey, on ? '1' : '0') } catch { /* a convenience: nothing breaks without it */ }
+  }
+  /** A message opened from the trail that is not the trail's newest, so its row stands for the trail meanwhile. */
+  const [pinned, setPinned] = useState<{ key: string; mail: MailItem } | null>(null)
   /*
    * Unread, and whether the list is narrowed to it.
    *
@@ -538,10 +556,25 @@ export function MailPage() {
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
 
+  /* THE TRAILS ON THIS PAGE (conversation mode). Off, the list is the list; on, one row per trail -- its newest
+     message, or the one somebody opened from the trail (`pinned`). */
+  const mine = useMemo(() => [mailbox, currentUser?.email ?? null], [mailbox, currentUser?.email])
+  const threads = useMemo(() => (conversations ? groupConversations(items, mine) : null), [conversations, items, mine])
+  const threadOf = useMemo(() => {
+    const by = new Map<string, Conversation<MailItem>>()
+    for (const g of threads ?? []) for (const m of g.members) by.set(m.id, g)
+    if (pinned && threads?.some((g) => g.key === pinned.key)) by.set(pinned.mail.id, threads.find((g) => g.key === pinned.key)!)
+    return by
+  }, [threads, pinned])
+  const listed = useMemo(() => (threads
+    ? threads.map((g) => (pinned?.key === g.key ? pinned.mail : g.latest))
+    : items), [threads, items, pinned])
+
   const load = useCallback(async (at = 0) => {
     if (!currentUser) return
     setLoading(true)
     setError(null)
+    setPinned(null)
     try {
       // The blocklist is a list of senders, not of mail: the effect below owns it, for every tab.
       if (filter === 'blocked') {
@@ -878,6 +911,23 @@ export function MailPage() {
    * In a reading pane, clicking the message you are already reading should keep reading it —
    * emptying the pane would be a click that undoes itself.
    */
+  /* A TICK ON A CONVERSATION IS THE WHOLE TRAIL on this page: archiving or filing "it" means all of it. */
+  function chooseRow(m: MailItem, on: boolean) {
+    const ids = threadOf.get(m.id)?.members.map((x) => x.id) ?? [m.id]
+    setChosen((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) { if (on) next.add(id); else next.delete(id) }
+      return next
+    })
+  }
+
+  /* A message chosen in the trail above the open one: it opens in place, and its row stands for the trail. */
+  function openFromTrail(m: MailItem) {
+    const g = threadOf.get(open ?? '')
+    if (g) setPinned({ key: g.key, mail: { ...m, readAt: m.readAt ?? new Date().toISOString() } })
+    void toggleTo(m)
+  }
+
   async function toggleTo(mail: MailItem) {
     setOpen(mail.id)
 
@@ -1512,6 +1562,15 @@ export function MailPage() {
               </button>
             )}
             {/* Not on the blocklist, which is a list of senders rather than of mail. */}
+            {/* CONVERSATIONS (S19): a switch, remembered on this device. */}
+            {filter !== 'blocked' && (
+              <button type="button" onClick={() => setConversations(!conversations)} aria-pressed={conversations}
+                data-testid="mail-conversations" title={conversations ? 'Showing conversations: one row per trail' : 'Show each trail as one conversation'}
+                className={`shrink-0 inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                  conversations ? 'border-gold-500 bg-gold-50 text-navy-950' : 'border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50'}`}>
+                <MessagesSquare size={14} /> Conversations
+              </button>
+            )}
             {filter !== 'blocked' && <EmailViewSwitcher view={view} onChange={setView} />}
           </div>
         </div>
@@ -1732,7 +1791,7 @@ export function MailPage() {
            */
           <ReadingPane
             fill
-            items={items}
+            items={listed}
             selectedId={open}
             onSelect={(m) => void toggleTo(m)}
             emptyDetail="Pick a message on the left to read it."
@@ -1762,12 +1821,7 @@ export function MailPage() {
               /* Collapses with the gutter: padding on an empty span is the gap all over again. */
               <span className={selecting ? 'pl-4 pt-2.5 shrink-0' : ''}>
                 <RowGutter mail={m} selecting={selecting} chosen={chosen.has(m.id)}
-                  onChoose={(on) => setChosen((prev) => {
-                    const next = new Set(prev)
-                    if (on) next.add(m.id)
-                    else next.delete(m.id)
-                    return next
-                  })} />
+                  onChoose={(on) => chooseRow(m, on)} />
               </span>
             )}
             renderRow={(m) => (
@@ -1775,7 +1829,8 @@ export function MailPage() {
                  dropped when the unread bar came off this row, which put the tick box hard up
                  against the sender. */
               <span className={`block pl-3 pr-3 py-2.5 ${!m.readAt ? 'bg-brand-50/60' : ''}`}>
-                <MailSummary mail={m} tight blocked={blocked} />
+                <MailSummary mail={m} tight blocked={blocked}
+                  threadCount={threadOf.get(m.id)?.members.length} threadUnread={threadOf.get(m.id)?.unread} />
               </span>
             )}
             renderDetail={(m) => (
@@ -1787,6 +1842,11 @@ export function MailPage() {
                 through a long one, which is the whole behaviour the firm liked in Spark.
               */
               <div className="px-5 py-4 min-h-full flex flex-col">
+                {/* The trail it belongs to, above it, in conversation mode. */}
+                {conversations && currentUser && (
+                  <ConversationTrail mail={m} onPage={threadOf.get(m.id)?.members ?? []} userId={currentUser.id}
+                    mine={mine} onOpen={openFromTrail} />
+                )}
                 {/*
                   THE MESSAGE'S OWN HEADING: what it is about, when it came, who it is from and
                   who else was on it -- in that order, and each on its own line.
@@ -1899,8 +1959,13 @@ export function MailPage() {
         ) : (
           <>
             <ul className="divide-y divide-slate-100">
-              {items.map((m) => (
+              {listed.map((m) => (
                 <MailRow key={m.id} mail={m}
+                  threadCount={threadOf.get(m.id)?.members.length} threadUnread={threadOf.get(m.id)?.unread}
+                  trail={conversations && currentUser && open === m.id ? (
+                    <ConversationTrail mail={m} onPage={threadOf.get(m.id)?.members ?? []} userId={currentUser.id}
+                      mine={mine} onOpen={openFromTrail} />
+                  ) : null}
                   mine={[mailbox, currentUser?.email]}
                   chosen={chosen.has(m.id)}
                   expanded={open === m.id}
@@ -1921,12 +1986,7 @@ export function MailPage() {
                   onToggle={() => void toggle(m)}
                   onBlock={() => setBlocking(m)}
                   selecting={selecting}
-                  onChoose={(on) => setChosen((s) => {
-                    const next = new Set(s)
-                    if (on) next.add(m.id)
-                    else next.delete(m.id)
-                    return next
-                  })}
+                  onChoose={(on) => chooseRow(m, on)}
                   onLink={() => startLink(m)}
                   onReply={() => startReply(m)}
                   onReplyAll={() => startReply(m, true)}
@@ -2511,7 +2571,21 @@ function MailStatus({ mail, blocked, tight }: {
   )
 }
 
-function MailSummary({ mail, tight, blocked }: {
+/** "3", beside a conversation's newest sender: how many messages the row stands for. Brand when any is unread. */
+function ThreadCount({ n, unread }: { n: number; unread: number }) {
+  return (
+    <span data-testid="thread-count" title={`${n} messages in this conversation${unread ? `, ${unread} unread` : ''}`}
+      className={`shrink-0 min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold inline-flex items-center justify-center tabular-nums ${
+        unread ? 'bg-brand-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
+      {n}
+    </span>
+  )
+}
+
+function MailSummary({ mail, tight, blocked, threadCount = 0, threadUnread = 0 }: {
+  /** Conversation mode (S19): how many messages this row stands for, and how many of them are unread. */
+  threadCount?: number
+  threadUnread?: number
   mail: MailItem
   /** The reading pane's narrow column: one line of preview, no sender address, short chips. */
   tight?: boolean
@@ -2562,6 +2636,7 @@ function MailSummary({ mail, tight, blocked }: {
             {/* The name alone: the address would push the name itself out of sight here. */}
             {mail.fromName || mail.fromAddress}
           </span>
+          {threadCount > 1 && <ThreadCount n={threadCount} unread={threadUnread} />}
           <span className="ml-auto shrink-0 text-xs text-slate-400">
             {relativeDayLabel(mail.occurredAt)}
           </span>
@@ -2620,6 +2695,7 @@ function MailSummary({ mail, tight, blocked }: {
               <span className="font-normal text-slate-400"> &middot; {mail.fromAddress}</span>
             )}
           </span>
+          {threadCount > 1 && <ThreadCount n={threadCount} unread={threadUnread} />}
           <span className="min-w-0 flex-1 truncate">
             <span className={unread ? 'font-medium text-slate-800' : 'text-slate-600'}>
               {mail.subject || '(no subject)'}
@@ -3555,9 +3631,13 @@ function MailRow({
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
-  onUnread, onDone, fetchAttachment, onFolder,
+  onUnread, onDone, fetchAttachment, onFolder, threadCount, threadUnread, trail,
 }: {
   onFolder?: () => void
+  /** Conversation mode (S19): the trail's size on the row, and the trail above the open message. */
+  threadCount?: number
+  threadUnread?: number
+  trail?: ReactNode
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
   calendar?: string
@@ -3619,7 +3699,8 @@ function MailRow({
 
         <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
           {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
-          <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} blocked={blocked} />
+          <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} blocked={blocked}
+            threadCount={threadCount} threadUnread={threadUnread} />
         </button>
 
         <div className="shrink-0 flex items-center gap-2">
@@ -3661,6 +3742,7 @@ function MailRow({
           <div className="-mt-1 mb-2.5">
             <RecipientLines mail={mail} mine={mine} />
           </div>
+          {trail}
           <MailBody mail={mail} body={body} html={html} images={images}
             showPictures={showPictures} onShowPictures={onShowPictures} calendar={calendar}
             events={events} onAccept={onAccept} onRespond={onRespond} onRemoveEvent={onRemoveEvent}

@@ -84,6 +84,19 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**R-13's second half built: conversation mode** (Rinda: "have all the emails together that is in a trail"; Stephan,
+8 Nov: "You can build in the conversation mode"). A "Conversations" switch beside the view switcher, per person per
+device (localStorage), OFF by default. `lib/mailConversations.ts`: a trail = the subject with Re:/Fw:/AW:/[EXT]...
+stripped AND somebody in common (sender or recipient, the person's own addresses left out), joined transitively --
+two debtors' "Proof of payment" stay apart. Raptor does not store In-Reply-To/References, so this is Outlook's
+subject-based view, working on mail already here; storing the headers in the sync would be the next step if
+subject grouping ever misleads. One row per trail (newest, a "3" badge, brand when any unread); a tick selects the
+whole trail on the page; `components/email/ConversationTrail.tsx` above the open message lists the trail oldest-first
+including SENT replies and other pages (`fetchConversationMail`: whole mailbox by subject core, then the same rule);
+a tap opens one in place (`pinned`). Grouping is per loaded page: a trail split across pages shows as two rows until
+opened. No migration. Checks: `check-mail-conversations`, `e2e/mail-conversations` (both seen failing);
+check-staging-clock's real-clock count 57 -> 58 (the read stamp on a message opened from the trail).
+
 **e2e/people fails 2 checks on code BEFORE S19 too** (commission R300, payable) -- not touched; looks date-dependent.
 
 **Trust area "lagging" (Stephan, 7 Nov) -- the browser, not the database.** Every trust RPC timed as Stephan (a plain
