@@ -771,6 +771,19 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     if (stopAt && i.from > stopAt) continue
     if (i.amount === 0) continue
     const to = accrualEnd(i.from, i.days)
+    /* INTEREST TAKEN BACK (S20): a payment found late, worked out on its own day, means less interest than was
+       posted -- one row, negative, that covers no days. Drawn as the credit it is, and said, rather than as a
+       negative "Interest, 1 Apr - 1 Apr". */
+    if (i.amount < 0) {
+      pending.push({
+        date: to,
+        kind: 'interest',
+        description: 'Interest corrected: a payment found late, worked out on the day it was paid',
+        debit: 0,
+        credit: -i.amount,
+      })
+      continue
+    }
     pending.push({
       date: to,
       kind: 'interest',

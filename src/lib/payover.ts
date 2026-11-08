@@ -125,6 +125,12 @@ export interface RunPayment {
   /** S20: the other two dates (payover_run_payment_dates), for the run's date columns and the late line's words. */
   capturedOn: string | null
   approvedOn: string | null
+  /**
+   * A CORRECTION LINE (S20): the day of the payment whose split it corrects, and of the payment found late that
+   * caused it. Null on every ordinary line.
+   */
+  correctionOf: string | null
+  correctionFoundOn: string | null
   accountStatus: string | null
   handoverDate: string | null
   capitalHandedOver: number
@@ -280,13 +286,16 @@ export async function fetchTiles(periodStart?: string | null): Promise<CycleTile
 export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
   /* AND EACH PAYMENT'S CAPTURED AND APPROVED DAYS (S20), read beside it: payover_run_payments' shape is what the
      remittance advice is built on and is left alone. A failure here costs the two columns, never the run. */
-  const [{ data, error }, dates] = await Promise.all([
+  const [{ data, error }, dates, corrections] = await Promise.all([
     supabase.rpc('payover_run_payments', { p_run: runId }),
     supabase.rpc('payover_run_payment_dates', { p_run: runId }).then((r) => r.data ?? [], () => []),
+    supabase.rpc('payover_run_corrections', { p_run: runId }).then((r) => r.data ?? [], () => []),
   ])
   if (error) throw new Error(error.message)
   const dateOf = new Map(((dates ?? []) as { allocation_id: string; captured_on: string | null; approved_on: string | null }[])
     .map((d) => [d.allocation_id, d]))
+  const corrOf = new Map(((corrections ?? []) as { allocation_id: string; corrects_received_on: string | null; found_received_on: string | null }[])
+    .map((c) => [c.allocation_id, c]))
   return inRunningOrder(((data ?? []) as Record<string, unknown>[]).map((r) => ({
     lineId: String(r.line_id),
     allocationId: s(r.allocation_id),
@@ -315,6 +324,8 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     lateCapture: Boolean(r.late_capture),
     capturedOn: dateOf.get(String(r.allocation_id))?.captured_on ?? null,
     approvedOn: dateOf.get(String(r.allocation_id))?.approved_on ?? null,
+    correctionOf: corrOf.get(String(r.allocation_id))?.corrects_received_on ?? null,
+    correctionFoundOn: corrOf.get(String(r.allocation_id))?.found_received_on ?? null,
     accountStatus: s(r.account_status),
     handoverDate: s(r.handover_date),
     capitalHandedOver: n(r.capital_handed_over),

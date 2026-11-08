@@ -1,10 +1,134 @@
-# Raptor · Handover 18 — where Raptor stands
+# Raptor · Handover 19 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 18**, written by S18, which started from Raptor Handover 17. The next session is S19 and writes
-> Handover 19; its commits start `Raptor H18: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct);
-> older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by
-> that name.
+> **Raptor Handover 19**, written by S20 ("Late Money"), which started from Raptor Handover 18. The next session is S21
+> and writes Handover 20; its commits start `Raptor H20: ...`. **"Handover", not "handoff", from Handover 14 on**
+> (Stephan, 28 Oct); older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's
+> brief open it by that name.
+
+## S20 -- LATE MONEY (Raptor · Handover 19, 8 Nov; branch `claude/s20-late-money` from `claude/sales-raptor-review-p1pzx2` at 34e3f08)
+
+Three parts, Stephan's decisions of 8 Nov, each pushed and fast-forwarded onto the preview branch. Every staging
+migration is mirrored at the end of `supabase/schema.sql`. Fast suite green, build and lint clean (lint: warnings only,
+all pre-existing). The trust functions were edited IN PLACE on staging (pg_get_functiondef + exact text replace,
+raising if the text had moved on) and the full definitions mirrored; each was verified against the live body by md5
+-- with comments and whitespace ignored, because **15 trust functions already differed from schema.sql in comments
+only** before S20 (pre-existing drift, code identical).
+
+### PART 1 -- PERMISSIONS
+- **The payment split is finance's** (`s20_payment_split_finance_only`). `account_payments` and `payment_allocations`
+  select policies are `has_capability('finance.view')` (were "signed in"). Non-finance screens read the view
+  **`account_payment_lines`** (owner's rights on purpose: day, amount, method/source/paid_to_client, state, reference;
+  never who captured/approved, depositor, suspense/rejection reasons, the split). Readers moved to it: the account
+  ledger (`fetchLedgers`, `reversalFates`), the Transactions list (`fetchAccountPayments`), `PaymentDates`,
+  `storedBalance.fetchLedgerRows` (list, export, nightly, notices, campaigns -- the view lets the service role through),
+  undo-a-handover's payment count. `receipts_on_file(account)` (definer) serves the liaison's withdraw box. The eight
+  INVOKER sums non-finance screens use (collector_performance/daily, client book x4, ready to close, settlement) are now
+  SECURITY DEFINER (anon revoked); `protect_finance_cutover` too. The debtor portal reads as the service role
+  (unchanged). Still direct table reads, finance-only paths: `paymentReverse.fetchReverseTarget`, FinanceSettings'
+  count, `fetchPostedPayments`' Captured column -- held by `check-payment-split-access`.
+- **Trust guards are capabilities** (`s20_trust_guards_capabilities`). Reads -> `finance.view` (12 list/ledger reads,
+  account_ledger, previews, payover_cycle_now, refresh/build). Run approval, approve/release early, issuing the advice
+  (mark_payover_run_sent), reset, void -> **`payover.approve`** with finance. Marking a run or refund paid (by hand,
+  reconcile_bank_debit, allocate_bank_line's refund branch) -> **`payover.pay`** with finance. Both new ticks in the
+  Administrator template and the finance set (only an Administrator with finance gives/takes them); labels "Approve a
+  payover run" / "Mark a payover or refund paid". Policies on bank_statement_lines, client_charges, payover_run_lines,
+  payover_runs, trust_creditor_entries, trust_payments_out, finance_setting_changes -> finance.view (writes ->
+  payover.approve). Screens: RunDetail, the queue's bulk buttons, Payments out, Overpayments.
+- **Moving a receipt is `payment.move`** (`set_payment_account`; it asked payment.approve). `move_payment_to_cycle`
+  (staging tool) asks finance.view + staging instead of payment.move. Move / Place it (parked) gated in the UI.
+- NOT CHANGED (still role = 'Administrator'): raise/cancel/mark_client_charge_paid, credit_fee, reallocate_account,
+  discard_import_batch, bring_forward_client_balances, set_swordfish_holding, set_trust_opening_balance. Ask Stephan
+  whether these become capabilities too.
+
+### PART 2 -- CYCLE DATES (replaces "the approval date decides the cycle")
+- `payment_cycle_day(p)`: a trust receipt's BANK date (received_at, Johannesburg day); a PTC's CAPTURE date
+  (`account_payments.captured_on`, new, = the staging clock's day at insert; older rows fall back to created_at).
+  `ptc_cycle_on_capture()` is the switch Stephan asked to keep (on). `ptc_on_next_payover()` stays OFF.
+  `cycle_test_on` is written only by move_payment_to_cycle (staging).
+- `payover_run_takes(company, cycle, ptc, day)` -> own / late / null, asked by build, refresh, close and the buildable
+  list. LATE = an earlier cycle whose run is approved/sent/paid, or older than the last cycle Raptor builds with no open
+  run; it rides the NEXT OPEN run (no open run in between). `payover_run_lines.late`; payover_run_payments' late_capture
+  is that flag. Remittance/run note: "Late: received 20 Sept 2026, approved 12 Nov 2026" (PTC: captured).
+- A run is BLOCKED by an unapproved receipt dated in its cycle ("approve them first, or park them in suspense").
+- Collections (collector_performance/daily) count on the cycle day (`payment_counts_at`); clerk commission's
+  counts_on is the cycle day (trust once approved; PTC capture day) -- supersedes S18's allocation day. **Kept**: a trust
+  receipt credits whoever held the account at APPROVAL; a PTC whoever held it on the day paid (the code's existing rule).
+- Screens: run detail and Payments in -> History show Paid / Captured / Approved; payment-dates panel says
+  Approved (not Processed) and marks the date that decides the cycle. The import preview no longer says "split
+  immediately". The advice's Paid day is now the Johannesburg day (it printed the UTC day: 2 Jul for 3 Jul).
+- Probed on staging in a rolled-back transaction (clock 12 Nov): receipt banked 20 Sep (Sep run sent) -> late on Oct's
+  open run; banked 20 Oct -> Oct run, own; PTC paid 1 Sep captured 12 Nov -> Nov run; unapproved receipt banked 25 Oct
+  blocked Oct's run.
+
+### PART 3 -- BACKDATED PAYMENTS, PHASES 1b-3
+- **Trust -> Backdated payments** (`/trust/backdated`, on the rail beside To sort): `backdated_payments()` with three
+  dates, later payments split first / paid over, and the correction's state; "Work out the correction" (finance +
+  payment.approve) -> `propose_restatement`; figures panel = the doc's correction table; "Approve and post" (an
+  Administrator with payment.approve) -> `approve_restatement`; Cancel with a reason. Every step in
+  `payment_restatement_events`; the proposal's figures are held to the cent at approval ("the account has changed
+  since this was proposed").
+- How it posts without editing anything (`s20_backdated_corrections` + two fixes): payment_allocations is one row per
+  payment, so a correction is a **correction receipt** -- `account_payments` R0.00, `source 'correction'`,
+  `corrects_payment_id`, its allocation = the DIFFERENCE. Every existing sum (engine, in duplum, trust ledger trigger,
+  payover runs) then includes it unchanged; it rides the next open run as a late line, labelled "Correction to the
+  payment of 1 Apr 2026 (a payment of 1 Mar 2026 was found late), approved ...". A backdated payment still WAITING is
+  approved by the correction itself with its date-order split (an ordinary line on the advice). Interest: ONE row,
+  `source 'restatement'`, covering 0 days on the last day already posted (so the day interest next runs from never
+  moves); the statement draws it as "Interest corrected: a payment found late ..." (credit). Capital outstanding moves by
+  the restated difference. Correction receipts are kept off `account_payment_lines`, the debtor portal, collections,
+  commission and the control list.
+- BLOCKED (decide by hand, said on the row): Swordfish interest after the day, a later receipt Swordfish paid over
+  (imported history frozen), account in duplum, a receipt fee that would change, an overpayment already
+  refunded/moved/released. A payment carrying a correction cannot be reversed, nor its account re-split
+  (`reverse_payment_allocation`, `reallocate_account` refuse).
+- The calculator (`restatement_compute`) is S18's rolled-back trick, but it removes NO rows and re-splits each payment
+  AS ITSELF (old split parked on an R0.00 placeholder, payment unapproved and approved again). Two bugs found doing
+  it: interest parked in 1900 became the coverage (fixed: day before the handover); S18's full-amount copies left the
+  original in the movements, so the payment day's interest came out R0.67 short (fixed). `restatement_preview` is now
+  a wrapper over it -- **do not run supabase/manual/s18_restatement_preview.sql** (marked superseded).
+- **Worked example to the cent, in the database**: `scripts/qa/live/s20-restatement-worked-example.sql` builds the
+  doc's account, proposes, approves as an Administrator, reads back, rolls back. 8 Nov: `failures []` -- March 412.46 /
+  87.54 / 500 / 115 / 385; April correction -307.16 / +240.21 / +66.95 / +15.40 / +51.55; interest 605.30; capital
+  8 933.05; trust ledger client +51.55 firm -51.55; correction line late on a ready run; two audit events.
+- The collector's commission is NOT corrected: clerk commission is on the amount collected, which does not change.
+
+### CHECKS ADDED (each seen failing on broken code)
+check-payment-split-access, check-payover-capabilities, check-cycle-dates, check-backdated-payments;
+e2e/payment-split-collector, e2e/run-late-lines, e2e/backdated-payments. Twenty-odd existing checks moved to the new
+rules (named in the commits). e2e/performance (8) and e2e/people (2) fail identically on the base commit 34e3f08
+(date-dependent, pre-existing).
+
+### START HERE (S21)
+1. **Camille tests corrections on staging** (Trust -> Backdated payments). Staging has no backdated payment of its own
+   today; the live probe shows how to make one. Ask Stephan the open questions below before production.
+2. **Open questions for Stephan** (conservative choices made, all switchable):
+   - A late correction / late receipt that makes the client's run negative is carried like any run below nil -- OK?
+     (Camille's doc Q3: invoice the client if the account is closed? not built.)
+   - Commission VAT on a correction (doc Q4): the run's advice shows it; no separate debit note.
+   - Limits (doc Q6): none -- any date back to the handover.
+   - In duplum (doc Q7): blocked, comes to finance.
+   - The debtor's statement shows ONE "Interest corrected" credit line (doc Q8 wanted none): stored interest rows are
+     immutable, so the correction is a row; dated on the last day already posted, not the approval day.
+   - A run is now blocked by unapproved receipts dated in its cycle -- right, or a warning only?
+   - Collector credit for a late trust receipt stays with whoever held the account at approval (commission) and at the
+     bank date (collections figures) -- unify?
+   - The client-charge and other Administrator-role writes listed under Part 1.
+3. **Before production**: none of S20 is on production. The migrations are additive except the policy changes; apply in
+   the order listed in the commits; production's 15 drifted trust functions need the same md5 check.
+
+### TRAPS SEEN IN S20
+- **Another checkout's dev servers sat on port 5199** (`/home/claude/septumusrex69/...`), so e2e suites silently
+  tested THAT code. Run e2e with `RAPTOR_E2E_PORT=5311` (harness reads it) and never trust a pass you cannot break.
+- The Supabase tool refuses (cancels) SQL containing `drop policy`; `alter policy` goes through. It also cannot take
+  "delete": functions that contain it were changed by editing the live definition in place, so the word never appears
+  in the migration (see the `pg_temp.s20_edit` helper in any S20 migration).
+- A function changed with `alter function ... security definer` keeps an older `create` in schema.sql that says
+  invoker: the mirror of any later edit must carry `security definer` (done for collector_performance/daily).
+- `create or replace` cannot change a function's return columns (that needs a drop): new figures came through new
+  functions beside the old ones (payover_run_payment_dates, payover_run_corrections, receipts_on_file).
+- Checks read "the LAST finance revoke loop": a new loop must restate the whole list (done twice).
+- In plpgsql, `text[] || 'a string'` parses the string as an array literal: cast it (`'...'::text`).
 
 ## S19 -- RUNNING LOG (Raptor · Handover 18, 7 Nov; branch `claude/ecstatic-feynman-emzuez`, started from `claude/sales-raptor-review-p1pzx2` at 512ef1d)
 

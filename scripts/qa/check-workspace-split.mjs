@@ -172,7 +172,8 @@ const businessTargets = railTargets(businessLayout)
 /* EIGHT since 10 Oct: Client balances joined, after the Trust ledger it reads from. NINE since
    11 Oct: Overpayments, after Payments to make (the firm: "a separate section for overpayments"). */
 /* NINE AGAIN since 2 Nov (Raptor H16): Find a payment joined beside the bank statement, request #18. */
-check('the trust rail has its nine, settings and the door (Find a payment joined, 2 Nov)', trustTargets.length, 11)
+/* TEN since 8 Nov (Raptor H19 / S20): Backdated payments joined beside To sort. */
+check('the trust rail has its ten, settings and the door (Backdated payments joined, 8 Nov)', trustTargets.length, 12)
 /* FIVE AND THE DOOR: overview, income (drawn only for whoever holds business.income), expenses,
    drawings, back office -- and the door to the trust. */
 check('the business rail has its five and the door', businessTargets.length, 6)

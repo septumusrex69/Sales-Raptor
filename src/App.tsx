@@ -70,6 +70,7 @@ const FindPayment = lazy(() => import('./pages/trust/FindPayment').then((m) => (
 const TrustUnaccounted = lazy(() => import('./pages/trust/TrustUnaccounted').then((m) => ({ default: m.TrustUnaccounted })))
 const TrustOverpayments = lazy(() => import('./pages/trust/TrustOverpayments').then((m) => ({ default: m.TrustOverpayments })))
 const BroughtForward = lazy(() => import('./pages/trust/BroughtForward').then((m) => ({ default: m.BroughtForward })))
+const BackdatedPayments = lazy(() => import('./pages/trust/BackdatedPayments').then((m) => ({ default: m.BackdatedPayments })))
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
 const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
@@ -259,6 +260,8 @@ function App() {
                 <Route path="clients/all" element={<ClientBalances />} handle={{ title: 'Client balances' }} />
                 {/* TO SORT (S7): suspense, statement lines, overpayments and exceptions on one page, at the old address. */}
                 <Route path="exceptions" element={<TrustToSort />} handle={{ title: 'To sort' }} />
+                {/* S20: payments found late, worked out again in date order and corrected on the next run. */}
+                <Route path="backdated" element={<BackdatedPayments />} handle={{ title: 'Backdated payments' }} />
                 <Route path="settings" element={<FinanceSettings />} handle={{ title: 'Trust settings' }} />
                 {/* S10: Camille's Trust Debtors balances, brought forward once at the cut-over (HANDOFF §3a item 3). */}
                 <Route path="brought-forward" element={<BroughtForward />} handle={{ title: 'Balances brought forward' }} />

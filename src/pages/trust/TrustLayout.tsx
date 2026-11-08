@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Landmark, Users, Scale, Search, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, History, Landmark, Users, Scale, Search, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -37,6 +37,10 @@ const ITEMS: RailItem[] = [
   /* TO SORT (S7, the firm, 13 Oct: "there's a tab for overpayments and then there's another tab for
      exceptions ... I don't know where we can see the suspense account"): one page for all three. */
   { to: '/trust/exceptions', label: 'To sort', icon: TriangleAlert },
+  /* S20 (the Claude Doc "Payments found late"): payments dated before one already split -- a receipt out of
+     suspense, a PTC captured late -- each worked out again in date order and corrected on the next run. Beside To
+     sort because it is the same kind of work: something found late, to be put right before the payover. */
+  { to: '/trust/backdated', label: 'Backdated payments', icon: History },
   /* "A dedicated tab ... the clients that owe us money" (13 Oct). */
   { to: '/trust/clients', label: 'Clients owe us', icon: Users },
   /* "Every single transaction somewhere ... so we don't need to go into the bank" (13 Oct). */

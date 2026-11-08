@@ -61,8 +61,9 @@ ok('...and writes no nil fee row', /if v_fee_rate > 0 then\s*insert into public\
 
 /* ---- 3. not counted twice ---- */
 const perf = liveFn('collector_performance')
-ok('the collectors are not credited with it', (perf.match(/p\.source <> 'moved'/g) ?? []).length === 2)
-ok('...nor the day by day', /p\.source <> 'moved'/.test(liveFn('collector_daily')))
+/* S20: the filter also leaves out correction receipts now -- p.source not in ('moved', 'correction'). */
+ok('the collectors are not credited with it', (perf.match(/p\.source not in \('moved', 'correction'\)/g) ?? []).length === 2)
+ok('...nor the day by day', /p\.source not in \('moved', 'correction'\)/.test(liveFn('collector_daily')))
 ok('...nor the Payments in tiles', /p\.source <> 'moved'/.test(liveFn('payments_in_month')))
 ok('...nor a client\'s payments to date', /p\.source <> 'moved'/.test(liveFn('client_book_totals')))
 ok('the account\'s own settlement still counts it', !/p\.source <> 'moved'/.test(liveFn('account_settlement')))

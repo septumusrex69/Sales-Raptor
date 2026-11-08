@@ -176,7 +176,15 @@ export const ANNEXURE_B_FOOTNOTE =
 
 /** "11 Nov 2024" — dates on a client document are written the way they are read aloud. */
 /** The late line's words on the advice, in the advice's own date format; null on a line in its own cycle. */
-export function lateOf(l: Pick<RunPayment, 'lateCapture' | 'paidToClient' | 'receivedAt' | 'capturedOn' | 'approvedOn'>): string | null {
+export function lateOf(l: Pick<RunPayment, 'lateCapture' | 'paidToClient' | 'receivedAt' | 'capturedOn' | 'approvedOn'>
+  & Partial<Pick<RunPayment, 'correctionOf' | 'correctionFoundOn'>>): string | null {
+  /* A CORRECTION LINE SAYS WHAT IT CORRECTS (S20; the doc's "Correction to the 1 April payment"), dated the day it
+     was approved -- the payment it corrects went out on an advice the client already has. */
+  if (l.correctionOf) {
+    return `Correction to the payment of ${advDate(l.correctionOf)}`
+      + (l.correctionFoundOn ? ` (a payment of ${advDate(l.correctionFoundOn)} was found late)` : '')
+      + (l.approvedOn ? `, approved ${advDate(l.approvedOn)}` : '')
+  }
   if (!l.lateCapture) return null
   return lateLineNote({ paidToClient: l.paidToClient, receivedOn: l.receivedAt ? firmDay(l.receivedAt) : null,
     capturedOn: l.capturedOn ?? null, approvedOn: l.approvedOn ?? null }, (d) => advDate(d))
@@ -243,7 +251,8 @@ export function buildRemittanceAdvice(input: {
       status: advStatus(l),
       handedOver: advDate(l.handoverDate),
       handoverAmount: l.capitalHandedOver,
-      paid: advDate(l.receivedAt ? firmDay(l.receivedAt) : null),
+      /* A correction has no payment day of its own: it is the difference on one already paid over (S20). */
+      paid: l.correctionOf ? '' : advDate(l.receivedAt ? firmDay(l.receivedAt) : null),
       capitalReceived: l.toCapital,
       commission: l.commission,
       vat: l.commissionVat,

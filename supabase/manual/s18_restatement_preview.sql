@@ -1,3 +1,7 @@
+-- !! SUPERSEDED BY S20 (Raptor H19, 8 Nov) -- DO NOT RUN. restatement_preview is now a wrapper over
+-- !! restatement_compute (staging migrations s20_backdated_corrections and after); running this file would put the
+-- !! S18 full-copy calculator back, which ignores correction receipts and short-counts the payment day's interest.
+-- !! Kept as the record of phase 1 only.
 -- RAPTOR H17 / S18 -- PASTE INTO THE SUPABASE SQL EDITOR ON STAGING (kvkajxpremantdkhmjvb) AND RUN.
 -- Creates two functions only (restatement_preview, backdated_payments). Changes no data.
 -- The deletes inside restatement_preview only ever run inside a block that rolls itself back.

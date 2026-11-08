@@ -374,7 +374,10 @@ const account: Handler = async (req, res, admin) => {
       .select('id,capital_handed_over,handover_date,interest_rate_annual,status,last_action_at,ended_as,ended_on,prescribed,prescription_date,case_number,debtor_first_name,debtor_second_name,debtor_surname,account_number,client_reference,companies(name)')
       .eq('id', who.accountId).maybeSingle(),
     admin.from('firm_settings').select('firm_name, trust_bank, trust_branch_code, trust_account_number, trust_account_name, trust_account_type, phone, email').limit(1).maybeSingle(),
-    admin.from('account_payments').select('received_at, amount, approved_at, reversed_at, rejected_at').eq('account_id', who.accountId),
+    /* Not a correction receipt (S20): an R0.00 row that moves the split between the client and the firm, which is
+       no payment the debtor made and nothing the debtor is shown. */
+    admin.from('account_payments').select('received_at, amount, approved_at, reversed_at, rejected_at').eq('account_id', who.accountId)
+      .neq('source', 'correction'),
   ])
   if (!a) { res.status(404).json({ error: 'Your account could not be found. Please call us.' }); return }
   let summary
