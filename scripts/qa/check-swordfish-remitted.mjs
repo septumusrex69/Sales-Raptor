@@ -83,7 +83,7 @@ ok('...before it writes the copy the engine would split', refuseRev > 0 && copy 
 
 const move = lastFn('move_payment_to_cycle')
 const refuseMove = move.indexOf('if v_pay.paid_over_in_swordfish then')
-const moveWrite = move.indexOf('update public.account_payments set allocated_on')
+const moveWrite = move.indexOf('update public.account_payments set cycle_test_on')
 ok('move_payment_to_cycle refuses a remitted receipt', refuseMove > 0 && /belongs to no Raptor cycle/.test(move))
 ok('...before it moves anything', refuseMove > 0 && moveWrite > 0 && refuseMove < moveWrite)
 

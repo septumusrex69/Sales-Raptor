@@ -84,6 +84,8 @@ for (const col of ['commission', 'due_to_bf', 'to_interest', 'to_capital', 'to_f
 const ALLOWED = new Map([
   ['src/lib/paymentReverse.ts', 2],
   ['src/pages/finance/FinanceSettings.tsx', 1],
+  /* fetchPostedPayments' Captured column (S20): Payments in -> History, a trust screen. */
+  ['src/lib/payover.ts', 1],
 ])
 function walk(dir, out = []) {
   for (const f of readdirSync(join(root, dir))) {

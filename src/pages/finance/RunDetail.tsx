@@ -13,7 +13,8 @@ import {
   releaseRunEarly,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
-import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
+import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice, lateOf } from '../../lib/remittanceAdvice'
+import { firmDay } from '../../lib/dateLabels'
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
@@ -417,7 +418,11 @@ export function RunDetail() {
           <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-left text-slate-400">
+                {/* THE THREE DATES (S20; Stephan: "show the dates"): paid / received, captured, approved. The one that
+                    put the payment in this cycle is a trust receipt's Paid (its bank date) and a PTC's Captured. */}
                 <th className="px-3 py-2 font-medium">Paid</th>
+                <th className="px-2 py-2 font-medium">Captured</th>
+                <th className="px-2 py-2 font-medium">Approved</th>
                 <th className="px-2 py-2 font-medium">Account</th>
                 <th className="px-2 py-2 font-medium">Debtor</th>
                 <th className="px-2 py-2 font-medium">Your ref</th>
@@ -434,7 +439,9 @@ export function RunDetail() {
                 <tr key={r.lineId} onClick={() => setOpen(r)}
                   className={clsx('cursor-pointer border-b border-slate-50 hover:bg-slate-50',
                     r.lineKind === 'reversal' ? 'text-negative-700' : 'text-slate-700')}>
-                  <td className="px-3 py-2 text-slate-500">{r.receivedAt ? fmtDay(r.receivedAt.slice(0, 10)) : '\u2014'}</td>
+                  <td className="px-3 py-2 text-slate-500" data-testid="run-line-paid">{r.receivedAt ? fmtDay(firmDay(r.receivedAt)) : '\u2014'}</td>
+                  <td className="px-2 py-2 text-slate-500" data-testid="run-line-captured">{r.capturedOn ? fmtDay(r.capturedOn) : '\u2014'}</td>
+                  <td className="px-2 py-2 text-slate-500" data-testid="run-line-approved">{r.approvedOn ? fmtDay(r.approvedOn) : '\u2014'}</td>
                   <td className="px-2 py-2 text-slate-500">{r.caseNumber ?? ''}</td>
                   <td className="px-2 py-2 font-medium max-w-[16rem] truncate" title={r.debtor ?? undefined}>
                     {r.lineKind === 'carried' ? 'Brought forward' : r.debtor}
@@ -443,7 +450,7 @@ export function RunDetail() {
                   <td className="px-2 py-2 text-slate-500">
                     {[r.lineKind === 'ptc' && 'paid you directly',
                       r.lineKind === 'reversal' && 'reversed after the last run',
-                      r.lateCapture && 'captured after the previous cut-off'].filter(Boolean).join(' \u00b7 ')}
+                      lateOf(r)].filter(Boolean).join(' \u00b7 ')}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums">
                     {r.lineKind === 'carried' ? rand(r.carriedAmount) : rand(r.toCapital)}
@@ -468,7 +475,7 @@ export function RunDetail() {
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={mayReverse ? 10 : 9} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
+                <tr><td colSpan={mayReverse ? 12 : 11} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
               )}
             </tbody>
           </table>

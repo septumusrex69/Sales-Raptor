@@ -450,8 +450,9 @@ ok('...and keeps no copy of its own',
     (tbody.match(/<td\b/g) ?? []).length + (tbody.match(/<Td\b/g) ?? []).length, cols)
 }
 for (const [name, screen, fixedExpected] of [
-  /* Fifteen since prompt 11: Reverse sits on the row, beside the amount. */
-  ['the check screen', checkScreen, 15],
+  /* Fifteen since prompt 11: Reverse sits on the row, beside the amount. Seventeen since S20: Captured and
+     Approved beside Received. */
+  ['the check screen', checkScreen, 17],
 ]) {
   ok(`${name} draws the shared sections`,
     /FeeHeadCells opened=/.test(screen) && /FeeBodyCells a=/.test(screen))

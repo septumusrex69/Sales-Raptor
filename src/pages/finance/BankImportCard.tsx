@@ -155,8 +155,9 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
             sentences are the three things that will happen, in the order they happen.
           */}
           <p className="text-[12px] text-slate-500 leading-relaxed">
-            Receipts whose reference names exactly one account become payments, and each one is
-            split immediately — receipt fee, interest, costs, capital, commission. The rest wait
+            Receipts whose reference names exactly one account become payments and wait in the approval
+            queue; nothing is split until each is approved — then receipt fee, interest, costs, capital,
+            commission. Each belongs to the payover cycle of its date on this statement. The rest wait
             under Needs an account for you to place. Money paid out is imported too, and each line
             waits under Exceptions to be allocated — a payover, a refund, a transfer to the business
             account, bank charges or other — so that every rand that leaves the trust has a reason.

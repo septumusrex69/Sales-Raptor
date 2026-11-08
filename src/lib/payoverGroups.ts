@@ -8,7 +8,8 @@
  * Relative to the cycle that is OPEN today (fetchCycle):
  *   - the cycle that ended the day before it opened is THIS MONTH'S payover, the one due now;
  *   - anything older and still in the queue is EARLIER, STILL PENDING -- late by definition;
- *   - the open cycle's own runs build themselves as payments are processed (refresh_payover_runs)
+ *   - the open cycle's own runs build themselves as payments dated in it are approved (refresh_payover_runs; a
+ *     trust receipt by its bank date, a PTC by its capture date -- S20)
  *     and are said to be still open rather than mixed in with the month being paid.
  * Paid runs are grouped by their cycle with no urgency in the words: finished is finished.
  *

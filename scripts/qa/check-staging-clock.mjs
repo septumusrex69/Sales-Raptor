@@ -146,8 +146,9 @@ ok('a withdrawal is dated on the clock', /ended_on = public\.raptor_today\(\)/.t
 ok('a client charge defaults to the clock\'s day', /coalesce\(p_raised_on, public\.raptor_today\(\)\)/.test(lastFn('raise_client_charge').body))
 ok('Mark paid defaults to the clock', /p_paid_at timestamptz default public\.raptor_now\(\)/.test(lastFn('mark_payover_run_paid').head))
 /* created_at is a real stamp the clock cannot move; the cycle is allocated_on (be1e03b). */
-ok('the cycle tiles cut on allocated_on, not created_at',
-  /p\.allocated_on >= b\.s and p\.allocated_on <= public\.payover_cycle_end\(b\.s\)/.test(lastFn('payover_cycle_tiles').body)
+/* S20: on the payment's cycle day, which reads captured_on (the staging clock's day) for a PTC, never created_at. */
+ok('the cycle tiles cut on the cycle day, not created_at',
+  /public\.payment_cycle_day\(p\) >= b\.s and public\.payment_cycle_day\(p\) <= public\.payover_cycle_end\(b\.s\)/.test(lastFn('payover_cycle_tiles').body)
   && !/created_at/.test(lastFn('payover_cycle_tiles').body))
 ok('...and so does Build for another cycle', !/created_at/.test(lastFn('payover_buildable').body))
 for (const [table, column, fn] of [

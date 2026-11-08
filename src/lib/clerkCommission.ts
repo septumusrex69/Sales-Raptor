@@ -297,18 +297,18 @@ export interface CommissionPayment {
   /** The payover run this payment rode (a PTC's commission is released by it). Null: not on one yet. */
   payoverRunId: string | null
   /**
-   * THE DAY THE LINE BELONGS TO (S18). A trust receipt earns in the period it was ALLOCATED -- Stephan,
-   * 5 Nov: "a collector gets commission from a suspense ... from the date that it was allocated" --
-   * so a deposit placed out of suspense months later is paid in the period it was placed, not in one
-   * already paid. Null: not approved yet, so not processed and not earned. Absent (an older caller):
-   * the day the debtor paid, as before. A PTC reads its own day; its release is the run's.
+   * THE DAY THE LINE BELONGS TO -- the payment's CYCLE DAY (S20; Stephan, 8 Nov, superseding S18's allocation
+   * day): a trust receipt's BANK date, once approved; a PTC's CAPTURE date. clerk_commission_lines reads it off
+   * payment_cycle_day(), the same day that puts the payment in its payover cycle and its collections figures.
+   * Null: a trust receipt not approved yet, so not earned. Absent (an older caller): the day the debtor paid.
+   * Whoever held the account at APPROVAL is still credited for a trust receipt (S18, kept).
    */
   countsOn?: string | null
 }
 
 /** The day a payment's commission line belongs to -- see `countsOn`. Null: not earned yet. */
 export function countsOnOf(p: CommissionPayment): string | null {
-  if (p.paidToClient) return p.receivedOn
+  if (p.paidToClient) return p.countsOn ?? p.receivedOn
   return p.countsOn === undefined ? p.receivedOn : p.countsOn
 }
 
@@ -652,7 +652,7 @@ export function buildStatement(input: {
     for (const p of input.payments) {
       if (!counted(p)) continue
       if (!p.paidToClient) {
-        /* BY THE ALLOCATION DAY (S18), and a reversal names the period that line was paid in. */
+        /* BY THE CYCLE DAY (S20: the bank date, once approved), and a reversal names the period that line was paid in. */
         if (inPeriod(countsOnOf(p))) payments.push(lineFor(p, 'receipt'))
         if (inPeriod(p.reversedOn)) {
           const l = lineFor(p, 'reversal'); l.paidIn = periodKeyOf(countsOnOf(p) ?? p.receivedOn)
@@ -660,9 +660,11 @@ export function buildStatement(input: {
         }
         continue
       }
-      if (p.receivedOn > period.end) continue
+      /* A PTC belongs to the period of the day it was CAPTURED (S20), not the day the debtor paid the client. */
+      const ptcDay = countsOnOf(p) ?? p.receivedOn
+      if (ptcDay > period.end) continue
       place((k) => lineFor(p, k), (asOf) => releaseOf({
-        runId: p.payoverRunId, ownKey: periodKeyOf(p.receivedOn), runs: runsOf(p.companyId), asOf,
+        runId: p.payoverRunId, ownKey: periodKeyOf(ptcDay), runs: runsOf(p.companyId), asOf,
       }), p.reversedOn)
     }
     for (const c of input.carried ?? []) {
@@ -709,7 +711,7 @@ export function buildStatement(input: {
     runsUnread: scheme && input.runs === null
       && (input.payments.some((p) => p.paidToClient && counted(p)) || (input.carried ?? []).length > 0),
     reconstructed: scheme ? input.payments.filter((p) => counted(p) && p.holderSource === 'backfill'
-      && (inPeriod(p.receivedOn) || inPeriod(p.reversedOn))).length : 0,
+      && (inPeriod(countsOnOf(p) ?? p.receivedOn) || inPeriod(p.reversedOn))).length : 0,
     commissionStart: start,
   }
 }

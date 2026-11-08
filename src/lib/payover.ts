@@ -18,6 +18,7 @@
  * browser is a courtesy, not a boundary.
  */
 import { supabase } from './supabase'
+import { firmDay } from './dateLabels'
 import { fetchAllRows } from './fetchAll.ts'
 import { allocationOf, type Allocation } from './allocationRules'
 import { clockToday } from './clock.ts'
@@ -116,7 +117,14 @@ export interface RunPayment {
   needsRate: boolean
   capitalAfter: number
   carriedAmount: number
+  /**
+   * A LATE LINE (S20): a payment from an EARLIER cycle (its bank date, or a PTC's capture date) approved after that
+   * cycle's run had gone, so it rides this one. Named lateCapture since S8; payover_run_lines.late since S20.
+   */
   lateCapture: boolean
+  /** S20: the other two dates (payover_run_payment_dates), for the run's date columns and the late line's words. */
+  capturedOn: string | null
+  approvedOn: string | null
   accountStatus: string | null
   handoverDate: string | null
   capitalHandedOver: number
@@ -270,8 +278,15 @@ export async function fetchTiles(periodStart?: string | null): Promise<CycleTile
 }
 
 export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
-  const { data, error } = await supabase.rpc('payover_run_payments', { p_run: runId })
+  /* AND EACH PAYMENT'S CAPTURED AND APPROVED DAYS (S20), read beside it: payover_run_payments' shape is what the
+     remittance advice is built on and is left alone. A failure here costs the two columns, never the run. */
+  const [{ data, error }, dates] = await Promise.all([
+    supabase.rpc('payover_run_payments', { p_run: runId }),
+    supabase.rpc('payover_run_payment_dates', { p_run: runId }).then((r) => r.data ?? [], () => []),
+  ])
   if (error) throw new Error(error.message)
+  const dateOf = new Map(((dates ?? []) as { allocation_id: string; captured_on: string | null; approved_on: string | null }[])
+    .map((d) => [d.allocation_id, d]))
   return inRunningOrder(((data ?? []) as Record<string, unknown>[]).map((r) => ({
     lineId: String(r.line_id),
     allocationId: s(r.allocation_id),
@@ -298,6 +313,8 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     capitalAfter: n(r.capital_after),
     carriedAmount: n(r.carried_amount),
     lateCapture: Boolean(r.late_capture),
+    capturedOn: dateOf.get(String(r.allocation_id))?.captured_on ?? null,
+    approvedOn: dateOf.get(String(r.allocation_id))?.approved_on ?? null,
     accountStatus: s(r.account_status),
     handoverDate: s(r.handover_date),
     capitalHandedOver: n(r.capital_handed_over),
@@ -428,7 +445,8 @@ export async function approveRun(runId: string): Promise<void> {
 /**
  * APPROVED BEFORE THE CYCLE CLOSES, WITH THE REASON (the firm, 8 Oct: a large PTC where the client
  * owes the firm and the advice is needed now -- "there should be a good reason"). The reason and
- * who gave it are kept on the run; a payment processed later in the cycle goes to the next run.
+ * who gave it are kept on the run; a payment dated later in the cycle (its bank date, or a PTC's capture date --
+ * S20) and anything approved after the run went out ride the next run, the latter as a late line.
  */
 export async function approveRunEarly(runId: string, reason: string): Promise<void> {
   const { error } = await supabase.rpc('approve_payover_run_early', { p_run: runId, p_reason: reason })
@@ -487,8 +505,9 @@ export async function markRunPaid(runId: string, reference: string, paidAt: stri
 
 /**
  * THE QUEUE BUILDS ITS OWN RUNS (the firm, 8 Oct: "I don't even have to say go and build a run").
- * Every client with processed money in this cycle or the last gets its run built or brought up to
- * date; approved, sent, paid and voided runs are left alone. Returns how many it touched.
+ * Every client with approved money dated in this cycle or the last -- a trust receipt by its bank date, a PTC by
+ * the day it was captured (S20; Stephan, 8 Nov) -- or a late payment for its next open run, gets its run built or
+ * brought up to date; approved, sent, paid and voided runs are left alone. Returns how many it touched.
  */
 export async function refreshRuns(): Promise<number> {
   const { data, error } = await supabase.rpc('refresh_payover_runs')
@@ -1194,6 +1213,8 @@ export interface PostedPayment {
   debtor: string | null
   client: string | null
   receivedOn: string
+  /** S20: the day it went into Raptor -- a PTC's payover cycle. Read beside payments_posted. */
+  capturedOn: string | null
   approvedOn: string | null
   approvedByName: string | null
   amount: number
@@ -1267,6 +1288,19 @@ export async function fetchPostedPayments(from?: string, to?: string): Promise<P
     p_from: from ?? null, p_to: to ?? null,
   })
   if (error) throw new Error(error.message)
+  /* THE CAPTURED DAY (S20), read for the listed payments in batches -- payments_posted's shape is left alone. A
+     failure costs the column, never the list. */
+  const ids = [...new Set(((data ?? []) as { payment_id: string }[]).map((r) => String(r.payment_id)))]
+  const captured = new Map<string, string>()
+  const batches = await Promise.all(Array.from({ length: Math.ceil(ids.length / 200) }, (_, i) =>
+    supabase.from('account_payments').select('id, captured_on, created_at').in('id', ids.slice(i * 200, i * 200 + 200))
+      .then((r) => r.data ?? [], () => [])))
+  for (const cs of batches) {
+    for (const c of cs as { id: string; captured_on: string | null; created_at: string | null }[]) {
+      const day = c.captured_on ?? (c.created_at ? firmDay(c.created_at) : null)
+      if (day) captured.set(c.id, day)
+    }
+  }
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     paymentId: String(r.payment_id),
     allocationId: String(r.allocation_id),
@@ -1276,6 +1310,7 @@ export async function fetchPostedPayments(from?: string, to?: string): Promise<P
     debtor: s(r.debtor),
     client: s(r.client),
     receivedOn: String(r.received_on),
+    capturedOn: captured.get(String(r.payment_id)) ?? null,
     approvedOn: s(r.approved_on),
     approvedByName: s(r.approved_by_name),
     amount: Number(r.amount ?? 0),

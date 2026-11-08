@@ -579,7 +579,7 @@ export function FinanceWorkQueue() {
                     </td>
                   </tr>
                   <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-400">
-                    Nothing processed in this cycle yet. A client appears here, with its run built, as soon as a payment for it is approved.
+                    Nothing approved for this cycle yet. A client appears here, with its run built, as soon as a payment dated in this cycle (by the bank, or captured for a PTC) is approved.
                   </td></tr>
                 </>
               )}
