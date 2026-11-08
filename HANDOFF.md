@@ -84,6 +84,14 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**Small rings beside a collector's promises, day and traces** (Stephan, 8 Nov: "little pie charts to show ... how many
+are kept, how many are taken ... keep it there, but just on the side of it"). CollectorProfile (My collections):
+each card's figures stay; a `SideRing` sits at the right on wide screens, under them on narrow. `RingDonut` got
+`size="sm"` (96 px, stacked legend with numbers) and a <title> per slice. `lib/collectorRings.ts`: promises = kept /
+broken / still to come (kept % of resolved in the middle), the day = calls / emails / SMS / notes (validated dataviz
+categorical colours), traces = verified / tried not right / not tried (hit rate of what was tried). Nothing new is
+counted. Checks: check-collector-rings (12), e2e/performance extended (129).
+
 **Spell check in all eleven official written languages, in the background** (Stephan, 8 Nov: "make all 11 official
 languages"). isiZulu, isiXhosa, Sepedi, Setswana, Sesotho, Xitsonga, siSwati, Tshivenda, isiNdebele: Translate.org.za's
 Hunspell lists via Ubuntu's myspell-* packages (source zaf, LGPL 2.1), converted to UTF-8 (ve_ZA.aff had one stray

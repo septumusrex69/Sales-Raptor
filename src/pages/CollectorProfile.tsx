@@ -5,6 +5,8 @@ import {
   Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Card } from '../components/ui/Card'
+import { RingDonut } from '../components/ui/RingDonut'
+import { dayRing, promiseRing, ringPercent, traceRing, type RingPart } from '../lib/collectorRings.ts'
 import { UserAvatar } from '../components/ui/Avatar'
 import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { useAppStore } from '../store/AppStore'
@@ -224,6 +226,8 @@ export function CollectorProfile() {
                 kept rate is over the ones that have come due.
               </span>
             </p>
+            <div className="flex flex-col lg:flex-row">
+              <div className="min-w-0 flex-1">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 pt-2">
               <Measure label="Taken" value={stats.promisesMade} />
               <Measure label="Kept" value={stats.promisesKept} tone="good" />
@@ -235,6 +239,10 @@ export function CollectorProfile() {
               <Rate label="Kept" value={score.promiseKeptRate}
                 note={`${stats.promisesKept} of ${score.promisesResolved} resolved`}
                 tone={band(score.promiseKeptRate, THRESHOLDS.promiseKeptRate)} />
+            </div>
+              </div>
+              <SideRing label="kept" value={ringPercent(score.promiseKeptRate)} testId="ring-promises"
+                parts={promiseRing({ made: stats.promisesMade, kept: stats.promisesKept, broken: stats.promisesBroken, resolved: score.promisesResolved })} />
             </div>
           </Card>
 
@@ -248,6 +256,8 @@ export function CollectorProfile() {
                 {stats.inPlayAccounts.toLocaleString('en-ZA')} accounts.
               </span>
             </p>
+            <div className="flex flex-col lg:flex-row">
+              <div className="min-w-0 flex-1">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 pt-2">
               <Measure label="Calls" value={stats.calls}
                 note={`${stats.callsAnswered} answered`} />
@@ -263,6 +273,10 @@ export function CollectorProfile() {
               <Rate label="Book reached" value={score.coverage}
                 note={`${stats.accountsTouched.toLocaleString('en-ZA')} of ${stats.inPlayAccounts.toLocaleString('en-ZA')} accounts worked at least once`}
                 tone={band(score.coverage, THRESHOLDS.coverage)} />
+            </div>
+              </div>
+              <SideRing label="actions" value={score.actions.toLocaleString('en-ZA')} testId="ring-day"
+                parts={dayRing({ calls: stats.calls, emails: stats.emailsSent, sms: stats.smsSent, notes: stats.notesWritten })} />
             </div>
             {/*
               SAID, NOT LEFT BLANK. The firm asked for WhatsApp beside the calls and SMS, and
@@ -286,6 +300,8 @@ export function CollectorProfile() {
                 often a month apart.
               </span>
             </p>
+            <div className="flex flex-col lg:flex-row">
+              <div className="min-w-0 flex-1">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 pt-2">
               <Measure label="Pulled" value={stats.tracesPulled} note="in this month" />
               <Measure label="Leads found" value={stats.traceLeads}
@@ -305,6 +321,10 @@ export function CollectorProfile() {
                 on all eleven would be judging the bureau.
               </p>
             </div>
+              </div>
+              <SideRing label="hit rate" value={ringPercent(score.traceHitRate)} testId="ring-traces"
+                parts={traceRing({ leads: stats.traceLeads, worked: stats.tracesWorked, verified: stats.tracesVerified })} />
+            </div>
           </Card>
         </>
       )}
@@ -313,6 +333,22 @@ export function CollectorProfile() {
 }
 
 /* ---------- pieces ---------- */
+
+/*
+ * THE SMALL RING AT THE SIDE OF A CARD (S19; Stephan: "keep it there, but just on the side of it ... make like a small
+ * little pie chart"). Beside the figures on a wide screen, under them on a narrow one; nothing to draw is said, not a
+ * grey circle pretending to be a chart. See lib/collectorRings.ts for what each ring is a whole of.
+ */
+function SideRing({ parts, value, label, testId }: { parts: RingPart[]; value: string; label: string; testId: string }) {
+  const any = parts.some((p) => p.value > 0)
+  return (
+    <aside className="shrink-0 lg:w-56 flex items-center justify-center gap-4 px-4 pb-4 lg:py-3 lg:border-l border-slate-100" data-testid={testId}>
+      {any
+        ? <RingDonut size="sm" data={parts.filter((p) => p.value > 0)} centerValue={value} centerLabel={label} />
+        : <p className="text-[12px] text-slate-400 text-center">Nothing to draw yet this month.</p>}
+    </aside>
+  )
+}
 
 function Place({ label, value, place }: { label: string; value: string; place: string }) {
   return (

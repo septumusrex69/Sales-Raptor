@@ -944,6 +944,36 @@ try {
   await page.waitForTimeout(900)
   await t.shot(page, '43-collector')
 
+  /*
+   * THE SMALL RINGS AT THE SIDE (S19; Stephan, 8 Nov: "keep it there, but just on the side of it ... make like a small
+   * little pie chart"): promises, the day and traces each carry one, beside the figures rather than instead of them.
+   */
+  for (const id of ['ring-promises', 'ring-day', 'ring-traces']) {
+    const ring = page.getByTestId(id)
+    t.check(`${id}: a small ring beside the card's figures`, await ring.count(), 1)
+  }
+  {
+    const promises = page.getByTestId('ring-promises')
+    await promises.scrollIntoViewIfNeeded()
+    const side = await page.evaluate(() => {
+      const ring = document.querySelector('[data-testid="ring-promises"]')?.getBoundingClientRect()
+      const card = document.querySelector('[data-testid="ring-promises"]')?.closest('.card')?.getBoundingClientRect()
+      return ring && card ? Math.round(card.right - ring.right) : -1
+    })
+    t.ok(`...on the right of it on a wide screen (${side}px from the card's edge)`, side >= 0 && side < 40)
+    if (await promises.getByTestId('mini-ring').count()) {
+      t.ok('...the promises ring names Kept with its number, the same as the figure beside it',
+        /Kept\s*\d+/.test(await promises.innerText()))
+    }
+    await page.waitForTimeout(300)
+    await t.shot(page, '44-collector-rings')
+    /* The two rings below the fold, each as its card. */
+    for (const id of ['ring-day', 'ring-traces']) {
+      const card = page.getByTestId(id).locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " card ")][1]')
+      await card.screenshot({ path: `${OUT}/45-${id}.png` }).catch(() => {})
+    }
+  }
+
   t.ok('a collector has a page of their own',
     page.url().includes(`/performance/${USER_ID}`))
   t.ok('...saying where they stand on rand',
