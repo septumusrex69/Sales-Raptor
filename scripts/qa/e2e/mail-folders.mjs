@@ -88,17 +88,27 @@ try {
   }
   const subject = MAIL.find((m) => !m.is_junk && !m.is_sent && !m.done_at).subject
   await page.getByText(subject).first().waitFor({ timeout: 20000 })
+  /* THE PANE ON THE LEFT (Stephan, 8 Nov: "to the left you can have like a little pane expand that says folders"),
+     folded while there are no folders. */
+  t.check('with no folders the pane is folded to its word', await page.getByTestId('mail-folders-open').count(), 1)
+  await page.getByTestId('mail-folders-open').click()
   const strip = page.getByTestId('mail-folders')
-  t.ok('the folder row is there, with New folder on it', await strip.getByTestId('mail-folder-new').isVisible())
+  t.ok('open, it offers New folder', await strip.getByTestId('mail-folder-new').isVisible())
+  const side = await page.evaluate(() => {
+    const pane = document.querySelector('[data-testid="mail-folders"]')?.getBoundingClientRect()
+    return pane ? Math.round(pane.left) : -1
+  })
+  t.ok(`...and it sits on the left of the mail (x=${side})`, side >= 0 && side < 400)
 
-  /* 1. A folder for a client. */
+  /* 1. A folder for a client: it takes the CLIENT'S NAME ("If you link it to a client, it should be the client name"). */
   await strip.getByTestId('mail-folder-new').click()
-  await page.getByLabel('Folder name').fill('Statements')
   await page.getByLabel('Linked client').selectOption({ label: COMPANY.name })
+  t.check('choosing a client names the folder after it', await page.getByLabel('Folder name').inputValue(), COMPANY.name)
+  t.ok('...and the name is not typed over', await page.getByLabel('Folder name').evaluate((el) => el.readOnly))
   await page.getByTestId('folder-save').click()
   await page.getByTestId('mail-folder-empty').waitFor({ timeout: 5000 })
-  t.ok('a new folder is made and opened, linked to its client', /Statements/.test(await strip.innerText()) && (await strip.innerText()).includes(COMPANY.name))
-  t.ok('...empty, saying how to fill it', /Nothing in Statements yet/.test(await page.getByTestId('mail-folder-empty').innerText()))
+  t.ok('a new folder is made and opened under the client\'s name', (await strip.innerText()).includes(COMPANY.name))
+  t.ok('...empty, saying how to fill it', (await page.getByTestId('mail-folder-empty').innerText()).includes(`Nothing in ${COMPANY.name} yet`))
 
   /* 2. File one message from the Inbox. */
   await page.getByTestId('mail-tab-all').click()
@@ -106,19 +116,20 @@ try {
   await page.getByRole('button', { name: 'Select', exact: true }).click()
   await page.getByRole('checkbox').nth(1).check()
   await page.getByTestId('mail-bulk-folder').click()
-  await page.getByTestId('folder-pick').filter({ hasText: 'Statements' }).click()
+  await page.getByTestId('folder-pick').filter({ hasText: COMPANY.name }).click()
   await page.waitForTimeout(600)
   const moved = MAIL.find((m) => m.folder_id === 'fold-1')
   t.ok('a ticked message is filed in the folder', !!moved)
   t.check('...and leaves the Inbox', moved ? await page.getByText(moved.subject, { exact: true }).count() : -1, 0)
   t.ok('...and, on no record yet, is put on the folder\'s client too', moved ? links.includes(moved.id) : false)
-  t.ok('...which it says', /filed in Statements, 1 also put on/.test(await page.locator('body').innerText()))
+  t.ok('...which it says', (await page.locator('body').innerText()).includes(`filed in ${COMPANY.name}, 1 also put on the client’s record`))
 
   /* 3. In the folder, and back out. */
-  await strip.getByTestId('mail-folder').filter({ hasText: 'Statements' }).click()
+  await strip.getByTestId('mail-folder').filter({ hasText: COMPANY.name }).click()
   await page.getByText(moved.subject).first().waitFor({ timeout: 5000 })
   t.ok('the folder shows it', true)
-  t.check('...with its unread on the folder\'s chip', await strip.getByTestId('mail-folder-unread').count(), moved.read_at ? 0 : 1)
+  await t.shot(page, 'mail-folders-pane')
+  t.check('...with its unread beside the folder', await strip.getByTestId('mail-folder-unread').count(), moved.read_at ? 0 : 1)
   /* Select mode stays on after a move, as it does after every bulk action on this page. */
   if (await page.getByRole('button', { name: 'Select', exact: true }).count()) await page.getByRole('button', { name: 'Select', exact: true }).click()
   await page.getByRole('checkbox').nth(1).check()

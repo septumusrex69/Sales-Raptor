@@ -84,6 +84,16 @@ did not mention it) and mirroring Outlook's own subfolders. Checks: `check-own-m
 seen failing); check-mail-done, check-mail-queue and check-the-bell updated for the new clause. TRAP, AGAIN: a Write to
 `check-mail-folders.mjs` overwrote the existing sync-folders check -- restored. `ls` before naming any new file.
 
+**Mail folders moved to a pane on the left; a client's folder is named after the client** (Stephan, 8 Nov: "there
+are going to be many of them, so maybe to the left you can have like a little pane expand that says folders ... If
+you link it to a client, it should be the client name"). `FolderPane` (MailPage.tsx): folded to a narrow "Folders"
+column (dot when anything filed is unread) or open at w-52 listing every folder with its unread and a change button;
+open/folded remembered per person per device, open by default once they have a folder. FolderManager asks for the
+client first; choosing one makes the name the client's (read-only). **WAITING ON STEPHAN -- do not build until he
+says:** "it should also ask you, do you want to link the email address? ... Don't automatically throw emails into
+folders. I don't know ... Let me come back to you on that." I.e. whether linking a client should offer to file that
+client's address(es) into the folder automatically. Nothing is auto-filed today. e2e/mail-folders updated (14).
+
 **R-13's second half built: conversation mode** (Rinda: "have all the emails together that is in a trail"; Stephan,
 8 Nov: "You can build in the conversation mode"). A "Conversations" switch beside the view switcher, per person per
 device (localStorage), OFF by default. `lib/mailConversations.ts`: a trail = the subject with Re:/Fw:/AW:/[EXT]...

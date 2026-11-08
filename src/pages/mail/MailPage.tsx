@@ -228,10 +228,23 @@ export function MailPage() {
   const [foldersVersion, setFoldersVersion] = useState(0)
   /** The messages being filed, while the box asks which folder. */
   const [foldering, setFoldering] = useState<MailItem[] | null>(null)
+  /*
+   * THE FOLDER PANE OPEN OR FOLDED, remembered per person on this device. Until they choose, it is open once they
+   * have a folder and folded before -- an empty pane is width for nothing.
+   */
+  const paneKey = `raptor.mail.folderPane.${currentUser?.id ?? 'anon'}`
+  const [paneChoice, setPaneChoice] = useState<boolean | null>(() => {
+    try { const v = window.localStorage.getItem(paneKey); return v === null ? null : v === '1' } catch { return null }
+  })
+  const setFolderPaneOpen = (on: boolean) => {
+    setPaneChoice(on)
+    try { window.localStorage.setItem(paneKey, on ? '1' : '0') } catch { /* a convenience */ }
+  }
   /** The folder whose name or client is being changed, or 'new'. */
   const [managing, setManaging] = useState<MailFolder | 'new' | null>(null)
   const { companies } = useAppStore()
   const folder = folders.find((f) => f.id === folderId) ?? null
+  const folderPaneOpen = paneChoice ?? folders.length > 0
   /*
    * CONVERSATION MODE (R-13's second half, S19; Rinda: "have all the emails together that is in a trail"; Stephan:
    * "You can build in the conversation mode"). A switch, remembered per person on this device, OFF until somebody
@@ -658,7 +671,8 @@ export function MailPage() {
       }
       const n = mails.length
       setStatus(`${n} message${n === 1 ? '' : 's'} ${target ? `filed in ${target.name}` : 'back in the inbox'}`
-        + (onClient ? `, ${onClient} also put on ${client?.name}` : '') + '.')
+        /* A client's folder carries the client's name, so "filed in Alianna, also put on Alianna" says it twice. */
+        + (onClient ? `, ${onClient} also put on ${client?.name === target?.name ? 'the client\u2019s record' : client?.name}` : '') + '.')
       setFoldering(null)
       if (open && mails.some((m) => m.id === open)) setOpen(null)
       await load(page)
@@ -1576,44 +1590,18 @@ export function MailPage() {
         </div>
 
         {/*
-          YOUR FOLDERS (R-13, S19). Rinda: "file our emails into the relevant subfolder keeping our inbox to a minimum";
-          Stephan: "an option for people to have the folders ... and they can ... link a folder with a client." A row of
-          their own under the tabs, quiet until somebody makes one: New folder is the only thing on it until then.
+          UNDER THE TABS, A ROW: YOUR FOLDERS ON THE LEFT, THE MAIL ON THE RIGHT (S19). The folders were a strip of chips
+          under the tabs; Stephan, 8 Nov: "there are going to be many of them, so maybe to the left you can have like a
+          little pane expand that says folders". See FolderPane.
         */}
-        {filter !== 'blocked' || folderId ? (
-          <div className="px-5 py-1.5 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto" data-testid="mail-folders">
-            <span className="shrink-0 text-[11.5px] font-medium uppercase tracking-wide text-slate-400 mr-1">Folders</span>
-            {folders.map((f) => {
-              const client = f.companyId ? companies.find((c) => c.id === f.companyId) : null
-              const on = folderId === f.id
-              return (
-                <button key={f.id} type="button" onClick={() => { setFilterOnly('all'); setFolderId(on ? null : f.id) }}
-                  aria-pressed={on} data-testid="mail-folder" title={client ? `Linked to ${client.name}` : f.name}
-                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] ${
-                    on ? 'border-gold-500 bg-gold-50 text-navy-950 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                  <Folder size={12} className={on ? 'text-gold-600' : 'text-slate-400'} /> {f.name}
-                  {client && <span className="text-[11px] text-slate-400">· {client.name}</span>}
-                  {(folderUnread[f.id] ?? 0) > 0 && (
-                    <span title="Unread" data-testid="mail-folder-unread"
-                      className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold inline-flex items-center justify-center tabular-nums bg-brand-500 text-white">
-                      {folderUnread[f.id] > 99 ? '99+' : folderUnread[f.id]}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-            {folder && (
-              <button type="button" onClick={() => setManaging(folder)} data-testid="mail-folder-manage"
-                className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-slate-500 hover:bg-slate-100">
-                <Settings2 size={12} /> Rename or link
-              </button>
-            )}
-            <button type="button" onClick={() => setManaging('new')} data-testid="mail-folder-new"
-              className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-slate-500 hover:bg-slate-100">
-              <FolderPlus size={13} /> New folder
-            </button>
-          </div>
-        ) : null}
+        <div className={`flex ${paneShowing ? 'lg:flex-1 lg:min-h-0' : ''}`}>
+          {(filter !== 'blocked' || folderId) && (
+            <FolderPane folders={folders} current={folderId} unread={folderUnread} companies={companies}
+              open={folderPaneOpen} onToggle={() => setFolderPaneOpen(!folderPaneOpen)}
+              onPick={(id) => { setFilterOnly('all'); setFolderId(id === folderId ? null : id) }}
+              onManage={(f) => setManaging(f)} onNew={() => setManaging('new')} />
+          )}
+          <div className={`min-w-0 flex-1 ${paneShowing ? 'lg:flex lg:flex-col lg:min-h-0' : ''}`}>
 
         {/* The bulk bar only exists once something is selected — an always-visible row of
             disabled buttons is furniture. */}
@@ -2043,6 +2031,8 @@ export function MailPage() {
             </div>
           </div>
         )}
+          </div>
+        </div>
       </Card>
 
       {emptying && (
@@ -5178,8 +5168,12 @@ function FolderManager({ folder, folders, companies, userId, onClose, onSaved, o
   onSaved: (f: MailFolder | null) => void
   onRemoved: () => void
 }) {
-  const [name, setName] = useState(folder?.name ?? '')
+  const [typed, setName] = useState(folder?.name ?? '')
   const [companyId, setCompanyId] = useState<string>(folder?.companyId ?? '')
+  /* A CLIENT'S FOLDER IS CALLED BY THE CLIENT'S NAME (Stephan, 8 Nov: "If you link it to a client, it should be the
+     client name"). Typed only when the folder is for no client. */
+  const linked = companyId ? companies.find((c) => c.id === companyId) ?? null : null
+  const name = linked ? linked.name : typed
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -5223,11 +5217,6 @@ function FolderManager({ folder, folders, companies, userId, onClose, onSaved, o
       }>
       <div className="space-y-3" data-testid="folder-manager">
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} autoFocus maxLength={60} aria-label="Folder name"
-            placeholder="e.g. Alianna Pharmacy, or Statements" className={inputClass} />
-        </label>
-        <label className="block">
           <span className="text-sm font-medium text-slate-700">Linked to a client <span className="font-normal text-slate-400">(optional)</span></span>
           <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} aria-label="Linked client" className={`${inputClass} bg-white`}>
             <option value="">No client</option>
@@ -5237,10 +5226,93 @@ function FolderManager({ folder, folders, companies, userId, onClose, onSaved, o
             A message filed here that is on no record yet goes onto this client&rsquo;s timeline too. Nothing is charged.
           </span>
         </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} aria-label="Folder name"
+            readOnly={!!linked} placeholder="e.g. Statements" className={`${inputClass} ${linked ? 'bg-slate-50 text-slate-500' : ''}`} />
+          {linked && <span className="mt-1 block text-[11.5px] text-slate-500">Named after the client. Choose No client to name it yourself.</span>}
+        </label>
         {confirming && <p className="text-[12.5px] text-slate-600">Its mail goes back to your inbox; nothing is deleted but the folder.</p>}
         {(error || (name.trim() && problem)) && <p className="text-[12.5px] text-negative-700">{error ?? problem}</p>}
         <p className="text-[11.5px] text-slate-400">Your folders are yours: nobody else sees them, and nothing moves in Outlook.</p>
       </div>
     </Modal>
+  )
+}
+
+/**
+ * YOUR FOLDERS, ON THE LEFT (S19). Stephan, 8 Nov, of the strip of chips it replaced: "there are going to be many of
+ * them, so maybe to the left you can have like a little pane expand that says folders." Folded it is a narrow column
+ * with the word on it (and a dot when anything filed is unread); open it lists every folder down the side, each
+ * with its unread, the client it is for, and the way to change it. Mail itself stays to the right, unmoved.
+ */
+function FolderPane({ folders, current, unread, companies, open, onToggle, onPick, onManage, onNew }: {
+  folders: MailFolder[]
+  current: string | null
+  unread: Record<string, number>
+  companies: { id: string; name: string }[]
+  open: boolean
+  onToggle: () => void
+  onPick: (id: string) => void
+  onManage: (f: MailFolder) => void
+  onNew: () => void
+}) {
+  const anyUnread = folders.some((f) => (unread[f.id] ?? 0) > 0)
+  if (!open) {
+    return (
+      <button type="button" onClick={onToggle} data-testid="mail-folders-open" aria-expanded={false}
+        title="Show your folders"
+        className="relative shrink-0 w-9 border-r border-slate-100 flex flex-col items-center gap-2 pt-3 text-slate-500 hover:bg-slate-50 hover:text-slate-700">
+        <Folder size={15} />
+        <span className="text-[11px] font-medium tracking-wide [writing-mode:vertical-rl]">Folders</span>
+        {anyUnread && <span aria-label="Unread in a folder" className="absolute top-2 right-1.5 w-2 h-2 rounded-full bg-brand-500" />}
+      </button>
+    )
+  }
+  return (
+    <nav aria-label="Your folders" data-testid="mail-folders"
+      className="shrink-0 w-52 border-r border-slate-100 py-2 flex flex-col">
+      <div className="flex items-center justify-between px-3 pb-1.5">
+        <span className="text-[11.5px] font-semibold uppercase tracking-wide text-slate-400">Folders</span>
+        <button type="button" onClick={onToggle} aria-expanded title="Fold the folders away" data-testid="mail-folders-close"
+          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><ChevronRight size={14} className="rotate-180" /></button>
+      </div>
+      <ul className="flex-1 overflow-y-auto">
+        {folders.map((f) => {
+          const client = f.companyId ? companies.find((c) => c.id === f.companyId) : null
+          const on = current === f.id
+          const n = unread[f.id] ?? 0
+          return (
+            <li key={f.id} className="group relative">
+              <button type="button" onClick={() => onPick(f.id)} aria-pressed={on} data-testid="mail-folder"
+                title={client ? `${f.name} · linked to ${client.name}` : f.name}
+                className={`w-full flex items-center gap-2 pl-3 pr-8 py-1.5 text-left text-[13px] ${
+                  on ? 'bg-gold-50 text-navy-950 font-medium shadow-[inset_3px_0_0_var(--c-gold-brand)]' : 'text-slate-600 hover:bg-slate-50'}`}>
+                <Folder size={13} className={`shrink-0 ${on ? 'text-gold-600' : 'text-slate-400'}`} />
+                <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                {n > 0 && (
+                  <span title="Unread" data-testid="mail-folder-unread"
+                    className="shrink-0 min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold inline-flex items-center justify-center tabular-nums bg-brand-500 text-white">
+                    {n > 99 ? '99+' : n}
+                  </span>
+                )}
+              </button>
+              {/* Change it: always there on the one you are in, on hover for the rest (a tap on the iPad opens it first). */}
+              <button type="button" onClick={() => onManage(f)} aria-label={`Change ${f.name}`} data-testid="mail-folder-manage"
+                className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-white hover:text-slate-600 ${on ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}`}>
+                <Settings2 size={12} />
+              </button>
+            </li>
+          )
+        })}
+        {folders.length === 0 && (
+          <li className="px-3 py-2 text-[12px] text-slate-400">No folders yet. Make one for a client, or for anything you file.</li>
+        )}
+      </ul>
+      <button type="button" onClick={onNew} data-testid="mail-folder-new"
+        className="mx-2 mt-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-slate-500 hover:bg-slate-100">
+        <FolderPlus size={13} /> New folder
+      </button>
+    </nav>
   )
 }
