@@ -76,6 +76,8 @@ export type Capability =
   | 'payment.approve'
   | 'payment.reverse'
   | 'payment.move'
+  | 'payover.approve'
+  | 'payover.pay'
   /* ---- the book ---- */
   | 'book.hand_out'
   | 'book.reassign'
@@ -240,6 +242,26 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     label: 'Move a receipt to another debtor',
     blurb: 'Only while it is unapproved, and only the account — never the amount or the date, '
       + 'which are what the bank said.',
+    group: 'Money',
+    inDatabase: true,
+  },
+  /*
+   * THE PAYOVER RUN'S TWO PRESSES (S20; Stephan, 8 Nov: "run approval" and "marking paid" as capabilities, not "is
+   * an Administrator"). Each is checked WITH finance.view in the database -- a tick without the trust account opens
+   * nothing -- and both sit in the finance set, so only an Administrator with finance gives or takes them. No
+   * second-person rule: Stephan, "unnecessary".
+   */
+  'payover.approve': {
+    label: 'Approve a payover run',
+    blurb: 'Approve a client’s run on its payout day (or early, with a reason), release it early, issue its '
+      + 'remittance advice, or reset or void one. An approved run is a tax invoice.',
+    group: 'Money',
+    inDatabase: true,
+  },
+  'payover.pay': {
+    label: 'Mark a payover or refund paid',
+    blurb: 'Record that the money left the trust account -- by hand with the EFT reference, or by matching the '
+      + 'line on the bank statement.',
     group: 'Money',
     inDatabase: true,
   },
@@ -535,7 +557,7 @@ export function can(
  * what would be refused rather than letting somebody tick it and fail.
  */
 export const FINANCE_CAPABILITIES: Capability[] = ['finance.view', 'business.view', 'business.income', 'people.pay',
-  'payment.approve', 'payment.reverse', 'payment.move']
+  'payment.approve', 'payment.reverse', 'payment.move', 'payover.approve', 'payover.pay']
 
 /** Finance access is Trust: the line the database draws (profile_has_finance). */
 export function hasFinanceAccess(user: CapabilityHolder | null | undefined): boolean {

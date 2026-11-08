@@ -133,9 +133,9 @@ for (const fn of ['mark_payover_run_paid', 'mark_refund_paid']) {
   ok(`...before it writes anything`, body.indexOf('payouts_statement_only') >= 0 && body.indexOf('payouts_statement_only') < body.search(/\bupdate public\./))
 }
 const runPage = strip(read('src/pages/finance/RunDetail.tsx'))
-ok('the run offers Mark paid only while the switch is off (and the run is not below nil, and is due)', /\(run\.status === 'approved' \|\| run\.status === 'sent'\) && !scheduled && !statementOnly && run\.net_payover >= 0 && \(/.test(runPage))
+ok('the run offers Mark paid only while the switch is off (and the run is not below nil, and is due)', /mayPay && \(run\.status === 'approved' \|\| run\.status === 'sent'\) && !scheduled && !statementOnly && run\.net_payover >= 0 && \(/.test(runPage))
 ok('...and says how it will be paid when it is on', /Paid when its line on the bank statement is allocated/.test(runPage))
-ok('Payments out offers Mark paid only while the switch is off', /\) : statementOnly \|\| p\.kind === 'drawing' \? \(\s*<span[^>]*>Paid from the statement<\/span>/.test(strip(read('src/pages/trust/TrustPaymentsOut.tsx'))))
+ok('Payments out offers Mark paid only while the switch is off', /\) : statementOnly \|\| p\.kind === 'drawing' \|\| !mayPay \? \(\s*<span[^>]*>\{!mayPay && !statementOnly && p\.kind !== 'drawing' \? 'Marked paid by finance' : 'Paid from the statement'\}<\/span>/.test(strip(read('src/pages/trust/TrustPaymentsOut.tsx'))))
 ok('Trust settings carries the switch', /saveStatementOnly\(e\.target\.checked\)/.test(strip(read('src/pages/finance/FinanceSettings.tsx'))))
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))

@@ -141,9 +141,13 @@ no('schema.sql never declares a database to be staging',
  * check-silent-triggers records at length: with no session current_user_role() is NULL, `null <>
  * 'Administrator'` is NULL, and `if NULL then` does not run.
  */
+/* S20: BOTH CHANGED. reset_payover_run throws away a run, which is undoing an approval -- payover.approve with
+   finance, in the same safe `not (...)` form. move_payment_to_cycle is a staging tool, not a receipt moving
+   between debtors, so it no longer borrows payment.move (whose label is "Move a receipt to another debtor"):
+   finance.view plus the staging lock below. */
 const GATES = {
-  reset_payover_run: /current_user_role\(\) is distinct from 'Administrator'/,
-  move_payment_to_cycle: /not public\.has_capability\('payment\.move'\)/,
+  reset_payover_run: /not \(public\.has_capability\('finance\.view'\) and public\.has_capability\('payover\.approve'\)\)/,
+  move_payment_to_cycle: /not public\.has_capability\('finance\.view'\)/,
 }
 for (const [name, body] of [['reset_payover_run', reset], ['move_payment_to_cycle', move]]) {
   ok(`${name} is gated`, GATES[name].test(body ?? ''))
@@ -182,8 +186,15 @@ ok('...and asks the database whether this is staging as well',
   /if public\.is_staging_database\(\)\s*\n\s*and coalesce\(current_setting\('raptor\.reset_run'/.test(guard ?? ''))
 ok('...and reset_payover_run is the only thing that sets it',
   /perform set_config\('raptor\.reset_run', p_run::text, true\);/.test(reset ?? ''))
-check('...which it does exactly once, in that one function',
-  (sql.match(/set_config\('raptor\.reset_run'/g) ?? []).length, 1)
+/* Every definition of it in the append-only file is reset_payover_run's own (S20 mirrored a second copy). */
+const resetSets = [...sql.matchAll(/set_config\('raptor\.reset_run'/g)].map((m) => {
+  const before = sql.slice(0, m.index)
+  const fn = /create (?:or replace )?function public\.(\w+)\(/gi
+  let last = ''; let f
+  while ((f = fn.exec(before))) last = f[1]
+  return last
+})
+check('...which it does in that one function only', resetSets.length > 0 && resetSets.every((n) => n === 'reset_payover_run'), true)
 
 /* ---------------- the trap that fails quietly ---------------- */
 
@@ -264,7 +275,7 @@ const refresh = liveBody('refresh_payover_runs') ?? ''
 ok('refresh builds this cycle and the last', /foreach v_cycle in array array\[v_last, v_open\]/.test(refresh))
 ok('...never touching an approved, sent, paid or voided run',
   /and not public\.payover_run_is_open\(status\)\) then\s+continue;/.test(refresh))
-ok('...and is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(refresh))
+ok('...and is finance\'s (S20: the capability, not the role)', /not public\.has_capability\('finance\.view'\)/.test(refresh))
 const approveRun = liveBody('approve_payover_run') ?? ''
 ok('a run cannot be approved before its cycle has closed without a reason -- on staging too',
   /if v_end >= public\.raptor_today\(\) and nullif\(btrim\(coalesce\(v_early, ''\)\), ''\) is null then\s+raise exception/.test(approveRun)

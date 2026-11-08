@@ -35,10 +35,14 @@ const handlers = [
   [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
   [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACCOUNT] })],
   /* The receipt on file: approved, standing, a trust receipt, carried by a run that has been paid. */
-  [(u) => /\/rest\/v1\/account_payments\?.*account_id=eq\./.test(u), () => ({ body: [{
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?.*account_id=eq\./.test(u), () => ({ body: [{
     id: PAY_ID, received_at: '2026-07-02T22:00:00Z', amount: 1100, paid_to_client: false, paid_over_in_swordfish: false,
     approved_at: '2026-07-04T08:00:00Z', reversed_at: null, rejected_at: null, is_demo: false,
     reference: 'KLR1006', reversal_reason: null }] })],
+  /* S20: the withdraw box reads its runs through receipts_on_file -- the allocation is finance's only. */
+  [(u) => /\/rpc\/receipts_on_file\b/.test(u), () => ({ body: [{
+    id: PAY_ID, received_at: '2026-07-02T22:00:00Z', amount: 1100, paid_to_client: false, paid_over_in_swordfish: false,
+    run_invoice: 'PO-KLR-2607', run_status: 'paid', on_run: true, to_client: 847.5 }] })],
   [(u) => /\/rest\/v1\/payment_allocations\?/.test(u), () => ({ body: [{ payment_id: PAY_ID, to_client: 847.5, payover_run_id: 'run-k' }] })],
   [(u) => /\/rest\/v1\/payover_runs\?/.test(u), () => ({ body: [{ id: 'run-k', invoice_number: 'PO-KLR-2607', status: 'paid' }] })],
   [(u) => /\/rpc\/withdrawal_basis\b/.test(u), () => ({ body: [{ fees: 119.03, interest: 459.88, commission: 0, vat_rate: 0.15, capital: 5300, commission_rate: 0.1 }] })],

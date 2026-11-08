@@ -895,7 +895,9 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
    * four fifths of the way to a silent wrong balance on a debtor's own statement.
    */
   const [payments, fees, accruals] = await Promise.all([
-    fetchAllRows(() => supabase.from('account_payments')
+    /* THE VIEW, NOT THE TABLE (S20): account_payments is finance.view only; account_payment_lines is the same
+       rows with the columns a collector's screen uses, and no split. */
+    fetchAllRows(() => supabase.from('account_payment_lines')
       .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,reversal_reason,receipt_fee_legacy,rejected_at')
       .eq('account_id', accountId).order('received_at', { ascending: false }).order('id'),
       { table: 'payments' }),
@@ -991,7 +993,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
 export async function reversalFates(ids: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   if (ids.length === 0) return out
-  const { data } = await supabase.from('account_payments')
+  const { data } = await supabase.from('account_payment_lines')
     .select('replaces_payment_id, account_id, approved_at, rejected_at, bank_line_id')
     .in('replaces_payment_id', ids)
   const copies = (data ?? []) as { replaces_payment_id: string; account_id: string; approved_at: string | null; rejected_at: string | null; bank_line_id: string | null }[]
@@ -1001,10 +1003,16 @@ export async function reversalFates(ids: string[]): Promise<Map<string, string>>
     const { data: ls } = await supabase.from('bank_statement_lines').select('id, payment_id').in('id', lines)
     const pays = ((ls ?? []) as { id: string; payment_id: string | null }[]).filter((l) => l.payment_id)
     if (pays.length) {
-      const { data: ps } = await supabase.from('account_payments')
-        .select('id, debtor_accounts(account_number, case_number)').in('id', pays.map((l) => l.payment_id as string))
-      const num = new Map(((ps ?? []) as unknown as { id: string; debtor_accounts: { account_number: string | null; case_number: string | null } | null }[])
-        .map((p) => [p.id, p.debtor_accounts?.account_number ?? p.debtor_accounts?.case_number ?? 'another account']))
+      /* Two reads, not an embed: the view carries no foreign key for PostgREST to follow (S20). */
+      const { data: ps } = await supabase.from('account_payment_lines')
+        .select('id, account_id').in('id', pays.map((l) => l.payment_id as string))
+      const accIds = [...new Set(((ps ?? []) as { account_id: string }[]).map((p) => p.account_id))]
+      const { data: as } = accIds.length
+        ? await supabase.from('debtor_accounts').select('id, account_number, case_number').in('id', accIds) : { data: [] }
+      const accNum = new Map(((as ?? []) as { id: string; account_number: string | null; case_number: string | null }[])
+        .map((a) => [a.id, a.account_number ?? a.case_number ?? 'another account']))
+      const num = new Map(((ps ?? []) as { id: string; account_id: string }[])
+        .map((p) => [p.id, accNum.get(p.account_id) ?? 'another account']))
       for (const l of pays) placedOn.set(l.id, num.get(l.payment_id as string) ?? 'another account')
     }
   }

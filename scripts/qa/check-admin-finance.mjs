@@ -27,7 +27,8 @@ check('without, finance may not be changed on anybody, nor anything on yourself'
    mayChangeCapability(without, { id: 'r' }, 'marketing.send'), mayChangeCapability(without, { id: 'x' }, 'marketing.send')].join(), 'false,false,false,true')
 
 const schema = read('supabase/schema.sql')
-const sqlSet = /select array\['finance\.view', 'business\.view', 'business\.income', 'people\.pay',\s*'payment\.approve', 'payment\.reverse', 'payment\.move'\]/.test(
+/* S20: the two payover presses joined the set -- only an Administrator with finance gives or takes them. */
+const sqlSet = /select array\['finance\.view', 'business\.view', 'business\.income', 'people\.pay',\s*'payment\.approve', 'payment\.reverse', 'payment\.move', 'payover\.approve', 'payover\.pay'\]/.test(
   schema.slice(schema.lastIndexOf('create or replace function public.finance_capabilities(')))
 check('the screen and the database name the same finance set', sqlSet, true)
 const guard = schema.slice(schema.lastIndexOf('create or replace function public.protect_profile_privileged_fields('))

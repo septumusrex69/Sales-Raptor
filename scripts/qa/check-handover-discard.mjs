@@ -56,7 +56,8 @@ ok('the library is readable at all', lib.length > 1500)
  * rather than discovered when a client asks where their account went.
  */
 for (const [table, why] of [
-  ['account_payments', 'a payment has been received'],
+  /* The VIEW since S20: the table is finance.view only, and a count of nought there would discard money. */
+  ['account_payment_lines', 'a payment has been received'],
   ['payover_run_lines', 'a remittance has gone to the client'],
   ['promises_to_pay', 'the debtor has made an arrangement'],
   ['account_documents', 'a document is filed on the account'],

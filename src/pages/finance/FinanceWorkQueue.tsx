@@ -23,7 +23,7 @@ import { sendAdviceForRuns } from '../../lib/remittanceEmail'
 import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
 import { drawingStep, transferReference, type PaidOut } from '../../lib/paymentsOut'
 import { fetchPaymentsOutPaid } from '../../lib/bankAllocationApi'
-import { canDrawFromTrust } from '../../lib/permissions'
+import { canApprovePayover, canDrawFromTrust, canMarkPaidOut } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
 import { MarkPaidModal, type PayableRun } from './MarkPaidModal'
 import { rand as randAmount } from '../../lib/money'
@@ -154,6 +154,8 @@ export function FinanceWorkQueue() {
      Bredell Ferreira account needs to be paid as well"). Once its clients are paid, the firm's share
      is drawable and this screen says so, one press from Record a transfer. */
   const { currentUser } = useAuth()
+  const mayApprove = canApprovePayover(currentUser)
+  const mayPay = canMarkPaidOut(currentUser)
   const [firm, setFirm] = useState<FirmTrustSplit | null>(null)
   /* The firm's drawings and whether the statement has them: the payout day's last line (prompt 12 B2). */
   const [paidOut, setPaidOut] = useState<PaidOut[]>([])
@@ -200,11 +202,11 @@ export function FinanceWorkQueue() {
        emailing the advice and recording an EFT all need something the queue does not have — which
        row, which address, which reference — and a button that half-does a job is worse than one
        that takes you to where the job is done. Approve is the exception: there is nothing to ask. */
-    if (row.nextStep === 'paid' && !statementOnly && row.netPayover >= 0) {
+    if (row.nextStep === 'paid' && !statementOnly && row.netPayover >= 0 && mayPay) {
       setPaying([{ id: row.runId, client: row.client, invoiceNumber: row.invoiceNumber, amount: row.netPayover }])
       return
     }
-    if (row.nextStep !== 'approve') { navigate(`/trust/runs/${row.runId}`); return }
+    if (row.nextStep !== 'approve' || !mayApprove) { navigate(`/trust/runs/${row.runId}`); return }
     setBusy(row.runId)
     setError(null)
     try {
@@ -320,17 +322,18 @@ export function FinanceWorkQueue() {
      Ready and keeps taking in what is raised for it -- a withdrawal comes off THIS payout rather than
      sending an approved run back. Approving earlier is the run page's Approve early, with a reason. */
   const waitsForDay = (r: WorkQueueRow) => r.status === 'ready' && !stillOpen(r) && !!cycle && cycle.today < paysOn(r)
-  const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r)).map((r) => r.runId)
+  /* S20: nothing to approve, issue or pay in bulk without the tick for it (payover.approve / payover.pay). */
+  const toApprove = !mayApprove ? [] : pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r)).map((r) => r.runId)
   const approveLater = pickedRows.filter(waitsForDay)
   const readyNow = rows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r))
   const readyLater = rows.filter((r) => r.status === 'ready' && (stillOpen(r) || waitsForDay(r)))
   /* The soonest day any of them may be approved: the payout day, or for a running cycle its own. */
   const readyLaterDay = readyLater.map((r) => paysOn(r)).sort()[0] ?? null
   const scheduled = pickedRows.filter((r) => r.status === 'approved' && !isDue(r))
-  const toEmail = pickedRows.filter((r) => r.status === 'approved' && isDue(r)).map((r) => r.runId)
+  const toEmail = !mayApprove ? [] : pickedRows.filter((r) => r.status === 'approved' && isDue(r)).map((r) => r.runId)
   /* Only what is ready to pay: approved or sent, on its day, and not below nil -- a run below nil is
      the client owing us, and mark_payover_run_paid refuses it. */
-  const toPay = statementOnly ? [] : pickedRows.filter((r) => (r.status === 'approved' || r.status === 'sent') && isDue(r) && r.netPayover >= 0)
+  const toPay = statementOnly || !mayPay ? [] : pickedRows.filter((r) => (r.status === 'approved' || r.status === 'sent') && isDue(r) && r.netPayover >= 0)
 
   async function payRuns(refs: Record<string, string>, date: string) {
     const list = paying ?? []

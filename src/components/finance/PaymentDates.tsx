@@ -22,7 +22,7 @@ export function PaymentDates({ paymentId }: { paymentId: string }) {
   useEffect(() => {
     if (!open || dates) return
     let live = true
-    void supabase.from('account_payments')
+    void supabase.from('account_payment_lines')
       .select('received_at, created_at, allocated_on, approved_at, paid_to_client')
       .eq('id', paymentId).maybeSingle()
       .then(({ data, error: e }) => {

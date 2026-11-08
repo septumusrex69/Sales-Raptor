@@ -30,9 +30,9 @@ const handlers = [
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
   /* The three dates, read for the one payment when its button is tapped. */
-  [(u) => /\/rest\/v1\/account_payments\?.*select=received_at%2Ccreated_at/.test(u), () => ({ body: {
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?.*select=received_at%2Ccreated_at/.test(u), () => ({ body: {
     received_at: PAY.received_at, created_at: '2026-07-28T09:15:00Z', allocated_on: '2026-07-29', approved_at: PAY.approved_at, paid_to_client: true } })],
-  [(u) => /\/rest\/v1\/account_payments\?.*account_id=eq\./.test(u), () => ({ body: [PAY] })],
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?.*account_id=eq\./.test(u), () => ({ body: [PAY] })],
   [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACCOUNT], headers: { 'content-range': '0-0/1' } })],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],

@@ -87,7 +87,8 @@ export interface AccountPaymentRow {
 }
 
 export async function fetchAccountPayments(accountId: string): Promise<AccountPaymentRow[]> {
-  const { data, error } = await supabase.from('account_payments')
+  /* THE VIEW (S20): every account page draws this list, a collector's included, and the table is finance.view only. */
+  const { data, error } = await supabase.from('account_payment_lines')
     .select('id, received_at, amount, paid_to_client, reference, approved_at, reversed_at, reversal_reason, paid_over_in_swordfish, rejected_at, is_demo')
     .eq('account_id', accountId).is('rejected_at', null).order('received_at', { ascending: false }).limit(500)
   if (error) throw new Error(error.message)

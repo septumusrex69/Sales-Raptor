@@ -162,6 +162,9 @@ check('the ones marked as enforced are the ones the database really checks',
   CAPABILITY_ORDER.filter((c) => CAPABILITIES[c].inDatabase).sort(),
   ['business.view', 'finance.view', 'library.edit', 'mail.refile', 'payment.approve',
     'payment.move', 'payment.record', 'payment.reverse', 'settlement.approve', 'business.income',
+    /* S20: approve_payover_run (and early / release / sent / reset / void) and mark_payover_run_paid,
+       mark_refund_paid, reconcile_bank_debit and allocate_bank_line's refund branch ask for them. */
+    'payover.approve', 'payover.pay',
     /* S10: the marketing tables' policies ask for it. */
     'marketing.send',
     /* 22 Oct: every People table's policies and both pay functions ask for it. */

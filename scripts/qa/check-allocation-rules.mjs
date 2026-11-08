@@ -371,8 +371,8 @@ ok('the audit list also reads what the account itself adds up to',
   && posted.includes('payments_banked'))
 /* AND IT IS THE ADMINISTRATOR'S ALONE. This is security definer, so the guard has to be in the
    query -- row-level security does not apply to it. */
-ok('the audit list is Administrator only',
-  /public\.current_user_role\(\) = 'Administrator'/.test(posted))
+ok('the audit list is finance\'s only (S20: the capability, not the Administrator role)',
+  /public\.has_capability\('finance\.view'\)/.test(posted) && !/current_user_role\(\) = 'Administrator'/.test(posted))
 
 /* ================================================================== AND THE SCREENS
  *

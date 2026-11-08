@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useAuth } from '../../store/AuthContext'
+import { canMoveReceipt } from '../../lib/permissions'
 import { Link } from 'react-router-dom'
 import { ShowMore, useDrawn } from '../../components/ui/ShowMore'
 import { AlertTriangle, Check, Loader2, Search, X } from 'lucide-react'
@@ -72,6 +74,8 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   const [suspended, setSuspended] = useState<SuspendedBankLine[]>([])
   const [suspending, setSuspending] = useState<UnallocatedReceipt | null>(null)
   const [placingParked, setPlacingParked] = useState<SuspendedPayment | null>(null)
+  /* S20: giving a parked receipt its debtor is set_payment_account, which asks payment.move. */
+  const mayMove = canMoveReceipt(useAuth().currentUser)
   const [query, setQuery] = useState<SuspenseQuery>(EMPTY_SUSPENSE_QUERY)
   /*
    * A HUNDRED DRAWN AT A TIME (S19, Stephan on the iPad, 7 Nov: "very slow and lagging"). All 1 805 receipts were
@@ -499,11 +503,11 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <span className="inline-flex gap-1.5">
-                      <button type="button" onClick={() => setPlacingParked(r)}
+                      {mayMove && <button type="button" onClick={() => setPlacingParked(r)}
                         className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
                           text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
                         Place it
-                      </button>
+                      </button>}
                       {/* BACK TO THE QUEUE, for one parked by mistake. Without it the only way out
                           is placing it somewhere, which is how a receipt ends up on an account
                           chosen to clear a list. */}

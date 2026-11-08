@@ -11,7 +11,7 @@ import { bankFileCsv, canPay, defaultTicked, fileTotal, fnbOwnAccount, keyOf, ne
 import { markRunPaid } from '../../lib/payover'
 import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, fetchTrustOwnAccount, type FirmTrustSplit } from '../../lib/trust'
 import { drawFromTrust } from '../../lib/businessApi'
-import { canDrawFromTrust } from '../../lib/permissions'
+import { canDrawFromTrust, canMarkPaidOut } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
 import { transferReference, type PaidOut } from '../../lib/paymentsOut'
 import { shortDate } from '../../lib/trustCycles'
@@ -116,6 +116,8 @@ export function TrustPaymentsOut() {
 
   const waiting = paid.filter((p) => !p.confirmed)
   const mayDraw = canDrawFromTrust(currentUser)
+  /* S20: marking a run or refund paid is payover.pay. */
+  const mayPay = canMarkPaidOut(currentUser)
   const payable = rows.filter(canPay)
   const pending = rows.filter((r) => !canPay(r))
   const inFile = rows.filter((r) => ticked.has(keyOf(r)) && canPay(r))
@@ -277,8 +279,8 @@ export function TrustPaymentsOut() {
                           ) : needsBanking(p) ? (
                             <Link to="/library/firm" className="text-[12px] text-amber-800 underline whitespace-nowrap">Business account</Link>
                           ) : null
-                        ) : statementOnly || p.kind === 'drawing' ? (
-                          <span className="text-[11.5px] text-slate-400 whitespace-nowrap">Paid from the statement</span>
+                        ) : statementOnly || p.kind === 'drawing' || !mayPay ? (
+                          <span className="text-[11.5px] text-slate-400 whitespace-nowrap">{!mayPay && !statementOnly && p.kind !== 'drawing' ? 'Marked paid by finance' : 'Paid from the statement'}</span>
                         ) : (
                           <button type="button"
                             onClick={() => setPaying({ kind: p.kind as 'payover' | 'refund', id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}

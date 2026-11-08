@@ -61,7 +61,7 @@ try {
       [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
       [(u) => /\/rpc\/accounts_ready_to_close\b/.test(u), () => ({ body: READY })],
       [(u) => /\/rest\/v1\/debtor_accounts\?/.test(u), () => ({ body: [acct('acc-4003', 'HTH/4003'), acct('acc-4005', 'HTH/4005')] })],
-      [(u) => /\/rest\/v1\/account_payments\?/.test(u), () => ({ body: [
+      [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?/.test(u), () => ({ body: [
         pay('p3', 'acc-4003', 1000, '2026-06-30'), pay('p5a', 'acc-4005', 1000, '2026-06-30'), pay('p5b', 'acc-4005', 70, '2026-07-30')] })],
       [(u) => /\/rest\/v1\/account_fees\?/.test(u), () => ({ body: [
         fee('acc-4003', 'p3', 100, '2026-06-30'), fee('acc-4005', 'p5a', 100, '2026-06-30'), fee('acc-4005', 'p5b', 0, '2026-07-30')] })],
@@ -106,7 +106,7 @@ try {
       [(u) => u.includes('/rest/v1/profiles'), () => ({ body: [ADMIN] })],
       [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
       [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACCOUNT] })],
-      [(u) => /\/rest\/v1\/account_payments\?/.test(u), () => ({ body: [
+      [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?/.test(u), () => ({ body: [
         { id: 'p1', account_id: ACCOUNT.id, received_at: '2026-07-07T22:00:00Z', amount: 2000, paid_to_client: false,
           approved_at: '2026-07-10T08:00:00Z', reversed_at: null, rejected_at: null, is_demo: false },
         { id: 'p2', account_id: ACCOUNT.id, received_at: '2026-08-04T22:00:00Z', amount: 5000, paid_to_client: false,

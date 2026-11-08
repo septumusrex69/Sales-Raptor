@@ -177,7 +177,8 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 22)
+/* 25 since S20: canApprovePayover, canMarkPaidOut and canMoveReceipt. */
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 25)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:

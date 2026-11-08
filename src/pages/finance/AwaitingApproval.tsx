@@ -22,6 +22,8 @@ import { fetchLiveSettlements, fetchReadyToClose, type ReadyToClose } from '../.
 import { CloseReadyBox } from '../../components/accounts/CloseReadyBox'
 import { cycleStartOn, shortDate } from '../../lib/trustCycles'
 import { clockToday } from '../../lib/clock.ts'
+import { useAuth } from '../../store/AuthContext'
+import { canMoveReceipt } from '../../lib/permissions'
 /*
  * THE FOUR FIGURES BEHIND EACH FEE LINE ARE DRAWN FROM ONE DEFINITION, shared with the
  * administrator's check of posted payments. On the queue they moved out of the table and into the
@@ -80,6 +82,8 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
   const [page, setPage] = useState(0)
   /* The receipt whose debtor is being corrected, if one is. */
   const [moving, setMoving] = useState<AwaitingPayment | null>(null)
+  /* S20: moving a receipt to another debtor is payment.move -- the tick labelled so -- not payment.approve. */
+  const mayMove = canMoveReceipt(useAuth().currentUser)
   /*
    * AND THE RECEIPT NOBODY IS READY TO PLACE AT ALL.
    *
@@ -487,8 +491,8 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                     {/* INLINE, NOT A MENU: a dropdown inside the sideways scroller is clipped by it,
                         and on the last row of the page it opened into nothing. */}
                     <span className="inline-flex gap-2 text-[11px] font-medium">
-                      <button type="button" onClick={() => setMoving(r)}
-                        className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Move</button>
+                      {mayMove && <button type="button" onClick={() => setMoving(r)}
+                        className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Move</button>}
                       <button type="button" onClick={() => setParking(r)}
                         className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Suspense</button>
                       {/* "NOT OURS", SAID ON THE BUTTON (prompt 11): Reject was being used to mean

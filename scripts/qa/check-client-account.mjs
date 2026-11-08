@@ -90,10 +90,12 @@ for (const [n, b] of [['raise_client_charge', raise], ['cancel_client_charge', c
 /* ---------------- raising, cancelling, settling ---------------- */
 
 for (const [n, b] of [['raise_client_charge', raise], ['cancel_client_charge', cancel],
-  ['mark_client_charge_paid', paid], ['client_account', account]]) {
+  ['mark_client_charge_paid', paid]]) {
   ok(`${n} is Administrator only`,
     /current_user_role\(\) is distinct from 'Administrator'|current_user_role\(\) = 'Administrator'/.test(b ?? ''))
 }
+/* S20: the client's running statement is a READ, so it asks finance.view rather than the role. */
+ok('client_account is finance\'s to read', /public\.has_capability\('finance\.view'\)/.test(account ?? ''))
 ok('a charge has to say what it is for', /Say what the client is being charged for/.test(raise ?? ''))
 ok('...and be more than nothing', /has to be more than nothing/.test(raise ?? ''))
 ok('cancelling asks why', /Say why it is being cancelled/.test(cancel ?? ''))
@@ -191,8 +193,8 @@ ok('payover_run_blockers is revoked too',
   /revoke execute on function public\.payover_run_blockers\(uuid\) from public, anon/.test(sql))
 ok('payover_invoice_number as well',
   /revoke execute on function public\.payover_invoice_number\(uuid, date\) from public, anon/.test(sql))
-ok('and voiding a run now asks who is asking',
-  /current_user_role\(\) is distinct from 'Administrator'/.test(voidRun ?? ''))
+ok('and voiding a run now asks who is asking (S20: payover.approve, with finance)',
+  /not \(public\.has_capability\('finance\.view'\) and public\.has_capability\('payover\.approve'\)\)/.test(voidRun ?? ''))
 
 /* ---------------- an overpayment is a credit to dispose of ---------------- */
 
