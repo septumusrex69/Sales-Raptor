@@ -671,7 +671,7 @@ export function MailPage() {
       }
       const n = mails.length
       setStatus(`${n} message${n === 1 ? '' : 's'} ${target ? `filed in ${target.name}` : 'back in the inbox'}`
-        /* A client's folder carries the client's name, so "filed in Alianna, also put on Alianna" says it twice. */
+        /* A client's folder carries the client's name, so "filed in Acme, also put on Acme" says it twice. */
         + (onClient ? `, ${onClient} also put on ${client?.name === target?.name ? 'the client\u2019s record' : client?.name}` : '') + '.')
       setFoldering(null)
       if (open && mails.some((m) => m.id === open)) setOpen(null)

@@ -24,14 +24,14 @@ const row = (id, subject, from, fromName, min, over = {}) => ({
 })
 const T = (n) => `cccccccc-0000-4000-8000-00000000000${n}`
 const INBOX = [
-  row(T(1), 'Statement for October', 'accounts@alianna.example', 'Alianna Accounts', 1),
-  row(T(2), 'RE: Statement for October', 'accounts@alianna.example', 'Alianna Accounts', 3,
+  row(T(1), 'Statement for October', 'accounts@karootiles.example', 'Karoo Tiles Accounts', 1),
+  row(T(2), 'RE: Statement for October', 'accounts@karootiles.example', 'Karoo Tiles Accounts', 3,
     { cc_recipients: [{ name: 'Camille', address: 'camille@bredellferreira.example' }] }),
   row(T(3), 'Re: RE: Statement for October', 'camille@bredellferreira.example', 'Camille', 5),
   row(T(4), 'Statement for October', 'someone.else@other.example', 'Someone Else', 4),
 ]
 const SENT = row(T(5), 'Re: Statement for October', PROFILE.email, 'Me', 2,
-  { is_sent: true, to_address: 'accounts@alianna.example', to_name: 'Alianna Accounts', to_recipients: [{ name: 'Alianna Accounts', address: 'accounts@alianna.example' }] })
+  { is_sent: true, to_address: 'accounts@karootiles.example', to_name: 'Karoo Tiles Accounts', to_recipients: [{ name: 'Karoo Tiles Accounts', address: 'accounts@karootiles.example' }] })
 const ALL = [...INBOX, SENT]
 const newest = (a, b) => Date.parse(b.occurred_at) - Date.parse(a.occurred_at)
 
@@ -91,9 +91,9 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="conversation-message"]').length >= 4, null, { timeout: 10000 })
   const items = trail.getByTestId('conversation-message')
   t.check('the trail lists all four: three received and the reply I sent', await items.count(), 4)
-  t.ok('...the sent one from the whole mailbox, marked as mine', /You → Alianna Accounts/.test(await trail.innerText()))
+  t.ok('...the sent one from the whole mailbox, marked as mine', /You → Karoo Tiles Accounts/.test(await trail.innerText()))
   t.ok('...not the other sender\'s message on the same words', !/Someone Else/.test(await trail.innerText()))
-  t.ok('...oldest at the top, as a trail is read', /^Alianna Accounts/.test((await items.first().innerText()).trim()))
+  t.ok('...oldest at the top, as a trail is read', /^Karoo Tiles Accounts/.test((await items.first().innerText()).trim()))
   await t.shot(page, 'mail-conversations')
   await items.first().click()
   await page.waitForTimeout(400)

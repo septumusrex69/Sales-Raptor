@@ -15,7 +15,7 @@ import { COMPANY, PROFILE, TEAM, USER_ID, accountsPage } from './fixtures.mjs'
 
 const t = makeRunner('payment-dates')
 const ADMIN = { ...PROFILE, name: 'Stephan', role: 'Administrator' }
-const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000', status: 'Active: Activated', case_number: 'RAP-125310', assigned_to: USER_ID }
+const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000', status: 'Active: Activated', case_number: 'RAP-900010', assigned_to: USER_ID }
 const PAY = {
   id: 'pay-ptc', received_at: '2026-07-02T22:00:00Z', amount: 2500, paid_to_client: true, reference: 'PTC-0703',
   approved_at: '2026-07-29T10:00:00Z', reversed_at: null, reversal_reason: null, paid_over_in_swordfish: false, rejected_at: null, is_demo: false,

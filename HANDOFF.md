@@ -1,12 +1,78 @@
-# Raptor · Handover 18 — where Raptor stands
+# Raptor · Handover 19 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 18**, written by S18, which started from Raptor Handover 17. The next session is S19 and writes
-> Handover 19; its commits start `Raptor H18: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct);
+> **Raptor Handover 19**, written by S19, which started from Raptor Handover 18. The next session is S20 and writes
+> Handover 20; its commits start `Raptor H19: ...`. **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct);
 > older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by
 > that name.
 
-## S19 -- RUNNING LOG (Raptor · Handover 18, 7 Nov; branch `claude/ecstatic-feynman-emzuez`, started from `claude/sales-raptor-review-p1pzx2` at 512ef1d)
+## S19 -- WHERE IT STANDS, AND WHERE S20 STARTS (Raptor · Handover 19, 7 - 9 Nov; branch `claude/ecstatic-feynman-emzuez`)
+
+Every commit is `Raptor H18: ...`, pushed to the branch AND fast-forwarded onto the preview/staging branch
+`claude/sales-raptor-review-p1pzx2` (last: 34e3f08). Last state: fast suite green (23 385 checks, 382 files), build and
+lint clean. Every staging migration is mirrored at the end of `supabase/schema.sql`. The detail of each piece is in
+the running log below.
+
+### WHAT S19 SHIPPED (staging / the preview)
+
+- **Requests:** R-25 (diary rows no longer run into the next column) built and released; R-26's question answered
+  ("Active: Activated" now reads "Active", under the pre-legal agent); R-13 built in full -- **mail folders** of one's
+  own (a pane on the left, linkable to a client, the folder then named after the client) and **conversation mode**.
+- **Trust:** the overview wears the hero band and the firm's navy/steel/gold instead of black; the whole area draws a
+  hundred rows at a time (it was the browser, not the database); suspense, the lines to allocate and the bank
+  statement were silently capped at 1 000 rows by PostgREST -- they now read every page.
+- **Payments:** paid / captured / processed one tap away (a calendar button beside a payment's date); a PTC's date is
+  typed, never defaulted to today.
+- **Export the book:** its own tick, `book.export` -- Administrators, Liaison Manager, Call Centre Manager, Pre-legal
+  Team Leaders; not sales, not collectors.
+- **Look:** the day's photograph no longer hops (fetched once, navy until it arrives, Llandudno only on failure).
+- **Spell check:** a Settings tab of its own (Spelling); English and Afrikaans on, the other nine official written
+  languages a tick away; runs in a Web Worker so isiZulu's slow dictionary never freezes the page.
+- **Collectors:** small rings beside promises, the day and traces on My collections.
+- **Settings:** grouped You / The firm / Sales / Call centre / Communications / Finance, with each department's pages
+  elsewhere gathered as links.
+
+### START HERE (S20)
+
+1. **QUEUED BY STEPHAN (9 Nov: "Cue this connection. For some other next build."): connect the five Settings tabs that
+   do not save** -- Pipelines, Lead Sources, Rejection Reasons, Custom Fields, Notifications. Demo leftovers: React
+   state over constants, nothing in the database, and the app reads the constants (`REJECTION_REASONS` in
+   `lib/rejection.ts`, `DEAL_STAGES`, ...). Marked "not saved" in the menu and on the page for now. Each needs a table
+   (or firm_settings columns) with RLS, the tab writing it, and the app reading it with the constants as fallback.
+   **Ask first:** who may edit each list, and whether removing a stage/source that rows still use is refused or moves
+   them. A suggested-task card with the full brief was queued in S19.
+2. **Waiting on Stephan's answer -- do not build until he says:** when a mail folder is linked to a client, should
+   Raptor offer to link the client's email address(es) so their mail files itself into the folder? ("Don't
+   automatically throw emails into folders. I don't know ... Let me come back to you on that.") Nothing auto-files today.
+3. **Requests waiting on a ticked answer** (off the builder's queue until answered and re-sent): R-23 (does the refund
+   on the account Rinda named now show after S18's fix?), R-24 ("Record transfer": rename / help line / tooltip / nothing). R-13 has
+   a how-to-test comment; Stephan must approve it and mark it Done for Rinda to be asked to test.
+4. **Still open from Handover 18:** backdated payments phases 2-3 (Camille's approval of the calculation); whether
+   commission and collections figures count by CAPTURED or PAID date (the three dates are now shown, the figures still
+   count by paid); debtor offers under Disputes (Sonia's email; "not as important"); S17's email-compose items.
+5. **Ideas offered, not chosen:** Afrikaans versions of the templates with a preferred language per debtor; storing
+   In-Reply-To/References in the sync (exact threads, better auto-matching); a morning email per collector; the CSV
+   export's ID numbers showing as 8.0E+12 in Excel; e2e/people's two date-dependent failures; Itumeleng's BuzzBox
+   extension is Barry's (140).
+
+### TRAPS SEEN IN S19
+
+- **`ls` before naming a new file.** Twice a new check was written over an existing one of the same name
+  (`check-payment-dates.mjs`, `check-mail-folders.mjs`) -- both restored. The Write tool does not warn.
+- **The Supabase tool asks for confirmation on `truncate`/`delete`, which Stephan's iPad cannot show** (it timed out
+  once). To time or count functions as a person, a plain `select` works: `set_config('request.jwt.claims', ...)` then
+  `query_to_xml(format('select count(*) ...'))` per function -- no temp table needed.
+- **PostgREST stops at 1 000 rows and says nothing** (`db-max-rows`). Any RPC whose list can pass 1 000 must go through
+  `fetchAllRows`, with an order that ends on a unique column. `trust_entries` caps itself at 500 on purpose.
+- **Source checks read exact text**: adding a clause or a dependency (folder_id, folderId) broke check-mail-done,
+  check-mail-queue and check-the-bell on correct code; check-staging-clock counts every real-clock read (now 58).
+- **e2e makeRunner `check` is Object.is** -- compare arrays as joined strings.
+- **Test fixtures must be invented, never copied from a screenshot.** S19's first diary test took debtor first names
+  and a client's name off a staging screenshot; they were replaced (9 Nov) with plainly made-up ones. The repo is public.
+- Pay (`people.pay`) is a tick no role is born with, not even Administrator: a link gated on canViewPay is hidden from
+  an Administrator without it. That is correct.
+
+## S19 -- RUNNING LOG (Raptor · Handover 18, 7 - 9 Nov; branch `claude/ecstatic-feynman-emzuez`, started from `claude/sales-raptor-review-p1pzx2` at 512ef1d)
 
 **The build queue on 7 Nov was empty**: R-23, R-24 and R-25 were all `accepted` with `build_requested_at` cleared by
 earlier builder runs, each waiting on a ticked answer (R-23: does the refund now show after S18's money-out fix; R-24:

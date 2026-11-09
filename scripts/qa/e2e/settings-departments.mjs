@@ -15,7 +15,7 @@ import { PROFILE } from './fixtures.mjs'
 
 const t = makeRunner('settings-departments')
 const ADMIN = { ...PROFILE, name: 'Stephan', role: 'Administrator', team_id: null }
-const AGENT = { ...PROFILE, name: 'Itumeleng', role: 'Pre-legal Agent' }
+const AGENT = { ...PROFILE, name: 'A Collector', role: 'Pre-legal Agent' }
 const server = await startServer()
 let browser
 const open = async (who) => {

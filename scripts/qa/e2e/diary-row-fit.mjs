@@ -2,7 +2,7 @@
  * R-25 (Raptor H18): A DIARY ROW NEVER RUNS INTO THE NEXT COLUMN.
  *
  * The call centre's screenshot (5 Nov, a 1220px window, sidebar open): on Today, "Carried 14 days"
- * sat on top of "In progress", the debtor names were cut to "Chris Ditin" under the Work chip. The row
+ * sat on top of "In progress", the debtor names were cut short under the Work chip. The row
  * went into columns as soon as the LIST was 48rem wide, while the five fixed columns alone take about
  * 47rem -- so the Account column was a few pixels wide and its case number, name and badges (all
  * shrink-0, nothing clipping) spilled across Work and Position.
@@ -21,13 +21,14 @@ const iso = (d) => d.toISOString().slice(0, 10)
 const today = new Date()
 const due = iso(new Date(today.getTime() - 20 * 86400000))
 
-const NAMES = [['Christopher', 'Ditinkosi-Mabaso'], ['Baphiwe', 'Tshabalala-Nkosi'], ['Refilwe', 'Tau'], ['Zodwa', 'Nkomo']]
+/* Invented: a long name, a hyphenated one and two short ones. */
+const NAMES = [['Bartholomew', 'Vanderwesthuizen-Lee'], ['Annamarie', 'Oosthuizen-Moodley'], ['Jo', 'Test'], ['Sam', 'Example']]
 const ENTRIES = NAMES.map(([first, last], i) => ({
   id: `de-${i}`, account_id: `acc-${i}`, owner_id: USER_ID, created_by: USER_ID, kind: 'new_account', state: 'open',
   due_on: due, priority: 20, source: 'import', reason: null, created_at: '2026-01-01T08:00:00Z',
   promises_to_pay: null, campaigns: null,
   debtor_accounts: {
-    id: `acc-${i}`, company_id: COMPANY_ID, account_number: `AC${i}`, case_number: `RAP-12528${i}`,
+    id: `acc-${i}`, company_id: COMPANY_ID, account_number: `AC${i}`, case_number: `RAP-90000${i}`,
     debtor_first_name: first, debtor_surname: last, capital_outstanding: 345 + i * 100, status: 'Active',
     sub_status: null, bucket: null, client_action_ask: null, last_action_at: null, ended_as: null, book: 'pre_legal',
     prescription_date: null, main_comment: null, main_comment_at: null,
@@ -40,7 +41,7 @@ try {
   browser = await chromium.launch()
   const { context, page } = await signedInPage(browser, { ...PROFILE, role: 'Pre-legal Agent' }, [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [{ ...PROFILE, role: 'Pre-legal Agent' }] })],
-    [(u) => u.includes('/rest/v1/companies'), () => ({ body: [{ ...COMPANY, name: 'Bonnitta Pharmacy (Pty) Ltd' }] })],
+    [(u) => u.includes('/rest/v1/companies'), () => ({ body: [{ ...COMPANY, name: 'Example Wholesalers (Pty) Ltd' }] })],
     [(u) => u.includes('/rest/v1/diary_entries') && u.includes('due_on=lt.'), () => ({ body: ENTRIES })],
     [(u) => u.includes('/rest/v1/diary_entries'), () => ({ body: [] })],
   ], [])

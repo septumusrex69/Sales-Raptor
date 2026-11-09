@@ -25,11 +25,11 @@ const mail = (subject, from, to = ME, cc = [], at = n) => ({
 check('Re:, Fw:, AW: and [EXT], however deep, come off', conversationSubject('RE: Fw: AW:[EXT] Statement  for October'), 'statement for october')
 check('...and Fwd: and a numbered Re[2]:', conversationSubject('Fwd: Re[2]: Payment'), 'payment')
 check('a subject that only looks like a prefix is left alone', conversationSubject('Regarding the statement'), 'regarding the statement')
-check('my own address is not a participant', [...participants(mail('x', 'client@alianna.co.za'), [ME])], ['client@alianna.co.za'])
+check('my own address is not a participant', [...participants(mail('x', 'client@karootiles.co.za'), [ME])], ['client@karootiles.co.za'])
 
 /* One client trail: the client writes, the firm's colleague is copied on the reply, the colleague answers. */
-const a1 = mail('Statement for October', 'accounts@alianna.co.za', ME, [], 1)
-const a2 = mail('RE: Statement for October', 'accounts@alianna.co.za', ME, ['camille@bredellferreira.co.za'], 2)
+const a1 = mail('Statement for October', 'accounts@karootiles.co.za', ME, [], 1)
+const a2 = mail('RE: Statement for October', 'accounts@karootiles.co.za', ME, ['camille@bredellferreira.co.za'], 2)
 const a3 = mail('Re: RE: Statement for October', 'camille@bredellferreira.co.za', ME, [], 3)
 /* Two debtors, the same words, nobody in common. */
 const d1 = mail('Proof of payment', 'debtor.one@gmail.com', ME, [], 4)
@@ -46,7 +46,7 @@ check('every message is in exactly one trail', groups.reduce((t, g) => t + g.mem
 check('trails in the order their newest arrived', groups.map((g) => g.key)[0], blank.id)
 
 /* The rest of a trail, read from the mailbox: my sent reply joins through the client. */
-const sent = { ...mail('Re: Statement for October', ME, 'accounts@alianna.co.za', [], 7), isSent: true }
+const sent = { ...mail('Re: Statement for October', ME, 'accounts@karootiles.co.za', [], 7), isSent: true }
 check('my sent reply belongs to the client trail', inConversation(sent, [a1], [ME]), true)
 check('...but not to the other debtor\'s', inConversation(mail('Re: Proof of payment', ME, 'debtor.two@gmail.com'), [d1], [ME]), false)
 

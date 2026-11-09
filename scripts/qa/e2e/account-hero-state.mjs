@@ -12,7 +12,7 @@ import { PORT, chromium, makeRunner, signedInPage, startServer, stopServer } fro
 import { COMPANY, PROFILE, TEAM, USER_ID, accountsPage } from './fixtures.mjs'
 
 const t = makeRunner('account-hero-state')
-const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000', status: 'Active: Activated', case_number: 'RAP-125310', assigned_to: USER_ID }
+const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000', status: 'Active: Activated', case_number: 'RAP-900010', assigned_to: USER_ID }
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
   [(u) => u.includes('/rest/v1/profiles'), (u) => {
