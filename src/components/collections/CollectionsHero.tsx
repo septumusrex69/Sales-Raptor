@@ -356,7 +356,12 @@ function HeroPhotoCredit() {
   const credit = photoCredit({ ...look.photo, line: look.line, who: look.who })
   if (!known) return null
   return (
-    <p className="pointer-events-auto absolute bottom-2 right-4 z-10 max-w-[70%] truncate text-right text-[10px] text-white/55" data-testid="hero-photo-credit">
+    /* `!absolute`, AND IT IS THE FIX (S21 · Raptor H19). Stephan, 9 Nov, on the iPad: "very small at the top ... there's
+       some text, white text there" -- the credit sat at the TOP edge, half under the bar. index.css gives every child of
+       .collections-hero `position: relative` (to lift it over the scrim), and that rule, written after Tailwind's,
+       beat this element's `absolute`: it fell into the flow above the headline. Important wins outright, whatever the
+       order of the stylesheets. */
+    <p className="pointer-events-auto !absolute bottom-2 right-4 z-10 max-w-[70%] truncate text-right text-[10px] text-white/55" data-testid="hero-photo-credit">
       {look.photo.title}, {look.photo.place}. Photo: <a href={credit.profile} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">{credit.name}</a> on <a href={credit.unsplash} target="_blank" rel="noreferrer" className="hover:text-white hover:underline">Unsplash</a>
     </p>
   )
