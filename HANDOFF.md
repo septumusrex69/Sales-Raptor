@@ -35,6 +35,26 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## STAGING CLEARED, AND THE CLEAR STAGING BUTTON FIXED (Raptor · Handover 19, 9 Nov; branch `claude/gallant-hypatia-t8oofh` from `claude/sales-raptor-review-p1pzx2` at 60a3a2f)
+
+- **Staging was emptied at Stephan's word** ("Clear all the information, the data on staging ... the debtors ... the
+  clients, everything"): 214 accounts, 7 clients, every lead / deal / contact / handover batch, payments, trust
+  entries, bank lines, payover runs, the trust opening. Users, settings, templates, workflows, mail kept. Clock
+  restarted on **9 Nov 2026**, logged in finance_setting_changes as Stephan. Staging is EMPTY now -- a session that
+  expects the 214-account book will not find it.
+- **The button was broken**: "cannot truncate ... leave_applications references leave_records". Cause: migration
+  `leave_round_two` (23 Oct) was only described in schema.sql, so check-clear-staging could not see the key, and S14's
+  and S20's rewrites of clear_staging (built from the file's last body) dropped `leave_applications`. That one clear
+  was run as the function's body with the table added (rolled back on its first try, nothing lost).
+- **Fixed**: staging migration `h19_clear_staging_leave_applications` (S20's body + `public.leave_applications`;
+  mirrored at the end of schema.sql, md5 3b70c497e01c6a9ab5903a7827b51e73 verified); probed as an Administrator in a
+  rolled-back block -- it runs to the end. `leave_round_two` is now **copied verbatim** into schema.sql where its note
+  was (md5 9b2684d5c3224a335dce0120f1ec1eec verified), so `check-clear-staging` sees the key: it failed on the old
+  body naming exactly this table, passes on the new one (15/15), and names leave_applications in its list.
+- Also on the branch: an empty `raptor/` folder (finances, trust) Stephan asked for, for test material.
+- **Production**: the fix is staging-only by nature (clear_staging refuses anywhere but staging); production needs it
+  only if leave_round_two is ever taken there.
+
 ## S21 -- S17'S COMPOSE PROBLEMS (Raptor · Handover 19, 9 Nov; branch `claude/new-session-84tmki` from `claude/sales-raptor-review-p1pzx2` at 6bf5d15)
 
 **Item 1 (the five Settings tabs) was being built by another session** when S21 started (its migration landed on

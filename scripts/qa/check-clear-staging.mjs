@@ -72,7 +72,9 @@ const KEPT = ['profiles', 'teams', 'departments', 'user_emails', 'calendar_event
 check('nothing the firm keeps is cleared', KEPT.filter((t) => tset.has(t) || removed.includes(t)), [])
 
 // 4. The failure of 21 Oct and the tables the prompt named.
-for (const t of ['account_settlements', 'signing_requests', 'handover_drafts', 'account_balances']) {
+// leave_applications: dropped by two rewrites while leave_round_two was missing from schema.sql, so the
+// button failed again on 9 Nov (Raptor H19). Named here so the key reader losing it cannot pass quietly.
+for (const t of ['account_settlements', 'signing_requests', 'handover_drafts', 'account_balances', 'leave_applications']) {
   ok(`${t} is cleared`, tset.has(t) || removed.includes(t))
 }
 ok('debtor_accounts goes before companies (its key restricts)',

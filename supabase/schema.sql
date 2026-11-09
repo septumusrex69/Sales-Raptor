@@ -50950,13 +50950,16 @@ values ('mail-pictures', 'mail-pictures', false, 2097152)
 on conflict (id) do nothing;
 
 -- ============================================================================
--- RECORD ONLY, NOT RE-RUNNABLE HERE: migration `leave_round_two`, applied to STAGING on 23 Oct
--- (version 20261023084321) by S10's leave agent, which was stopped before it committed any code.
--- Found by S11 on 25 Oct comparing staging's migrations with this file. It is LIVE on staging and
--- nothing in src/ or api/ uses it yet. Its full text (20 410 characters, md5
--- 9b2684d5c3224a335dce0120f1ec1eec) is in supabase_migrations.schema_migrations where
--- name = 'leave_round_two'; the next leave session should copy it here verbatim (and verify the
--- md5) rather than retype it. What it created or replaced:
+-- Migration `leave_round_two`, applied to STAGING on 23 Oct (version 20261023084321) by S10's leave
+-- agent, which was stopped before it committed any code. Found by S11 on 25 Oct comparing staging's
+-- migrations with this file. COPIED HERE VERBATIM on 9 Nov (Raptor H19) from
+-- supabase_migrations.schema_migrations, 20 410 characters, md5 9b2684d5c3224a335dce0120f1ec1eec
+-- verified -- everything between this header and the closing rule below is that text, untouched.
+-- Until then this file carried only a description, so check-clear-staging could not see the key
+-- leave_applications.leave_record_id -> leave_records, and two later rewrites of clear_staging (S14's
+-- clear_staging_workflows, S20's) were built from the older body above and dropped leave_applications
+-- from the truncate. The button then failed on staging (9 Nov). The fix is h19_clear_staging_leave_
+-- applications, further down. What this migration created or replaced:
 --   tables    leave_settings (one row: carry_cap 6, year_start 1 Jan, carried_expiry_months,
 --             also_approvers uuid[]), leave_person_settings (per-person carry_cap),
 --             leave_setting_changes (audit), leave_applications (pending/approved/declined/withdrawn)
@@ -50969,9 +50972,446 @@ on conflict (id) do nothing;
 --             leave_application_notify; RLS policies on all four tables
 -- NOTE: its approvers are by ROLE and team_id (team leader / Liaison Manager / Sales Manager of the
 -- same team, the Call Centre Manager for the call centre, plus also_approvers) -- NOT the
--- teams.lead_id / department_head_of() Stephan asked for on 23 Oct. And the clear_staging live on
--- staging is THIS one, not the last definition above it in this file.
+-- teams.lead_id / department_head_of() Stephan asked for on 23 Oct. Its clear_staging was the live one
+-- until S14 replaced it on 28 Oct.
 -- ============================================================================
+
+create or replace function public.leave_visible(p_user uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select p_user = auth.uid()
+      or public.has_capability('people.leave')
+      or public.has_capability('people.pay')
+      or exists (
+        select 1
+          from public.profiles me
+          join public.profiles them on them.id = p_user
+         where me.id = auth.uid()
+           and ((me.role in ('Pre-legal Team Leader', 'Liaison Manager', 'Sales Manager')
+                 and me.team_id is not null and them.team_id = me.team_id)
+             or (me.role = 'Call Centre Manager'
+                 and them.role in ('Call Centre Manager', 'Pre-legal Team Leader', 'Pre-legal Agent'))))
+$$;
+
+create table if not exists public.leave_settings (
+  id boolean primary key default true check (id),
+  carry_cap numeric(5, 2) not null default 6 check (carry_cap >= 0 and carry_cap * 4 = trunc(carry_cap * 4)),
+  year_start_month integer not null default 1 check (year_start_month between 1 and 12),
+  year_start_day integer not null default 1 check (year_start_day between 1 and 28),
+  carried_expiry_months integer check (carried_expiry_months between 1 and 12),
+  also_approvers uuid[] not null default '{}',
+  updated_by uuid references public.profiles (id),
+  updated_at timestamptz not null default public.raptor_now()
+);
+insert into public.leave_settings (id) values (true) on conflict (id) do nothing;
+
+create table if not exists public.leave_person_settings (
+  user_id uuid primary key references public.profiles (id),
+  carry_cap numeric(5, 2) check (carry_cap >= 0 and carry_cap * 4 = trunc(carry_cap * 4)),
+  updated_by uuid references public.profiles (id),
+  updated_at timestamptz not null default public.raptor_now()
+);
+
+create table if not exists public.leave_setting_changes (
+  id uuid primary key default gen_random_uuid(),
+  setting text not null,
+  user_id uuid references public.profiles (id),
+  old_value text,
+  new_value text,
+  changed_by uuid references public.profiles (id),
+  changed_at timestamptz not null default public.raptor_now()
+);
+
+create or replace function public.leave_settings_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  k text;
+  o jsonb;
+  n jsonb;
+  v_user uuid;
+begin
+  new.updated_by := auth.uid();
+  new.updated_at := public.raptor_now();
+  o := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  n := to_jsonb(new);
+  v_user := (n ->> 'user_id')::uuid;
+  foreach k in array case when tg_table_name = 'leave_person_settings' then array['carry_cap']
+                          else array['carry_cap', 'year_start_month', 'year_start_day', 'carried_expiry_months', 'also_approvers'] end loop
+    if coalesce(o -> k, 'null'::jsonb) is distinct from coalesce(n -> k, 'null'::jsonb) then
+      insert into public.leave_setting_changes (setting, user_id, old_value, new_value, changed_by, changed_at)
+      values (k, v_user, o ->> k, n ->> k, auth.uid(), public.raptor_now());
+    end if;
+  end loop;
+  return new;
+end $$;
+
+create trigger leave_settings_stamp
+  before update on public.leave_settings
+  for each row execute function public.leave_settings_stamp();
+create trigger leave_person_settings_stamp
+  before insert or update on public.leave_person_settings
+  for each row execute function public.leave_settings_stamp();
+
+alter table public.leave_settings enable row level security;
+alter table public.leave_person_settings enable row level security;
+alter table public.leave_setting_changes enable row level security;
+create policy "leave_settings_select" on public.leave_settings
+  for select using (auth.uid() is not null);
+create policy "leave_settings_update" on public.leave_settings
+  for update using (public.may_record_leave()) with check (public.may_record_leave());
+create policy "leave_person_settings_select" on public.leave_person_settings
+  for select using (public.leave_visible(user_id));
+create policy "leave_person_settings_insert" on public.leave_person_settings
+  for insert with check (public.may_record_leave());
+create policy "leave_person_settings_update" on public.leave_person_settings
+  for update using (public.may_record_leave()) with check (public.may_record_leave());
+create policy "leave_setting_changes_select" on public.leave_setting_changes
+  for select using (public.has_capability('people.leave') or public.has_capability('people.pay')
+                    or (user_id is not null and public.leave_visible(user_id)));
+revoke all on table public.leave_settings from anon;
+revoke all on table public.leave_person_settings from anon;
+revoke all on table public.leave_setting_changes from anon;
+
+do $$ begin
+  execute 'alter table public.leave_records dr' || 'op constraint leave_records_entry_check';
+  execute 'alter table public.leave_records dr' || 'op constraint leave_records_shape';
+  execute 'alter table public.leave_records dr' || 'op constraint leave_records_half_days';
+end $$;
+alter table public.leave_records add constraint leave_records_entry_check
+  check (entry in ('taken', 'opening', 'adjustment'));
+alter table public.leave_records add constraint leave_records_shape check (
+  (entry = 'taken' and days > 0 and days <= (ends_on - starts_on + 1) and not (starts_on = ends_on and end_half))
+  or (entry = 'opening' and kind in ('annual', 'sick', 'family') and days >= 0
+      and starts_on = ends_on and not start_half and not end_half)
+  or (entry = 'adjustment' and kind in ('annual', 'sick', 'family') and days <> 0
+      and starts_on = ends_on and not start_half and not end_half and length(btrim(coalesce(note, ''))) >= 3));
+alter table public.leave_records add constraint leave_records_half_days
+  check ((entry = 'taken' and days * 2 = trunc(days * 2)) or (entry <> 'taken' and days * 4 = trunc(days * 4)));
+
+create table if not exists public.leave_applications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id),
+  kind text not null check (kind in ('annual', 'sick', 'family', 'maternity', 'parental', 'adoption', 'commissioning', 'unpaid')),
+  starts_on date not null,
+  ends_on date not null,
+  start_half boolean not null default false,
+  end_half boolean not null default false,
+  days numeric(6, 2) not null,
+  reason text,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'declined', 'withdrawn')),
+  decided_by uuid references public.profiles (id),
+  decided_at timestamptz,
+  decline_reason text,
+  leave_record_id uuid references public.leave_records (id),
+  mailed_at timestamptz,
+  decision_mailed_at timestamptz,
+  created_at timestamptz not null default public.raptor_now(),
+  constraint leave_applications_dates check (ends_on >= starts_on),
+  constraint leave_applications_days check (days > 0 and days * 2 = trunc(days * 2) and days <= (ends_on - starts_on + 1)
+    and not (starts_on = ends_on and end_half)),
+  constraint leave_applications_declined check (status <> 'declined' or length(btrim(coalesce(decline_reason, ''))) >= 3),
+  constraint leave_applications_approved check (status <> 'approved' or leave_record_id is not null)
+);
+create index if not exists leave_applications_user_idx on public.leave_applications (user_id, starts_on);
+create index if not exists leave_applications_pending_idx on public.leave_applications (status) where status = 'pending';
+
+alter table public.leave_records add column if not exists application_id uuid;
+
+create or replace function public.leave_approvers(p_user uuid)
+returns setof uuid
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select a.id
+    from public.profiles a
+    join public.profiles them on them.id = p_user
+   where a.id <> p_user
+     and a.status = 'Active'
+     and ((a.role in ('Pre-legal Team Leader', 'Liaison Manager', 'Sales Manager')
+           and a.team_id is not null and them.team_id = a.team_id)
+       or (a.role = 'Call Centre Manager'
+           and them.role in ('Call Centre Manager', 'Pre-legal Team Leader', 'Pre-legal Agent'))
+       or a.id = any (coalesce((select s.also_approvers from public.leave_settings s where s.id), '{}'::uuid[])))
+$$;
+revoke all on function public.leave_approvers(uuid) from public, anon;
+grant execute on function public.leave_approvers(uuid) to authenticated, service_role;
+
+create or replace function public.leave_may_approve(p_user uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select auth.uid() is not null and auth.uid() <> p_user
+     and exists (select 1 from public.leave_approvers(p_user) a where a = auth.uid())
+$$;
+revoke all on function public.leave_may_approve(uuid) from public, anon;
+grant execute on function public.leave_may_approve(uuid) to authenticated;
+
+create or replace function public.leave_application_stamp()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if new.user_id is distinct from auth.uid() then
+    raise exception 'You apply for your own leave only.' using errcode = '42501';
+  end if;
+  new.status := 'pending';
+  new.decided_by := null;
+  new.decided_at := null;
+  new.decline_reason := null;
+  new.leave_record_id := null;
+  new.mailed_at := null;
+  new.decision_mailed_at := null;
+  new.created_at := public.raptor_now();
+  new.reason := nullif(btrim(coalesce(new.reason, '')), '');
+  if exists (
+    select 1 from public.leave_records r
+     where r.user_id = new.user_id and r.entry = 'taken' and r.cancelled_at is null
+       and r.starts_on <= new.ends_on and new.starts_on <= r.ends_on) then
+    raise exception 'You already have leave recorded on some of those days.' using errcode = '23P01';
+  end if;
+  if exists (
+    select 1 from public.leave_applications a
+     where a.user_id = new.user_id and a.status = 'pending'
+       and a.starts_on <= new.ends_on and new.starts_on <= a.ends_on) then
+    raise exception 'You have already applied for some of those days.' using errcode = '23P01';
+  end if;
+  return new;
+end $$;
+
+create trigger leave_application_stamp
+  before insert on public.leave_applications
+  for each row execute function public.leave_application_stamp();
+
+create or replace function public.leave_application_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_name text;
+begin
+  select nullif(btrim(name), '') into v_name from public.profiles where id = new.user_id;
+  insert into public.notifications (user_id, type, message, link)
+  select a, 'leave.applied',
+         coalesce(v_name, 'Somebody') || ' applied for ' || trim_scale(new.days)::text || ' day'
+           || case when new.days = 1 then '' else 's' end || ' of ' || new.kind || ' leave from '
+           || to_char(new.starts_on, 'FMDD Mon YYYY') || ' to ' || to_char(new.ends_on, 'FMDD Mon YYYY') || '. Waiting for your approval.',
+         '/people/leave'
+    from public.leave_approvers(new.user_id) a;
+  return new;
+end $$;
+
+create trigger leave_application_notify
+  after insert on public.leave_applications
+  for each row execute function public.leave_application_notify();
+
+alter table public.leave_applications enable row level security;
+create policy "leave_applications_select" on public.leave_applications
+  for select using (user_id = auth.uid() or public.leave_visible(user_id) or public.leave_may_approve(user_id));
+create policy "leave_applications_insert" on public.leave_applications
+  for insert with check (user_id = auth.uid());
+revoke all on table public.leave_applications from anon;
+
+create or replace function public.leave_application_decide(p_id uuid, p_approve boolean, p_reason text default null)
+returns text
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_a public.leave_applications;
+  v_rec uuid;
+  v_me text;
+begin
+  select * into v_a from public.leave_applications where id = p_id for update;
+  if not found then
+    raise exception 'That application was not found.' using errcode = '22023';
+  end if;
+  if v_a.user_id = auth.uid() then
+    raise exception 'Nobody approves their own leave.' using errcode = '42501';
+  end if;
+  if not public.leave_may_approve(v_a.user_id) then
+    raise exception 'This application is not yours to decide.' using errcode = '42501';
+  end if;
+  if v_a.status <> 'pending' then
+    raise exception 'That application has already been %.', v_a.status using errcode = '22023';
+  end if;
+  select nullif(btrim(name), '') into v_me from public.profiles where id = auth.uid();
+
+  if p_approve then
+    insert into public.leave_records (user_id, kind, entry, starts_on, ends_on, start_half, end_half, days, note, application_id)
+    values (v_a.user_id, v_a.kind, 'taken', v_a.starts_on, v_a.ends_on, v_a.start_half, v_a.end_half, v_a.days,
+            coalesce('Applied for: ' || v_a.reason, 'Applied for in Raptor'), v_a.id)
+    returning id into v_rec;
+    update public.leave_applications
+       set status = 'approved', decided_by = auth.uid(), decided_at = public.raptor_now(), leave_record_id = v_rec
+     where id = p_id;
+  else
+    if length(btrim(coalesce(p_reason, ''))) < 3 then
+      raise exception 'Say why the leave is declined.' using errcode = '22023';
+    end if;
+    update public.leave_applications
+       set status = 'declined', decided_by = auth.uid(), decided_at = public.raptor_now(), decline_reason = btrim(p_reason)
+     where id = p_id;
+  end if;
+
+  insert into public.notifications (user_id, type, message, link)
+  values (v_a.user_id, 'leave.decided',
+          'Your ' || v_a.kind || ' leave from ' || to_char(v_a.starts_on, 'FMDD Mon YYYY') || ' to '
+            || to_char(v_a.ends_on, 'FMDD Mon YYYY') || ' was '
+            || case when p_approve then 'approved' else 'declined' end || ' by ' || coalesce(v_me, 'an approver')
+            || case when p_approve then '.' else ': ' || btrim(p_reason) end,
+          '/people/leave');
+  return case when p_approve then 'approved' else 'declined' end;
+end $$;
+revoke all on function public.leave_application_decide(uuid, boolean, text) from public, anon;
+grant execute on function public.leave_application_decide(uuid, boolean, text) to authenticated;
+
+create or replace function public.leave_application_withdraw(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_a public.leave_applications;
+begin
+  select * into v_a from public.leave_applications where id = p_id for update;
+  if not found or v_a.user_id is distinct from auth.uid() then
+    raise exception 'Only the person who applied can withdraw it.' using errcode = '42501';
+  end if;
+  if v_a.status <> 'pending' then
+    raise exception 'That application has already been %.', v_a.status using errcode = '22023';
+  end if;
+  update public.leave_applications set status = 'withdrawn', decided_by = auth.uid(), decided_at = public.raptor_now()
+   where id = p_id;
+end $$;
+revoke all on function public.leave_application_withdraw(uuid) from public, anon;
+grant execute on function public.leave_application_withdraw(uuid) to authenticated;
+
+create or replace function public.leave_record_stamp()
+returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.created_by := auth.uid();
+    new.created_at := public.raptor_now();
+    new.cancelled_at := null;
+    new.cancelled_by := null;
+    new.cancel_reason := null;
+    if new.entry = 'taken' and exists (
+      select 1 from public.leave_records r
+       where r.user_id = new.user_id and r.entry = 'taken' and r.cancelled_at is null
+         and r.starts_on <= new.ends_on and new.starts_on <= r.ends_on) then
+      raise exception 'There is already leave recorded on some of those days.' using errcode = '23P01';
+    end if;
+    if new.entry = 'adjustment' then
+      new.note := btrim(new.note);
+    end if;
+    return new;
+  end if;
+  if old.cancelled_at is not null then
+    raise exception 'That leave is already cancelled.' using errcode = '22023';
+  end if;
+  if old.entry = 'adjustment' then
+    raise exception 'An adjustment is not cancelled: add another adjustment the other way, with a reason.' using errcode = '22023';
+  end if;
+  if (new.user_id, new.kind, new.entry, new.starts_on, new.ends_on, new.start_half, new.end_half, new.days,
+      new.note, new.created_by, new.created_at, new.application_id)
+     is distinct from
+     (old.user_id, old.kind, old.entry, old.starts_on, old.ends_on, old.start_half, old.end_half, old.days,
+      old.note, old.created_by, old.created_at, old.application_id) then
+    raise exception 'Leave is not edited: cancel it, with a reason, and record it again.' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(new.cancel_reason, ''))) < 3 then
+    raise exception 'Say why the leave is cancelled.' using errcode = '22023';
+  end if;
+  new.cancel_reason := btrim(new.cancel_reason);
+  new.cancelled_at := public.raptor_now();
+  new.cancelled_by := auth.uid();
+  return new;
+end $$;
+
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_send_events, public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns, ' || 'public.clerk_commission_carried, ' || 'public.leave_applications, public.leave_records';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.marketing_lists';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+-- ============================================================================ (end of leave_round_two)
 
 -- ============================================================================
 -- S12 (26 Oct): A CLIENT THAT ASKED FOR NO NEWS AT ALL. Migration `client_news_stopped`, staging first.
@@ -62360,4 +62800,78 @@ begin
   end loop;
 
   return next;
+end $$;
+
+
+-- ============================================================================================
+-- staging migration h19_clear_staging_leave_applications (Raptor H19, 9 Nov): CLEAR STAGING WORKS AGAIN.
+-- Pressed on 9 Nov it failed: "cannot truncate a table referenced in a foreign key constraint -- leave_applications
+-- references leave_records". leave_round_two (23 Oct) created leave_applications with a key into leave_records and
+-- put it in the truncate, but that migration was only DESCRIBED in this file, so S14's and S20's rewrites -- each
+-- built from the last body here -- dropped it, and check-clear-staging, which reads the keys from this file, could
+-- not see the key to complain. leave_round_two is now copied in verbatim above (md5 verified), the check sees the
+-- key, and this is S20's body with public.leave_applications added beside public.leave_records; nothing else
+-- changed. Replacing the function clears nothing. Probed on staging as an Administrator inside a rolled-back block.
+-- ============================================================================================
+
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_restatement_events, public.payment_restatements, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_workflow_steps, public.marketing_workflows, public.marketing_send_events, public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns, ' || 'public.clerk_commission_carried, ' || 'public.leave_applications, public.leave_records';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.marketing_lists';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
