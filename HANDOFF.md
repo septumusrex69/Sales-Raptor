@@ -85,10 +85,11 @@ reference we gave before. Asked, he chose **replace RAP- everywhere** and **four
   DRC0001 typed any way, a slash is still a client's reference; api looks in both columns), mail matching (emailSync).
 - The import's preview of the next number reads the client's CASE numbers (`fetchAccountReferences`), so it predicts
   what the database assigns; `suggestReference` starts a fresh series at 0001.
-- **Not done:** global search does not find an account by its OLD RAP- number (the search index is an expression over
-  case_number etc.; adding legacy_case_number means rebuilding it). **Production: not applied** -- run the migration
-  there only with Stephan, after the backup: it renumbers every live account, and any debtor told a RAP- number keeps
-  being matched by legacy_case_number. Check first how many production accounts have an account_number that is NOT
+- **The old RAP- numbers do not matter** (Stephan, 9 Nov: "All the app numbers are going to be irrelevant. Old RAP"):
+  none reached a real debtor. So global search does NOT need to find an old RAP- number -- not to be built.
+  legacy_case_number and the matching on it stay as a silent safety net (invisible, costs nothing); remove them if
+  they ever get in the way. **Production: not applied** -- run the migration there only with Stephan, after the
+  backup: it renumbers every live account. Check first how many production accounts have an account_number that is NOT
   in their client's series (those get new numbers) and whether two clients' series collide.
 - Checks: check-case-number (+17, three breaks seen failing by name), check-debtor-portal (+5), check-new-debtor and
   the SMS-width rule moved ("never wider"). Fast suite 23 847 green; e2e debtor-portal 46, accounts 164, payments-in 40,
