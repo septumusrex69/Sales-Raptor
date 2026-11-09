@@ -61783,3 +61783,292 @@ grant select on public.payment_restatements, public.payment_restatement_events t
 -- under finance.view), and only as themselves: changed_by was never checked, so a row could name somebody else.
 alter policy finance_setting_changes_insert on public.finance_setting_changes
   with check ((select public.has_capability('finance.view')) and changed_by = (select auth.uid()));
+
+
+-- ============================================================================================
+-- Raptor H19 (migrations h19_settings_lists_and_notification_switches and h19_settings_lists_staging_clock, staging
+-- 9 Nov; the second put the functions' stamps on raptor_now(), the staging clock -- check-staging-clock)
+-- THE SETTINGS TABS THAT DID NOT SAVE, CONNECTED (Stephan, 8-9 Nov).
+--
+-- Stephan's answers, 9 Nov:
+--   * Administrators and the Sales Manager change the sales lists; everyone signed in reads them.
+--   * A stage, source or reason still on rows is MOVED, never orphaned: removing one that is in use asks where its
+--     rows go; a rename renames it on every row (and on draft campaign audiences).
+--   * Notifications: the real kinds Raptor sends, each person switches their own off.
+--   * Custom fields: hidden until somebody asks for one (no table).
+--
+-- BUILT-IN VALUES are the ones Raptor's own code writes or reasons about by name: the five deal stages (sending a
+-- quotation moves a deal to 'Quotation Sent', a signed mandate to 'Won', ...), the lead sources Raptor stamps by
+-- itself ('Website', 'Email', 'Direct', 'Imported list', 'Other') and the reason 'Other' (the import's fallback).
+-- They cannot be renamed or removed; everything else can.
+--
+-- Rows are never removed from sales_list_items: a removed value is stamped removed_at (adding it again brings it
+-- back). Writes go through the definer functions only, so the "move the rows" rule cannot be skipped.
+-- ============================================================================================
+
+create table if not exists public.sales_list_items (
+  list text not null check (list in ('deal_stage', 'lead_source', 'rejection_reason')),
+  value text not null check (value = btrim(value) and length(value) between 1 and 60),
+  position integer not null default 0,
+  -- Deal stages a firm adds: the chance of closing used for a deal that enters it. Built-in stages keep the
+  -- figures in src/types.ts (DEAL_STAGE_PROBABILITY).
+  probability integer check (probability is null or probability between 0 and 100),
+  built_in boolean not null default false,
+  removed_at timestamptz,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles (id) on delete set null,
+  primary key (list, value)
+);
+alter table public.sales_list_items enable row level security;
+create policy sales_list_items_select on public.sales_list_items for select to authenticated using (true);
+revoke all on public.sales_list_items from anon, authenticated;
+grant select on public.sales_list_items to authenticated;
+
+-- The lists as the app shipped them (src/types.ts DEAL_STAGES, src/data/mockData.ts leadSources,
+-- src/lib/rejection.ts REJECTION_REASONS). Won and Rejected sit at 1000/1001 so added stages always come before them.
+insert into public.sales_list_items (list, value, position, built_in) values
+  ('deal_stage', 'New Deal', 0, true), ('deal_stage', 'Quotation Sent', 1, true), ('deal_stage', 'Mandate Sent', 2, true),
+  ('deal_stage', 'Won', 1000, true), ('deal_stage', 'Rejected', 1001, true),
+  ('lead_source', 'Website', 0, true), ('lead_source', 'Google Ads', 1, false), ('lead_source', 'Referral', 2, false),
+  ('lead_source', 'LinkedIn', 3, false), ('lead_source', 'Facebook', 4, false), ('lead_source', 'Direct', 5, true),
+  ('lead_source', 'Email', 6, true), ('lead_source', 'Existing Client', 7, false), ('lead_source', 'Sales Rep', 8, false),
+  ('lead_source', 'Event', 9, false), ('lead_source', 'ChatGPT', 10, false), ('lead_source', 'Claude', 11, false),
+  ('lead_source', 'Gemini', 12, false), ('lead_source', 'Imported list', 13, true), ('lead_source', 'Other', 14, true),
+  ('rejection_reason', 'Not interested anymore', 0, false), ('rejection_reason', 'Too expensive', 1, false),
+  ('rejection_reason', 'Went with another provider', 2, false), ('rejection_reason', 'No response', 3, false),
+  ('rejection_reason', 'We declined them', 4, false), ('rejection_reason', 'Other', 5, true)
+on conflict (list, value) do nothing;
+
+-- Any value already on a row and not on the lists joins them (so nothing in the database starts out orphaned).
+insert into public.sales_list_items (list, value, position, probability)
+select 'deal_stage', v, 500 + row_number() over (order by v), 40
+  from (select distinct btrim(stage) v from public.deals) x
+ where length(v) between 1 and 60 and not exists (select 1 from public.sales_list_items i where i.list = 'deal_stage' and i.value = x.v)
+on conflict (list, value) do nothing;
+insert into public.sales_list_items (list, value, position)
+select 'lead_source', v, 500 + row_number() over (order by v)
+  from (select btrim(source) v from public.leads union select btrim(source) from public.deals) x
+ where length(v) between 1 and 60 and not exists (select 1 from public.sales_list_items i where i.list = 'lead_source' and i.value = x.v)
+on conflict (list, value) do nothing;
+insert into public.sales_list_items (list, value, position)
+select 'rejection_reason', v, 500 + row_number() over (order by v)
+  from (select btrim(rejection_reason) v from public.leads where rejection_reason is not null
+        union select btrim(rejection_reason) from public.deals where rejection_reason is not null) x
+ where length(v) between 1 and 60 and not exists (select 1 from public.sales_list_items i where i.list = 'rejection_reason' and i.value = x.v)
+on conflict (list, value) do nothing;
+
+/* Who may change the sales lists: Stephan, 9 Nov -- Administrators and the Sales Manager. */
+create or replace function public.sales_list_editor()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.current_user_role() in ('Administrator', 'Sales Manager'), false);
+$$;
+
+/* How many rows use each value of a list -- what the Settings tab shows beside it, and what removing it moves. */
+create or replace function public.sales_list_usage(p_list text)
+returns table (value text, uses bigint)
+language sql stable security definer set search_path = public as $$
+  select v, count(*) from (
+    select stage v from public.deals where p_list = 'deal_stage'
+    union all select source from public.leads where p_list = 'lead_source'
+    union all select source from public.deals where p_list = 'lead_source'
+    union all select rejection_reason from public.leads where p_list = 'rejection_reason' and rejection_reason is not null
+    union all select rejection_reason from public.deals where p_list = 'rejection_reason' and rejection_reason is not null
+  ) x where auth.uid() is not null group by v;
+$$;
+
+/* Moves every row from one value to another (the one place it is written, for rename and remove alike). */
+create or replace function public.sales_list_move_rows(p_list text, p_from text, p_to text)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+  n integer := 0;
+  k integer;
+begin
+  if p_list = 'deal_stage' then
+    update public.deals set stage = p_to where stage = p_from;
+    get diagnostics k = row_count; n := n + k;
+  elsif p_list = 'lead_source' then
+    update public.leads set source = p_to where source = p_from;
+    get diagnostics k = row_count; n := n + k;
+    update public.deals set source = p_to where source = p_from;
+    get diagnostics k = row_count; n := n + k;
+    -- A draft campaign aimed at leads from this source follows it (a sent campaign is history and keeps its words).
+    update public.marketing_campaigns c
+       set audience = jsonb_set(c.audience, '{sources}',
+             (select coalesce(jsonb_agg(distinct case when s = p_from then p_to else s end), '[]'::jsonb)
+                from jsonb_array_elements_text(c.audience -> 'sources') s))
+     where c.status = 'draft' and c.audience ->> 'kind' = 'leads_by'
+       and jsonb_typeof(c.audience -> 'sources') = 'array' and c.audience -> 'sources' ? p_from;
+  elsif p_list = 'rejection_reason' then
+    update public.leads set rejection_reason = p_to where rejection_reason = p_from;
+    get diagnostics k = row_count; n := n + k;
+    update public.deals set rejection_reason = p_to where rejection_reason = p_from;
+    get diagnostics k = row_count; n := n + k;
+  end if;
+  return n;
+end $$;
+revoke execute on function public.sales_list_move_rows(text, text, text) from public, anon, authenticated;
+
+create or replace function public.sales_list_add(p_list text, p_value text, p_probability integer default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v text := btrim(coalesce(p_value, ''));
+  hit public.sales_list_items;
+  pos integer;
+begin
+  if not public.sales_list_editor() then
+    raise exception 'Only an Administrator or the Sales Manager changes this list.' using errcode = '42501';
+  end if;
+  if p_list not in ('deal_stage', 'lead_source', 'rejection_reason') then raise exception 'No such list.'; end if;
+  if length(v) = 0 or length(v) > 60 then raise exception 'Give it a name of 1 to 60 characters.'; end if;
+  if p_probability is not null and (p_list <> 'deal_stage' or p_probability not between 0 and 100) then
+    raise exception 'A chance of closing is a deal stage''s, from 0 to 100.';
+  end if;
+  select * into hit from public.sales_list_items where list = p_list and lower(value) = lower(v) limit 1;
+  if found and hit.removed_at is null then raise exception '"%" is already on the list.', hit.value; end if;
+  select coalesce(max(position), -1) + 1 into pos from public.sales_list_items
+   where list = p_list and removed_at is null and position < 1000;
+  if hit.value is not null then
+    update public.sales_list_items
+       set removed_at = null, position = pos, probability = case when p_list = 'deal_stage' then coalesce(p_probability, probability, 40) end,
+           updated_at = public.raptor_now(), updated_by = auth.uid()
+     where list = p_list and value = hit.value;
+  else
+    insert into public.sales_list_items (list, value, position, probability, updated_by)
+    values (p_list, v, pos, case when p_list = 'deal_stage' then coalesce(p_probability, 40) end, auth.uid());
+  end if;
+end $$;
+
+create or replace function public.sales_list_rename(p_list text, p_old text, p_new text)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+  v text := btrim(coalesce(p_new, ''));
+  item public.sales_list_items;
+begin
+  if not public.sales_list_editor() then
+    raise exception 'Only an Administrator or the Sales Manager changes this list.' using errcode = '42501';
+  end if;
+  select * into item from public.sales_list_items where list = p_list and value = p_old and removed_at is null for update;
+  if not found then raise exception '"%" is not on the list.', p_old; end if;
+  if item.built_in then raise exception '"%" is built in: Raptor itself uses it by name, so it keeps its name.', p_old; end if;
+  if length(v) = 0 or length(v) > 60 then raise exception 'Give it a name of 1 to 60 characters.'; end if;
+  if v = p_old then return 0; end if;
+  if exists (select 1 from public.sales_list_items where list = p_list and lower(value) = lower(v) and value <> p_old) then
+    raise exception '"%" is already on the list (or was, and can be added back).', v;
+  end if;
+  update public.sales_list_items set value = v, updated_at = public.raptor_now(), updated_by = auth.uid()
+   where list = p_list and value = p_old;
+  return public.sales_list_move_rows(p_list, p_old, v);
+end $$;
+
+/* Removing a value rows still use needs p_move_to (Stephan: "ask where to move them"); it refuses without one. */
+create or replace function public.sales_list_remove(p_list text, p_value text, p_move_to text default null)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+  item public.sales_list_items;
+  used bigint;
+begin
+  if not public.sales_list_editor() then
+    raise exception 'Only an Administrator or the Sales Manager changes this list.' using errcode = '42501';
+  end if;
+  select * into item from public.sales_list_items where list = p_list and value = p_value and removed_at is null for update;
+  if not found then raise exception '"%" is not on the list.', p_value; end if;
+  if item.built_in then raise exception '"%" is built in: Raptor itself uses it by name, so it stays.', p_value; end if;
+  select coalesce(sum(u.uses), 0) into used from public.sales_list_usage(p_list) u where u.value = p_value;
+  if used > 0 and p_move_to is null then
+    raise exception '% still use "%": choose where to move them first.', used, p_value using errcode = 'P0001', hint = 'move_to';
+  end if;
+  if p_move_to is not null then
+    if p_move_to = p_value or not exists (select 1 from public.sales_list_items where list = p_list and value = p_move_to and removed_at is null) then
+      raise exception 'Move them to a value still on the list.';
+    end if;
+    if p_list = 'deal_stage' and p_move_to in ('Won', 'Rejected') then
+      raise exception 'Deals are moved to an open stage; winning or rejecting a deal is done on the deal.';
+    end if;
+  end if;
+  update public.sales_list_items set removed_at = public.raptor_now(), updated_at = public.raptor_now(), updated_by = auth.uid()
+   where list = p_list and value = p_value;
+  if used > 0 then return public.sales_list_move_rows(p_list, p_value, p_move_to); end if;
+  return 0;
+end $$;
+
+/* The order, as the tab sends it: every value on the list once (deal stages: the open ones -- Won and Rejected stay last). */
+create or replace function public.sales_list_reorder(p_list text, p_values text[])
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  want text[];
+begin
+  if not public.sales_list_editor() then
+    raise exception 'Only an Administrator or the Sales Manager changes this list.' using errcode = '42501';
+  end if;
+  select coalesce(array_agg(value order by value), '{}') into want from public.sales_list_items
+   where list = p_list and removed_at is null and position < 1000;
+  if (select coalesce(array_agg(v order by v), '{}') from unnest(p_values) v) is distinct from want then
+    raise exception 'The list has changed since it was opened: open it again.';
+  end if;
+  update public.sales_list_items i set position = o.n - 1, updated_at = public.raptor_now(), updated_by = auth.uid()
+    from unnest(p_values) with ordinality o(v, n)
+   where i.list = p_list and i.value = o.v;
+end $$;
+
+create or replace function public.sales_list_set_probability(p_value text, p_probability integer)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.sales_list_editor() then
+    raise exception 'Only an Administrator or the Sales Manager changes this list.' using errcode = '42501';
+  end if;
+  if p_probability is null or p_probability not between 0 and 100 then raise exception 'A chance from 0 to 100.'; end if;
+  update public.sales_list_items set probability = p_probability, updated_at = public.raptor_now(), updated_by = auth.uid()
+   where list = 'deal_stage' and value = p_value and removed_at is null and not built_in;
+  if not found then raise exception 'Only a stage the firm added has its own chance of closing.'; end if;
+end $$;
+
+revoke execute on function public.sales_list_editor(), public.sales_list_usage(text),
+  public.sales_list_add(text, text, integer), public.sales_list_rename(text, text, text),
+  public.sales_list_remove(text, text, text), public.sales_list_reorder(text, text[]),
+  public.sales_list_set_probability(text, integer) from public, anon;
+grant execute on function public.sales_list_editor(), public.sales_list_usage(text),
+  public.sales_list_add(text, text, integer), public.sales_list_rename(text, text, text),
+  public.sales_list_remove(text, text, text), public.sales_list_reorder(text, text[]),
+  public.sales_list_set_probability(text, integer) to authenticated;
+
+-- ============================================================================================
+-- NOTIFICATIONS, SWITCHED OFF PER PERSON. A kind is the part of notifications.type before the dot
+-- ('change_request.reply' -> 'change_request'); src/lib/notificationKinds.ts names them for the tab. One row per
+-- person and kind, muted true/false (never removed). The bell is told nothing a person has switched off: the
+-- trigger drops the row before it is written, whoever writes it (SQL functions, the portals, the screens).
+-- ============================================================================================
+create table if not exists public.notification_preferences (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  kind text not null check (kind ~ '^[a-z_]{1,40}$'),
+  muted boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, kind)
+);
+alter table public.notification_preferences enable row level security;
+create policy notification_preferences_select on public.notification_preferences for select to authenticated
+  using (user_id = (select auth.uid()));
+create policy notification_preferences_insert on public.notification_preferences for insert to authenticated
+  with check (user_id = (select auth.uid()));
+create policy notification_preferences_update on public.notification_preferences for update to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+revoke all on public.notification_preferences from anon, authenticated;
+grant select, insert, update on public.notification_preferences to authenticated;
+
+create or replace function public.notification_kind(p_type text)
+returns text language sql immutable set search_path = public as $$
+  select split_part(coalesce(p_type, ''), '.', 1);
+$$;
+
+create or replace function public.notification_respects_mute()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.notification_preferences p
+              where p.user_id = new.user_id and p.kind = public.notification_kind(new.type) and p.muted) then
+    return null;
+  end if;
+  return new;
+end $$;
+revoke execute on function public.notification_respects_mute() from public, anon, authenticated;
+drop trigger if exists notifications_respect_mute on public.notifications;
+create trigger notifications_respect_mute before insert on public.notifications
+  for each row execute function public.notification_respects_mute();

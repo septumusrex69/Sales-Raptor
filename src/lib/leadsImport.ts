@@ -2,6 +2,7 @@ import type {
   LeadClassification, LeadSource, LeadStatus, ProductService, RejectionReason,
 } from '../types'
 import { clockNow } from './clock.ts'
+import { listValues, onListOr, salesListsNow } from './salesListValues.ts'
 
 /**
  * The sales team's leads workbook, read into Raptor's `leads` table.
@@ -367,6 +368,12 @@ export function statusFor(code: string | undefined): { status: LeadStatus; known
 
 /** Where it came from. The spreadsheet's wording is free text and has forty-odd spellings. */
 export function sourceFor(v: string | undefined): LeadSource {
+  // A source the firm has since removed (Settings -> Lead Sources, Raptor H19) becomes 'Other', so an import never
+  // puts a removed value back on rows.
+  return onListOr(sourceGuess(v), listValues(salesListsNow(), 'lead_source'))
+}
+
+function sourceGuess(v: string | undefined): LeadSource {
   const s = (v ?? '').toLowerCase()
   if (s.includes('google') && !s.includes('email')) return 'Google Ads'
   if (s.includes('refer')) return 'Referral'
@@ -387,6 +394,12 @@ export function sourceFor(v: string | undefined): LeadSource {
  * report stays honest and nothing anybody wrote is lost.
  */
 export function rejectionFor(v: string | undefined): RejectionReason | null {
+  const r = rejectionGuess(v)
+  // As for sources: a reason the firm has removed becomes 'Other' (its words are kept in the notes either way).
+  return r === null ? null : onListOr(r, listValues(salesListsNow(), 'rejection_reason'))
+}
+
+function rejectionGuess(v: string | undefined): RejectionReason | null {
   const s = (v ?? '').toLowerCase().trim()
   if (!s) return null
   if (s.includes('rejected by us') || s.includes('declin')) return 'We declined them'

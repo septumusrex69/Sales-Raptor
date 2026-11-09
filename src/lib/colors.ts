@@ -1,4 +1,4 @@
-import type { ActivityType, DealStage, LeadClassification, LeadSource, ProductService, TaskType } from '../types'
+import type { ActivityType, BuiltInDealStage, BuiltInLeadSource, DealStage, LeadClassification, ProductService, TaskType } from '../types'
 
 /**
  * Single source of truth for the navy/gold-minimal categorical palette
@@ -7,7 +7,7 @@ import type { ActivityType, DealStage, LeadClassification, LeadSource, ProductSe
  * new dashboard chart agrees with the existing ones.
  */
 
-export const STAGE_COLORS: Record<DealStage, string> = {
+export const STAGE_COLORS: Record<BuiltInDealStage, string> = {
   'New Deal': 'var(--stage-new-deal)',
   'Quotation Sent': 'var(--stage-quotation-sent)',
   'Mandate Sent': 'var(--stage-mandate-sent)',
@@ -15,7 +15,7 @@ export const STAGE_COLORS: Record<DealStage, string> = {
   Rejected: 'var(--stage-rejected)',
 }
 
-export const SOURCE_COLORS: Record<LeadSource, string> = {
+export const SOURCE_COLORS: Record<BuiltInLeadSource, string> = {
   Website: 'var(--c-steel-soft)',
   'Google Ads': 'var(--c-gold)',
   Referral: 'var(--c-green)',
@@ -126,7 +126,12 @@ export const CLASSIFICATION_TAILWIND: Record<LeadClassification, string> = {
 export const DEAL_CLOSE_EVENT_COLOR = 'var(--c-rust)'
 
 /** The open-pipeline-through-Won stages, in funnel order (Rejected is shown separately). */
-export const FUNNEL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent', 'Won']
+/** A stage's colour; a stage the firm added (Settings -> Pipelines) is drawn in the open-stage grey. */
+export function stageColor(stage: DealStage): string {
+  return (STAGE_COLORS as Record<string, string>)[stage] ?? 'var(--c-steel-light)'
+}
+
+export const FUNNEL_STAGES: BuiltInDealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent', 'Won']
 export const FUNNEL_COLORS: string[] = FUNNEL_STAGES.map((s) => STAGE_COLORS[s])
 
 /**

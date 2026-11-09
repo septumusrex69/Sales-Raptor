@@ -43,7 +43,8 @@ import { EmailActivityList } from '../../components/EmailActivityRow'
 import { NoteActivityList } from '../../components/NoteActivityRow'
 import { openingFor, type ComposeOpening } from '../../lib/emailActivity'
 import { buildDrilldownUrl } from '../../lib/drilldown'
-import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
+import { formatCurrency, formatDate, formatLeadNumber, industries } from '../../data/mockData'
+import { useSalesLists } from '../../lib/salesLists'
 import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
@@ -949,6 +950,7 @@ function EditLeadModal({
   onClose: () => void
   onSave: (patch: Partial<typeof lead>) => void
 }) {
+  const { sources: leadSources } = useSalesLists()
   const [form, setForm] = useState({ ...lead })
   const [opportunity, setOpportunity] = useState(() => leadOpportunityValueFromLead(lead))
   return (

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
-import { REJECTION_REASONS } from '../../lib/rejection'
+import { useSalesLists } from '../../lib/salesLists'
 import type { RejectionReason } from '../../types'
 
 /**
@@ -17,7 +17,8 @@ export function RejectLeadModal({
   onClose: () => void
   onConfirm: (reason: RejectionReason, note: string) => void
 }) {
-  const [reason, setReason] = useState<RejectionReason>('Not interested anymore')
+  const { reasons } = useSalesLists()
+  const [reason, setReason] = useState<RejectionReason>(() => (reasons.includes('Not interested anymore') ? 'Not interested anymore' : reasons[0]))
   const [note, setNote] = useState('')
   return (
     <Modal title="Reject Lead" onClose={onClose} width={420}>
@@ -33,7 +34,7 @@ export function RejectLeadModal({
         </p>
         <FormField label="Rejection Reason" required>
           <select className={inputClass} value={reason} onChange={(e) => setReason(e.target.value as RejectionReason)} autoFocus>
-            {REJECTION_REASONS.map((r) => (
+            {reasons.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </select>

@@ -3,7 +3,7 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { services } from '../../data/mockData'
 import { dealKind } from '../../lib/dealKind'
 import type { Deal } from '../../types'
-import { REJECTION_REASONS } from '../../lib/rejection'
+import { useSalesLists } from '../../lib/salesLists'
 import type { RejectionReason } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
@@ -90,7 +90,8 @@ export function MarkWonModal({
 }
 
 export function MarkRejectedModal({ onClose, onSave }: { onClose: () => void; onSave: (reason: RejectionReason, note: string) => void }) {
-  const [reason, setReason] = useState<RejectionReason>('Not interested anymore')
+  const { reasons } = useSalesLists()
+  const [reason, setReason] = useState<RejectionReason>(() => (reasons.includes('Not interested anymore') ? 'Not interested anymore' : reasons[0]))
   const [note, setNote] = useState('')
   return (
     <Modal title="Reject Deal" onClose={onClose} width={400}>
@@ -103,7 +104,7 @@ export function MarkRejectedModal({ onClose, onSave }: { onClose: () => void; on
       >
         <FormField label="Rejection Reason" required>
           <select className={inputClass} value={reason} onChange={(e) => setReason(e.target.value as RejectionReason)} autoFocus>
-            {REJECTION_REASONS.map((r) => (
+            {reasons.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </select>

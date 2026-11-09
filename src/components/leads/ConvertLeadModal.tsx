@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { formatCurrency, services } from '../../data/mockData'
 import { leadServiceValueList } from './LeadOpportunityFields'
-import { REJECTION_REASONS } from '../../lib/rejection'
+import { useSalesLists } from '../../lib/salesLists'
 import type { ConvertConfirmation, ConvertDealConfirmation, ConvertDealOutcome } from '../../store/AppStore'
 import type { Deal, ID, Lead, ProductService, RejectionReason, User } from '../../types'
 import { CommissionScaleEditor } from '../companies/CommissionScaleEditor'
@@ -90,6 +90,7 @@ export function ConvertLeadModal({
   onClose: () => void
   onConfirm: (confirmation: ConvertConfirmation) => void
 }) {
+  const { reasons } = useSalesLists()
   const [startDate, setStartDate] = useState(() => clockToday())
   /*
    * THE CLIENT'S CODE, PROPOSED AS IT BECOMES ONE (23 Oct; the firm: "I thought Raptor creates a code
@@ -273,7 +274,7 @@ export function ConvertLeadModal({
                         required
                       >
                         <option value="">Select a reason…</option>
-                        {REJECTION_REASONS.map((r) => (
+                        {reasons.map((r) => (
                           <option key={r}>{r}</option>
                         ))}
                       </select>

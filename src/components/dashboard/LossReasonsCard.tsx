@@ -1,5 +1,5 @@
 import { Card, CardHeader } from '../ui/Card'
-import { REJECTION_REASONS } from '../../lib/rejection'
+import { useSalesLists } from '../../lib/salesLists'
 import type { Deal, Lead, RejectionReason } from '../../types'
 
 /**
@@ -12,7 +12,8 @@ import type { Deal, Lead, RejectionReason } from '../../types'
  * they are split out per row for the cases where that distinction matters.
  */
 export function LossReasonsCard({ leads, deals, periodLabel }: { leads: Lead[]; deals: Deal[]; periodLabel: string }) {
-  const rows = REJECTION_REASONS.map((reason: RejectionReason) => {
+  const { reasons } = useSalesLists()
+  const rows = reasons.map((reason: RejectionReason) => {
     const leadCount = leads.filter((l) => l.rejectionReason === reason).length
     const dealCount = deals.filter((d) => d.rejectionReason === reason).length
     return { reason, leadCount, dealCount, total: leadCount + dealCount }

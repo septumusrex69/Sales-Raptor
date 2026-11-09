@@ -15,8 +15,8 @@ import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
 import { CapabilitiesModal } from '../../components/settings/CapabilitiesModal'
 import { TrustedDevicesList, TrustedDevicesModal } from '../../components/settings/TrustedDevices'
 import { needsDeviceCode } from '../../lib/loginCode'
-import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
-import { REJECTION_REASONS } from '../../lib/rejection'
+import { SalesListTab } from '../../components/settings/SalesListTab'
+import { NotificationSwitches } from '../../components/settings/NotificationSwitches'
 import { useAuth } from '../../store/AuthContext'
 import { can, hasFinanceAccess } from '../../lib/capabilities.ts'
 import { useAppStore } from '../../store/AppStore'
@@ -35,8 +35,7 @@ import {
 } from '../../lib/spellCheck'
 import { warmSpelling } from '../../lib/spellClient'
 import { supabase, PRODUCTION_APP_URL } from '../../lib/supabase'
-import type { CustomField, CustomFieldType, Team, User, UserRole } from '../../types'
-import { DEAL_STAGES } from '../../types'
+import type { Team, User, UserRole } from '../../types'
 import type { Target, TargetMetric } from '../../types'
 import { TARGET_METRICS, resolveTarget } from '../../lib/targets'
 import { getCurrentSalesMonth } from '../../lib/salesMonth'
@@ -51,7 +50,7 @@ import { saveStartDate } from '../../lib/peopleApi'
  * this should live in the same environment." Teams are under Users -> Departments & teams now, and an
  * old ?tab=Teams link lands there (see SettingsPage) rather than on Profile.
  */
-const TABS = ['Profile', 'Appearance', 'Spelling', 'Users', 'Targets', 'Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
+const TABS = ['Profile', 'Appearance', 'Spelling', 'Users', 'Targets', 'Pipelines', 'Lead Sources', 'Rejection Reasons', 'Notifications', 'Integrations', 'Data Import'] as const
 type Tab = (typeof TABS)[number]
 
 const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
@@ -68,25 +67,27 @@ const isTab = (v: string | null): v is Tab => TABS.includes((v ?? '') as Tab)
  * where the work is and their addresses are in mail already sent. A link is offered only to somebody who may open
  * it. Targets belongs to Sales AND the call centre (a team's or a person's month), so both headings carry it.
  *
- * NOT SAVED YET (`unsaved`): five tabs came over from the demo the app started as and keep what is typed in the page
- * only -- nothing reaches the database, and the lists the app uses are fixed in code. Marked, and said inside each, so
- * nobody edits a pipeline and believes it changed. Connecting each is a decision for the firm.
+ * SAVED, ALL OF THEM (Raptor H19). S19 marked five tabs from the demo "not saved"; H19 connected four -- Pipelines,
+ * Lead Sources and Rejection Reasons are the firm's lists (sales_list_items, salesLists.ts), Notifications each
+ * person's switches (notification_preferences) -- and took Custom Fields out until somebody asks for an actual field
+ * (Stephan, 9 Nov: nothing in Raptor showed or filled one in, so saving the list would have changed nothing).
+ * An old ?tab=Custom Fields link falls back to Profile.
  */
 type NavItem =
-  | { kind: 'tab'; tab: Tab; label?: string; unsaved?: boolean }
+  | { kind: 'tab'; tab: Tab; label?: string }
   | { kind: 'link'; to: string; label: string; show: (u: Parameters<typeof can>[0]) => boolean }
 const NAV: { heading: string; items: NavItem[] }[] = [
   { heading: 'You', items: [
     { kind: 'tab', tab: 'Profile' }, { kind: 'tab', tab: 'Appearance' }, { kind: 'tab', tab: 'Spelling' },
-    { kind: 'tab', tab: 'Notifications', unsaved: true },
+    { kind: 'tab', tab: 'Notifications' },
   ] },
   { heading: 'The firm', items: [
     { kind: 'tab', tab: 'Users' }, { kind: 'tab', tab: 'Integrations' }, { kind: 'tab', tab: 'Data Import' },
     { kind: 'link', to: '/library/firm', label: 'The firm\u2019s details', show: (u) => canEditLibrary(u) },
   ] },
   { heading: 'Sales', items: [
-    { kind: 'tab', tab: 'Targets' }, { kind: 'tab', tab: 'Pipelines', unsaved: true }, { kind: 'tab', tab: 'Lead Sources', unsaved: true },
-    { kind: 'tab', tab: 'Rejection Reasons', unsaved: true }, { kind: 'tab', tab: 'Custom Fields', unsaved: true },
+    { kind: 'tab', tab: 'Targets' }, { kind: 'tab', tab: 'Pipelines' }, { kind: 'tab', tab: 'Lead Sources' },
+    { kind: 'tab', tab: 'Rejection Reasons' },
   ] },
   { heading: 'Call centre', items: [
     { kind: 'tab', tab: 'Targets', label: 'Collection targets' },
@@ -170,8 +171,6 @@ export function SettingsPage() {
                       className={`w-full flex items-center gap-2 text-left px-3 py-1.5 rounded-lg text-sm font-medium ${tab === i.tab ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:bg-slate-100'}`}
                     >
                       <span className="min-w-0 truncate">{i.label ?? i.tab}</span>
-                      {i.unsaved && <span title="Not saved yet: changes here are not kept" data-testid="settings-unsaved"
-                        className="ml-auto shrink-0 rounded px-1 text-[9.5px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50">not saved</span>}
                     </button>
                   ) : (
                     <Link key={i.to} to={i.to}
@@ -210,22 +209,18 @@ export function SettingsPage() {
             <PanelLeftOpen size={15} /> {tab}
           </button>
         )}
-        {(['Pipelines', 'Custom Fields', 'Lead Sources', 'Rejection Reasons', 'Notifications'] as Tab[]).includes(tab) && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="settings-not-saved">
-            <b>Not saved yet.</b> This page came over from the demo Raptor started as: what you change here lasts until you
-            leave the page and is not used anywhere else. Ask for it to be connected before relying on it.
-          </div>
-        )}
         {tab === 'Profile' && <ProfileTab />}
         {tab === 'Appearance' && <AppearanceTab />}
         {tab === 'Spelling' && <SpellingTab />}
         {tab === 'Users' && <UsersSection />}
         {tab === 'Targets' && <TargetsTab />}
-        {tab === 'Pipelines' && <PipelinesTab />}
-        {tab === 'Custom Fields' && <CustomFieldsTab />}
-        {tab === 'Lead Sources' && <StringListTab title="Lead Sources" initial={initialLeadSources} />}
-        {tab === 'Rejection Reasons' && <StringListTab title="Rejection Reasons" initial={REJECTION_REASONS} />}
-        {tab === 'Notifications' && <NotificationsTab />}
+        {tab === 'Pipelines' && <SalesListTab list="deal_stage" title="Pipelines" rowNoun="deal"
+          subtitle="The stages a deal moves through. Added stages come before Won and Rejected; the built-in five are the ones Raptor moves deals through itself." />}
+        {tab === 'Lead Sources' && <SalesListTab list="lead_source" title="Lead Sources" rowNoun="lead or deal"
+          subtitle="Where a lead came from: offered on every lead and deal, and in the reports and campaigns." />}
+        {tab === 'Rejection Reasons' && <SalesListTab list="rejection_reason" title="Rejection Reasons" rowNoun="lead or deal"
+          subtitle="Why business did not happen: the same list for a lead and a deal, and the dashboard's loss reasons." />}
+        {tab === 'Notifications' && <NotificationSwitches />}
         {tab === 'Integrations' && <IntegrationsTab />}
         {tab === 'Data Import' && params.get('client') && <BackToClient id={params.get('client')!} />}
         {tab === 'Data Import' && <DataImportTab forCompanyId={params.get('client')} />}
@@ -1770,144 +1765,6 @@ function TargetRow({
   )
 }
 
-function PipelinesTab() {
-  const [stages, setStages] = useState<string[]>([...DEAL_STAGES]);
-  const [name, setName] = useState('')
-  return (
-    <Card>
-      <CardHeader title="Pipelines" subtitle="Customise your sales pipeline stages" />
-      <div className="border-y border-slate-100 text-[12.5px]">
-        {stages.map((s, i) => (
-          <div key={s} className="flex items-center gap-3 border-b border-slate-50 last:border-b-0 px-3 py-1.5 hover:bg-slate-50">
-            <span className="text-slate-400 w-5 tabular-nums">{i + 1}</span>
-            <span className="font-medium text-slate-700 flex-1 truncate">{s}</span>
-            {!(['Won', 'Rejected'] as string[]).includes(s) && (
-              <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-0.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
-                <X size={13} />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!name.trim()) return
-          setStages((prev) => [...prev.slice(0, -2), name, ...prev.slice(-2)])
-          setName('')
-        }}
-        className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
-      >
-        <input className={inputClass} placeholder="New stage name" value={name} onChange={(e) => setName(e.target.value)} />
-        <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
-          <Plus size={15} /> Add Stage
-        </button>
-      </form>
-    </Card>
-  )
-}
-
-const FIELD_TYPES: CustomFieldType[] = ['Text', 'Number', 'Currency', 'Date', 'Dropdown', 'Multi-select', 'Checkbox', 'URL', 'Email', 'Phone']
-
-function CustomFieldsTab() {
-  const [fields, setFields] = useState<CustomField[]>(initialCustomFields)
-  const [addOpen, setAddOpen] = useState(false)
-
-  return (
-    <Card padded={false}>
-      <div className="p-5 flex items-center justify-between">
-        <CardHeader title="Custom Fields" subtitle="Add fields without developer changes" />
-        <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 h-fit">
-          <Plus size={15} /> Add Custom Field
-        </button>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full list-table whitespace-nowrap">
-          <thead>
-            <tr className="text-left border-y border-slate-100 text-slate-400">
-              <th className="font-medium px-3 py-2">Field</th>
-              <th className="font-medium px-2 py-2">Related To</th>
-              <th className="font-medium px-2 py-2">Type</th>
-              <th className="font-medium px-2 py-2">Status</th>
-              <th className="w-10"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {fields.map((f) => (
-              <tr key={f.id} className="border-b border-slate-50 hover:bg-slate-50">
-                <td className="px-3 py-1.5 font-medium text-slate-700 max-w-[16rem] truncate" title={f.name}>{f.name}</td>
-                <td className="px-2 py-1.5 text-slate-500">{f.relatedTo}</td>
-                <td className="px-2 py-1.5 text-slate-500">{f.type}</td>
-                <td className="px-2 py-1.5">
-                  <span className={`badge !px-2 !py-0.5 !text-[11px] ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
-                </td>
-                <td className="px-2 py-1.5">
-                  <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-0.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
-                    <Trash2 size={14} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {addOpen && (
-        <AddCustomFieldModal
-          onClose={() => setAddOpen(false)}
-          onSave={(f) => setFields((prev) => [...prev, { ...f, id: `cf${prev.length + 1}`, status: 'Active' }])}
-        />
-      )}
-    </Card>
-  )
-}
-
-function AddCustomFieldModal({ onClose, onSave }: { onClose: () => void; onSave: (f: { name: string; relatedTo: CustomField['relatedTo']; type: CustomFieldType }) => void }) {
-  const [form, setForm] = useState<{ name: string; relatedTo: CustomField['relatedTo']; type: CustomFieldType }>({ name: '', relatedTo: 'Leads', type: 'Text' })
-  return (
-    <Modal title="Add Custom Field" onClose={onClose} width={400}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!form.name) return
-          onSave(form)
-          onClose()
-        }}
-      >
-        <FormField label="Field Name" required>
-          <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus placeholder="e.g. Contract Length" />
-        </FormField>
-        <FormField label="Related To">
-          <select className={inputClass} value={form.relatedTo} onChange={(e) => setForm({ ...form, relatedTo: e.target.value as CustomField['relatedTo'] })}>
-            {(['Leads', 'Deals', 'Contacts', 'Companies'] as CustomField['relatedTo'][]).map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
-        </FormField>
-        <FormField label="Field Type">
-          <select className={inputClass} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as CustomFieldType })}>
-            {FIELD_TYPES.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </FormField>
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
-          <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Add Field
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
-/**
- * Picking a skin. Each option is shown as the thing it produces rather than described in
- * words — a name and a paragraph can't tell you what an interface will feel like, and a
- * three-colour tile can.
- */
 function AppearanceTab() {
   const { themeId, setTheme, theme } = useTheme()
   const { celebrate } = useAppStore()
@@ -2078,85 +1935,6 @@ function SpellingTab() {
           )}
       </Card>
     </>
-  )
-}
-
-function StringListTab({ title, initial }: { title: string; initial: string[] }) {
-  const [items, setItems] = useState<string[]>(initial)
-  const [value, setValue] = useState('')
-  return (
-    <Card>
-      <CardHeader title={title} />
-      <div className="flex flex-wrap gap-2 mb-4">
-        {items.map((item) => (
-          <span key={item} className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-600 text-sm font-medium px-3 py-1.5 rounded-full">
-            {item}
-            <button onClick={() => setItems((prev) => prev.filter((x) => x !== item))} className="text-slate-400 hover:text-red-500">
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!value.trim() || items.includes(value.trim())) return
-          setItems((prev) => [...prev, value.trim()])
-          setValue('')
-        }}
-        className="flex gap-2"
-      >
-        <input className={inputClass} placeholder={`Add ${title.toLowerCase().slice(0, -1)}`} value={value} onChange={(e) => setValue(e.target.value)} />
-        <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
-          <Plus size={15} /> Add
-        </button>
-      </form>
-      {title === 'Lead Sources' && (
-        <p className="text-xs text-slate-400 mt-3">Also used across Industries such as: {industries.slice(0, 4).join(', ')}…</p>
-      )}
-    </Card>
-  )
-}
-
-const NOTIFICATION_TYPES = [
-  'New lead assigned',
-  'Task due',
-  'Task overdue',
-  'Meeting starting',
-  'Proposal viewed',
-  'Proposal accepted',
-  'Deal inactive',
-  'Deal moved',
-  'Deal won',
-  'Lead reassigned',
-]
-
-function NotificationsTab() {
-  const [enabled, setEnabled] = useState<Record<string, boolean>>(Object.fromEntries(NOTIFICATION_TYPES.map((t) => [t, true])))
-  return (
-    <Card>
-      <CardHeader title="Notifications" subtitle="Choose which events notify you" />
-      <div className="divide-y divide-slate-50">
-        {NOTIFICATION_TYPES.map((t) => (
-          <div key={t} className="flex items-center justify-between py-1.5">
-            <span className="text-[12.5px] text-slate-700">{t}</span>
-            <Toggle checked={enabled[t]} onChange={(v) => setEnabled((prev) => ({ ...prev, [t]: v }))} />
-          </div>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`w-10 h-5.5 rounded-full transition-colors relative shrink-0 ${checked ? 'bg-brand-600' : 'bg-slate-200'}`}
-      style={{ height: 22 }}
-    >
-      <span className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-[19px]' : 'translate-x-0.5'}`} style={{ width: 18, height: 18 }} />
-    </button>
   )
 }
 

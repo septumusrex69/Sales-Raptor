@@ -6,6 +6,48 @@
 > (Stephan, 28 Oct); older sections keep their word, and the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
 
+## SETTINGS TABS THAT SAVE (Raptor · Handover 19, 9 Nov; queued by Stephan 8 Nov; branch `claude/trusting-newton-wowy32` from `claude/sales-raptor-review-p1pzx2`)
+
+S19 marked five Settings tabs "not saved" (demo leftovers: React state only, the app read lists fixed in code). All
+five are settled; the "not saved" marks and banner are gone. Staging migrations `h19_settings_lists_and_notification_switches`
+and `h19_settings_lists_staging_clock`, mirrored at the end of `supabase/schema.sql`.
+
+**Stephan's answers (9 Nov, asked before building):** Administrators AND the Sales Manager change the sales lists
+(everyone signed in reads them); a stage/source/reason still on rows is MOVED, never orphaned; Notifications show the
+real kinds, each person switches their own off; Custom Fields hidden until somebody asks for an actual field.
+
+- **`sales_list_items`** (list = deal_stage | lead_source | rejection_reason, value, position, probability, built_in,
+  removed_at). Browser: SELECT only. Writes only via definer functions gated by `sales_list_editor()` (role
+  Administrator / Sales Manager): `sales_list_add` (a removed value comes back), `_rename` (renames every lead/deal
+  row and draft campaign `leads_by` audiences), `_remove(list, value, move_to)` (refused while rows use it unless
+  `move_to`; never moves deals into Won/Rejected), `_reorder`, `_set_probability` (added stages only), `_usage`.
+  Rows are never removed (removed_at) -- the Supabase tool's "delete" trap avoided by design. Stamps on raptor_now().
+- **Built-in values cannot be renamed or removed** (Raptor's code uses them by name): the five stages, sources
+  Website / Direct / Email / Imported list / Other, reason Other. Seeded from the old constants, plus any value already
+  on a row. Added stages sit before Won/Rejected with their own chance of closing (default 40).
+- **App:** `src/lib/salesListValues.ts` (pure; the old constants are the FALLBACK when nothing is saved/loaded) and
+  `src/lib/salesLists.ts` (load once, `useSalesLists()`, the writes). Every screen that offered a list reads it:
+  QuickAdd lead form, Edit lead, Leads filter, Reject lead, Convert lead, Mark rejected, Loss reasons card, Deals
+  board (columns, sort, stage picker, "at least" funnel), Reports, campaign audience picker. `DealStage`, `LeadSource`,
+  `RejectionReason` are now `BuiltIn... | (string & {})`. The lead import turns a removed source/reason into Other.
+  **Trap fixed on the way:** `normalizeDeal` turned any unknown stage into New Deal -- it would have hidden every stage
+  the firm adds. It now maps only retired names the firm does not use; the board gives an unlisted stage its own column.
+- **Notifications:** `notification_preferences(user_id, kind, muted)` (own rows only); kind = `notification_kind(type)`
+  = the part before the dot; a BEFORE INSERT trigger on `notifications` drops a muted kind, whoever writes it (SQL,
+  portals, screens). The tab lists 11 real kinds (`src/lib/notificationKinds.ts`); `check-sales-lists` fails when code
+  writes a kind with no switch. Muting `handover` also silences the new-work popup (it reads the bell) -- by design.
+- **Custom Fields:** tab removed (an old `?tab=Custom Fields` link lands on Profile). `mockData.customFields` and the
+  `CustomField` type are left in place, unused by Settings.
+
+**Checks (each seen failing on broken code):** `check-sales-lists` (41), `e2e/settings-lists` (18),
+`e2e/settings-departments` (moved to the new state); live probe `scripts/qa/live/h19-settings-lists.sql` (rolled
+back; 9 Nov `failures []`, and with the role gate and the mute trigger broken it named both). Fast suite, build, lint
+(no new warnings) green; deal-stages, lead-form-order, news-*, sales-comms-dashboards, send-mandate, client-welcome,
+dashboard-landing, settings-users, spelling-settings e2e green.
+
+**Before production:** apply the two migrations in order. Then ask Stephan whether the built-in stages' chances
+(20/60/60) should become editable too (only added stages' are today).
+
 ## S20 -- LATE MONEY (Raptor · Handover 19, 8 Nov; branch `claude/s20-late-money` from `claude/sales-raptor-review-p1pzx2` at 34e3f08)
 
 Three parts, Stephan's decisions of 8 Nov, each pushed and fast-forwarded onto the preview branch. Every staging

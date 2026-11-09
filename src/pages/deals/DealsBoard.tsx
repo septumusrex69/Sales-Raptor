@@ -14,14 +14,13 @@ import { UserAvatar } from '../../components/ui/Avatar'
 import { DealForm } from '../../components/layout/QuickAdd'
 import { MarkRejectedModal, MarkWonModal } from './DealStageModals'
 import { formatCurrency, formatDate, TODAY } from '../../data/mockData'
-import { FUNNEL_STAGES, STAGE_COLORS } from '../../lib/colors'
+import { stageColor } from '../../lib/colors'
+import { useSalesLists } from '../../lib/salesLists'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, isWithinPeriod } from '../../lib/salesMonth'
-import { DEAL_STAGES, OPEN_DEAL_STAGES } from '../../types'
 import type { Deal, DealStage } from '../../types'
 import type { WonDealDetails } from '../../store/AppStore'
 
-const OPEN_STAGES = OPEN_DEAL_STAGES
 
 type DealSortKey = 'name' | 'company' | 'value' | 'stage' | 'probability' | 'owner' | 'createdAt' | 'expectedCloseDate'
 
@@ -30,6 +29,8 @@ export function DealsBoard() {
   const { deals, users, companyById, userById, moveDealStage, markDealWon, markDealRejected } = store
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
+  /* The firm's stages (Settings -> Pipelines, Raptor H19); the shipped five until they load. */
+  const lists = useSalesLists()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -79,10 +80,12 @@ export function DealsBoard() {
   // Further-restricted rows for Table view drill-down links — Kanban always shows the full board.
   const tableRows = useMemo(() => {
     if (view !== 'table') return filtered
-    const stageFilterIndex = stageFilter ? FUNNEL_STAGES.indexOf(stageFilter as (typeof FUNNEL_STAGES)[number]) : -1
+    /* The funnel is the pipeline in order without Rejected: "at this stage or further". */
+    const funnel = lists.stages.filter((s) => s !== 'Rejected')
+    const stageFilterIndex = stageFilter ? funnel.indexOf(stageFilter) : -1
     return filtered.filter((d) => {
       if (stageFilter && stageAtLeast && stageFilterIndex >= 0) {
-        if (FUNNEL_STAGES.indexOf(d.stage as (typeof FUNNEL_STAGES)[number]) < stageFilterIndex) return false
+        if (funnel.indexOf(d.stage) < stageFilterIndex) return false
       } else if (stages.length > 0 && !stages.includes(d.stage)) {
         return false
       }
@@ -96,11 +99,13 @@ export function DealsBoard() {
       }
       return true
     })
-  }, [filtered, view, stages, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
+  }, [filtered, view, lists.stages, stages, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
 
   // Annotated rather than asserted: `as DealStage[]` would let a retired stage name through,
   // and a column nothing matches is a column of deals nobody can see.
-  const columns: DealStage[] = [...OPEN_STAGES, 'Won', 'Rejected']
+  // A deal on a stage the list does not name (the saved lists failed to load) still gets a column, before Won.
+  const strays = [...new Set(deals.map((d) => d.stage))].filter((s) => !lists.stages.includes(s))
+  const columns: DealStage[] = [...lists.openStages, ...strays, 'Won', 'Rejected']
 
   function sortValue(d: Deal, key: DealSortKey): string | number | undefined {
     switch (key) {
@@ -112,7 +117,7 @@ export function DealsBoard() {
         return d.value
       case 'stage':
         // Pipeline order, not alphabetical — sorted by name, Rejected would land before Won.
-        return DEAL_STAGES.indexOf(d.stage)
+        return lists.stages.indexOf(d.stage)
       case 'probability':
         return d.probability
       case 'owner':
@@ -185,7 +190,7 @@ export function DealsBoard() {
         {/* Working a stage is how the day is actually organised — every mandate that has gone
             out and is waiting, all in one list — so it needs a control, not only a drill-down
             link from somewhere else. */}
-        <StagePicker stages={DEAL_STAGES} chosen={stages}
+        <StagePicker stages={lists.stages} chosen={stages}
           onChange={(next) => { setStages(next); if (next.length) setView('table') }} />
         <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
           <option value="All">All Owners</option>
@@ -233,7 +238,7 @@ export function DealsBoard() {
               >
                 <div className="px-3.5 py-3 flex items-center justify-between sticky top-0">
                   <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STAGE_COLORS[stage] }} />
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: stageColor(stage) }} />
                     <span className="text-sm font-semibold text-slate-700">{stageColumnLabel(stage)}</span>
                     <span className="text-xs text-slate-400">({stageDeals.length})</span>
                   </div>

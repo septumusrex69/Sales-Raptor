@@ -7,7 +7,8 @@ import { SearchableSelect } from '../ui/SearchableSelect'
 import { useAppStore } from '../../store/AppStore'
 import { ClientPicker } from '../ui/ClientPicker'
 import { useAuth } from '../../store/AuthContext'
-import { leadSources, services } from '../../data/mockData'
+import { services } from '../../data/mockData'
+import { useSalesLists } from '../../lib/salesLists'
 import type { Lead, LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
 import { isAssignableOwner } from '../../lib/permissions'
@@ -121,6 +122,7 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
   onCreated?: (lead: Lead) => void
 }) {
   const { currentUser } = useAuth()
+  const { sources: leadSources } = useSalesLists()
   const reps = useMemo(() => store.users.filter((u) => isAssignableOwner(u.role)), [store.users])
   const [form, setForm] = useState({
     firstName: initial?.firstName ?? '',

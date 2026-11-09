@@ -10,8 +10,8 @@ import { StatTile } from '../../components/ui/StatTile'
 import { SalesMonthPicker } from '../../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../../components/ui/CompareSelector'
 import { FormField, inputClass } from '../../components/ui/Modal'
-import { countries, formatCurrency, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
-import { DEAL_STAGES } from '../../types'
+import { countries, formatCurrency, leadClassifications, provinces, services, TODAY } from '../../data/mockData'
+import { useSalesLists } from '../../lib/salesLists'
 import type { Deal, Lead, LeadClassification, LeadSource, LeadStatus, ProductService } from '../../types'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { pctDelta } from '../../lib/pctDelta'
@@ -33,6 +33,7 @@ const BAR_COLOR = STAGE_COLORS['Quotation Sent']
 
 export function ReportsPage() {
   const { leads, deals, activities, users } = useAppStore()
+  const { sources: leadSources, stages: dealStages } = useSalesLists()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [params] = useSearchParams()
   const [tab, setTab] = useState<Tab>(() => (TABS as readonly string[]).includes(params.get('tab') ?? '') ? params.get('tab') as Tab : 'Overview')
@@ -157,7 +158,7 @@ export function ReportsPage() {
 
   const leadsByRep = useMemo(() => reps.map((r) => ({ name: r.name.split(' ')[0], value: leadsInPeriod.filter((l) => l.ownerId === r.id).length })), [leadsInPeriod, reps])
 
-  const dealsByStage = useMemo(() => DEAL_STAGES.map((s) => ({ name: s, value: allDealsFiltered.filter((d) => d.stage === s).length })), [allDealsFiltered])
+  const dealsByStage = useMemo(() => dealStages.map((s) => ({ name: s, value: allDealsFiltered.filter((d) => d.stage === s).length })), [allDealsFiltered, dealStages])
 
   const lostByReason = useMemo(() => {
     const map = new Map<string, number>()
@@ -262,7 +263,7 @@ export function ReportsPage() {
           conversionRate: sourceLeads.length ? Math.round((engagedLeads.length / sourceLeads.length) * 100) : 0,
         }
       }),
-    [leadsInPeriod, wonDealsInPeriod],
+    [leadsInPeriod, wonDealsInPeriod, leadSources],
   )
 
   const provinceReport = useMemo(
