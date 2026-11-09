@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { questionFor, waitingOn } from '../../src/lib/changeRequests.ts'
 import {
-  MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, fitWithin, isOpen, mayDecide, mayWithdraw,
+  MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, documentType, DOCUMENT_TYPES, fitWithin, isOpen, mayDecide, mayWithdraw,
   STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, mayEdit, onShelf, SHELVES, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
@@ -39,8 +39,15 @@ check('a big screenshot is drawn at 1 600 on its long side', fitWithin(3200, 240
 check('...a small one is never enlarged', fitWithin(800, 600), { width: 800, height: 600 })
 check('...nonsense is nothing, not a division by zero', fitWithin(0, 100), { width: 0, height: 0 })
 check('a picture is never refused for size: it is shrunk first', fileProblem({ name: 'a.png', type: 'image/png', size: 40_000_000 }), null)
-ok('a PDF over 5 MB is refused, and says its size', /6\.0 MB; a PDF may be 5 MB at most\.$/.test(fileProblem({ name: 'b.pdf', type: 'application/pdf', size: 6 * 1048576 }) ?? ''))
-ok('...anything else is refused by name', /^c\.docx is not a picture or a PDF\.$/.test(fileProblem({ name: 'c.docx', type: 'application/msword', size: 10 }) ?? ''))
+ok('a PDF over 5 MB is refused, and says its size', /6\.0 MB; a file may be 5 MB at most\.$/.test(fileProblem({ name: 'b.pdf', type: 'application/pdf', size: 6 * 1048576 }) ?? ''))
+/* Documents too (S21 · Raptor H19, Stephan: "like an Excel file or a Word document") -- decided by the extension. */
+check('a Word document may go', fileProblem({ name: 'c.docx', type: 'application/msword', size: 10 }), null)
+check('...and an Excel sheet with no type at all (an iPad)', fileProblem({ name: 'Book1.xlsx', type: '', size: 10 }), null)
+check('...and a CSV Windows calls Excel', fileProblem({ name: 'list.csv', type: 'application/vnd.ms-excel', size: 10 }), null)
+check('...stored as what its extension says', documentType('Book1.XLSX'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+ok('a macro-enabled sheet is refused by name', /^m\.xlsm cannot be attached\./.test(fileProblem({ name: 'm.xlsm', type: 'application/vnd.ms-excel.sheet.macroEnabled.12', size: 10 }) ?? ''))
+ok('...and so is a program', /^setup\.exe cannot be attached\./.test(fileProblem({ name: 'setup.exe', type: 'application/octet-stream', size: 10 }) ?? ''))
+ok('a document over 5 MB is refused, and says its size', /6\.0 MB; a file may be 5 MB at most\.$/.test(fileProblem({ name: 'big.docx', type: '', size: 6 * 1048576 }) ?? ''))
 check('base64 is measured as the bytes it carries', [base64Bytes('AAAA'), base64Bytes('AAA='), base64Bytes('AA==')], [3, 2, 1])
 const groups = parseReviewGroups([
   { title: ' Diary colours ', request_numbers: [3, '4', 3, -1, 'x'], what: 'Two people want...', questions: ['Which red?', 5, ' '], size: 'small' },
@@ -87,6 +94,13 @@ ok('the asker may answer, or an Administrator for them, nobody else', mayTest({ 
 
 /* ---------- the database ---------- */
 const schema = read('supabase/schema.sql')
+/* The browser's list and the database's are the same eleven types. */
+{
+  const db = [...schema.matchAll(/add constraint change_request_files_mime_check check \(mime in \(([\s\S]*?)\)\)/g)].pop()?.[1] ?? ''
+  const dbTypes = [...db.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort().join('|')
+  const appTypes = [...new Set(['image/jpeg', 'image/png', 'image/webp', ...Object.values(DOCUMENT_TYPES)])].sort().join('|')
+  check('the database takes exactly the types the app sends', dbTypes, appTypes)
+}
 const block = schema.slice(schema.lastIndexOf('-- S12 (26 Oct): CHANGE REQUESTS'))
 ok('the three tables exist', ['change_requests', 'change_request_files', 'change_request_reviews']
   .every((t) => new RegExp(`create table if not exists public\\.${t} \\(`).test(block)))

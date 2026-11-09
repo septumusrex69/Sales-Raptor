@@ -62072,3 +62072,17 @@ revoke execute on function public.notification_respects_mute() from public, anon
 drop trigger if exists notifications_respect_mute on public.notifications;
 create trigger notifications_respect_mute before insert on public.notifications
   for each row execute function public.notification_respects_mute();
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_request_files_office_documents (staging, 9 Nov)
+-- ============================================================================================
+-- Raptor H19 (S21): a request may carry an Excel sheet, a Word document, a CSV, a PowerPoint or a text file as well
+-- as a picture or a PDF (Stephan, 9 Nov). Same 5 MB per file. Macro-enabled Office files (.xlsm, .docm) stay out:
+-- a request is read by people and by Claude, and a file that can run code has no business in it.
+alter table public.change_request_files
+  drop constraint change_request_files_mime_check,
+  add constraint change_request_files_mime_check check (mime in (
+    'image/jpeg', 'image/png', 'image/webp', 'application/pdf',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain'));

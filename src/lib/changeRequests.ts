@@ -403,14 +403,44 @@ export function requestLabel(r: Pick<ChangeRequest, 'number'>): string {
 export const PICTURE_MAX_SIDE = 1600
 export const MAX_FILE_BYTES = 5 * 1024 * 1024
 export const MAX_FILES = 5
-export const ACCEPTED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] as const
+
+/*
+ * DOCUMENTS AS WELL AS PICTURES (S21 · Raptor H19). Stephan, 9 Nov: "make it so that when you make a suggestion you
+ * can upload a file as well, like an Excel file or a Word document". Decided by the file's EXTENSION, not the type
+ * the browser reports: an iPad hands some files over with no type at all, and Windows calls a .csv
+ * "application/vnd.ms-excel". The stored type is always the one written here, so the database's list
+ * (change_request_files_mime_check) and this one are the same eleven. Macro-enabled files (.xlsm, .docm) are left out
+ * on purpose -- a request is opened by people and read by Claude, and a file that can run code has no place in one.
+ */
+export const DOCUMENT_TYPES: Record<string, string> = {
+  pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  csv: 'text/csv',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+}
+
+/** What the file picker offers: every picture, and the documents by extension (iOS reads extensions best). */
+export const FILE_PICKER_ACCEPT = ['image/*', ...Object.keys(DOCUMENT_TYPES).map((e) => `.${e}`), ...new Set(Object.values(DOCUMENT_TYPES))].join(',')
+
+/** The type a document is stored as, or null when it is not one Raptor takes. Pictures are not documents. */
+export function documentType(name: string): string | null {
+  const ext = /\.([a-z0-9]+)$/i.exec(name.trim())?.[1]?.toLowerCase()
+  return ext ? DOCUMENT_TYPES[ext] ?? null : null
+}
 
 /** Why a file may not go, or null. Said before anything is sent. */
 export function fileProblem(f: { name: string; type: string; size: number }): string | null {
   const isImage = f.type.startsWith('image/')
-  if (!isImage && f.type !== 'application/pdf') return `${f.name} is not a picture or a PDF.`
-  /* A picture is shrunk before it is measured, so only a PDF can be refused for size here. */
-  if (!isImage && f.size > MAX_FILE_BYTES) return `${f.name} is ${(f.size / 1048576).toFixed(1)} MB; a PDF may be 5 MB at most.`
+  if (!isImage && !documentType(f.name)) {
+    return `${f.name} cannot be attached. A picture, a PDF, an Excel or Word file, a CSV, a PowerPoint or a text file can.`
+  }
+  /* A picture is shrunk before it is measured, so only a document can be refused for size here. */
+  if (!isImage && f.size > MAX_FILE_BYTES) return `${f.name} is ${(f.size / 1048576).toFixed(1)} MB; a file may be 5 MB at most.`
+  if (!isImage && f.size === 0) return `${f.name} is empty.`
   return null
 }
 

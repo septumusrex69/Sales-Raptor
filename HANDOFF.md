@@ -71,6 +71,17 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- A REQUEST CAN CARRY AN EXCEL OR WORD FILE (9 Nov; staging migration `h19_request_files_office_documents`, mirrored)
+Stephan: "when you make a suggestion [you can] upload a file as well, like an Excel file or a Word document". The light
+bulb takes .xlsx .xls .csv .docx .doc .pptx .txt beside pictures and PDFs, 5 MB each, five a request. The type is
+decided by the EXTENSION (`documentType`, changeRequests.ts) -- an iPad sends some files with no type, Windows calls a
+CSV Excel -- and the database's `change_request_files_mime_check` holds exactly the same eleven types (check-change-
+requests compares them). Macro files (.xlsm/.docm) refused on purpose. The Requests page offers a document as a
+download, as it did a PDF. The change-requests skill now says how a session reads them. Checks: check-change-requests
+(+8, two breaks seen failing), e2e/change-requests (+3: an .xlsx with no type stored as Excel). **Found, not mine:
+e2e/change-requests fails 2 on the code before this change too** ("the list opens on Needs a decision", "an
+Administrator sees the options") -- look at them next time Requests is touched.
+
 ## SETTINGS TABS THAT SAVE (Raptor · Handover 19, 9 Nov; queued by Stephan 8 Nov; branch `claude/trusting-newton-wowy32` from `claude/sales-raptor-review-p1pzx2`)
 
 S19 marked five Settings tabs "not saved" (demo leftovers: React state only, the app read lists fixed in code). All

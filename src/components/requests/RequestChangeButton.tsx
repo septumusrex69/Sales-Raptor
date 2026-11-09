@@ -5,7 +5,7 @@ import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { DictateButton } from '../ui/Dictate'
 import {
-  ACCEPTED_MIME, DEPARTMENT_HINT, MAX_FILES, REQUEST_DEPARTMENTS, fileProblem, fitWithin, paneOf, type RequestDepartment,
+  DEPARTMENT_HINT, FILE_PICKER_ACCEPT, documentType, MAX_FILES, REQUEST_DEPARTMENTS, fileProblem, fitWithin, paneOf, type RequestDepartment,
 } from '../../lib/changeRequests'
 import { createRequest, type OutgoingFile } from '../../lib/changeRequestsApi'
 
@@ -100,7 +100,8 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
           const { base64, mime } = await shrinkPicture(f)
           next.push({ name: f.name.replace(/\.[^.]+$/, '') + '.jpg', mime, base64, preview: `data:${mime};base64,${base64}` })
         } else {
-          next.push({ name: f.name, mime: f.type, base64: await readBase64(f), preview: null })
+          /* Stored as the type its extension says (documentType), whatever the browser reported. */
+          next.push({ name: f.name, mime: documentType(f.name) ?? f.type, base64: await readBase64(f), preview: null })
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -140,7 +141,7 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
   }
 
   return (
-    <Modal title="Request a change" subtitle="What should Raptor do differently? A screenshot helps." onClose={onClose} width={560}
+    <Modal title="Request a change" subtitle="What should Raptor do differently? A screenshot or a file helps." onClose={onClose} width={560}
       footer={
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs text-slate-400 truncate" title={page} data-testid="request-change-pane">From the {pane} pane</p>
@@ -193,10 +194,10 @@ function RequestChangeModal({ pageTitle, onClose }: { pageTitle: string; onClose
           {files.length < MAX_FILES && (
             <button type="button" onClick={() => input.current?.click()} disabled={reading}
               className="flex h-20 w-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50">
-              {reading ? <Loader2 size={18} className="animate-spin" /> : <ImagePlus size={18} />} Screenshot or PDF
+              {reading ? <Loader2 size={18} className="animate-spin" /> : <ImagePlus size={18} />} Add a file
             </button>
           )}
-          <input ref={input} type="file" multiple accept={[...ACCEPTED_MIME, 'image/*'].join(',')} className="hidden" data-testid="request-change-files"
+          <input ref={input} type="file" multiple accept={FILE_PICKER_ACCEPT} className="hidden" data-testid="request-change-files"
             onChange={(e) => { void add(Array.from(e.target.files ?? [])); e.target.value = '' }} />
         </div>
         <p className="text-xs text-slate-400">Everybody can see requests. The administrator decides what gets built, and you are told when yours is done.</p>

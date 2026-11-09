@@ -113,6 +113,11 @@ try {
   const bytes = await bigPng(page)
   await page.getByTestId('request-change-files').setInputFiles({ name: 'screenshot.png', mimeType: 'image/png', buffer: Buffer.from(bytes) })
   await page.locator('img[alt="screenshot.jpg"]').waitFor({ timeout: 10000 })
+  /* AND AN EXCEL SHEET (S21 · Raptor H19, Stephan: "like an Excel file or a Word document"), handed over with NO type,
+     the way an iPad does -- the extension decides. Invented bytes: nothing here opens it. */
+  await page.getByTestId('request-change-files').setInputFiles({ name: 'Debtors to check.xlsx', mimeType: '', buffer: Buffer.from('PK\u0003\u0004 invented sheet') })
+  await page.getByText('Debtors to check.xlsx').first().waitFor({ timeout: 5000 }).catch(() => {})
+  t.ok('an Excel sheet goes on beside the picture', await page.getByText('Debtors to check.xlsx').count() > 0)
   await t.shot(page, 'change-requests-0-form')
   await page.getByTestId('request-change-send').click()
   await page.getByTestId('request-change-sent').waitFor({ timeout: 10000 })
@@ -122,8 +127,12 @@ try {
     && req?.body.description === 'The Paid column should show the date it was paid.'
     && /^\/accounts(\?|$)/.test(req?.body.page_path ?? '') && req?.body.page_title === 'Accounts')
   t.check('...with the pane and the department they chose', JSON.stringify([req?.body.pane, req?.body.department]), JSON.stringify(['Accounts', 'Finance']))
-  const file = writes.find((w) => w.table === 'change_request_files')
-  t.ok('ONE file on it, a JPEG', !!file && file.body.request_id === 'new-1' && file.body.mime === 'image/jpeg' && file.body.name === 'screenshot.jpg')
+  const file = writes.find((w) => w.table === 'change_request_files' && w.body.name === 'screenshot.jpg')
+  const sheet = writes.find((w) => w.table === 'change_request_files' && w.body.name === 'Debtors to check.xlsx')
+  t.check('two files on it', writes.filter((w) => w.table === 'change_request_files').length, 2)
+  t.check('...the sheet stored as an Excel sheet, whatever the browser said',
+    sheet?.body.mime, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  t.ok('the picture, a JPEG', !!file && file.body.request_id === 'new-1' && file.body.mime === 'image/jpeg' && file.body.name === 'screenshot.jpg')
   const width = file ? await page.evaluate(async (b64) => {
     const i = new Image(); i.src = `data:image/jpeg;base64,${b64}`; await i.decode(); return [i.naturalWidth, i.naturalHeight]
   }, file.body.data) : null
