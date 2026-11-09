@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
 import { Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { draftKeyFor, dropDraft, findDraft, saveDraft, type MailDraft } from '../lib/mailDrafts'
@@ -252,6 +252,20 @@ export function ComposeEmailModal({
   const [showCc, setShowCc] = useState(initialCc !== undefined)
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
+  /*
+   * THE BOX GROWS WITH WHAT IS TYPED, LIKE OUTLOOK (S21 · Raptor H19). Stephan, 9 Nov, with a screenshot: "The signature
+   * is way below the text ... I think do it like Outlook does it." A twelve-row textarea put a one-line message twelve
+   * rows above the signature. The textarea is now as tall as its words (two rows at least), the signature follows one
+   * blank line under the last of them, and the room for writing is the space below, which a press brings back to the
+   * text -- one document, as in Outlook.
+   */
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [body])
   const spell = useSpellGate()
   /*
    * THE FIRM'S OWN FACE, IN THE BOX SOMEBODY TYPES IN.
@@ -676,8 +690,9 @@ export function ComposeEmailModal({
               email. It's not necessary to have like a separate box for that." The box is drawn round both; the
               textarea inside it has no frame of its own, and the signature sits under what is typed as it will in
               the inbox. On a forward it goes under the original instead -- where composeBody puts it. */}
-          <div className={`${inputClass} !p-0 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500/40 focus-within:border-brand-500`} data-testid="message-box">
-          <textarea className="block w-full resize-y border-0 bg-transparent px-3 py-2 text-sm outline-none" rows={quotedHtml ? 7 : 12} value={body} lang={lang}
+          <div className={`${inputClass} !p-0 overflow-hidden cursor-text min-h-[18rem] focus-within:ring-2 focus-within:ring-brand-500/40 focus-within:border-brand-500`} data-testid="message-box"
+            onClick={(e) => { if (e.target === e.currentTarget) bodyRef.current?.focus() }}>
+          <textarea ref={bodyRef} className="block w-full resize-none overflow-hidden border-0 bg-transparent px-3 pt-2 text-sm outline-none" rows={2} value={body} lang={lang}
             style={emailBodyCss(firm) as CSSProperties}
             spellCheck={spellCheckEnabled()} onChange={(e) => { touch(); setBody(e.target.value) }} required={!quotedHtml}
             placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
@@ -859,8 +874,9 @@ function SignatureInline({ user, firm, afterOriginal = false }: {
     url ? { width: user?.emailSignatureImageWidth ?? 160, align: user?.emailSignatureImageAlign ?? 'left' } : null, url)
   if (!signature) return null
   const style = firm.emailFont ? emailBodyStyle(firm) : null
-  /* The page's own margin matches the textarea's padding, so the signature lines up under the text. */
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body style="margin:0;padding:0 12px 10px;background:transparent">${
+  /* The page's own margin matches the textarea's padding, so the signature lines up under the text; the top padding is
+     the one blank line composeBody puts between the message and the signature. */
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body style="margin:0;padding:1.5em 12px 10px;background:transparent">${
     /* The first two breaks are composeBody's gap after an empty body; the box's own space under the text stands in. */
     composeBody('', signature, style).replace('<br><br>', '')}</body></html>`
   const measure = () => {

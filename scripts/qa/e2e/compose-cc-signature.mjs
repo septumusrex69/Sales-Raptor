@@ -118,6 +118,13 @@ try {
   t.check('...and no preview panel or label beside it', await modal.getByText('How the email ends').count(), 0)
   const order = await modal.locator('[data-testid="message-box"]').evaluate((box) => [...box.children].map((c) => c.tagName).join(','))
   t.check('...under what is typed', order, 'TEXTAREA,IFRAME')
+  /* LIKE OUTLOOK (Stephan, 9 Nov: "The signature is way below the text"): right under the last line typed, not twelve
+     rows down. Two short paragraphs leave the signature within a few lines of the text. */
+  const gap = await modal.locator('[data-testid="message-box"]').evaluate((box) => {
+    const ta = box.querySelector('textarea'); const fr = box.querySelector('iframe')
+    return ta && fr ? Math.round(fr.getBoundingClientRect().top - ta.getBoundingClientRect().top) : -1
+  })
+  t.ok(`...right under the text, as in Outlook (${gap}px from the top of the text)`, gap > 0 && gap < 140)
   const face = await frame.evaluate((f) => f.contentDocument?.body?.firstElementChild?.getAttribute('style') ?? '')
   t.ok('...in the firm\'s face, as the send wraps it', /font-family:/.test(face))
   await t.shot(page, '10-cc-and-signature')
