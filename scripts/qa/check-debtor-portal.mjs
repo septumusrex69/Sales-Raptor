@@ -25,7 +25,8 @@ const ok = (name, v) => check(name, v, true)
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8')
 
 /* ---------- the case number, typed any way ---------- */
-for (const typed of ['RAP-125318', 'rap-125318', 'RAP 125318', 'RAP125318', ' 125318 ', 'rap.125318']) check(`"${typed}" is RAP-125318`, normaliseCaseNumber(typed), 'RAP-125318')
+/* S21: the RAP- numbers are gone -- an old one, or bare digits, is not a case number any more. */
+check('bare digits are not a case number', normaliseCaseNumber('125318'), null)
 check('words are not a case number', normaliseCaseNumber('my account'), null)
 check('a client reference is not a case number', normaliseCaseNumber('ALIANNAPH/30182'), null)
 /* S21 · Raptor H19: the case number is the client-code reference, typed any way. */
@@ -95,7 +96,7 @@ const api = read('api/_lib/debtorPortal.ts')
 
 /* SIGN IN WITH WHAT YOU HAVE (Stephan, 4 Nov: "with your ID number ... your email address, or your case number"). */
 const L = (x) => JSON.stringify(debtorLogin(x))
-ok('a case number is a case number, however it is typed', L(' rap 125318 ') === JSON.stringify({ kind: 'case', value: 'RAP-125318' }))
+ok('a case number is a case number, however it is typed', L(' drc 0001 ') === JSON.stringify({ kind: 'case', value: 'DRC0001' }))
 ok('an email is an email, lower-cased', L(' Stephan@BredellFerreira.co.za ') === JSON.stringify({ kind: 'email', value: 'stephan@bredellferreira.co.za' }))
 ok('an ID number is thirteen digits, spaces and dashes ignored', L('800101 5009 087') === JSON.stringify({ kind: 'id', value: '8001015009087' }))
 ok('...and anything else is nothing, so the page says what to type', debtorLogin('blah') === null && debtorLogin('') === null && debtorLogin(42) === null && debtorLogin('12') === null)

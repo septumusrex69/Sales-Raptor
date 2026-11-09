@@ -102,16 +102,13 @@ check('no debit carries a reference',
 
 check('FNB app', referenceFrom('FNB APP PAYMENT FROM  QQQ1932'), 'QQQ1932')
 
-/* RAPTOR'S CASE NUMBER (S18; Stephan, 5 Nov: "Match case numbers on import too"): every notice asks
-   the debtor to pay with it, and the dash used to split it into two things that matched nothing. */
-check('a case number with its dash', referenceFrom('FNB APP PAYMENT FROM  RAP-125318'), 'RAP-125318')
-check('...without it, in lower case', referenceFrom('CAPITEC  rap125318'), 'RAP-125318')
-check('...with a space', referenceFrom('ABSA BANK  RAP 125318'), 'RAP-125318')
-check('...with a dot', referenceFrom('RAP.125318 J SMITH'), 'RAP-125318')
-check('...ahead of an account number on the same line', referenceFrom('QQQ1932 RAP-125318'), 'RAP-125318')
-check('...in brackets', referenceFrom('INT-BANKING PMT FRM (RAP-125318)'), 'RAP-125318')
-check('a name beginning RAP is not a case number', referenceFrom('CAPITEC RAPHAEL MOKOENA'), null)
-check('...nor is a longer word ending RAP and digits (it stays an ordinary reference)', referenceFrom('XRAP125318'), 'XRAP125318')
+/* RAPTOR'S CASE NUMBER (S18; since 9 Nov the client-code reference, S21 · Raptor H19, and the RAP- numbers gone):
+   every notice asks the debtor to pay with it. It is the shape an account reference already has, so it is read the
+   same way -- with its dash, in brackets, in lower case. */
+check('a case number', referenceFrom('FNB APP PAYMENT FROM  DRC0001'), 'DRC0001')
+check('...in lower case', referenceFrom('CAPITEC  drc0001'), 'DRC0001')
+check('...in brackets', referenceFrom('INT-BANKING PMT FRM (ACF10085)'), 'ACF10085')
+check('a name is not a case number', referenceFrom('CAPITEC RAPHAEL MOKOENA'), null)
 check('Capitec', referenceFrom('CAPITEC   WWW0296'), 'WWW0296')
 check('ABSA', referenceFrom('ABSA BANK PPP11708'), 'PPP11708')
 check('a cash deposit at a branch', referenceFrom('ADT CASH DEPOSOMEWHERE   WWW0296'), 'WWW0296')
@@ -227,17 +224,19 @@ const note = s.lines.find((l) => l.direction === 'note')
 check('the interest-rate notice keeps its whole description',
   note?.description, 'CR.INT.RATE   4,25000')
 
-/* ...AND THE IMPORT PLACES IT (S18): the last import_bank_lines matches a RAP reference on case_number,
-   normalised, and never retries it as an account number. */
+/* ...AND THE IMPORT PLACES IT (S18; S21): the last import_bank_lines tries the reference as a case number, and as an
+   account number only when no case number has it. No RAP- branch: those numbers are gone (Stephan, 9 Nov). */
 {
   const sqlAll = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
   const at = sqlAll.lastIndexOf('create or replace function public.import_bank_lines(')
   const imp = at < 0 ? '' : sqlAll.slice(at, sqlAll.indexOf('\nend $$;', at))
   ok('import_bank_lines is in the schema', imp.length > 2000)
-  ok('import_bank_lines matches the case number', /if v_ref ~ '\^RAP\[\\s\._\/-\]\*\[0-9\]\{4,9\}\$' then/.test(imp)
-    && /where upper\(a\.case_number\) = v_ref;/.test(imp))
-  ok('...normalised to RAP-digits', /v_ref := 'RAP-' \|\| regexp_replace\(v_ref, '\[\^0-9\]', '', 'g'\);/.test(imp))
-  ok('...and only otherwise the account number', /else\s*\n[\s\S]*?where upper\(a\.account_number\) = v_ref;\s*\n\s*end if;/.test(imp))
+  const caseAt = imp.indexOf('where upper(a.case_number) = v_ref;')
+  const accountAt = imp.indexOf('where upper(a.account_number) = v_ref;')
+  ok('import_bank_lines matches the case number', caseAt > 0)
+  ok('...before the account number', accountAt > 0 && caseAt < accountAt)
+  ok('...and the account number only when no case number has it', /if v_ids is null then\s+select array_agg\(a\.id\) into v_ids\s+from public\.debtor_accounts a\s+where upper\(a\.account_number\) = v_ref;/.test(imp))
+  ok('...and nothing reads RAP- any more', !/RAP/.test(imp.replace(/--[^\n]*/g, '')))
 }
 
 console.log(`\ncheck-bank-statement: ${pass} passed, ${failures.length} failed`)

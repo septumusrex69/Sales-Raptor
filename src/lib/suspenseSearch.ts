@@ -57,7 +57,7 @@ export function suspenseMatches(row: SuspenseRow, q: SuspenseQuery): boolean {
     if (amount !== null && Math.round(amount * 100) === Math.round(row.amount * 100)) return true
     const lower = term.toLowerCase()
     if (hay.includes(lower)) return true
-    /* A reference typed without its spaces or dots ("RAP100001" for "RAP-100 001") still finds it. */
+    /* A reference typed without its spaces or dots ("DRC0001" for "DRC-0001") still finds it. */
     const bare = lower.replace(/[\s,.\-/]/g, '')
     return bare.length >= 3 && hayDigits.replace(/[-/]/g, '').includes(bare)
   })

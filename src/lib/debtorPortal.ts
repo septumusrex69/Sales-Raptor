@@ -30,16 +30,13 @@ export const DEBTOR_SESSION_DAYS = 7
  * spaces and dashes a debtor copies off an SMS are taken out, and what is left must be a code (a letter, then letters
  * or digits) ending in digits.
  *
- * AN OLD RAP- NUMBER STILL WORKS: notices already sent quote it, so "RAP-125318", "rap 125318" and a bare "125318"
- * come back as RAP-125318, which the portal looks up in legacy_case_number. Null rather than a guess.
+ * Null rather than a guess -- and bare digits are not a case number: every one starts with its client's code.
  */
 export function normaliseCaseNumber(typed: unknown): string | null {
   if (typeof typed !== 'string') return null
   const s = typed.trim().toUpperCase().replace(/[\s ._/-]+/g, '')
-  const old = /^(?:RAP)?(\d{4,9})$/.exec(s)
-  if (old) return `RAP-${old[1]}`
   /* A SLASH IS A CLIENT'S REFERENCE (ALIANNAPH/30182), never ours: Raptor's numbers are a code and digits, so a
-     typed slash keeps the old answer -- not a case number -- rather than being read through. */
+     typed slash is not a case number rather than being read through. */
   if (/\//.test(typed)) return null
   return /^[A-Z][A-Z0-9]{0,11}\d{3,}$/.test(s) && s.length <= 16 ? s : null
 }

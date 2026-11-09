@@ -34,7 +34,7 @@
 /**
  * Anything in a subject line shaped like a reference.
  *
- * LETTERS THEN DIGITS, which is what every reference in this business looks like: RAP-123829,
+ * LETTERS THEN DIGITS, which is what every reference in this business looks like: DRC0001,
  * VE0001, F20832, ABSTO-4. Returned uppercased and deduplicated, in the order they appear.
  *
  * THE DIGIT FLOOR IS THREE AND IT IS LOAD-BEARING. A subject line is full of things that are
@@ -52,8 +52,8 @@ export function referencesIn(subject: string | null | undefined): string[] {
   if (!subject) return []
   const out: string[] = []
   const seen = new Set<string>()
-  /* A separator is allowed between the letters and the digits because Raptor's own case numbers
-     carry one (RAP-123829) and some clients' do too (ABSTO/0041). */
+  /* A separator is allowed between the letters and the digits because people write one into a
+     case number (DRC-0001) and some clients' references carry one (ABSTO/0041). */
   for (const m of subject.matchAll(/\b[A-Za-z]{1,5}[-/]?\d{3,}\b/g)) {
     /* The whole match, as written, uppercased. Keeping the separator means the token reads back
        the way a person typed it; `normaliseReference` is what takes it out for comparing. */
@@ -69,7 +69,7 @@ export function referencesIn(subject: string | null | undefined): string[] {
 /**
  * The same token with any separator taken out, for comparing against what is stored.
  *
- * A person writes RAP-123829, RAP 123829 or rap123829 and means one account. The column holds one
+ * A person writes DRC-0001, DRC 0001 or drc0001 and means one account. The column holds one
  * spelling, so both sides are reduced to letters and digits before they are compared.
  */
 export function normaliseReference(token: string): string {
