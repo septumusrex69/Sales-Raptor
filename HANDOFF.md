@@ -71,8 +71,8 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
   played with a fake visualViewport; breaks seen failing by name). `check-recipient-suggest` and `check-reply-all`
   moved to the new text. Fast suite green (23 768 / 388), build clean, lint no new warnings; e2e mail 151,
   recipient-field 26, compose-send 12.
-- **Not pushed to the preview branch** -- S21's instructions allow its own branch only; fast-forward
-  `claude/sales-raptor-review-p1pzx2` (or open a pull request) when Stephan says.
+- **On the preview branch**: fast-forwarded onto `claude/sales-raptor-review-p1pzx2` (6bf5d15 -> ba53b7e) at Stephan's
+  word, 9 Nov.
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
