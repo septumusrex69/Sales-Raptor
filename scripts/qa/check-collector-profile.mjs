@@ -313,7 +313,8 @@ const daily_fn = sql.slice(sql.lastIndexOf('create or replace function public.co
 ok('a year of days comes back in one round trip', /returns table \(on_day date/.test(daily_fn))
 /* The firm's own day, not UTC: a payment at half past one in Johannesburg is still yesterday in
    UTC, and a daily total that disagrees with the bank statement is one nobody trusts again. */
-ok('...on the firm’s own day', /at time zone 'Africa\/Johannesburg'/.test(daily_fn))
+/* S20: payment_cycle_day() -- the Johannesburg day of the bank date, or a PTC's capture day. */
+ok('...on the firm’s own day', /public\.payment_cycle_day\(p\) as on_day/.test(daily_fn))
 ok('...excluding payments that bounced', /p\.reversed_at is null/.test(daily_fn))
 ok('...credited to whoever held the account that day', /order by dh\.effective_from desc/.test(daily_fn))
 ok('...and able to answer for the whole floor', /p_user is null or h\.user_id = p_user/.test(daily_fn))

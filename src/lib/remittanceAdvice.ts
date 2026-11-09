@@ -17,9 +17,11 @@
  *     never reached capital, which read as "we collected nothing for you" beside a real payment.
  *   - "Paid in full" appears only where the capital outstanding is nought. FileFish printed it
  *     beside R5 635.80 still owing, because it was reading a stored status.
- *   - A payment RECEIVED before the period started carries a note saying it was captured after the
- *     previous cut-off. FileFish showed 27 December and 9 January payments in the 11 January run
- *     with no explanation, which reads like a mistake and is not one.
+ *   - A LATE payment says why it is here (S20, Raptor H19): it belongs to an earlier cycle -- its bank date, or a
+ *     PTC's capture date -- and was approved after that cycle's run had gone, so the note reads "Late: received
+ *     20 Sep 2026, approved 12 Nov 2026". FileFish showed 27 December and 9 January payments in the 11 January run
+ *     with no explanation, which reads like a mistake and is not one. A payment simply received before the period
+ *     is no longer "late": since S20 a receipt belongs to its bank date's cycle, so it is on time where it is.
  *   - A reversal is a negative line and says what it is, rather than silently reducing a total.
  */
 import { paymentReference } from './paymentsOut.ts'
@@ -28,6 +30,8 @@ import { inRunningOrder } from './runOrder.ts'
 import { rand } from './money.js'
 import { buildXlsx, type Cell } from './xlsxWrite.js'
 import { clockNow } from './clock.js'
+import { lateLineNote } from './paymentDates.ts'
+import { firmDay } from './dateLabels.ts'
 
 export interface RemittanceFirm {
   name: string
@@ -96,6 +100,8 @@ export interface CollectionRow {
   capitalOutstanding: number
   reversal: boolean
   lateCapture: boolean
+  /** S20: "Late: received 20 Sep 2026, approved 12 Nov 2026", or null on a line in its own cycle. */
+  lateNote: string | null
   /** The line's VAT sentence, under the row (the firm, 10 Oct: "the VAT also needs to be there"). */
   vatLine: string
 }
@@ -169,6 +175,21 @@ export const ANNEXURE_B_FOOTNOTE =
   + 'on the handover amount.'
 
 /** "11 Nov 2024" — dates on a client document are written the way they are read aloud. */
+/** The late line's words on the advice, in the advice's own date format; null on a line in its own cycle. */
+export function lateOf(l: Pick<RunPayment, 'lateCapture' | 'paidToClient' | 'receivedAt' | 'capturedOn' | 'approvedOn'>
+  & Partial<Pick<RunPayment, 'correctionOf' | 'correctionFoundOn'>>): string | null {
+  /* A CORRECTION LINE SAYS WHAT IT CORRECTS (S20; the doc's "Correction to the 1 April payment"), dated the day it
+     was approved -- the payment it corrects went out on an advice the client already has. */
+  if (l.correctionOf) {
+    return `Correction to the payment of ${advDate(l.correctionOf)}`
+      + (l.correctionFoundOn ? ` (a payment of ${advDate(l.correctionFoundOn)} was found late)` : '')
+      + (l.approvedOn ? `, approved ${advDate(l.approvedOn)}` : '')
+  }
+  if (!l.lateCapture) return null
+  return lateLineNote({ paidToClient: l.paidToClient, receivedOn: l.receivedAt ? firmDay(l.receivedAt) : null,
+    capturedOn: l.capturedOn ?? null, approvedOn: l.approvedOn ?? null }, (d) => advDate(d))
+}
+
 export function advDate(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(`${iso.slice(0, 10)}T00:00:00`)
@@ -230,13 +251,15 @@ export function buildRemittanceAdvice(input: {
       status: advStatus(l),
       handedOver: advDate(l.handoverDate),
       handoverAmount: l.capitalHandedOver,
-      paid: advDate(l.receivedAt),
+      /* A correction has no payment day of its own: it is the difference on one already paid over (S20). */
+      paid: l.correctionOf ? '' : advDate(l.receivedAt ? firmDay(l.receivedAt) : null),
       capitalReceived: l.toCapital,
       commission: l.commission,
       vat: l.commissionVat,
       capitalOutstanding: l.capitalAfter,
       reversal: l.lineKind === 'reversal',
       lateCapture: l.lateCapture,
+      lateNote: lateOf(l),
       vatLine: vatLine(l, l.lineKind === 'reversal'),
     }))
 
@@ -247,7 +270,7 @@ export function buildRemittanceAdvice(input: {
       yourRef: l.clientReference ?? '',
       ourRef: l.caseNumber ?? '',
       debtor: l.debtor,
-      paid: advDate(l.receivedAt),
+      paid: advDate(l.receivedAt ? firmDay(l.receivedAt) : null),
       receivedByYou: l.paymentAmount,
       /* ONLY WHAT THIS PAYMENT RECOVERED, never what the account still owes. The firm's own
          wording in prompt 4: do not show other fees still outstanding on the account. */
@@ -265,7 +288,7 @@ export function buildRemittanceAdvice(input: {
       yourRef: l.clientReference ?? '',
       ourRef: l.caseNumber ?? '',
       debtor: l.debtor,
-      paid: advDate(l.receivedAt),
+      paid: advDate(l.receivedAt ? firmDay(l.receivedAt) : null),
       amount: l.excessCredit,
     }))
 
@@ -410,7 +433,7 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
         c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver,
         { n: c.handoverAmount }, c.paid, { n: c.capitalReceived }, { n: c.commission },
         { n: c.vat }, { n: c.capitalOutstanding }, c.vatLine,
-        [c.reversal ? 'reversal' : '', c.lateCapture ? 'captured after previous cut-off' : '']
+        [c.reversal ? 'reversal' : '', c.lateNote ?? '']
           .filter(Boolean).join(' · '),
       ])
     }

@@ -30,9 +30,9 @@ const handlers = [
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
   /* The three dates, read for the one payment when its button is tapped. */
-  [(u) => /\/rest\/v1\/account_payments\?.*select=received_at%2Ccreated_at/.test(u), () => ({ body: {
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?.*select=received_at%2Ccreated_at/.test(u), () => ({ body: {
     received_at: PAY.received_at, created_at: '2026-07-28T09:15:00Z', allocated_on: '2026-07-29', approved_at: PAY.approved_at, paid_to_client: true } })],
-  [(u) => /\/rest\/v1\/account_payments\?.*account_id=eq\./.test(u), () => ({ body: [PAY] })],
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?.*account_id=eq\./.test(u), () => ({ body: [PAY] })],
   [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACCOUNT], headers: { 'content-range': '0-0/1' } })],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
@@ -56,10 +56,10 @@ try {
   t.check('the dates are not on the row until asked for', await page.getByTestId('payment-dates-panel').count(), 0)
   await btn.click()
   const panel = page.getByTestId('payment-dates-panel')
-  await page.getByTestId('payment-date-processed').waitFor({ timeout: 5000 })
+  await page.getByTestId('payment-date-approved').waitFor({ timeout: 5000 })
   t.ok('one tap shows Paid as the debtor\'s day (3 Jul)', /03 Jul 2026/.test(await page.getByTestId('payment-date-paid').innerText()))
   t.ok('...Captured as the day it went into Raptor (28 Jul)', /28 Jul 2026/.test(await page.getByTestId('payment-date-captured').innerText()))
-  t.ok('...and Processed as the day it was approved (29 Jul)', /29 Jul 2026/.test(await page.getByTestId('payment-date-processed').innerText()))
+  t.ok('...and Approved as the day it was approved (29 Jul)', /29 Jul 2026/.test(await page.getByTestId('payment-date-approved').innerText()))
   t.check('...and says it was captured late', await panel.getByTestId('payment-captured-late').count(), 1)
   await page.mouse.click(5, 5)
   t.check('a tap elsewhere closes it', await page.getByTestId('payment-dates-panel').count(), 0)

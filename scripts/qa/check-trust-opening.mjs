@@ -58,7 +58,7 @@ ok('...and come together or not at all',
 const setter = liveFn('set_trust_opening_balance')
 ok('the setter was found', setter.length > 200)
 ok('Administrator with the trust tick only',
-  /if not public\.has_capability\('finance\.view'\) or public\.current_user_role\(\) <> 'Administrator' then\s*raise exception/.test(setter))
+  /if not public\.has_capability\('finance\.view'\) or public\.current_user_role\(\) is distinct from 'Administrator' then\s*raise exception/.test(setter))
 ok('...never in the future, on the firm\'s clock',
   /if p_as_at > public\.raptor_today\(\) then\s*raise exception/.test(setter))
 ok('...with a reason of a sentence', /length\(v_reason\) < 10 then\s*raise exception/.test(setter))

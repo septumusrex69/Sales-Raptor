@@ -377,9 +377,9 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
       statusCol: 3,
       /* THE PER-LINE VAT SENTENCE, under each collection (the firm, 10 Oct: "the VAT also needs to
          be there"). The figures are the row's own, so the sentence and the columns cannot differ. */
-      subLines: adv.collections.map((c) => c.vatLine),
+      subLines: adv.collections.map((c) => (c.lateNote ? `${c.vatLine} · ${c.lateNote}` : c.vatLine)),
       footnotes: [
-        `${late ? '* Captured after the previous cut-off. ' : ''}Handover amount refers to the original account balance.`,
+        `${late ? '* Late: from an earlier cycle, approved after that cycle\u2019s payover had gone. ' : ''}Handover amount refers to the original account balance.`,
       ],
     })
   }

@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
+import { canViewFinance } from '../../lib/permissions'
 import { useAppStore } from '../../store/AppStore'
 import { supabase } from '../../lib/supabase'
 import { parseCsv, type CsvRow } from '../../lib/csv'
@@ -267,6 +268,14 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
     const STOPPED = 'You stopped the import.'
     const rows = planRows(plan)
     const totalRows = IMPORT_TABLES.reduce((t, k) => t + rows[k].length, 0)
+    /* S20 review: receipts are trust money, so the database takes them only from an Administrator with
+       the trust account (account_payments_insert), and taking an import back out needs the same.
+       Said here, before anything is written, rather than as a refused insert half-way through. */
+    if (rows.account_payments.length > 0 && !canViewFinance(currentUser)) {
+      setError('This import carries receipts, and only an Administrator with the trust account can bring '
+        + 'receipts in. Ask one to run it, or have the trust account ticked for you. Nothing was changed.')
+      return
+    }
     try {
       /*
        * Before deleting anything, prove the destination can actually receive the import. A
@@ -375,7 +384,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
     } finally {
       setPhase(null); setStoppable(false); setStopping(false)
     }
-  }, [plan, wipe, refreshSyncedData])
+  }, [plan, wipe, refreshSyncedData, currentUser])
 
   /*
    * TWO TABS, NOT TWO HEADINGS, at the firm's correction -- drawn on the screenshot as a pair of

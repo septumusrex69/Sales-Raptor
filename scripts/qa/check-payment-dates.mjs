@@ -124,11 +124,11 @@ ok('...and re-reads the plan when it changes',
 
 const build = fn('build_payover_run')
 ok('the run function was found', build.length > 2000)
-ok('a run claims on the allocation date', /and \(p\.allocated_on >= p_period_start/.test(build))
+/* S20 (Stephan, 8 Nov): on the payment's CYCLE DAY -- bank date, or a PTC's capture date -- through payover_run_takes. */
+ok('a run claims on the payment\'s cycle day', /public\.payover_run_takes\(p_company, p_period_start, a\.paid_to_client, public\.payment_cycle_day\(p\)\) is not null/.test(build))
 /* Trust money by its own cycle; a PTC by the day before the run's payover date (10 Oct: a PTC
    rides the next payover -- check-ptc-next-payover). */
-ok('...bounded by the cycle it is for',
-  /and p\.allocated_on <= case when a\.paid_to_client\s+then public\.payover_ptc_until\(v_end\) else v_end end/.test(build))
+ok('...and never on the approval date', !/p\.allocated_on/.test(build))
 /*
  * AND NOT ON created_at ANY MORE. Left in beside the new clause it would be an AND that quietly
  * excluded everything imported, which reads as "the run is empty" rather than as a bug.
@@ -166,7 +166,7 @@ ok('...with the refusal before it', refusalAt > 0 && refusalAt < splitAt)
 
 const move = fn('move_payment_to_cycle')
 ok('moving a payment between cycles was found', move.length > 800)
-ok('...moves the allocation date', /set allocated_on = v_at::date/.test(move))
+ok('...moves its own staging column, not the approval date (S20)', /set cycle_test_on = v_at::date/.test(move) && !/set allocated_on/.test(move))
 /*
  * AND NOT created_at. It was honest about doing so, because created_at was what the run claimed on
  * -- but it is the audit trail, and a testing control that edits the audit trail leaves no way to

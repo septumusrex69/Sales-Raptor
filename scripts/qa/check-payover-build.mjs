@@ -141,9 +141,13 @@ no('schema.sql never declares a database to be staging',
  * check-silent-triggers records at length: with no session current_user_role() is NULL, `null <>
  * 'Administrator'` is NULL, and `if NULL then` does not run.
  */
+/* S20: BOTH CHANGED. reset_payover_run throws away a run, which is undoing an approval -- payover.approve with
+   finance, in the same safe `not (...)` form. move_payment_to_cycle is a staging tool, not a receipt moving
+   between debtors, so it no longer borrows payment.move (whose label is "Move a receipt to another debtor"):
+   finance.view plus the staging lock below. */
 const GATES = {
-  reset_payover_run: /current_user_role\(\) is distinct from 'Administrator'/,
-  move_payment_to_cycle: /not public\.has_capability\('payment\.move'\)/,
+  reset_payover_run: /not \(public\.has_capability\('finance\.view'\) and public\.has_capability\('payover\.approve'\)\)/,
+  move_payment_to_cycle: /not public\.has_capability\('finance\.view'\)/,
 }
 for (const [name, body] of [['reset_payover_run', reset], ['move_payment_to_cycle', move]]) {
   ok(`${name} is gated`, GATES[name].test(body ?? ''))
@@ -182,8 +186,15 @@ ok('...and asks the database whether this is staging as well',
   /if public\.is_staging_database\(\)\s*\n\s*and coalesce\(current_setting\('raptor\.reset_run'/.test(guard ?? ''))
 ok('...and reset_payover_run is the only thing that sets it',
   /perform set_config\('raptor\.reset_run', p_run::text, true\);/.test(reset ?? ''))
-check('...which it does exactly once, in that one function',
-  (sql.match(/set_config\('raptor\.reset_run'/g) ?? []).length, 1)
+/* Every definition of it in the append-only file is reset_payover_run's own (S20 mirrored a second copy). */
+const resetSets = [...sql.matchAll(/set_config\('raptor\.reset_run'/g)].map((m) => {
+  const before = sql.slice(0, m.index)
+  const fn = /create (?:or replace )?function public\.(\w+)\(/gi
+  let last = ''; let f
+  while ((f = fn.exec(before))) last = f[1]
+  return last
+})
+check('...which it does in that one function only', resetSets.length > 0 && resetSets.every((n) => n === 'reset_payover_run'), true)
 
 /* ---------------- the trap that fails quietly ---------------- */
 
@@ -200,8 +211,7 @@ check('...which it does exactly once, in that one function',
  * the 5th of September, it missed the first payment run in which it was supposed to be. So it
  * should be running in the payment run."
  */
-ok('a run claims a cycle by the date the payment was allocated',
-  /and p\.allocated_on <= case when a\.paid_to_client\s+then public\.payover_ptc_until\(v_end\) else v_end end\s*\n\s*and \(p\.allocated_on >= p_period_start/.test(build ?? ''))
+ok('a run claims a cycle by the payment\'s cycle day (S20: bank date, or a PTC\'s capture date)', /public\.payover_run_takes\(p_company, p_period_start, a\.paid_to_client, public\.payment_cycle_day\(p\)\) is not null/.test(build ?? ''))
 no('...not by the date somebody typed on it',
   /received_at >= p_period_start/.test(build ?? ''))
 no('...and not by when the row happened to be written',
@@ -209,8 +219,8 @@ no('...and not by when the row happened to be written',
 /* MONEY SWORDFISH ALREADY REMITTED IS NEVER CLAIMED, which is the other half of the same fix. */
 ok('...and never money Swordfish already paid over',
   /and not p\.paid_over_in_swordfish/.test(build ?? ''))
-ok('moving a payment moves that, which is the only thing that works',
-  /update public\.account_payments set allocated_on = v_at::date where id = p_payment/.test(move ?? ''))
+ok('moving a payment moves its staging cycle column, which is the only thing that works',
+  /update public\.account_payments set cycle_test_on = v_at::date where id = p_payment/.test(move ?? ''))
 /* AND LEAVES created_at ALONE. It is the audit trail; a testing control that edits it leaves no
    way to tell a moved receipt from one captured that day. */
 no('...without editing the audit trail',
@@ -264,7 +274,7 @@ const refresh = liveBody('refresh_payover_runs') ?? ''
 ok('refresh builds this cycle and the last', /foreach v_cycle in array array\[v_last, v_open\]/.test(refresh))
 ok('...never touching an approved, sent, paid or voided run',
   /and not public\.payover_run_is_open\(status\)\) then\s+continue;/.test(refresh))
-ok('...and is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(refresh))
+ok('...and is finance\'s (S20: the capability, not the role)', /not public\.has_capability\('finance\.view'\)/.test(refresh))
 const approveRun = liveBody('approve_payover_run') ?? ''
 ok('a run cannot be approved before its cycle has closed without a reason -- on staging too',
   /if v_end >= public\.raptor_today\(\) and nullif\(btrim\(coalesce\(v_early, ''\)\), ''\) is null then\s+raise exception/.test(approveRun)
@@ -274,9 +284,12 @@ ok('approving early demands a real reason and keeps who gave it',
   /length\(btrim\(coalesce\(p_reason, ''\)\)\) < 10/.test(early) && /early_by = auth\.uid\(\)/.test(early)
   && /perform public\.approve_payover_run\(p_run\)/.test(early))
 const buildLive = liveBody('build_payover_run') ?? ''
-ok('money processed after an early approval rides the next run, not none',
-  /or exists \(select 1 from public\.payover_runs e\s+where e\.company_id = p_company\s+and e\.status in \('approved', 'sent', 'paid'\)\s+and p\.allocated_on between e\.period_start\s+and case when a\.paid_to_client\s+then public\.payover_ptc_until\(e\.period_end\) else e\.period_end end\)/.test(buildLive))
-ok('...and refresh looks for it', /p\.allocated_on between e\.period_start\s+and case when a\.paid_to_client\s+then public\.payover_ptc_until\(e\.period_end\) else e\.period_end end/.test(refresh))
+/* S20: money approved after its cycle's run had gone rides the NEXT OPEN run as a late line -- payover_run_takes. */
+const takesLive = liveBody('payover_run_takes') ?? ''
+ok('money approved after its cycle\'s run went rides the next open run, not none',
+  /o\.status in \('approved', 'sent', 'paid'\)/.test(takesLive) && /then 'late'/.test(takesLive)
+  && /= 'late' as is_late/.test(buildLive))
+ok('...and refresh looks for it', /public\.payover_run_takes\(d\.company_id, v_cycle, a\.paid_to_client, public\.payment_cycle_day\(p\)\)/.test(refresh))
 ok('...opening a box that asks which cycle', /function BuildRunModal\(/.test(queue))
 ok('...defaulting to the one running now', /useState\(cycle\.periodStart\)/.test(queue))
 /* FORWARD AS WELL AS BACK, which is not a mistake: nothing waits for a period to end, and

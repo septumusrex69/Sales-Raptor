@@ -371,8 +371,8 @@ ok('the audit list also reads what the account itself adds up to',
   && posted.includes('payments_banked'))
 /* AND IT IS THE ADMINISTRATOR'S ALONE. This is security definer, so the guard has to be in the
    query -- row-level security does not apply to it. */
-ok('the audit list is Administrator only',
-  /public\.current_user_role\(\) = 'Administrator'/.test(posted))
+ok('the audit list is finance\'s only (S20: the capability, not the Administrator role)',
+  /public\.has_capability\('finance\.view'\)/.test(posted) && !/current_user_role\(\) = 'Administrator'/.test(posted))
 
 /* ================================================================== AND THE SCREENS
  *
@@ -450,8 +450,9 @@ ok('...and keeps no copy of its own',
     (tbody.match(/<td\b/g) ?? []).length + (tbody.match(/<Td\b/g) ?? []).length, cols)
 }
 for (const [name, screen, fixedExpected] of [
-  /* Fifteen since prompt 11: Reverse sits on the row, beside the amount. */
-  ['the check screen', checkScreen, 15],
+  /* Fifteen since prompt 11: Reverse sits on the row, beside the amount. Seventeen since S20: Captured and
+     Approved beside Received. */
+  ['the check screen', checkScreen, 17],
 ]) {
   ok(`${name} draws the shared sections`,
     /FeeHeadCells opened=/.test(screen) && /FeeBodyCells a=/.test(screen))

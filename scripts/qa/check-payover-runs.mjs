@@ -103,8 +103,9 @@ ok('...and ends the day before the next one', /period_end = \(period_start \+ in
  * run in which it was supposed to be. So it should be running in the payment run."
  */
 for (const [name, body] of Object.entries({ build, close })) {
-  ok(`${name} selects by the date the payment was allocated`,
-    /p\.allocated_on >=/.test(body) && /p\.allocated_on <=/.test(body))
+  /* S20: by the payment's CYCLE DAY (bank date / PTC capture date) through payover_run_takes, not allocated_on. */
+  ok(`${name} selects by the payment's cycle day`,
+    /public\.payover_run_takes\([^)]*public\.payment_cycle_day\(p\)\) is not null/.test(body) && !/p\.allocated_on/.test(body))
   ok(`...and never money Swordfish already paid over`, /not p\.paid_over_in_swordfish/.test(body))
   check(`...and never by when it was received`, (body.match(/p\.received_at/g) ?? []), [])
   check(`...nor by when the row happened to be written`, (body.match(/p\.created_at/g) ?? []), [])

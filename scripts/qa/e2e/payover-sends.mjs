@@ -246,7 +246,7 @@ try {
   const emptyHead = (await groups.first().innerText()).split(String.fromCharCode(0xa0)).join(' ')
   t.ok('an empty open cycle still shows its band and when it pays',
     /^Collecting[\s\S]*11 Sep 2026 – 10 Oct 2026[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(emptyHead))
-  t.ok('...and says why it is empty', (await page.getByText('Nothing processed in this cycle yet').count()) === 1)
+  t.ok('...and says why it is empty', (await page.getByText('Nothing approved for this cycle yet').count()) === 1)
   queue = QUEUE
 
   /* ---- APPROVING BEFORE THE CYCLE CLOSES, WITH A REASON (the firm, 8 Oct) ---- */

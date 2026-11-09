@@ -116,7 +116,7 @@ export async function fetchLedgerRows(client: BalanceClient, accountIds: readonl
   const ids = [...new Set(accountIds)]
   if (ids.length === 0) return new Map()
   const [payments, fees, accruals, moneyOut] = await Promise.all([
-    fetchAllRows(() => client.from('account_payments').select(LEDGER_SELECT.payments).in('account_id', ids).order('id'), { table: 'payments' }),
+    fetchAllRows(() => client.from('account_payment_lines').select(LEDGER_SELECT.payments).in('account_id', ids).order('id'), { table: 'payments' }),
     fetchAllRows(() => client.from('account_fees').select(LEDGER_SELECT.fees).in('account_id', ids).order('id'), { table: 'fees' }),
     fetchAllRows(() => client.from('account_interest_accruals').select(LEDGER_SELECT.accruals).in('account_id', ids).order('id'), { table: 'interest' }),
     fetchMoneyOut(client, ids),

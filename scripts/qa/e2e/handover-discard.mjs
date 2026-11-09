@@ -51,7 +51,7 @@ try {
       body: [], headers: { 'content-range': '0-15/16' },
     })],
     /* Nothing has happened on them, so nothing refuses the discard. */
-    [(u) => /\/rest\/v1\/(account_payments|promises_to_pay|account_documents|payover_run_lines)/.test(u),
+    [(u) => /\/rest\/v1\/(account_payments|account_payment_lines|promises_to_pay|account_documents|payover_run_lines)/.test(u),
       () => ({ body: [], headers: { 'content-range': '*/0' } })],
   ], [])
   await page.setViewportSize({ width: 1180, height: 1250 })

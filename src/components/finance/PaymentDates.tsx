@@ -5,7 +5,7 @@ import { formatDate } from '../../data/mockData'
 import { capturedLate, paymentDates, type PaymentDate } from '../../lib/paymentDates'
 
 /**
- * PAID · CAPTURED · PROCESSED, ONE TAP AWAY (S19; Stephan, 7 Nov: "it doesn't need to be in your face, like taking up
+ * PAID · CAPTURED · APPROVED, ONE TAP AWAY (S19; Stephan, 7 Nov: "it doesn't need to be in your face, like taking up
  * a lot of space in important places. We can just access this information somewhere ... an easy, close place").
  *
  * A small calendar button beside a payment's date; a TAP opens the three dates under it -- a tap rather than a
@@ -22,8 +22,8 @@ export function PaymentDates({ paymentId }: { paymentId: string }) {
   useEffect(() => {
     if (!open || dates) return
     let live = true
-    void supabase.from('account_payments')
-      .select('received_at, created_at, allocated_on, approved_at, paid_to_client')
+    void supabase.from('account_payment_lines')
+      .select('received_at, created_at, captured_on, allocated_on, approved_at, paid_to_client')
       .eq('id', paymentId).maybeSingle()
       .then(({ data, error: e }) => {
         if (!live) return
@@ -44,7 +44,7 @@ export function PaymentDates({ paymentId }: { paymentId: string }) {
   return (
     <span ref={box} className="relative inline-flex align-middle">
       <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
-        aria-expanded={open} aria-label="Paid, captured and processed dates" title="Paid, captured and processed"
+        aria-expanded={open} aria-label="Paid, captured and approved dates" title="Paid, captured and approved"
         data-testid="payment-dates"
         className={`ml-1 rounded p-0.5 ${open ? 'text-slate-700 bg-slate-100' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'}`}>
         <CalendarClock size={13} />
@@ -58,7 +58,11 @@ export function PaymentDates({ paymentId }: { paymentId: string }) {
                 <>
                   {dates.map((d) => (
                     <span key={d.label} className="flex items-baseline justify-between gap-3 py-0.5" data-testid={`payment-date-${d.label.toLowerCase()}`}>
-                      <span className="text-slate-500">{d.label}</span>
+                      <span className="text-slate-500">
+                        {d.label}
+                        {/* S20: the date that puts it in a payover cycle, said where the dates are. */}
+                        {d.decidesCycle && <span className="ml-1 text-[10.5px] text-slate-400" data-testid="payment-date-cycle">· cycle</span>}
+                      </span>
                       <span className={`tabular-nums font-medium ${d.day ? 'text-slate-800' : 'text-slate-400'}`} title={d.note}>
                         {d.day ? formatDate(d.day) : 'Not yet'}
                       </span>

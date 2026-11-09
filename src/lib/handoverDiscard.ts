@@ -71,7 +71,9 @@ export async function discardBlockers(accountIds: string[]): Promise<string[]> {
     return n ?? 0
   }
   const [payments, promises, documents, paid] = await Promise.all([
-    count('account_payments'),
+    /* The VIEW (S20): the table is finance.view only, and an Administrator without finance counting nought
+       here would discard accounts that hold money. */
+    count('account_payment_lines'),
     count('promises_to_pay'),
     count('account_documents'),
     /* ON A REMITTANCE RUN is the hardest refusal of the four: the client has been invoiced on it.

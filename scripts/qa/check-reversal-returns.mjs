@@ -186,7 +186,10 @@ ok('the reverse box says where the money goes', /waits\s+on Payments in as/.test
 
 const move = liveFn('set_payment_account')
 ok('an unapproved receipt can be put on the right debtor', move !== null)
-ok('...by somebody who may approve payments', /if not public\.may_approve_payment\(\) then/.test(move ?? ''))
+/* S20: by payment.move, the tick labelled "Move a receipt to another debtor" -- it asked payment.approve, so the
+   tick on the settings screen decided nothing. */
+ok('...by somebody who may move a receipt (payment.move)', /if not public\.has_capability\('payment\.move'\) then/.test(move ?? ''))
+ok('...and no longer by the approve tick', !/may_approve_payment\(\)/.test(move ?? ''))
 /*
  * THE TWO REFUSALS ARE WHAT MAKE THIS NOT AN EDIT TO A FINANCIAL RECORD. An unapproved payment has
  * nothing split, no fee raised and no remittance run against it. The moment it is approved this

@@ -13,7 +13,8 @@ import {
   releaseRunEarly,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
-import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
+import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice, lateOf } from '../../lib/remittanceAdvice'
+import { firmDay } from '../../lib/dateLabels'
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
@@ -21,7 +22,7 @@ import { MarkPaidModal } from './MarkPaidModal'
 import { useBackLink, useRecordName } from '../../lib/backLink'
 import { fetchAdviceSends, adviceCopyName, adviceCopyUrl, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
 import { fetchClientPaymentsForRun, recordClientPayment } from '../../lib/clientStatement'
-import { canReversePayment, canViewBusiness, canViewFinance } from '../../lib/permissions'
+import { canApprovePayover, canMarkPaidOut, canReversePayment, canViewBusiness, canViewFinance } from '../../lib/permissions'
 import { ReversePaymentModal } from '../../components/finance/ReversePaymentModal'
 import { useAuth } from '../../store/AuthContext'
 import { clockToday } from '../../lib/clock.ts'
@@ -109,6 +110,10 @@ export function RunDetail() {
   const [reversing, setReversing] = useState<string | null>(null)
   const { currentUser } = useAuth()
   const mayReverse = canReversePayment(currentUser)
+  /* S20: the run's presses are ticks of their own -- payover.approve (approve, early, release, issue the advice) and
+     payover.pay (mark paid) -- each with finance, as the database asks. */
+  const mayApprove = canApprovePayover(currentUser)
+  const mayPay = canMarkPaidOut(currentUser)
   /* The payout lag from Trust settings, to say which day this run pays on. */
   const [lag, setLag] = useState(1)
   const [emailModal, setEmailModal] = useState(false)
@@ -251,7 +256,7 @@ export function RunDetail() {
             </span>
             {/* APPROVED ON THE PAYOUT DAY (the firm, 11 Oct): before it -- cycle open or closed -- only
                 with a reason, which also releases the advice and the payment. */}
-            {run.status === 'ready' && !beforeDay && (
+            {mayApprove && run.status === 'ready' && !beforeDay && (
               <button type="button" disabled={busy} onClick={() => void act(() => approveRun(run.id))}
                 className="rounded-lg bg-navy-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
                 Approve
@@ -263,7 +268,7 @@ export function RunDetail() {
                 Approved on {fmtDay(paysOn)}
               </span>
             )}
-            {run.status === 'ready' && beforeDay && (
+            {mayApprove && run.status === 'ready' && beforeDay && (
               <button type="button" disabled={busy} onClick={() => setEarlyModal(true)}
                 className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-[13px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50">
                 Approve early…
@@ -278,20 +283,20 @@ export function RunDetail() {
                 <span className="text-[12.5px] text-slate-500" data-testid="run-scheduled">
                   Advice and payment on {fmtDay(paysOn)}
                 </span>
-                <button type="button" disabled={busy} onClick={() => setReleaseModal(true)}
+                {mayApprove && <button type="button" disabled={busy} onClick={() => setReleaseModal(true)}
                   className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-[13px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50">
                   Release early…
-                </button>
+                </button>}
               </>
             )}
-            {run.status === 'approved' && !scheduled && (
+            {mayApprove && run.status === 'approved' && !scheduled && (
               <button type="button" disabled={busy || !advice} onClick={() => setEmailModal(true)}
                 className="rounded-lg bg-navy-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
                 Email advice
               </button>
             )}
             {/* A revision goes BESIDE what was sent, never over it (the firm, 8 Oct). */}
-            {(run.status === 'sent' || run.status === 'paid') && (
+            {mayApprove && (run.status === 'sent' || run.status === 'paid') && (
               <button type="button" disabled={busy || !advice} onClick={() => setEmailModal(true)}
                 className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                 Send again
@@ -307,7 +312,7 @@ export function RunDetail() {
                 Nothing to pay: comes off their next payover
               </span>
             )}
-            {(run.status === 'approved' || run.status === 'sent') && !scheduled && !statementOnly && run.net_payover >= 0 && (
+            {mayPay && (run.status === 'approved' || run.status === 'sent') && !scheduled && !statementOnly && run.net_payover >= 0 && (
               <button type="button" disabled={busy} onClick={() => setPayModal(true)}
                 className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                 Mark paid
@@ -413,7 +418,11 @@ export function RunDetail() {
           <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-left text-slate-400">
+                {/* THE THREE DATES (S20; Stephan: "show the dates"): paid / received, captured, approved. The one that
+                    put the payment in this cycle is a trust receipt's Paid (its bank date) and a PTC's Captured. */}
                 <th className="px-3 py-2 font-medium">Paid</th>
+                <th className="px-2 py-2 font-medium">Captured</th>
+                <th className="px-2 py-2 font-medium">Approved</th>
                 <th className="px-2 py-2 font-medium">Account</th>
                 <th className="px-2 py-2 font-medium">Debtor</th>
                 <th className="px-2 py-2 font-medium">Your ref</th>
@@ -430,7 +439,9 @@ export function RunDetail() {
                 <tr key={r.lineId} onClick={() => setOpen(r)}
                   className={clsx('cursor-pointer border-b border-slate-50 hover:bg-slate-50',
                     r.lineKind === 'reversal' ? 'text-negative-700' : 'text-slate-700')}>
-                  <td className="px-3 py-2 text-slate-500">{r.receivedAt ? fmtDay(r.receivedAt.slice(0, 10)) : '\u2014'}</td>
+                  <td className="px-3 py-2 text-slate-500" data-testid="run-line-paid">{r.receivedAt ? fmtDay(firmDay(r.receivedAt)) : '\u2014'}</td>
+                  <td className="px-2 py-2 text-slate-500" data-testid="run-line-captured">{r.capturedOn ? fmtDay(r.capturedOn) : '\u2014'}</td>
+                  <td className="px-2 py-2 text-slate-500" data-testid="run-line-approved">{r.approvedOn ? fmtDay(r.approvedOn) : '\u2014'}</td>
                   <td className="px-2 py-2 text-slate-500">{r.caseNumber ?? ''}</td>
                   <td className="px-2 py-2 font-medium max-w-[16rem] truncate" title={r.debtor ?? undefined}>
                     {r.lineKind === 'carried' ? 'Brought forward' : r.debtor}
@@ -439,7 +450,7 @@ export function RunDetail() {
                   <td className="px-2 py-2 text-slate-500">
                     {[r.lineKind === 'ptc' && 'paid you directly',
                       r.lineKind === 'reversal' && 'reversed after the last run',
-                      r.lateCapture && 'captured after the previous cut-off'].filter(Boolean).join(' \u00b7 ')}
+                      lateOf(r)].filter(Boolean).join(' \u00b7 ')}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums">
                     {r.lineKind === 'carried' ? rand(r.carriedAmount) : rand(r.toCapital)}
@@ -464,7 +475,7 @@ export function RunDetail() {
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={mayReverse ? 10 : 9} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
+                <tr><td colSpan={mayReverse ? 12 : 11} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
               )}
             </tbody>
           </table>

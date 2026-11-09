@@ -42,14 +42,18 @@ ok('build_payover_run is found', build.length > 1000)
 ok('refresh_payover_runs is found', refresh.length > 500)
 
 const PTC_WINDOW = 'p.allocated_on <= case when a.paid_to_client then public.payover_ptc_until(v_end) else v_end end'
-ok('a run claims a PTC up to the day before ITS payover date, trust money to its own cycle end', build.includes(PTC_WINDOW))
-ok('...and the refresh finds the client on the same window, or no run is built for it', refresh.includes(PTC_WINDOW))
-ok('a PTC late for an approved run is judged on that run\'s PTC window too',
-  build.includes('and case when a.paid_to_client then public.payover_ptc_until(e.period_end) else e.period_end end'))
+/* S20: THE WINDOW MOVED INTO payover_run_takes(), which build, refresh and close all ask -- so they cannot
+   disagree -- and the day it is measured on is payment_cycle_day() (a PTC's capture day), not allocated_on. */
+const takes = last('payover_run_takes')
+ok('a run claims a PTC up to the day before ITS payover date, trust money to its own cycle end',
+  takes.includes('p_day <= case when coalesce(p_paid_to_client, false) then public.payover_ptc_until(public.payover_cycle_end(p_period_start)) else public.payover_cycle_end(p_period_start) end')
+  && build.includes('public.payover_run_takes(p_company, p_period_start, a.paid_to_client, public.payment_cycle_day(p)) is not null'))
+ok('...and the refresh finds the client on the same rule, or no run is built for it',
+  refresh.includes('public.payover_run_takes(d.company_id, v_cycle, a.paid_to_client, public.payment_cycle_day(p)) is not null'))
 ok('a later run leaves a PTC an earlier OPEN run is due to carry',
-  /and not \(a\.paid_to_client and exists \( select 1 from public\.payover_runs e where e\.company_id = p_company and e\.period_start < p_period_start and public\.payover_run_is_open\(e\.status\) and p\.allocated_on <= public\.payover_ptc_until\(e\.period_end\)\)\)/.test(build))
-ok('an earlier run takes back a PTC a later open run took',
-  /with freed as \( update public\.payment_allocations a set payover_run_id = null .*l\.period_start > p_period_start and public\.payover_run_is_open\(l\.status\) and a\.paid_to_client/.test(build))
+  /and not \(coalesce\(p_paid_to_client, false\) and exists \( select 1 from public\.payover_runs e where e\.company_id = p_company and e\.period_start < p_period_start and public\.payover_run_is_open\(e\.status\) and p_day <= public\.payover_ptc_until\(e\.period_end\)\)\)/.test(takes))
+ok('an earlier run takes back what a later open run took that it would take itself (a PTC, or since S20 a late line)',
+  /with freed as \( update public\.payment_allocations a set payover_run_id = null .*l\.period_start > p_period_start and public\.payover_run_is_open\(l\.status\) and public\.payover_run_takes\(p_company, p_period_start, a\.paid_to_client, public\.payment_cycle_day\(p\)\) is not null/.test(build))
 ok('...and the later run\'s figures are redone', /perform public\.recompute_payover_run\(x\) from unnest\(v_later\)/.test(build))
 const freed = build.indexOf('with freed as')
 const claimed = build.indexOf('with claimed as')

@@ -55,10 +55,10 @@ const record = (u, req) => { calls.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...(req
 
 /* What the Reverse box reads about the payment, by id, whichever screen opened it. */
 const targetHandlers = [
-  [(u) => /\/rest\/v1\/account_payments\?(.*&)?id=eq\./.test(u), () => ({ body: {
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?(.*&)?id=eq\./.test(u), () => ({ body: {
     id: PAY_ID, account_id: ACCOUNT.id, amount: 3500, received_at: '2026-06-15T00:00:00+02:00', paid_to_client: false,
     bank_line_id: 'line-1', paid_over_in_swordfish: false, approved_at: '2026-06-16T08:00:00Z', reversed_at: null } })],
-  [(u) => /\/rest\/v1\/account_payments\?.*account_id=eq\./.test(u), () => ({ body: [{
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?.*account_id=eq\./.test(u), () => ({ body: [{
     id: PAY_ID, received_at: '2026-06-15T00:00:00+02:00', amount: 3500, paid_to_client: false, reference: 'KLR1005',
     approved_at: '2026-06-16T08:00:00Z', reversed_at: null, reversal_reason: null, paid_over_in_swordfish: false,
     rejected_at: null, is_demo: false }] })],

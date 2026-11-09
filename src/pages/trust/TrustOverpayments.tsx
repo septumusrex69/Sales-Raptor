@@ -13,6 +13,8 @@ import { shortDate } from '../../lib/trustCycles'
 import { clockNowMs, clockToday } from '../../lib/clock.ts'
 import type { PaidOut, PaymentToMake } from '../../lib/paymentsOut'
 import { MarkPaidBox, type Paying } from './TrustPaymentsOut'
+import { useAuth } from '../../store/AuthContext'
+import { canMarkPaidOut } from '../../lib/permissions'
 
 /**
  * OVERPAYMENTS, IN ONE PLACE (the firm, 11 Oct: "perhaps we should have a separate section for like
@@ -44,6 +46,8 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function TrustOverpayments({ embedded = false }: { embedded?: boolean } = {}) {
   const [params, setParams] = useSearchParams()
+  /* S20: marking a refund paid is payover.pay. */
+  const mayPay = canMarkPaidOut(useAuth().currentUser)
   const tab: Tab = (TABS.find((t) => t.id === params.get('tab'))?.id) ?? 'decide'
   const [undecided, setUndecided] = useState<ExceptionJob[]>([])
   const [toRefund, setToRefund] = useState<PaymentToMake[]>([])
@@ -169,8 +173,8 @@ export function TrustOverpayments({ embedded = false }: { embedded?: boolean } =
                       <td className="px-2 py-1.5 font-mono text-[12.5px] text-slate-700">{p.reference ?? '—'}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-800">{rand(p.amount)}</td>
                       <td className="px-3 py-1.5 text-right">
-                        {statementOnly ? (
-                          <span className="text-[11.5px] text-slate-400">Paid from the statement</span>
+                        {statementOnly || !mayPay ? (
+                          <span className="text-[11.5px] text-slate-400">{statementOnly ? 'Paid from the statement' : 'Marked paid by finance'}</span>
                         ) : (
                           <button type="button" data-testid="overpay-mark-paid"
                             onClick={() => setPaying({ kind: 'refund', id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}

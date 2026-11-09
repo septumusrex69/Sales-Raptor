@@ -470,6 +470,22 @@ export function canReversePayment(user: Pick<User, 'role' | 'grants' | 'revokes'
 }
 
 /**
+ * THE PAYOVER RUN'S PRESSES (S20) -- the browser's copies of the database's guards, so a button is drawn only where
+ * the database will honour it. Each asks finance.view as well, as approve_payover_run / mark_payover_run_paid do:
+ * an Administrator with finance revoked keeps the template's payover ticks and still may not use them.
+ */
+export function canApprovePayover(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view') && can(user, 'payover.approve')
+}
+export function canMarkPaidOut(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view') && can(user, 'payover.pay')
+}
+/** Moving an unapproved receipt to another debtor (set_payment_account): payment.move, as its label says. */
+export function canMoveReceipt(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'payment.move')
+}
+
+/**
  * WHO MAY RECORD THAT A CLIENT ACCEPTED A SETTLEMENT -- the client liaisons and the Administrator,
  * at the firm's ruling. approve_settlement asks the same tick, so a button drawn here is never
  * refused there.

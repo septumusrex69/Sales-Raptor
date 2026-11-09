@@ -411,7 +411,8 @@ ok('overrides are read as in force on the day the line counts',
 ok('the client\'s rate is the one stamped on the receipt first', /coalesce\(al\.commission_rate, public\.account_commission_rate\(p\.account_id\)\)/.test(lines))
 
 /* WHAT COUNTS AS COLLECTED: one predicate, three readers, so the floor and pay cannot disagree. */
-const COLLECTED = "p.source <> 'moved' and p.rejected_at is null and not p.is_demo"
+/* S20: a correction receipt (R0.00, the split of a payment found late) is no more collected than a moved overpayment. */
+const COLLECTED = "p.source not in ('moved', 'correction') and p.rejected_at is null and not p.is_demo"
 check('collector_performance reads collected that way, twice', (liveFn('collector_performance').split(COLLECTED).length - 1), 2)
 check('collector_daily reads it that way', (liveFn('collector_daily').split(COLLECTED).length - 1), 1)
 check('the commission reads it that way', (lines.split(COLLECTED).length - 1), 1)

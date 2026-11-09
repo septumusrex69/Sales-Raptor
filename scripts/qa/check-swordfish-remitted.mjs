@@ -69,7 +69,17 @@ for (const name of ['allocate_payment_on_insert', 'approve_payment', 'reallocate
 const writers = [...schema.matchAll(/create or replace function public\.(\w+)\(/g)]
   .map((m) => m[1]).filter((n, i, all) => all.indexOf(n) === i)
   .filter((n) => /insert into public\.payment_allocations/.test(lastFn(n)))
-check('nothing but allocate_payment writes an allocation', writers, ['allocate_payment'])
+/*
+ * AND approve_restatement (S20), WHICH WRITES ONLY WHAT allocate_payment WORKED OUT: the date-order split of a payment
+ * found late (computed by allocate_payment inside restatement_compute's rolled-back block) and, for a payment
+ * already split, the DIFFERENCE between that and what was posted. It refuses any account where a later receipt
+ * was paid over in Swordfish, and never touches a receipt marked paid_over_in_swordfish -- held below.
+ */
+check('nothing but allocate_payment (and the correction it worked out) writes an allocation', writers, ['allocate_payment', 'approve_restatement'])
+const restate = lastFn('restatement_compute')
+ok('...the correction refuses a Swordfish-remitted receipt', /coalesce\(v\.paid_over_in_swordfish, false\)/.test(restate))
+ok('...and an account where a later one was remitted', /coalesce\(q\.paid_over_in_swordfish, false\)/.test(restate)
+  && /A later receipt on this account was paid over in Swordfish/.test(lastFn('restatement_figures')))
 
 /* ---------- 2. reversal and moving refuse it ---------- */
 
@@ -83,7 +93,7 @@ ok('...before it writes the copy the engine would split', refuseRev > 0 && copy 
 
 const move = lastFn('move_payment_to_cycle')
 const refuseMove = move.indexOf('if v_pay.paid_over_in_swordfish then')
-const moveWrite = move.indexOf('update public.account_payments set allocated_on')
+const moveWrite = move.indexOf('update public.account_payments set cycle_test_on')
 ok('move_payment_to_cycle refuses a remitted receipt', refuseMove > 0 && /belongs to no Raptor cycle/.test(move))
 ok('...before it moves anything', refuseMove > 0 && moveWrite > 0 && refuseMove < moveWrite)
 

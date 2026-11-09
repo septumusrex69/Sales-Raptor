@@ -80,8 +80,10 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
   }, [ending, receipts, accountId])
   const chosen = (receipts ?? []).filter((r) => payments === 'refund' && refundIds.has(r.id))
   const refundTotal = chosen.reduce((t, r) => t + r.amount, 0)
-  const owedBack = chosen.filter((r) => r.runStatus && ['approved', 'sent', 'paid'].includes(r.runStatus))
-    .reduce((t, r) => t + r.toClient, 0)
+  const paidOver = chosen.filter((r) => r.runStatus && ['approved', 'sent', 'paid'].includes(r.runStatus))
+  const owedBack = paidOver.reduce((t, r) => t + (r.toClient ?? 0), 0)
+  /* Without the trust account the split is not sent (receipts_on_file), so the amount is not known here. */
+  const owedBackUnknown = paidOver.some((r) => r.toClient === null)
 
   useEffect(() => {
     if (ending !== 'withdrawn' || basis) return
@@ -254,7 +256,7 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
                 </FormField>
                 <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" data-testid="withdraw-effect">
                   {chosen.length === 0 ? 'Tick the payments to refund.'
-                    : `${rand(refundTotal)} refunded to the debtor${owedBack > 0 ? `; the client owes back ${rand(owedBack)} on its next payover` : ''}. It appears under Payments out with its reference.`}
+                    : `${rand(refundTotal)} refunded to the debtor${owedBackUnknown ? '; the client owes back what it was paid from them on its next payover' : owedBack > 0 ? `; the client owes back ${rand(owedBack)} on its next payover` : ''}. It appears under Payments out with its reference.`}
                 </p>
               </>
             )}

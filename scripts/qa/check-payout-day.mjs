@@ -60,7 +60,7 @@ ok('a revision of an advice already sent is not held again', /if v_run\.status =
 ok('nor is paying a run whose advice already went', /= 'approved' then\s*perform public\.assert_payover_run_due/.test(liveFn('mark_payover_run_paid')))
 
 const release = liveFn('release_payover_run_early')
-ok('releasing early is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(release))
+ok('releasing early is payover.approve (S20), with finance', /not \(public\.has_capability\('finance\.view'\) and public\.has_capability\('payover\.approve'\)\)/.test(release))
 ok('...needs a reason of ten characters', /length\(coalesce\(v_why, ''\)\) < 10/.test(release))
 ok('...and keeps who and why', /released_by = auth\.uid\(\), released_reason = v_why/.test(release))
 ok('payments to make lists a run before its day as scheduled', /then 'scheduled' else r\.status end/.test(liveFn('payments_to_make')))
@@ -90,8 +90,8 @@ ok('...and before it sends', ask >= 0 && ask < send.indexOf("fetch('/api/email/s
 
 /* ---------------- 3 and 4. the queue ---------------- */
 const queue = strip(read('src/pages/finance/FinanceWorkQueue.tsx'))
-ok('bulk email takes due runs only', /toEmail = pickedRows\.filter\(\(r\) => r\.status === 'approved' && isDue\(r\)\)/.test(queue))
-ok('bulk pay takes due runs only', /toPay = statementOnly \? \[\] : pickedRows\.filter\(\(r\) => \(r\.status === 'approved' \|\| r\.status === 'sent'\) && isDue\(r\)/.test(queue))
+ok('bulk email takes due runs only', /toEmail = !mayApprove \? \[\] : pickedRows\.filter\(\(r\) => r\.status === 'approved' && isDue\(r\)\)/.test(queue))
+ok('bulk pay takes due runs only', /toPay = statementOnly \|\| !mayPay \? \[\] : pickedRows\.filter\(\(r\) => \(r\.status === 'approved' \|\| r\.status === 'sent'\) && isDue\(r\)/.test(queue))
 ok('a run before its day says when it pays instead of offering a button', /data-testid="scheduled"/.test(queue))
 const bulk = queue.slice(queue.indexOf('async function bulk('), queue.indexOf('async function bulkApprove'))
 ok('every bulk press clears its spinner in a finally', /finally \{[\s\S]*setBusy\(null\)/.test(bulk))

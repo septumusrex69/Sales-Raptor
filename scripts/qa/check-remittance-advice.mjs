@@ -123,8 +123,11 @@ check('...and an empty status reads as in progress',
   advStatus({ paidInFull: false, accountStatus: '' }), 'In progress')
 
 /* A PAYMENT OLDER THAN THE PERIOD SAYS WHY IT IS HERE. */
-const late = build([line({ lateCapture: true })])
-check('a payment captured after the previous cut-off is flagged', late.collections[0].lateCapture, true)
+const late = build([line({ lateCapture: true, receivedAt: '2026-09-19T22:00:00Z', capturedOn: '2026-09-21', approvedOn: '2026-11-12' })])
+check('a late payment is flagged', late.collections[0].lateCapture, true)
+/* S20: AND SAYS WHY -- received in an earlier cycle, approved after its run had gone. */
+ok('...with its received and approved days', /^Late: received 20 Sept? 2026, approved 12 Nov 2026$/.test(late.collections[0].lateNote ?? ''))
+check('a line in its own cycle has no late note', build([line()]).collections[0].lateNote, null)
 
 /* A REVERSAL IS A LINE, NOT A SILENT SUBTRACTION. */
 const rev = build([line(), line({ lineId: 'r', lineKind: 'reversal', toCapital: -500, commission: -150, commissionVat: -22.5 })])
@@ -340,7 +343,7 @@ const vatAdv = build([line()])
 check('every collection carries it', vatAdv.collections.map((c) => SP(c.vatLine)),
   ['Commission 30% R 150.00 + VAT 15% R 22.50 = R 172.50 deducted'])
 const vatPdfSrc = readFileSync(new URL('../../src/lib/remittancePdf.ts', import.meta.url), 'utf8')
-ok('the PDF draws it under each collection', /subLines: adv\.collections\.map\(\(c\) => c\.vatLine\)/.test(vatPdfSrc)
+ok('the PDF draws it under each collection (S20: with the late note after it)', /subLines: adv\.collections\.map\(\(c\) => \(c\.lateNote \? `\$\{c\.vatLine\} \u00b7 \$\{c\.lateNote\}` : c\.vatLine\)\)/.test(vatPdfSrc)
   && /const sub = sec\.subLines\?\.\[i\]/.test(vatPdfSrc))
 ok('...and keeps the OUTSTANDING column', /\{ head: 'VAT', width: 48, right: true \}, \{ head: 'Outstanding', width: 70, right: true \}/.test(vatPdfSrc))
 const vatAdvSrc = readFileSync(new URL('../../src/lib/remittanceAdvice.ts', import.meta.url), 'utf8')

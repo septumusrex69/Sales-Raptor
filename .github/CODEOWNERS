@@ -29,6 +29,7 @@
 /src/lib/accountCharges.ts              @septumusrex69
 /src/lib/actionTariff.ts                @septumusrex69
 /src/lib/annexureB.ts                   @septumusrex69
+/src/lib/backdatedPayments.ts           @septumusrex69
 /src/lib/balanceInput.ts                @septumusrex69
 /src/lib/bank*.ts                       @septumusrex69
 /src/lib/business*.ts                   @septumusrex69
@@ -48,6 +49,7 @@
 /src/lib/quotedCommission.ts            @septumusrex69
 /src/lib/recordPayment.ts               @septumusrex69
 /src/lib/remittance*.ts                 @septumusrex69
+/src/lib/restatement.ts                 @septumusrex69
 /src/lib/repayment*.ts                  @septumusrex69
 /src/lib/settlement*.ts                 @septumusrex69
 /src/lib/simplePay.ts                   @septumusrex69

@@ -98,7 +98,7 @@ const handlers = [
   [(u) => /\/rpc\/payments_posted/.test(u), () => ({ body: [POSTED] })],
   [(u) => /\/rpc\/reverse_payment/.test(u), (_u, req) => { sent.push({ reverse: req.postDataJSON() }); return { body: 'copy-1' } }],
   /* WHAT THE REVERSE BOX READS ABOUT THE PAYMENT, by id (prompt 11: one box from every door). */
-  [(u) => /\/rest\/v1\/account_payments\?(.*&)?id=eq\./.test(u), () => ({ body: {
+  [(u) => /\/rest\/v1\/account_payment(?:s|_lines)\?(.*&)?id=eq\./.test(u), () => ({ body: {
     id: 'pay-7', account_id: 'acct-7', amount: 1000, received_at: '2026-09-02T08:00:00Z', paid_to_client: false,
     bank_line_id: 'line-7', paid_over_in_swordfish: false, approved_at: '2026-09-02T09:00:00Z', reversed_at: null } })],
   [(u) => /\/rest\/v1\/payment_allocations\?/.test(u), () => ({ body: [{ payover_run_id: 'run-7' }] })],
