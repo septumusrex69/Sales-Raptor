@@ -8,6 +8,7 @@ import { fetchIncome } from '../../lib/businessApi'
 import { INCOME_PARTS, incomeTotals, type IncomeRow } from '../../lib/businessIncome'
 import { clockNow } from '../../lib/clock.ts'
 import { IncomeTrend } from '../../components/business/IncomeTrend'
+import { OurShareOfCollections } from '../../components/business/OurShareOfCollections'
 
 /**
  * WHAT THE FIRM EARNED.
@@ -64,6 +65,9 @@ export function BusinessIncome() {
         <div className="text-sm font-medium text-slate-700 min-w-[10rem] text-center">{monthLabel(year, month)}</div>
         <button type="button" onClick={() => step(1)} className={controlClass}>Later</button>
       </div>
+
+      {/* OUR SHARE OF COLLECTIONS (S21 · Raptor H19), for the month chosen, before what that month earned in detail. */}
+      <OurShareOfCollections year={year} month={month} />
 
       {error && <Card className="p-4 text-sm text-negative-700 bg-negative-50 border-negative-100">{error}</Card>}
 

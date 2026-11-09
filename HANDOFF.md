@@ -91,6 +91,21 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- OUR SHARE OF COLLECTIONS (9 Nov; staging migrations `h19_collections_share`, `h19_collections_share_vat_apart`, mirrored)
+- Stephan: "if we collect 2 million, or 3 million, how much of that is [our] share? How much of that is the client
+  share? ... the profitability margin ratio." Agreed: **Business -> Income**, behind business.income (no role has it,
+  not even Administrator), named **Our share of collections**. Under the month picker: the chosen month and the twelve
+  to it (ratio, a bar, Collected / Our share / VAT for SARS / Clients' share), a month-by-month table, and client by
+  client for the month.
+- OURS = commission + Annexure B fees and costs + interest earned on receipts; VAT on commission apart (SARS's); the
+  CLIENTS' share = collected less both, i.e. what the clients get. Collected and earned are the Income graph's own
+  figures (business_income_months; `collections_share(from, to)` per client, same rules, dated by approval). The
+  graph's existing "earned as a share of collected" also counts charges to clients and bank interest, so it can read a
+  little higher -- the page says so. `src/lib/collectionsShare.ts`; a period's ratio is the ratio of its totals, never
+  an average of ratios. The chosen month is read BY ITS DATE (a month with no row is nothing collected).
+- Checks: check-collections-share (average-of-ratios break seen failing), e2e business-income (+4; the by-date break
+  seen failing). Staging's reloaded book has no payments yet, so the figures there are empty until there are some.
+
 ### S21 -- SUSPENSE NEAR MATCHES; THE SIGNATURE LIKE OUTLOOK (9 Nov; staging migrations `h19_suspense_near_matches`, `h19_near_matches_in_the_revoke_list`, mirrored, md5 verified)
 - Stephan: "proceed with the suspense near match. Give options still a search option." Each suspense receipt on screen
   offers "Did they mean": accounts whose case or account number is ONE SLIP from a reference-like word on the receipt

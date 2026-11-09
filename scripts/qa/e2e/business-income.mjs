@@ -47,6 +47,11 @@ function handlers(me) {
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [me] })],
     /* BEFORE business_income, whose pattern also matches this one. */
     [(u) => /\/rpc\/business_income_months/.test(u), (u, req) => { monthsAsked.push(req.postDataJSON()); return { body: MONTHS } }],
+    /* S21: our share of collections, client by client (invented). */
+    [(u) => /\/rpc\/collections_share/.test(u), () => ({ body: [
+      { company_id: 'c1', company_name: 'Kestrel Insurance', collected: 20000, ours: 8000, vat: 600 },
+      { company_id: 'c2', company_name: 'Rinda Roo', collected: 7750, ours: 2000, vat: 98.31 },
+    ] })],
     [(u) => /\/rpc\/business_income/.test(u), () => ({ body: INCOME })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: MONTH })],
     [(u) => /\/rpc\/trust_bank_costs/.test(u), () => ({ body: [BANK] })],
@@ -146,6 +151,18 @@ try {
     await page.getByRole('button', { name: 'Since the start' }).click()
     await page.waitForTimeout(300)
     t.check('...and "since the start" asks from 2015', monthsAsked.at(-1)?.p_from, '2015-01-01')
+    /* ---- OUR SHARE OF COLLECTIONS (S21 · Raptor H19; Stephan: "how much of that is [our] share? How much of that is
+       the client share? ... the profitability margin ratio") ---- */
+    const share = page.getByTestId('our-share')
+    await share.getByTestId('share-months').waitFor({ timeout: 10000 })
+    const months = (await share.getByTestId('share-months').innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    /* September in the fixture: collected 27 750; ours 3 160.04 + 2 959.69 + 4 655.17 = 10 774.90; VAT 698.31. */
+    t.ok('each month: collected, our share, the clients\' share and the ratio', /September 2026[\s\S]*R 27 750\.00[\s\S]*R 10 774\.90[\s\S]*R 16 276\.79[\s\S]*38\.8%/.test(months))
+    const clientsText = (await share.getByTestId('share-clients').innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    t.ok('client by client, with the ratio', /Kestrel Insurance[\s\S]*R 20 000\.00[\s\S]*R 8 000\.00[\s\S]*R 11 400\.00[\s\S]*40\.0%/.test(clientsText))
+    t.ok('...the VAT on commission said apart, as SARS\'s', /VAT for SARS/.test(await share.innerText()))
+    /* The fixture has no row for this month: its card says nothing was collected rather than borrowing September's. */
+    t.ok('the month chosen is read by its date, not taken from the latest row', /—/.test(await share.getByTestId('share-month').innerText()))
     await t.shot(page, 'business-income')
     await context.close()
   }

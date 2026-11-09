@@ -101,6 +101,15 @@ export async function fetchIncomeMonths(from: string, to: string): Promise<Incom
   return ((data ?? []) as Record<string, unknown>[]).map(toIncomeMonth)
 }
 
+/** Our share of collections, client by client, for a period (S21). No rows without business.income. */
+export async function fetchCollectionsShare(from: string, to: string): Promise<{ companyId: string; client: string; collected: number; ours: number; vat: number }[]> {
+  const { data, error } = await supabase.rpc('collections_share', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    companyId: String(r.company_id), client: String(r.company_name ?? 'A client'), collected: n(r.collected), ours: n(r.ours), vat: n(r.vat),
+  }))
+}
+
 export interface Drawing { id: string; at: string; amount: number; reference: string; drawnBy: string | null }
 
 /** The drawings out of trust in a period, newest first. */

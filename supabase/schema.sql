@@ -63214,3 +63214,86 @@ begin
     end;
   end loop;
 end $$;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_collections_share (staging, 9 Nov)
+--
+-- OUR SHARE OF COLLECTIONS, CLIENT BY CLIENT (Stephan, 9 Nov: "if we collect 2 million, or 3 million, how much of that
+-- is [our] share? How much of that is the client share? ... the profitability margin ratio"; the name and the place --
+-- Business, Income, behind business.income -- agreed the same day).
+--
+-- THE SAME TWO FIGURES AS THE INCOME GRAPH, SPLIT BY CLIENT: `collected` is business_income_months' own rule (every
+-- debtor receipt, to the trust or straight to the client, less the reversed, rejected and returned unpaid, dated by
+-- APPROVAL), and `ours` is business_income's earnings on receipts -- commission, its VAT, Annexure B fees and costs,
+-- interest -- dated the same way, so the two sit in the same month. Charges to clients, bank interest and unclaimed
+-- credit are the firm's income but not a share of anything a debtor paid, so they are not in `ours`.
+-- Behind business.income: no rows for anybody without it.
+-- ============================================================================================
+create or replace function public.collections_share(p_from date, p_to date)
+returns table(company_id uuid, company_name text, collected numeric, ours numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with col as (
+    select a.company_id, sum(p.amount) as collected
+      from public.account_payments p
+      join public.debtor_accounts a on a.id = p.account_id
+     where (coalesce(p.approved_at, p.received_at) at time zone 'Africa/Johannesburg')::date between p_from and p_to
+       and p.reversed_at is null and p.rejected_at is null and p.returned_unpaid_on is null
+     group by a.company_id
+  ), earned as (
+    select b.company_id, b.company_name, b.interest + b.costs + b.commission + b.commission_vat as ours
+      from public.business_income(p_from, p_to) b
+     where b.company_id is not null
+  )
+  select coalesce(c.company_id, e.company_id), coalesce(co.name, e.company_name),
+         coalesce(c.collected, 0), coalesce(e.ours, 0)
+    from col c
+    full join earned e on e.company_id = c.company_id
+    left join public.companies co on co.id = coalesce(c.company_id, e.company_id)
+   where public.has_capability('business.income')
+     and coalesce(c.company_id, e.company_id) is not null
+   order by 3 desc, 2
+$$;
+revoke all on function public.collections_share(date, date) from public, anon;
+grant execute on function public.collections_share(date, date) to authenticated;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_collections_share_vat_apart (staging, 9 Nov)
+-- Commission VAT apart from our share -- it is SARS's, neither the firm's nor the client's -- so the clients' share
+-- (collected less ours less VAT) is exactly what the clients get, and the ratio is the firm's own. The return columns
+-- change, so the function is replaced, not altered; nothing called it yet but the Income page.
+-- ============================================================================================
+drop function if exists public.collections_share(date, date);
+create function public.collections_share(p_from date, p_to date)
+returns table(company_id uuid, company_name text, collected numeric, ours numeric, vat numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with col as (
+    select a.company_id, sum(p.amount) as collected
+      from public.account_payments p
+      join public.debtor_accounts a on a.id = p.account_id
+     where (coalesce(p.approved_at, p.received_at) at time zone 'Africa/Johannesburg')::date between p_from and p_to
+       and p.reversed_at is null and p.rejected_at is null and p.returned_unpaid_on is null
+     group by a.company_id
+  ), earned as (
+    select b.company_id, b.company_name, b.interest + b.costs + b.commission as ours, b.commission_vat as vat
+      from public.business_income(p_from, p_to) b
+     where b.company_id is not null
+  )
+  select coalesce(c.company_id, e.company_id), coalesce(co.name, e.company_name),
+         coalesce(c.collected, 0), coalesce(e.ours, 0), coalesce(e.vat, 0)
+    from col c
+    full join earned e on e.company_id = c.company_id
+    left join public.companies co on co.id = coalesce(c.company_id, e.company_id)
+   where public.has_capability('business.income')
+     and coalesce(c.company_id, e.company_id) is not null
+   order by 3 desc, 2
+$$;
+revoke all on function public.collections_share(date, date) from public, anon;
+grant execute on function public.collections_share(date, date) to authenticated;
