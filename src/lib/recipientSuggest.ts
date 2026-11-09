@@ -29,6 +29,13 @@ export interface Suggestion {
    * number back as "this one is on the record" is a guess about how the caller built the list.
    */
   onRecord?: boolean
+  /**
+   * SOMEBODY WHO WORKS AT THE FIRM (S21 · Raptor H19). Stephan: "I try to add Rinda". A colleague nobody had
+   * written to yet was not in the history and so could not be found by her name at all. Offered on the first
+   * letter like history (never on an empty box), and never with the X: forgetting is for remembered addresses,
+   * and a colleague comes back from the staff list however often they are forgotten.
+   */
+  colleague?: boolean
 }
 
 /**
@@ -149,4 +156,51 @@ export function looksLikeAddress(value: string): boolean {
 /** "Reno Buitendag <reno@x.co.za>", or just the address where no name was ever seen. */
 export function describe(s: Suggestion): string {
   return s.name ? `${s.name} <${s.address}>` : s.address
+}
+
+/*
+ * SEVERAL PEOPLE ON ONE LINE (S21 · Raptor H19). Stephan, 5 Nov: "I try to add Rinda ... multiple people to CC."
+ * The Cc box held one address: picking a second person REPLACED the first, and typing a comma by hand was a box of
+ * type="email" that the browser treats as one address. The line is still ONE STRING to everything around it (the
+ * draft, the reply-all pre-fill, the send route, nodemailer -- which takes a comma-separated Cc as it is), so the
+ * box keeps a string and these read it as a list. A comma or a semicolon separates, because Outlook writes ";" and
+ * people paste what Outlook wrote.
+ */
+
+/** Every address on the line, trimmed, blanks dropped, each once (case ignored), in the order typed. */
+export function recipientList(value: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of value.split(/[,;]/)) {
+    const a = part.trim()
+    if (!a || seen.has(a.toLowerCase())) continue
+    seen.add(a.toLowerCase())
+    out.push(a)
+  }
+  return out
+}
+
+/**
+ * The line as the box holds it: the people already chosen, and what is being typed after them. The last piece is
+ * the draft even when it is blank, which is what a trailing ", " means -- a finished entry and an empty box.
+ */
+export function splitRecipientLine(value: string): { chosen: string[]; draft: string } {
+  const parts = value.split(/[,;]/)
+  const draft = (parts.pop() ?? '').replace(/^\s+/, '')
+  return { chosen: recipientList(parts.join(',')), draft }
+}
+
+/** Back to the one string: the chosen, then the draft. A chosen list with nothing typed after it ends ", ". */
+export function joinRecipientLine(chosen: string[], draft = ''): string {
+  return chosen.length ? `${chosen.join(', ')}, ${draft}` : draft
+}
+
+/** What goes to the server: every address once, joined by ", " -- never a trailing comma or a blank. */
+export function normaliseRecipients(value: string): string {
+  return recipientList(value).join(', ')
+}
+
+/** The pieces on the line that are not addresses, so Send can name them rather than let a mail server bounce them. */
+export function notAddresses(value: string): string[] {
+  return recipientList(value).filter((a) => !looksLikeAddress(a))
 }

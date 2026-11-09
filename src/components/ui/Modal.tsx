@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -72,11 +72,16 @@ export function Modal({ title, subtitle, onClose, children, width = 480, headerR
     el.focus({ preventScroll: true })
   }, [])
 
+  const keyboard = useKeyboardViewport()
+
   return createPortal(
     // data-modal-open marks that someone is mid-task in a form: the new-version check
     // refuses to auto-reload while this is in the DOM, so an update can't wipe a
     // half-written email out from under them.
-    <div data-modal-open className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-slate-900/40 p-4 overflow-y-auto" onClick={onClose}>
+    <div data-modal-open className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-slate-900/40 p-4 overflow-y-auto"
+      data-keyboard={keyboard ? 'open' : undefined}
+      style={keyboard ? { top: keyboard.top, height: keyboard.height, bottom: 'auto', alignItems: 'flex-start' } : undefined}
+      onClick={onClose}>
       <div
         ref={card}
         /* -1 so it can be focused programmatically without joining the tab order: the card itself
@@ -85,9 +90,9 @@ export function Modal({ title, subtitle, onClose, children, width = 480, headerR
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="bg-white rounded-2xl shadow-xl w-full mt-10 sm:mt-0 max-h-[90vh] overflow-y-auto
-          outline-none"
-        style={{ maxWidth: width }}
+        className={`bg-white rounded-2xl shadow-xl w-full ${keyboard ? '' : 'mt-10 sm:mt-0'} max-h-[90vh] overflow-y-auto
+          outline-none`}
+        style={keyboard ? { maxWidth: width, maxHeight: keyboard.height - 32 } : { maxWidth: width }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 sticky top-0 z-10 bg-white rounded-t-2xl">
@@ -153,3 +158,34 @@ export const controlClass =
 
 /** The same field, filling whatever it is put in — which is what most of them want. */
 export const inputClass = `w-full ${controlClass}`
+
+/*
+ * THE SCREEN THE KEYBOARD LEAVES (S21 · Raptor H19). Stephan, 5 Nov, writing an email on the iPad: "the thing where
+ * I was writing was going down". On an iPad the on-screen keyboard does not shrink the page -- it covers the bottom
+ * half and Safari slides the page up to keep the cursor in view -- so a dialog centred on the WHOLE screen and up to
+ * 90% of its height has its lower half under the keyboard, and every line typed made Safari slide it again. While
+ * the keyboard is up the overlay is pinned to the visual viewport (what can actually be seen) and the card fits
+ * inside it, top-aligned; its own scroll keeps the box being typed in on screen. Nothing changes on a desktop: the
+ * visual viewport is the window there, so this returns null. 120px is more than browser chrome ever takes and less
+ * than any keyboard.
+ */
+function useKeyboardViewport(): { top: number; height: number } | null {
+  const [vp, setVp] = useState<{ top: number; height: number } | null>(null)
+  useEffect(() => {
+    const v = typeof window !== 'undefined' ? window.visualViewport : null
+    if (!v) return
+    const update = () => {
+      const open = window.innerHeight - v.height > 120
+      setVp((prev) => {
+        if (!open) return null
+        const next = { top: Math.round(v.offsetTop), height: Math.round(v.height) }
+        return prev && prev.top === next.top && prev.height === next.height ? prev : next
+      })
+    }
+    update()
+    v.addEventListener('resize', update)
+    v.addEventListener('scroll', update)
+    return () => { v.removeEventListener('resize', update); v.removeEventListener('scroll', update) }
+  }, [])
+  return vp
+}

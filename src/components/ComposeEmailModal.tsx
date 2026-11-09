@@ -13,7 +13,10 @@ import { DictateButton } from './ui/Dictate'
 import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
 import { FIRM_UNSET, emailBodyCss, fetchFirmSettings, type FirmSettings } from '../lib/firmSettings'
-import { emailBodyHtml } from '../lib/emailStyle.ts'
+import { emailBodyHtml, emailBodyStyle } from '../lib/emailStyle.ts'
+import { composeBody, signatureHtml } from '../lib/emailSignature.ts'
+import { normaliseRecipients, notAddresses, recipientList } from '../lib/recipientSuggest.ts'
+import { useAppStore } from '../store/AppStore'
 import { fetchAttachment } from '../lib/userMail'
 import { fetchForwardAttachments, leftOffNote } from '../lib/forwardAttachments'
 import { useSpellGate } from './SpellGate'
@@ -224,7 +227,15 @@ export function ComposeEmailModal({
   /** The message a forward is of, so its draft is told apart from a forward of another. */
   forwardOf?: string
 }) {
-  const { session } = useAuth()
+  const { session, currentUser } = useAuth()
+  /*
+   * THE FIRM'S OWN PEOPLE, FOUND BY NAME (S21 · Raptor H19). Stephan: "I try to add Rinda ... multiple people to
+   * CC." Only the active ones with an address, and never the person writing -- copying yourself is what Sent is for.
+   */
+  const { users } = useAppStore()
+  const colleagues = users
+    .filter((u) => u.status === 'Active' && !!u.email && u.id !== currentUser?.id)
+    .map((u) => ({ email: u.email, name: u.name }))
   const [address, setAddress] = useState(to ?? recipients?.[0]?.email ?? '')
   const [cc, setCc] = useState(initialCc ?? '')
   /*
@@ -469,6 +480,13 @@ export function ComposeEmailModal({
       setError(`This needs ${missingField} before it can go.`)
       return
     }
+    /* EVERY ONE ON THE CC LINE IS AN ADDRESS (S21), named when it is not: half a name left in the box goes to a
+       mail server as a recipient and comes back as a bounce on a notice somebody thought had gone. */
+    const badCc = notAddresses(cc)
+    if (badCc.length > 0) {
+      setError(`${badCc.map((a) => `“${a}”`).join(', ')} on the Cc line ${badCc.length === 1 ? 'is not an email address' : 'are not email addresses'}. Finish ${badCc.length === 1 ? 'it' : 'them'} or take ${badCc.length === 1 ? 'it' : 'them'} off.`)
+      return
+    }
     /*
      * THE SESSION, WHICH IS THE ONE THAT COULD NOT BE GUESSED FROM THE SCREEN. An iPad left on a
      * page for an afternoon can come back with the token refreshed away underneath it; everything
@@ -489,7 +507,8 @@ export function ComposeEmailModal({
       const payload = JSON.stringify({
           to: address.trim(),
           /* Absent rather than empty, so a cleared box sends to the one recipient only. */
-          ...(cc.trim() ? { cc: cc.trim() } : {}),
+          /* Each address once, joined by ", " -- the box keeps a trailing comma while somebody types. */
+          ...(normaliseRecipients(cc) ? { cc: normaliseRecipients(cc) } : {}),
           subject: subject.trim(),
           /* The note somebody typed, then the original underneath it. The typed half is prose and
              becomes <br>s; the quoted half is markup that came in already cleaned. */
@@ -592,7 +611,7 @@ export function ComposeEmailModal({
         )}
         <FormField label="To" required>
           <RecipientField value={address} onChange={setAddress}
-            contextual={recipients} taken={[cc]} required autoFocus={!address} />
+            contextual={recipients} colleagues={colleagues} taken={recipientList(cc)} required autoFocus={!address} />
         </FormField>
         {/*
           OPEN ON A REPLY-ALL, where it is pre-filled with the people who were on the original and
@@ -624,7 +643,8 @@ export function ComposeEmailModal({
               `taken`: WITHOUT THE ADDRESS IT IS ALREADY GOING TO. On a reply the To line is one of
               these same contacts, and offering it here as a Cc offers to send one notice twice.
             */}
-            <RecipientField value={cc} onChange={setCc} contextual={recipients}
+            {/* SEVERAL PEOPLE (S21 · Raptor H19): each one chosen is a chip, and the box is for the next. */}
+            <RecipientField multiple value={cc} onChange={setCc} contextual={recipients} colleagues={colleagues}
               taken={[address]} autoFocus={initialCc === undefined} />
           </FormField>
         ) : (
@@ -683,6 +703,7 @@ export function ComposeEmailModal({
         {appendHtml && appendNote && (
           <p className="-mt-2 mb-3 text-xs text-slate-500">{appendNote}</p>
         )}
+        <SignaturePreview user={currentUser} firm={firm} body={body} afterOriginal={!!quotedHtml} />
 
         {/*
           THE SAME MICROPHONE AS THE REST OF RAPTOR. It has been on the diary and the account
@@ -801,5 +822,70 @@ export function ComposeEmailModal({
         </div>
       </form>
     </Modal>
+  )
+}
+
+/*
+ * THE SIGNATURE, AS IT GOES OUT UNDER THE MESSAGE (S21 · Raptor H19). Stephan, 5 Nov: "show me the email
+ * signature that I uploaded ... how it will look relative to the text." It was added on the server and seen for
+ * the first time in the recipient's inbox.
+ *
+ * DRAWN BY THE SEND'S OWN FUNCTIONS -- signatureHtml, composeBody and emailBodyStyle, the very three sendAsUser
+ * calls -- around the last paragraph typed, so the gap, the face, the size and the picture's width and side are
+ * the send's and not a copy of them. The one difference is the picture's address: the send embeds it (cid:) and
+ * the screen shows the same file from storage.
+ *
+ * IN A SANDBOXED FRAME, because the signature is stored HTML (signatureHtml does not escape it -- what is typed
+ * there is what goes out) and the page must not run it. No allow-scripts; allow-same-origin only so the frame
+ * can be measured to its height.
+ *
+ * ON A FORWARD the signature goes under the ORIGINAL, because composeBody appends it to everything -- said rather
+ * than drawn, since the original is already on screen above.
+ */
+function SignaturePreview({ user, firm, body, afterOriginal }: {
+  user: { emailSignature?: string; emailSignatureImageUrl?: string; emailSignatureImageWidth?: number; emailSignatureImageAlign?: 'left' | 'center' | 'right' } | null
+  firm: FirmSettings
+  body: string
+  afterOriginal: boolean
+}) {
+  const frame = useRef<HTMLIFrameElement>(null)
+  const [height, setHeight] = useState(80)
+  const url = user?.emailSignatureImageUrl ?? null
+  const signature = signatureHtml(user?.emailSignature ?? null,
+    url ? { width: user?.emailSignatureImageWidth ?? 160, align: user?.emailSignatureImageAlign ?? 'left' } : null, url)
+  const paragraphs = body.trim() ? body.trim().split(/\n\s*\n/) : []
+  const last = paragraphs.length ? paragraphs[paragraphs.length - 1] : ''
+  const lead = afterOriginal ? '' : last
+    ? (paragraphs.length > 1 ? '<span style="color:#94a3b8">\u2026</span><br><br>' : '') + emailBodyHtml(last)
+    : '<span style="color:#94a3b8">Your message</span>'
+  const style = firm.emailFont ? emailBodyStyle(firm) : null
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body style="margin:0;padding:12px 14px;background:#fff">${
+    afterOriginal ? composeBody('<span style="color:#94a3b8">\u2026the original message</span>', signature, style) : composeBody(lead, signature, style)}</body></html>`
+  if (!signature) {
+    return (
+      <p className="-mt-1 mb-3 text-xs text-slate-500" data-testid="signature-preview-none">
+        No signature goes under this email. Add one in <a href="/settings?tab=Profile" className="font-medium text-brand-700 hover:underline">Settings → Profile</a>.
+      </p>
+    )
+  }
+  return (
+    <div className="-mt-1 mb-3" data-testid="signature-preview">
+      <p className="mb-1 text-xs text-slate-500">
+        {afterOriginal ? 'Your signature goes under the original message, like this.' : 'How the email ends: your signature, under what you typed.'}
+      </p>
+      <iframe ref={frame} title="Your signature as it goes out" sandbox="allow-same-origin" srcDoc={doc}
+        onLoad={() => {
+          const h = frame.current?.contentDocument?.documentElement.scrollHeight
+          if (h) setHeight(Math.min(h, 320))
+          /* A picture that arrives after the page is measured makes it taller; measure again when it does. */
+          for (const img of Array.from(frame.current?.contentDocument?.images ?? [])) {
+            img.addEventListener('load', () => {
+              const again = frame.current?.contentDocument?.documentElement.scrollHeight
+              if (again) setHeight(Math.min(again, 320))
+            })
+          }
+        }}
+        className="block w-full rounded-lg border border-slate-200" style={{ height }} />
+    </div>
   )
 }

@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { inputClass } from './ui/Modal'
 import { supabase } from '../lib/supabase'
 import {
-  looksLikeAddress, suggestRecipients, type Suggestion,
+  joinRecipientLine, looksLikeAddress, splitRecipientLine, suggestRecipients, type Suggestion,
 } from '../lib/recipientSuggest.ts'
 
 /**
@@ -24,11 +24,20 @@ import {
  * they stop and create a contact is how a CRM gets worked around instead of used. The suggestions
  * are an offer.
  */
-export function RecipientField({ value, onChange, contextual, taken, autoFocus, required, id }: {
+export function RecipientField({ value, onChange, contextual, colleagues, taken, autoFocus, required, id, multiple }: {
   value: string
   onChange: (next: string) => void
   /** Whoever is already known on the client, lead or deal in front of you. Offered first. */
   contextual?: { email: string; label?: string }[]
+  /** The firm's own people, found by name from the first letter -- see Suggestion.colleague. */
+  colleagues?: { email: string; name: string }[]
+  /**
+   * SEVERAL PEOPLE (S21 · Raptor H19) -- the Cc line. Each one chosen becomes a chip with its own X, the box
+   * under the cursor is for the next one, and `value` stays one comma-separated string (recipientSuggest's
+   * splitRecipientLine) so the draft, the reply-all pre-fill and the send route are unchanged. Off for To: a
+   * notice goes to one debtor.
+   */
+  multiple?: boolean
   /**
    * Addresses the message already goes to, from the other boxes on the same form.
    *
@@ -46,6 +55,20 @@ export function RecipientField({ value, onChange, contextual, taken, autoFocus, 
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const box = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
+  const [focused, setFocused] = useState(false)
+  /*
+   * WHAT IS CHOSEN AND WHAT IS BEING TYPED. Single: the whole value is being typed. Several: everything before
+   * the last comma is chosen, and the last piece is the box -- except a finished address sitting there with
+   * nobody typing (a reply-all pre-fill, a restored draft), which is drawn as the chip it is.
+   */
+  const line = useMemo(() => {
+    if (!multiple) return { chosen: [] as string[], draft: value }
+    const { chosen, draft } = splitRecipientLine(value)
+    if (!focused && looksLikeAddress(draft)) return { chosen: [...chosen, draft.trim()], draft: '' }
+    return { chosen, draft }
+  }, [multiple, value, focused])
+  const query = line.draft
 
   /*
    * Fetched once when the box appears rather than on every keystroke. The list is a few hundred
@@ -71,6 +94,8 @@ export function RecipientField({ value, onChange, contextual, taken, autoFocus, 
   const all = useMemo<Suggestion[]>(() => {
     const seen = new Set<string>()
     for (const t of taken ?? []) { const a = t.trim().toLowerCase(); if (a) seen.add(a) }
+    /* Nobody already on this line is offered again: a second copy of one notice to the same person. */
+    for (const c of line.chosen) seen.add(c.toLowerCase())
     const out: Suggestion[] = []
     /*
      * MINUS THE INDEX, so the record's own order survives the sort. fetchWorkspace returns
@@ -88,22 +113,37 @@ export function RecipientField({ value, onChange, contextual, taken, autoFocus, 
         onRecord: true,
       })
     }
+    /*
+     * COLLEAGUES BESIDE HISTORY, ONE ROW EACH. Somebody already written to keeps their use count (so the person
+     * mailed every week still leads) and gains the name on the staff list where history had none.
+     */
+    const staff = new Map<string, string>()
+    for (const c of colleagues ?? []) {
+      const a = c.email.trim().toLowerCase()
+      if (a) staff.set(a, c.name)
+    }
     for (const h of history) {
       if (seen.has(h.address)) continue
       seen.add(h.address)
-      out.push(h)
+      const name = staff.get(h.address)
+      out.push(name ? { ...h, name: h.name ?? name, colleague: true } : h)
+    }
+    for (const [address, name] of staff) {
+      if (seen.has(address)) continue
+      seen.add(address)
+      out.push({ address, name, uses: 0, lastUsed: null, colleague: true })
     }
     return out
-  }, [contextual, history, taken])
+  }, [contextual, colleagues, history, taken, line.chosen])
 
-  const shown = useMemo(() => suggestRecipients(all, value, 6), [all, value])
+  const shown = useMemo(() => suggestRecipients(all, query, 6), [all, query])
   /*
    * AN OFFER READS DIFFERENTLY FROM A SEARCH RESULT, so it is labelled as one. With nothing typed
    * these rows are not matches — the person has not asked for anything yet — and a bare list
    * appearing under an empty box is the thing the firm objected to. One line saying where they
    * came from is the difference between "here is everything" and "these two are on this file".
    */
-  const offering = value.trim() === '' && shown.length > 0
+  const offering = query.trim() === '' && shown.length > 0
 
   /* A click anywhere else closes it, which is what everybody expects of a panel like this. */
   useEffect(() => {
@@ -132,36 +172,101 @@ export function RecipientField({ value, onChange, contextual, taken, autoFocus, 
   }
 
   function take(s: Suggestion) {
-    onChange(s.address)
+    if (multiple) {
+      /* Added to the line, and the cursor stays for the next person. */
+      onChange(joinRecipientLine([...line.chosen, s.address]))
+      input.current?.focus()
+    } else {
+      onChange(s.address)
+    }
     setOpen(false)
   }
 
+  /* A finished address in the box becomes a chip: on a comma, a semicolon, Enter with nothing highlighted, or
+     leaving the box. Anything that is not yet an address stays where it is, to be finished or corrected. */
+  function commitDraft(): boolean {
+    if (!multiple || !looksLikeAddress(line.draft)) return false
+    onChange(joinRecipientLine([...line.chosen, line.draft.trim()]))
+    return true
+  }
+
+  function removeChosen(address: string) {
+    onChange(joinRecipientLine(line.chosen.filter((a) => a !== address), line.draft))
+    input.current?.focus()
+  }
+
+  function typed(next: string) {
+    if (multiple) {
+      const m = /^(.*?)[,;]\s*$/.exec(next)
+      if (m && looksLikeAddress(m[1])) { onChange(joinRecipientLine([...line.chosen, m[1].trim()])); return }
+      onChange(joinRecipientLine(line.chosen, next))
+    } else {
+      onChange(next)
+    }
+    setActive(0)
+    setOpen(true)
+  }
+
+  const field = (
+    <input
+      ref={input}
+      id={id}
+      /* type="email" is ONE address to the browser; the several-people box is text, and Send checks each one. */
+      type={multiple ? 'text' : 'email'}
+      inputMode="email"
+      className={multiple ? 'min-w-[10rem] flex-1 bg-transparent py-0.5 text-sm outline-none' : inputClass}
+      value={query}
+      onChange={(e) => typed(e.target.value)}
+      onFocus={() => { setFocused(true); if (!looksLikeAddress(query)) setOpen(true) }}
+      onBlur={() => { setFocused(false); commitDraft() }}
+      onKeyDown={(e) => {
+        if (multiple && e.key === 'Backspace' && query === '' && line.chosen.length > 0) {
+          /* Backspace in an empty box takes the last person off, as every mail client does. */
+          e.preventDefault()
+          onChange(joinRecipientLine(line.chosen.slice(0, -1)))
+          return
+        }
+        if (multiple && e.key === 'Enter' && !(open && shown[active])) {
+          /* Enter finishes the address rather than submitting the form under it. */
+          if (commitDraft()) { e.preventDefault(); return }
+        }
+        if (!open || shown.length === 0) return
+        if (e.key === 'ArrowDown') { e.preventDefault(); setActive((i) => (i + 1) % shown.length) }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => (i - 1 + shown.length) % shown.length) }
+        /* Enter takes the highlighted one rather than submitting the form under it. */
+        else if (e.key === 'Enter' && shown[active]) { e.preventDefault(); take(shown[active]) }
+        else if (e.key === 'Escape') { setOpen(false) }
+      }}
+      placeholder={multiple && line.chosen.length > 0 ? 'Add someone else' : 'name@company.co.za'}
+      autoComplete="off"
+      role="combobox"
+      aria-expanded={open && shown.length > 0}
+      aria-controls={listId}
+      aria-autocomplete="list"
+      required={required && (!multiple || line.chosen.length === 0)}
+      autoFocus={autoFocus}
+    />
+  )
+
   return (
     <div ref={box} className="relative">
-      <input
-        id={id}
-        type="email"
-        className={inputClass}
-        value={value}
-        onChange={(e) => { onChange(e.target.value); setActive(0); setOpen(true) }}
-        onFocus={() => { if (!looksLikeAddress(value)) setOpen(true) }}
-        onKeyDown={(e) => {
-          if (!open || shown.length === 0) return
-          if (e.key === 'ArrowDown') { e.preventDefault(); setActive((i) => (i + 1) % shown.length) }
-          else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => (i - 1 + shown.length) % shown.length) }
-          /* Enter takes the highlighted one rather than submitting the form under it. */
-          else if (e.key === 'Enter' && shown[active]) { e.preventDefault(); take(shown[active]) }
-          else if (e.key === 'Escape') { setOpen(false) }
-        }}
-        placeholder="name@company.co.za"
-        autoComplete="off"
-        role="combobox"
-        aria-expanded={open && shown.length > 0}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        required={required}
-        autoFocus={autoFocus}
-      />
+      {multiple ? (
+        /* Drawn as one box: the chips and the place to type, wrapping onto a second line when the line is long. */
+        <div className={`${inputClass} flex flex-wrap items-center gap-1.5 !py-1.5 cursor-text`}
+          data-testid="recipient-line" onClick={() => input.current?.focus()}>
+          {line.chosen.map((a) => (
+            <span key={a} data-testid="recipient-chip"
+              className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 py-0.5 pl-2 pr-1 text-xs text-slate-700">
+              <span className="truncate">{a}</span>
+              <button type="button" aria-label={`Take ${a} off`} onClick={(e) => { e.stopPropagation(); removeChosen(a) }}
+                className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700">
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+          {field}
+        </div>
+      ) : field}
 
       {open && shown.length > 0 && (
         <ul id={listId} role="listbox"
@@ -193,7 +298,10 @@ export function RecipientField({ value, onChange, contextual, taken, autoFocus, 
               {/* Offered only on what was remembered. Removing somebody who is on the deal in
                   front of you would hide them until the record itself changed — so it reads
                   `onRecord` and not the use count, which is only how they are ordered. */}
-              {!s.onRecord && (
+              {s.colleague && !s.onRecord && (
+                <span className="shrink-0 text-[10.5px] font-medium uppercase tracking-wide text-slate-400">Colleague</span>
+              )}
+              {!s.onRecord && !s.colleague && (
                 <button type="button" aria-label={`Forget ${s.address}`}
                   onClick={() => { void forget(s.address) }}
                   className="shrink-0 rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">

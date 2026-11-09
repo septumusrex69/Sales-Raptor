@@ -31,14 +31,50 @@
 4. **Requests waiting on a ticked answer** (off the builder's queue until answered and re-sent): R-23 (does the refund
    on the account Rinda named now show after S18's fix?), R-24 ("Record transfer": rename / help line / tooltip /
    nothing). R-13 (folders + conversations) carries a how-to-test comment; Stephan must approve it and mark it Done.
-5. **Still open from Handover 18:** debtor offers under Disputes (Sonia's email; "not as important"); S17's
-   email-compose items (several CC, the body jumping, the signature preview) -- check first whether a helper's
-   worktree ever landed them.
+5. **Still open from Handover 18:** debtor offers under Disputes (Sonia's email; "not as important"). ~~S17's
+   email-compose items~~ -- built by S21 (section below); the body-jumping fix wants Stephan on his iPad.
 6. **Ideas offered to Stephan, not chosen:** Afrikaans versions of the templates with a preferred language per debtor;
    storing In-Reply-To/References in the mail sync (exact threads, better auto-matching); a morning email per
    collector; the CSV export's ID numbers showing as 8.0E+12 in Excel; e2e/people's two date-dependent failures;
    Itumeleng's BuzzBox extension is Barry's (140).
 
+
+## S21 -- S17'S COMPOSE PROBLEMS (Raptor · Handover 19, 9 Nov; branch `claude/new-session-84tmki` from `claude/sales-raptor-review-p1pzx2` at 6bf5d15)
+
+**Item 1 (the five Settings tabs) is being built by ANOTHER session** -- found mid-start: staging migration
+`h19_settings_lists_and_notification_switches` (06:38 UTC, 9 Nov) created `sales_list_items`, `notification_preferences`
+and eight `sales_list_*` functions, and no branch carried its code yet. S21 left it alone. Whoever writes Handover 20:
+find that session's branch before touching Settings.
+
+Stephan chose S17's compose items instead ("Several CCS ... Is 17"). Nothing of the 5 Nov helper had landed (no commit
+since 4 Nov touched Cc, the signature or the compose box). No migration. Commits `Raptor H19: S21 -- ...`.
+- **Several people on the Cc line** ("I try to add Rinda ... multiple people to CC"). `RecipientField multiple`: each
+  person a chip with its own X; a comma, a semicolon, Enter or leaving the box finishes an address; Backspace in an
+  empty box takes the last off; nobody already on the line is offered again. The value is still ONE comma-separated
+  string (`splitRecipientLine` / `joinRecipientLine` / `normaliseRecipients` in recipientSuggest.ts), so drafts,
+  reply-all and the route are unchanged; nodemailer takes the comma list as it is. Send names a piece that is not an
+  address ("“rinda” on the Cc line is not an email address") and sends each address once. To stays single.
+- **Colleagues found by name** on To and Cc: AppStore's active users with an address, never the writer, tagged
+  "Colleague", from the first letter (never on an empty box), never with the forget-X.
+- **The signature under the message** ("show me the email signature that I uploaded ... how it will look relative to
+  the text"). `signatureHtml` / `composeBody` moved to `src/lib/emailSignature.ts`; `api/_lib/signature.ts` re-exports
+  them (the check asserts they are the SAME functions). `SignaturePreview` in ComposeEmailModal draws the last
+  paragraph typed + composeBody's gap + the signature in `emailBodyStyle(firm)`, in a sandboxed frame (stored
+  signature HTML is not escaped by the send, so it must not run here). On a forward it says the signature goes under
+  the original (composeBody appends to everything). No signature: a line pointing to Settings -> Profile.
+- **The body "going down" while typing** -- a diagnosis, NOT seen on an iPad: an iPad keyboard covers the page
+  without resizing it, so a dialog centred on the full screen had its lower half under the keyboard and Safari slid the
+  page on every line. `Modal` now pins the overlay to `window.visualViewport` while the keyboard is up (height
+  difference > 120px) and fits the card inside it; desktops are unchanged. Applies to every dialog. **Ask Stephan to
+  try writing an email on the iPad**; if it still moves, look next at the 12-row textarea scrolling inside the card.
+- Checks: `check-compose-cc-signature` (44, four breaks each seen failing), `e2e/compose-cc-signature` (29; the keyboard
+  played with a fake visualViewport; breaks seen failing by name). `check-recipient-suggest` and `check-reply-all`
+  moved to the new text. Fast suite green (23 768 / 388), build clean, lint no new warnings; e2e mail 151,
+  recipient-field 26, compose-send 12.
+- **Not pushed to the preview branch** -- S21's instructions allow its own branch only; fast-forward
+  `claude/sales-raptor-review-p1pzx2` (or open a pull request) when Stephan says.
+- Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
+  mailbox, so the preview is always the writer's own signature.
 
 ## S20 -- LATE MONEY (Raptor · Handover 19, 8 Nov; branch `claude/s20-late-money` from `claude/sales-raptor-review-p1pzx2` at 34e3f08)
 

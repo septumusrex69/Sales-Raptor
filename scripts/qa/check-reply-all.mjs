@@ -261,9 +261,9 @@ ok('...and it opens with the people who were on the original', /useState\(initia
  * correctly onto a message that leaves the building. The names were already in hand two fields up.
  */
 ok('...and it is the same picker as To',
-  /<RecipientField value=\{cc\} onChange=\{setCc\} contextual=\{recipients\}/.test(composer))
+  /<RecipientField multiple value=\{cc\} onChange=\{setCc\} contextual=\{recipients\}/.test(composer))
 /* Cleared to nothing, the message goes to the one recipient -- not to an empty Cc header. */
-ok('an emptied Cc box sends no Cc', /\.\.\.\(cc\.trim\(\) \? \{ cc: cc\.trim\(\) \} : \{\}\)/.test(composer))
+ok('an emptied Cc box sends no Cc', /\.\.\.\(normaliseRecipients\(cc\) \? \{ cc: normaliseRecipients\(cc\) \} : \{\}\)/.test(composer))
 
 /* ---------- 7. the send, in both places ---------- */
 

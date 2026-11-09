@@ -227,7 +227,7 @@ ok('...and numbers them so their order survives the sort',
  * on a contact who is on the file would hide them until the record itself changed -- and with the
  * count now carrying the position, every contextual entry but the first would have been given one.
  */
-ok('the X is offered on what was remembered', /\{!s\.onRecord && \(/.test(field))
+ok('the X is offered on what was remembered', /\{!s\.onRecord && !s\.colleague && \(/.test(field))
 ok('...and not decided by the use count', !/s\.uses !== Number\.MAX_SAFE_INTEGER/.test(field))
 /*
  * AN OFFER SAYS WHERE IT CAME FROM. With nothing typed these rows are not matches -- nobody has
@@ -235,7 +235,7 @@ ok('...and not decided by the use count', !/s\.uses !== Number\.MAX_SAFE_INTEGER
  * objected to the first time.
  */
 ok('an untyped box says what it is offering', /Already on this file/.test(field))
-ok('...only where nothing has been typed', /value\.trim\(\) === '' && shown\.length > 0/.test(field))
+ok('...only where nothing has been typed', /query\.trim\(\) === '' && shown\.length > 0/.test(field))
 
 /*
  * AND NOT THE ADDRESS IT IS ALREADY GOING TO. On a reply the To line is one of these same
@@ -245,7 +245,8 @@ ok('an address the message already goes to is not offered',
   /for \(const t of taken \?\? \[\]\)/.test(field))
 const composer = read('src/components/ComposeEmailModal.tsx')
 ok('the Cc box knows what the To box holds', /taken=\{\[address\]\}/.test(composer))
-ok('...and the To box knows what the Cc box holds', /taken=\{\[cc\]\}/.test(composer))
+/* Every one on the Cc line, now that it holds several (S21). */
+ok('...and the To box knows what the Cc box holds', /taken=\{recipientList\(cc\)\}/.test(composer))
 /* IT HIDES A SUGGESTION AND NOTHING MORE: the box stays a text box, which is the thing it is for.
    A `taken` that reached the input would refuse an address somebody deliberately typed twice. */
 ok('...and it only ever hides a suggestion', !/taken\.(includes|some)\(value/.test(field))
