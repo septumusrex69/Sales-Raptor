@@ -65,7 +65,8 @@ try {
       catch { await new Promise((r) => setTimeout(r, 500)) }
     }
     await page.getByTestId('backdated-row').first().waitFor({ timeout: 20000 })
-    t.ok('the Trust rail offers Backdated payments', (await page.locator('a[href="/trust/backdated"]').count()) > 0)
+    /* S21: in Payments in now, for approval; the rail item is gone ("Not a separate tab"). */
+    t.check('the Trust rail no longer has a Backdated tab', await page.locator('nav a[href="/trust/backdated"]').count(), 0)
     const row = (await page.getByTestId('backdated-row').first().innerText()).replace(/\s+/g, ' ')
     t.ok(`the row says paid 1 Mar, waiting, and one later payment paid over (${row.slice(0, 140)})`,
       /01 Mar 2026|1 Mar 2026/.test(row) && /Waiting/.test(row) && /1 payment/.test(row) && /1 paid over/.test(row))

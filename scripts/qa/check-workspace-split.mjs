@@ -173,7 +173,9 @@ const businessTargets = railTargets(businessLayout)
    11 Oct: Overpayments, after Payments to make (the firm: "a separate section for overpayments"). */
 /* NINE AGAIN since 2 Nov (Raptor H16): Find a payment joined beside the bank statement, request #18. */
 /* TEN since 8 Nov (Raptor H19 / S20): Backdated payments joined beside To sort. */
-check('the trust rail has its ten, settings and the door (Backdated payments joined, 8 Nov)', trustTargets.length, 12)
+/* NINE since 9 Nov (S21): Client ledger joined; Backdated payments went into Payments in and Bank statement off the
+   menu (Stephan: "not a separate tab", "the bank statement ... is unnecessary"). */
+check('the trust rail has its nine, settings and the door (S21: Client ledger in, Backdated and Bank statement out)', trustTargets.length, 11)
 /* FIVE AND THE DOOR: overview, income (drawn only for whoever holds business.income), expenses,
    drawings, back office -- and the door to the trust. */
 check('the business rail has its five and the door', businessTargets.length, 6)

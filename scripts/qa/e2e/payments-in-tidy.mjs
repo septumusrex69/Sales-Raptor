@@ -52,50 +52,26 @@ const server = await startServer()
 const browser = await chromium.launch()
 try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
-  await page.goto(`http://127.0.0.1:${PORT}/trust/payments`, { waitUntil: 'domcontentloaded' })
+  /*
+   * S21 · Raptor H19: suspense moved to To sort, a tile that opens (Stephan: "putting the suspense there by the payments
+   * in is not good"). The money OUT that sat under it on Payments in -- bank charges, a returned debit -- is on To sort
+   * already, under Statement lines to allocate, which offers both (BankLinesToAllocate: the allocation kinds and
+   * "Returned / unpaid receipt"); so it is not drawn a second time beside suspense.
+   */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions#suspense`, { waitUntil: 'domcontentloaded' })
   const interest = page.getByTestId('book-interest')
   await interest.waitFor({ timeout: 20000 })
   t.check('interest is offered as interest, and only on the interest line', await interest.count(), 1)
   t.ok('...while a debtor\'s receipt still offers Place it', await page.getByRole('row', { name: /CAPITEC P NAIDOO/ }).getByRole('button', { name: 'Place it' }).isVisible())
-  t.check('both bank charges offer Book as a bank charge', await page.getByTestId('book-charge').count(), 2)
-  const ret = page.getByTestId('returned-debit')
-  await page.getByTestId('bounced-suggestion').waitFor({ timeout: 10000 })
-  t.ok('the returned debit suggests the receipt it took back, by the account it names',
-    /Looks like the 15 Aug R 1 000\.00 from SBB\/2003 \(T Zulu\) bounced/.test(plain(await ret.innerText())))
-  t.check('...and has not paired it on its own', calls.filter((c) => c.returned).length, 0)
+  t.check('money out is not listed twice beside suspense', await page.getByRole('heading', { name: 'Payments out to allocate' }).count(), 0)
   t.check('nothing says "No run of this amount" any more', await page.getByText('No run of this amount').count(), 0)
-  /* The cards stand apart: the bottom of one is above the top of the next. */
-  const gap = await page.evaluate(() => {
-    const hs = [...document.querySelectorAll('h3')]
-    const a = hs.find((h) => h.textContent?.trim() === 'Needs an account')?.closest('.card')
-    const b = hs.find((h) => h.textContent?.trim() === 'Payments out to allocate')?.closest('.card')
-    return a && b ? Math.round(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom) : -999
-  })
-  t.ok(`the Payments out card stands apart from the one above it (gap ${gap}px)`, gap >= 8)
-  t.ok('the latest statement counts lines, not receipts', /5 lines still to place or allocate/.test(await page.getByTestId('latest-statement').innerText()))
-  /* Every action inside its card -- the first cut spilled the buttons past the right edge. */
-  const spill = await page.evaluate(() => {
-    const card = [...document.querySelectorAll('h3')].find((h) => h.textContent?.trim() === 'Payments out to allocate')?.closest('.card')
-    if (!card) return -999
-    const right = card.getBoundingClientRect().right
-    return Math.max(...[...card.querySelectorAll('button, a')].map((b) => Math.round(b.getBoundingClientRect().right - right)))
-  })
-  t.ok(`every action sits inside the card (overhang ${spill}px)`, spill <= 0)
-  await t.shot(page, 'payments-in-tidy')
+  await t.shot(page, 'to-sort-suspense')
 
   await interest.click()
   await page.waitForTimeout(600)
   t.check('Book as bank interest allocates that line as interest', JSON.stringify(calls.filter((c) => c.p_kind)[0] ?? null),
     JSON.stringify({ p_line: 'r-int', p_kind: 'bank_interest', p_reason: null, p_target: null }))
-  t.check('...and it leaves Needs an account', await page.getByTestId('book-interest').count(), 0)
-  await page.getByTestId('confirm-returned').click()
-  await page.waitForTimeout(600)
-  t.check('Confirm returns that receipt against that debit, in one call', JSON.stringify(calls.find((c) => c.returned)?.returned ?? null),
-    JSON.stringify({ p_line: 'd-ret', p_payment: 'p-sbb' }))
-  await page.getByTestId('book-charge').first().click()
-  await page.waitForTimeout(600)
-  t.check('Book as a bank charge allocates as a charge', JSON.stringify(calls.filter((c) => c.p_kind)[1] ?? null),
-    JSON.stringify({ p_line: 'd-fee', p_kind: 'bank_charge', p_reason: null, p_target: null }))
+  t.check('...and it leaves suspense', await page.getByTestId('book-interest').count(), 0)
   await context.close()
 } catch (e) {
   try { const pg = browser.contexts().flatMap((c) => c.pages())[0]; if (pg) await t.shot(pg, 'payments-in-tidy-where-it-stopped') } catch { /* */ }

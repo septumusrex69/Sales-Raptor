@@ -156,7 +156,10 @@ for (const [what, re] of [
 
 /* ---- the screen ---- */
 const page = read('src/pages/trust/BackdatedPayments.tsx')
-ok('Trust has the list', /to: '\/trust\/backdated', label: 'Backdated payments'/.test(read('src/pages/trust/TrustLayout.tsx'))
+/* S21 · Raptor H19 (Stephan: "shown for approval in the payments in. Not a separate tab"): the list sits in Payments in,
+   under the approval queue; the rail item is gone and the address still opens the page for links already sent. */
+ok('Payments in has the list, for approval', /<BackdatedPayments embedded refreshKey=\{changed\} \/>/.test(read('src/pages/finance/FinancePayments.tsx'))
+  && !/label: 'Backdated payments'/.test(read('src/pages/trust/TrustLayout.tsx'))
   && /path="backdated" element=\{<BackdatedPayments \/>\}/.test(read('src/App.tsx')))
 ok('Approve is drawn only for an Administrator with payment.approve', /const mayApprove = mayPropose && currentUser\?\.role === 'Administrator'/.test(page)
   && /can\(currentUser, 'payment\.approve'\)/.test(page) && /\{mayApprove && rs\?\.status === 'proposed' && !rs\.blockedReason && \(/.test(page))

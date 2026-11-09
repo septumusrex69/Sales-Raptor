@@ -20,6 +20,9 @@ import { clockToday } from '../../lib/clock.ts'
 import { accountedFromCash } from '../../lib/trustUnaccounted'
 import { currentHoldings, todoItems } from '../../lib/trustOverview'
 import { swordfishLeft, type SwordfishHolding } from '../../lib/swordfishHolding'
+import {
+  clientShareByCycle, compositionWidths, firmShareByCycle, readyForPayover, trustComposition,
+} from '../../lib/trustComposition'
 
 /**
  * IS THE TRUST ACCOUNT RIGHT, AND WHOSE PAYOVER IS EACH PART OF IT WAITING FOR?
@@ -129,6 +132,11 @@ export function TrustOverview() {
     cash, firm, kept: kept?.amount ?? 0, swordfish,
     label: (c) => cycleLabel(c.periodStart, c.periodEnd), payDay: longDate,
   })
+  const composition = trustComposition(cash, swordfishLeft(swordfish))
+  const widths = compositionWidths(composition)
+  const ready = readyForPayover(cash)
+  const clientRows = clientShareByCycle(cash)
+  const firmRows = firmShareByCycle(cash)
   const credits = lines.filter((l) => l.direction === 'credit')
   const todo = todoItems({
     notAccounted: head.notAccounted,
@@ -160,7 +168,7 @@ export function TrustOverview() {
       {/* THE MONEY FIRST, THEN HOW MUCH OF IT HAS A NAME ON IT (the firm, 10 Oct). */}
       {/* THE FIRM'S BLUES AND GOLD, NOT BLACK (Stephan, 7 Nov: "make it more relative to Raptor ... like coloring and
           stuff, because it's black and it doesn't look good"): the brand navy into steel, gold labels, a gold edge. */}
-      <div className="rounded-2xl text-white px-6 sm:px-8 py-6 grid grid-cols-1 sm:grid-cols-3 gap-6 ring-1 ring-gold-500/40
+      <div className="rounded-2xl text-white px-6 sm:px-8 py-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 ring-1 ring-gold-500/40
         bg-[linear-gradient(135deg,var(--c-navy-deep)_0%,var(--c-navy)_55%,var(--c-navy-mid)_100%)] shadow-[inset_0_3px_0_var(--c-gold-brand)]"
         data-testid="trust-headline">
         <div>
@@ -186,10 +194,93 @@ export function TrustOverview() {
             {head.notAccounted !== 0 && <span className="ml-1 underline underline-offset-2">· See every item</span>}
           </div>
         </Link>
+        {/* READY FOR PAYOVER (S21 · Raptor H19, the layout Stephan liked): the clients' money in CLOSED cycles --
+            collected, waiting for its pay day or overdue. Opens the runs, which now lead with what is to pay. */}
+        <Link to="/trust/payover" data-testid="ready-for-payover" className="block rounded-xl -m-2 p-2 hover:bg-white/5 transition-colors">
+          <Figure label="Ready for payover" value={rand(ready)} />
+          <div className="mt-2 text-xs text-white/75">Clients&rsquo; money from closed cycles · <span className="underline underline-offset-2">Payover runs</span></div>
+        </Link>
       </div>
 
+      {/*
+        WHAT THE ACCOUNT IS MADE OF, THEN EACH SHARE BROKEN UP, THEN WHAT NEEDS ATTENTION (S21 · Raptor H19).
+        Stephan, 9 Nov: "what's in the account ... client portion, our portion ... if you scroll down ... the client
+        share, which would be the payover for example the last 2 months, which you can break up. And then our share
+        ... and then at the bottom all the other discrepancies." Read off the same cycles as Accounted for
+        (trustComposition.ts), so the bar adds to that figure exactly.
+      */}
+      <section data-testid="trust-composition">
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">What the account is made of</h2>
+        <Card className="mt-3 px-6 py-5">
+          <div className="flex h-3 w-full gap-1 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            {widths.clients > 0 && <div className="h-full rounded-full bg-[var(--c-navy)]" style={{ width: `${widths.clients}%` }} />}
+            {widths.firm > 0 && <div className="h-full rounded-full bg-[var(--c-steel)]" style={{ width: `${widths.firm}%` }} />}
+            {widths.debtors > 0 && <div className="h-full rounded-full bg-[var(--c-gold)]" style={{ width: `${widths.debtors}%` }} />}
+            {widths.other > 0 && <div className="h-full rounded-full bg-slate-400" style={{ width: `${widths.other}%` }} />}
+          </div>
+          <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+            <Part swatch="bg-[var(--c-navy)]" label="Client funds" value={composition.clientFunds} />
+            <Part swatch="bg-[var(--c-steel)]" label="Bredell Ferreira's share" value={composition.firmShare} />
+            <Part swatch="bg-[var(--c-gold)]" label="Debtor credits" value={composition.debtorCredits} />
+            <Part swatch="bg-slate-400" label="Other holdings" value={composition.otherHoldings}
+              note={composition.otherHoldings !== 0 ? 'Held for Swordfish payovers' : undefined} />
+          </dl>
+        </Card>
+      </section>
+
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Card className="px-6 py-5"><div data-testid="client-share">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-lg font-semibold text-slate-800">Client share</h2>
+            <span className="text-lg font-semibold tabular-nums text-slate-800">{rand(composition.clientFunds)}</span>
+          </div>
+          <p className="text-[12.5px] text-slate-500">Cycle by cycle: what each payover will carry.</p>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {clientRows.length === 0 && <li className="py-3 text-sm text-slate-500">Nothing is held for clients.</li>}
+            {clientRows.map((r) => (
+              <li key={r.key}>
+                <Link to={r.isOpen ? '/trust/payover?tab=collecting' : '/trust/payover?tab=topay'}
+                  className="flex items-baseline gap-3 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13.5px] font-medium text-slate-800">{cycleLabel(r.periodStart, r.periodEnd)}</span>
+                    <span className="block text-[12px] text-slate-500">{r.isOpen ? 'Still collecting' : `Paid over ${longDate(r.paysOn)}`}</span>
+                  </span>
+                  <span className="text-[14px] font-semibold tabular-nums text-slate-800">{rand(r.amount)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div></Card>
+        <Card className="px-6 py-5"><div data-testid="firm-share">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-lg font-semibold text-slate-800">Our share</h2>
+            <span className="text-lg font-semibold tabular-nums text-slate-800">{rand(composition.firmShare)}</span>
+          </div>
+          <p className="text-[12.5px] text-slate-500">
+            {firm ? `${rand(firm.drawable)} may be drawn now${firm.waiting > 0.004 ? `, ${rand(firm.waiting)} waits for its clients to be paid` : ''}.`
+              : 'Fees, interest and commission not yet transferred, less bank charges.'}
+          </p>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {firmRows.length === 0 && <li className="py-3 text-sm text-slate-500">Nothing of the firm&rsquo;s is held.</li>}
+            {firmRows.map((r) => (
+              <li key={r.key}>
+                <Link to="/trust/payments-out" className="flex items-baseline gap-3 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13.5px] font-medium text-slate-800">{cycleLabel(r.periodStart, r.periodEnd)}</span>
+                    <span className="block text-[12px] text-slate-500">
+                      Earned {rand(r.earned)}{r.other !== 0 ? ` · bank interest, charges and transfers ${rand(r.other)}` : ''}
+                    </span>
+                  </span>
+                  <span className="text-[14px] font-semibold tabular-nums text-slate-800">{rand(r.amount)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div></Card>
+      </section>
+
       <section>
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">What is in the trust account</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">What is in the trust account, owner by owner</h2>
         <p className="text-sm text-slate-500 mt-1">
           Only money in the account today. Payovers already paid and the firm&rsquo;s transfers are history, on Bank statement and the Trust ledger.
         </p>
@@ -218,7 +309,7 @@ export function TrustOverview() {
           */}
           <Card className="lg:col-span-5 px-6 py-5"><div data-testid="needs-doing">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-lg font-semibold text-slate-800">Needs doing</div>
+              <div className="text-lg font-semibold text-slate-800">Needs attention</div>
               <span className={clsx('rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap',
                 todo.some((t) => t.tone === 'bad') ? 'bg-negative-50 text-negative-700'
                   : todo.some((t) => t.tone === 'warn') ? 'bg-amber-100 text-amber-800' : 'bg-positive-50 text-positive-700')}>
@@ -294,6 +385,19 @@ function Subtotal({ label, value, strong }: { label: string; value: number; stro
       <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div>
       <div className={clsx('font-semibold tabular-nums text-slate-800', strong ? 'text-2xl' : 'text-lg')}>
         {rand(value)}
+      </div>
+    </div>
+  )
+}
+
+function Part({ swatch, label, value, note }: { swatch: string; label: string; value: number; note?: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className={clsx('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', swatch)} />
+      <div className="min-w-0">
+        <dt className="text-[13px] text-slate-500">{label}</dt>
+        <dd className="text-[16px] font-semibold tabular-nums text-slate-800">{rand(value)}</dd>
+        {note && <dd className="text-[11.5px] text-slate-400">{note}</dd>}
       </div>
     </div>
   )

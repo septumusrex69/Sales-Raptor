@@ -42,11 +42,13 @@ const server = await startServer()
 const browser = await chromium.launch()
 try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
-  await page.goto(`http://127.0.0.1:${PORT}/trust/payments`, { waitUntil: 'domcontentloaded' })
+  /* S21: suspense lives on To sort, a tile that opens (Stephan: "you click on the suspense and it opens it"); a link
+     naming #suspense opens it already. */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions#suspense`, { waitUntil: 'domcontentloaded' })
   await page.locator('[data-testid="needs-account-scroll"] tbody tr').first().waitFor({ timeout: 20000 })
 
-  const tile = plain(await page.getByTestId('payments-overview').innerText())
-  t.ok(`the tile counts every receipt, not the first thousand (${tile.match(/[\d ]+ receipts? in suspense/)?.[0]})`, /1 805 receipts in suspense/.test(tile))
+  const tile = plain(await page.getByTestId('suspense-tile').innerText())
+  t.ok(`the tile counts every receipt, not the first thousand (${tile.match(/[\d ]+ receipts? with no account/)?.[0]})`, /1 805 receipts with no account yet/.test(tile))
   t.ok('...and adds up every one of them', /R 180 500\.00/.test(tile))
 
   const rows = () => page.locator('[data-testid="needs-account-scroll"] tbody tr').count()

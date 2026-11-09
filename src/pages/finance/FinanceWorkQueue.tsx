@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CreditCard, FileText, Filter, Loader2, Search, Users } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
@@ -19,6 +19,7 @@ import { firmDay } from '../../lib/dateLabels'
 import { clockNow } from '../../lib/clock.ts'
 import { supabase } from '../../lib/supabase'
 import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
+import { isPaidOver } from '../../lib/paidOverLedger'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
 import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
 import { drawingStep, transferReference, type PaidOut } from '../../lib/paymentsOut'
@@ -277,8 +278,8 @@ export function FinanceWorkQueue() {
    * Client balances carry it as owed to us until it is set off or paid. Approved and not yet sent
    * stays in Closed -- the advice telling them they owe us is still to go.
    */
-  const isFinal = (r: WorkQueueRow) => r.status === 'paid'
-    || (r.netPayover <= 0 && (r.status === 'sent' || (r.status === 'approved' && settled.has(r.runId))))
+  /* ONE RULE, SHARED WITH THE CLIENT LEDGER (S21): a finished run leaves this page for that one. */
+  const isFinal = (r: WorkQueueRow) => isPaidOver(r, settled)
   const tabOf = (r: WorkQueueRow): QueueTab => queueTabOf(r, {
     final: isFinal(r), released: released.has(r.runId), openStart: cycle?.periodStart ?? null, today: cycle?.today ?? null, lagMonths: lag,
   })
@@ -302,7 +303,7 @@ export function FinanceWorkQueue() {
   const isHistory = tabShown === 'history'
   /* "Approve", not "To pay" (the firm, 13 Oct: "to pay could mean pay to anyone"): this screen decides
      what each client gets; paying is Payments out. */
-  const TAB_LABEL: Record<QueueTab, string> = { collecting: 'Collecting', waiting: 'Waiting', topay: 'Approve', history: 'History' }
+  const TAB_LABEL: Record<QueueTab, string> = { collecting: 'Collecting', waiting: 'Waiting', topay: 'Approve and pay', history: 'History' }
   /* THE PAYOUT DAY'S LAST LINE (prompt 12 B2): the firm's drawing, under the clients' payovers on
      Approve -- the earliest payout day on the tab, which is the one being worked. Not under a search or
      a status filter, where it would read as one of the rows found. */
@@ -350,6 +351,9 @@ export function FinanceWorkQueue() {
     })
   }
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
+
+  /* An old ?tab=history link (and mail already sent) lands where paid payovers live now (S21). */
+  if (tabParam === 'history') return <Navigate to="/trust/client-ledger" replace />
 
   return (
     <div className="space-y-4">
@@ -413,7 +417,11 @@ export function FinanceWorkQueue() {
       <Card padded={false}>
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 px-4 pt-3">
           <div className="flex gap-4">
-            {(['collecting', 'waiting', 'topay', 'history'] as const).map((t) => {
+            {/* WHAT NEEDS A PERSON FIRST (S21 · Raptor H19). Stephan, 9 Nov: "maybe like first is the ones that should be
+                approved and paid. Or ready for payment. When there's nothing there ... these ones in waiting ... and then
+                the collecting ones after that. The history of the payovers would be then in the client ledger." So
+                History is not a tab here: a run approved and paid leaves for the Client ledger. */}
+            {(['topay', 'waiting', 'collecting'] as const).map((t) => {
               const count = counts[t]
               return (
                 <button
@@ -437,6 +445,10 @@ export function FinanceWorkQueue() {
               )
             })}
           </div>
+          <Link to="/trust/client-ledger" data-testid="to-client-ledger"
+            className="pb-2.5 text-[12.5px] font-medium text-sky-700 hover:text-sky-900">
+            Paid payovers are in the Client ledger &rarr;
+          </Link>
           <div className="flex flex-wrap items-center gap-2 pb-2">
             {/* HISTORY, ONE PAYOUT AT A TIME (S7): "what went out on 11 Sep?". A search looks across
                 every payout, so the picker steps aside while one is typed. */}

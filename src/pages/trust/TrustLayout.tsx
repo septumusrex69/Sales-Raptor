@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, History, Landmark, Users, Scale, Search, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, BookOpen, Briefcase, CircleGauge, Users, Scale, Search, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -32,19 +32,20 @@ const ITEMS: RailItem[] = [
   { to: '/trust', label: 'Overview', icon: CircleGauge, end: true },
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
+  /* S21 · Raptor H19 (Stephan, 9 Nov): a run approved and paid leaves Payover runs for here, filed by client. */
+  { to: '/trust/client-ledger', label: 'Client ledger', icon: BookOpen },
   /* The one place money leaves trust (S7): clients, refunds, the firm's transfer, and the bank file. */
   { to: '/trust/payments-out', label: 'Payments out', icon: Send },
   /* TO SORT (S7, the firm, 13 Oct: "there's a tab for overpayments and then there's another tab for
      exceptions ... I don't know where we can see the suspense account"): one page for all three. */
   { to: '/trust/exceptions', label: 'To sort', icon: TriangleAlert },
-  /* S20 (the Claude Doc "Payments found late"): payments dated before one already split -- a receipt out of
-     suspense, a PTC captured late -- each worked out again in date order and corrected on the next run. Beside To
-     sort because it is the same kind of work: something found late, to be put right before the payover. */
-  { to: '/trust/backdated', label: 'Backdated payments', icon: History },
+  /* BACKDATED PAYMENTS ARE IN PAYMENTS IN NOW (S21; Stephan: "shown for approval in the payments in. Not a separate
+     tab. It's unnecessary"). /trust/backdated still opens the page, for links already sent. */
   /* "A dedicated tab ... the clients that owe us money" (13 Oct). */
   { to: '/trust/clients', label: 'Clients owe us', icon: Users },
-  /* "Every single transaction somewhere ... so we don't need to go into the bank" (13 Oct). */
-  { to: '/trust/statement', label: 'Bank statement', icon: Landmark },
+  /* BANK STATEMENT IS OFF THE MENU (S21; Stephan, 9 Nov: "the bank statement ... is unnecessary"). It is still how the
+     account is reconciled -- Not accounted for is worked out against it -- so /trust/statement stays and that page
+     links to it. */
   /* Request #18: where did this payment go? Beside the statement, which answers the same question for bank lines only. */
   { to: '/trust/find', label: 'Find a payment', icon: Search },
   { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },

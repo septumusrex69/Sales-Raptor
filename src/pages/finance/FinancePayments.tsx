@@ -7,7 +7,7 @@ import { firmToday } from '../../lib/dateLabels'
 import { formatDate } from '../../data/mockData'
 import { fetchProcessedMonth, type ProcessedMonth } from '../../lib/payover'
 import { BankImportCard, LatestStatement } from './BankImportCard'
-import { UnallocatedReceipts } from './UnallocatedReceipts'
+import { BackdatedPayments } from '../trust/BackdatedPayments'
 import { RecordPaymentModal } from './RecordPaymentModal'
 import { AwaitingApproval } from './AwaitingApproval'
 import { CheckPayments } from './CheckPayments'
@@ -45,7 +45,6 @@ export function FinancePayments() {
   const [changed, setChanged] = useState(0)
   const [recording, setRecording] = useState(false)
   const [pending, setPending] = useState<{ count: number; total: number } | null>(null)
-  const [unmatched, setUnmatched] = useState<{ count: number; total: number } | null>(null)
   const [month, setMonth] = useState<ProcessedMonth | null>(null)
   const bump = useCallback(() => setChanged((n) => n + 1), [])
 
@@ -59,7 +58,6 @@ export function FinancePayments() {
   }, [changed])
 
   const onLoaded = useCallback((count: number, total: number) => setPending({ count, total }), [])
-  const onUnmatched = useCallback((count: number, total: number) => setUnmatched({ count, total }), [])
 
   const tabs = (
     <div className="flex gap-4 border-b border-slate-200">
@@ -108,7 +106,7 @@ export function FinancePayments() {
 
       {/* THE FOUR FIGURES, IN ONE CARD. A dash while one is being read, never a nought it has not
           earned. Needs an account turns amber when there is something in it. */}
-      <div className="card grid grid-cols-1 gap-px overflow-hidden bg-slate-200 sm:grid-cols-2 xl:grid-cols-4" data-testid="payments-overview">
+      <div className="card grid grid-cols-1 gap-px overflow-hidden bg-slate-200 sm:grid-cols-3" data-testid="payments-overview">
         <OverviewTile label="Waiting for approval"
           value={pending ? rand(pending.total) : '—'}
           note={pending ? `${pending.count.toLocaleString('en-ZA')} payment${pending.count === 1 ? '' : 's'}` : 'Reading the queue…'} />
@@ -116,9 +114,9 @@ export function FinancePayments() {
           note={month ? `${month.trustCount.toLocaleString('en-ZA')} payments this month` : 'This month'} />
         <OverviewTile label="Paid to clients · PTC" value={month ? rand(month.ptcAmount) : '—'}
           note={month ? `${month.ptcCount.toLocaleString('en-ZA')} payments this month` : 'This month'} />
-        <OverviewTile label="Needs an account" warn={!!unmatched && unmatched.count > 0}
-          value={unmatched ? rand(unmatched.total) : '—'}
-          note={unmatched ? `${unmatched.count.toLocaleString('en-ZA')} receipt${unmatched.count === 1 ? '' : 's'} in suspense` : 'Reading suspense…'} />
+        {/* SUSPENSE IS NOT HERE ANY MORE (S21 · Raptor H19). Stephan: "putting the suspense there by the payments in is
+            not good. So the payments in should only show what needs to be approved. Or where to put something." It
+            lives on To sort, as a tile that opens. */}
       </div>
 
       <LatestStatement refreshKey={changed} />
@@ -129,11 +127,9 @@ export function FinancePayments() {
       */}
       <AwaitingApproval refreshKey={changed} onApproved={bump} onLoaded={onLoaded} />
 
-      {/* SUSPENSE LIVES HERE, BELOW THE PENDING PAYMENTS, at the firm's asking -- named the way
-          their mock-up names it: Needs an account. */}
-      <div id="needs-an-account" className="scroll-mt-4">
-        <UnallocatedReceipts refreshKey={changed} onPlaced={bump} onTotals={onUnmatched} />
-      </div>
+      {/* BACKDATED PAYMENTS, FOR APPROVAL, UNDER THE QUEUE (S21): "shown for approval in the payments in. Not a separate
+          tab." Drawn only while one waits to be corrected. */}
+      <BackdatedPayments embedded refreshKey={changed} />
 
       {recording && (
         <RecordPaymentModal onClose={() => setRecording(false)}

@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { rand } from '../../lib/money'
 import { UnallocatedReceipts } from '../finance/UnallocatedReceipts'
 import { BankLinesToAllocate } from '../../components/finance/BankLinesToAllocate'
 import { ParkedCredits } from '../../components/finance/ParkedCredits'
@@ -23,6 +25,16 @@ import { TrustOverpayments } from './TrustOverpayments'
 export function TrustToSort() {
   const [changed, setChanged] = useState(0)
   const bump = useCallback(() => setChanged((n) => n + 1), [])
+  /*
+   * SUSPENSE AS A TILE THAT OPENS (S21 · Raptor H19). Stephan, 9 Nov: "the suspense is basically, you click on the
+   * suspense and it opens it. So it will show you the suspense and total number ... Then you can search a payment, for
+   * example, in there." Folded, it is the count and the total; open, the whole list with its search. Opened already
+   * when a link names it (#suspense, as the overview's Needs attention does). The list stays MOUNTED while folded, so
+   * the tile's figures are the list's own (onTotals) rather than a second read that could disagree with it.
+   */
+  const [suspenseOpen, setSuspenseOpen] = useState(() => typeof window !== 'undefined' && window.location.hash === '#suspense')
+  const [suspense, setSuspense] = useState<{ count: number; total: number } | null>(null)
+  const onSuspense = useCallback((count: number, total: number) => setSuspense({ count, total }), [])
   return (
     <div className="space-y-6" data-testid="to-sort">
       <div>
@@ -39,8 +51,23 @@ export function TrustToSort() {
       </div>
 
       <section id="suspense" className="space-y-2">
-        <h2 className="text-lg font-semibold tracking-tight text-slate-800">Suspense</h2>
-        <UnallocatedReceipts refreshKey={changed} onPlaced={bump} hidePayouts />
+        <button type="button" onClick={() => setSuspenseOpen((o) => !o)} aria-expanded={suspenseOpen} data-testid="suspense-tile"
+          className="card flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50">
+          {suspenseOpen ? <ChevronDown size={18} className="text-slate-400" /> : <ChevronRight size={18} className="text-slate-400" />}
+          <span className="min-w-0 flex-1">
+            <span className="block text-lg font-semibold tracking-tight text-slate-800">Suspense</span>
+            <span className="block text-[12.5px] text-slate-500">
+              {suspense ? `${suspense.count.toLocaleString('en-ZA')} receipt${suspense.count === 1 ? '' : 's'} with no account yet` : 'Reading suspense…'}
+              {suspenseOpen ? '' : ' · open it to search and place them'}
+            </span>
+          </span>
+          <span className={`text-xl font-semibold tabular-nums ${suspense && suspense.count > 0 ? 'text-amber-700' : 'text-slate-800'}`} data-testid="suspense-total">
+            {suspense ? rand(suspense.total) : '—'}
+          </span>
+        </button>
+        <div hidden={!suspenseOpen}>
+          <UnallocatedReceipts refreshKey={changed} onPlaced={bump} hidePayouts onTotals={onSuspense} />
+        </div>
       </section>
 
       <section id="lines" className="space-y-2">

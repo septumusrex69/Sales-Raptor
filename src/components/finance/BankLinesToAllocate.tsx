@@ -236,7 +236,7 @@ function LineRow({ line, candidates, business, swordfish, onDone }: {
             from there; a credit line is never refunded directly, so the money always has an owner
             while it waits. */}
         {line.direction === 'credit' && (
-          <Link to="/trust/payments#needs-an-account" data-testid="place-on-account"
+          <Link to="/trust/exceptions#suspense" data-testid="place-on-account"
             title="A debtor's payment, including one rejected off a closed account: place it on the account under Payments in, Needs an account. On a closed account it is held as the debtor's credit."
             className="text-xs font-medium text-[var(--c-steel)] hover:underline">
             Place on an account

@@ -25,7 +25,14 @@ import {
  * Approve needs an Administrator with payment.approve -- the database says the same (propose_restatement,
  * approve_restatement), so a button is never offered and then refused.
  */
-export function BackdatedPayments() {
+/*
+ * IN PAYMENTS IN, FOR APPROVAL (S21 · Raptor H19). Stephan, 9 Nov: "it should go back to the payments in as a backdated
+ * payment, and it should show there. If you reverse, for example, a payment ... the backdated and those calculations
+ * are shown for approval in the payments in. Not a separate tab." `embedded` draws it under the approval queue: a
+ * heading rather than a page title, and NOTHING AT ALL while nothing waits -- an empty section on the screen people
+ * approve from every day is noise. The address /trust/backdated still opens it whole, for links already sent.
+ */
+export function BackdatedPayments({ embedded = false, refreshKey = 0 }: { embedded?: boolean; refreshKey?: number } = {}) {
   const { currentUser } = useAuth()
   const mayPropose = can(currentUser, 'finance.view') && can(currentUser, 'payment.approve')
   const mayApprove = mayPropose && currentUser?.role === 'Administrator'
@@ -45,7 +52,7 @@ export function BackdatedPayments() {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load() }, [load, refreshKey])
 
   const latest = useMemo(() => latestByPayment(restatements), [restatements])
 
@@ -54,15 +61,20 @@ export function BackdatedPayments() {
     try { await run(); await load() } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
   }
 
+  if (embedded && error) return null
+  if (embedded && !rows) return null
   if (error) return <Card className="p-5 text-sm text-negative-700 bg-negative-50">The backdated payments could not be read: {error}</Card>
   if (!rows) return <div className="flex items-center gap-2 py-10 text-sm text-slate-400"><Loader2 size={16} className="animate-spin" /> Reading backdated payments…</div>
 
   const waiting = rows.filter((r) => latest.get(r.paymentId)?.status !== 'posted').length
+  if (embedded && waiting === 0) return null
   return (
     <div className="space-y-5" data-testid="backdated-payments">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-3xl">
-          <h1 className="text-xl font-semibold tracking-tight text-slate-800">Backdated payments</h1>
+          {embedded
+            ? <h2 className="text-lg font-semibold tracking-tight text-slate-800" id="backdated">Backdated payments to approve</h2>
+            : <h1 className="text-xl font-semibold tracking-tight text-slate-800">Backdated payments</h1>}
           <p className="mt-1 text-sm text-slate-500">
             Payments dated before a payment that was already split. Worked out again in date order, each one is corrected on the
             next payover run as a new line dated the day it is approved. Nothing already paid over is changed, and the

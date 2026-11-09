@@ -292,7 +292,7 @@ const from = page.indexOf('What is in the trust account')
 const control = from < 0 ? '' : page.slice(from)
 ok('the ownership block was found', control.length > 500 && control.length < 14000)
 let at = -1
-for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"', 'Needs doing']) {
+for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"', 'Needs attention']) {
   const found = control.indexOf(line)
   ok(`the ownership block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)

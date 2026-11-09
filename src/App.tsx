@@ -71,6 +71,7 @@ const TrustUnaccounted = lazy(() => import('./pages/trust/TrustUnaccounted').the
 const TrustOverpayments = lazy(() => import('./pages/trust/TrustOverpayments').then((m) => ({ default: m.TrustOverpayments })))
 const BroughtForward = lazy(() => import('./pages/trust/BroughtForward').then((m) => ({ default: m.BroughtForward })))
 const BackdatedPayments = lazy(() => import('./pages/trust/BackdatedPayments').then((m) => ({ default: m.BackdatedPayments })))
+const ClientLedger = lazy(() => import('./pages/trust/ClientLedger').then((m) => ({ default: m.ClientLedger })))
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
 const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
@@ -262,6 +263,9 @@ function App() {
                 <Route path="exceptions" element={<TrustToSort />} handle={{ title: 'To sort' }} />
                 {/* S20: payments found late, worked out again in date order and corrected on the next run. */}
                 <Route path="backdated" element={<BackdatedPayments />} handle={{ title: 'Backdated payments' }} />
+                {/* S21: every payover approved and paid, filed by client (Stephan: "the history of the payovers would be
+                    then in the client ledger"). */}
+                <Route path="client-ledger" element={<ClientLedger />} handle={{ title: 'Client ledger' }} />
                 <Route path="settings" element={<FinanceSettings />} handle={{ title: 'Trust settings' }} />
                 {/* S10: Camille's Trust Debtors balances, brought forward once at the cut-over (HANDOFF §3a item 3). */}
                 <Route path="brought-forward" element={<BroughtForward />} handle={{ title: 'Balances brought forward' }} />

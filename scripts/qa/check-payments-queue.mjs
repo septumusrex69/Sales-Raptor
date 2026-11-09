@@ -259,10 +259,14 @@ check('...nor reverses one', /reversePayment|ReverseModal/.test(page), false)
 ok('Reverse lives on Check', /<ReversePaymentModal paymentId=\{reversing\.paymentId\}/.test(checkPage) && /\{mayReverse && \(/.test(checkPage))
 /* ON ONE LINE, as the firm's mock-up draws them: Record payment is passed to the import's own row. */
 ok('Record payment and Import bank statement sit on one line', /<BankImportCard compact[\s\S]{0,200}leading=\{\([\s\S]{0,500}Record payment/.test(page))
-ok('the four overview tiles', ['Waiting for approval', 'Processed into trust', 'Paid to clients · PTC', 'Needs an account']
-  .every((l) => page.includes(`label="${l}"`)))
-ok('suspense comes after the queue', page.includes('<AwaitingApproval') && page.includes('<UnallocatedReceipts')
-  && page.indexOf('<AwaitingApproval') < page.indexOf('<UnallocatedReceipts'))
+/* S21 · Raptor H19 (Stephan: "the payments in should only show what needs to be approved. Or where to put
+   something"): three tiles, suspense gone to To sort, backdated payments under the queue for approval. */
+ok('the three overview tiles', ['Waiting for approval', 'Processed into trust', 'Paid to clients · PTC']
+  .every((l) => page.includes(`label="${l}"`)) && !page.includes('label="Needs an account"'))
+ok('suspense is not on Payments in', !page.includes('<UnallocatedReceipts'))
+ok('...it is a tile on To sort that opens', /data-testid="suspense-tile"/.test(read('src/pages/trust/TrustToSort.tsx')))
+ok('backdated payments come after the queue, for approval', page.includes('<AwaitingApproval') && page.includes('<BackdatedPayments embedded')
+  && page.indexOf('<AwaitingApproval') < page.indexOf('<BackdatedPayments embedded'))
 const month = sql.slice(sql.lastIndexOf('create or replace function public.payments_in_month('))
 ok('the processed tiles are summed in the database, behind finance.view',
   /has_capability\('finance\.view'\)/.test(month.slice(0, 1200)) && /reversed_at is null/.test(month.slice(0, 1200)))

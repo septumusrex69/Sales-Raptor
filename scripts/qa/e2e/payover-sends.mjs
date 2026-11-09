@@ -120,9 +120,15 @@ try {
     await page.locator(`[data-testid="cycle-group"][data-tone="${tone}"]`).first().waitFor({ timeout: 10000 })
   }
   await groups.first().waitFor({ timeout: 15000 })
-  t.ok('the tabs are Collecting, Waiting, Approve, History, each counting its runs',
+  /* S21 · Raptor H19 (Stephan: "first is the ones that should be approved and paid ... then these ones in waiting, and
+     then the collecting ones ... The history of the payovers would be then in the client ledger"). */
+  t.ok('the tabs are Approve and pay, Waiting, Collecting, each counting its runs',
     /Collecting\s*\(?\s*1\s*\)?/.test(await queueTab('collecting').innerText()) && /Waiting\s*\(?\s*3\s*\)?/.test(await queueTab('waiting').innerText())
-      && /Approve\s*\(?\s*2\s*\)?/.test(await queueTab('topay').innerText()) && /History\s*\(?\s*2\s*\)?/.test(await queueTab('history').innerText()))
+      && /Approve and pay\s*\(?\s*2\s*\)?/.test(await queueTab('topay').innerText()))
+  t.check('...in that order', JSON.stringify(await page.locator('[data-testid^="tab-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))),
+    JSON.stringify(['tab-topay', 'tab-waiting', 'tab-collecting']))
+  t.check('...and no History tab: paid payovers are in the Client ledger', await queueTab('history').count(), 0)
+  t.ok('...which the page links to', await page.getByTestId('to-client-ledger').isVisible())
   let h = await heads()
   t.check('it opens on To pay, which holds ONE cycle', h.length, 1)
   t.ok('...the overdue one, saying it was due', /^Overdue[\s\S]*2 clients[\s\S]*was due 11 Sep and is not yet paid/i.test(h[0] ?? ''))
@@ -191,24 +197,24 @@ try {
   t.check('...and calls the function once a run',
     JSON.stringify(calls.filter((c) => c.fn === 'mark_payover_run_paid').map((c) => c.p_run).slice(1).sort()), JSON.stringify(['A', 'C']))
 
-  /* ---- HISTORY (S7): one payout at a time, searchable across all of them ---- */
-  await openTab('history', 'done')
-  t.check('History opens on the latest payout', await page.getByTestId('history-payout').inputValue(), '2026-09-11')
-  t.check('...showing only that payout\'s runs', JSON.stringify((await page.getByTestId('queue-run').allInnerTexts()).map((x) => /Umhlanga/.test(x))), '[true]')
-  /* en-ZA writes September as "Sept". */
-  t.ok('...with the date paid on the firm\'s calendar (00:30 on 12 Sep, not UTC\'s 11th)',
-    /^12 Sept? 2026$/.test((await page.getByTestId('history-paid-on').first().innerText()).split(String.fromCharCode(0xa0)).join(' ')))
-  t.check('...and the reference it went out on', await page.getByTestId('history-reference').first().innerText(), 'BF PO-H')
-  await page.getByTestId('history-payout').selectOption('2026-08-11')
-  await page.getByTestId('queue-run').filter({ hasText: 'Thandeka' }).waitFor({ timeout: 5000 })
-  t.check('another month is one pick away', await page.getByTestId('queue-run').count(), 1)
-  await page.getByTestId('history-payout').selectOption('2026-09-11')
-  await page.getByTestId('queue-run').filter({ hasText: 'Umhlanga' }).waitFor({ timeout: 5000 })
-  await page.getByLabel('Search clients').fill('po-g')
-  await page.getByTestId('queue-run').filter({ hasText: 'Thandeka' }).waitFor({ timeout: 5000 })
-  t.ok('a search finds a run in another month by its number', (await page.getByTestId('queue-run').count()) === 1
-    && await page.getByTestId('history-payout').isDisabled())
-  await page.getByLabel('Search clients').fill('')
+  /* ---- THE CLIENT LEDGER (S21): what was paid over, filed by client ---- */
+  await page.getByTestId('to-client-ledger').click()
+  await page.getByTestId('client-ledger-row').first().waitFor({ timeout: 10000 })
+  const ledgerRows = (await page.getByTestId('client-ledger-row').allInnerTexts()).join(' | ')
+  t.ok(`the Client ledger lists the clients paid over (${ledgerRows.slice(0, 120)})`, /Umhlanga/.test(ledgerRows) && /Thandeka/.test(ledgerRows))
+  t.ok('...and not a client whose run is still to pay', !/Mopane/.test(ledgerRows))
+  await page.getByLabel('Search a client').fill('umhl')
+  t.check('a client is found by name', await page.getByTestId('client-ledger-row').count(), 1)
+  await page.getByTestId('client-ledger-row').first().click()
+  await page.getByTestId('client-ledger-payover').first().waitFor({ timeout: 5000 })
+  const payoverRow = await page.getByTestId('client-ledger-payover').first().innerText()
+  t.ok('opening the client lists its payovers, with the reference each went out on', /BF PO-H/.test(payoverRow))
+  t.ok('...paid on the firm\'s calendar (00:30 on 12 Sep, not UTC\'s 11th)', /12 Sep 2026/.test(payoverRow))
+  t.ok('...each opening the run, with its payments and the advice that was sent',
+    /\/trust\/runs\/H$/.test(await page.getByTestId('client-ledger-payover').first().getByRole('link').getAttribute('href') ?? ''))
+  await t.shot(page, 'client-ledger')
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payover`)
+  await groups.first().waitFor({ timeout: 15000 })
 
   /* ---- THE COLLECTING TAB: still collecting ---- */
   await openTab('collecting', 'early')

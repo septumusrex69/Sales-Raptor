@@ -246,8 +246,12 @@ try {
     /* THE RAIL DREW, with its name and the line saying whose money this is. */
     const rail = page.locator('nav').filter({ hasText: 'Money held for other people' }).first()
     t.ok('the trust rail is on the page', (await rail.count()) > 0)
-    for (const item of ['Overview', 'Payments in', 'Payover runs', 'To sort', 'Clients owe us', 'Bank statement']) {
+    /* S21: Client ledger in; Bank statement and Backdated payments off the menu (Stephan, 9 Nov). */
+    for (const item of ['Overview', 'Payments in', 'Payover runs', 'Client ledger', 'To sort', 'Clients owe us']) {
       t.ok(`...listing ${item}`, (await rail.getByRole('link', { name: item }).count()) > 0)
+    }
+    for (const gone of ['Bank statement', 'Backdated payments']) {
+      t.check(`...and not ${gone}`, await rail.getByRole('link', { name: gone }).count(), 0)
     }
     t.ok('...and its settings', (await rail.getByRole('link', { name: 'Trust settings' }).count()) > 0)
 

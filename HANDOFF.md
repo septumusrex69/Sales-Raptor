@@ -91,6 +91,40 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- THE TRUST AREA, SIMPLIFIED (9 Nov; Stephan's walk-through of a ChatGPT layout he liked; no migration)
+- **Overview**: four figures (In the trust account, Accounted for, Not accounted for -> its list, **Ready for payover**
+  = clients' money in closed cycles -> Payover runs); **What the account is made of** (bar + Client funds / Bredell
+  Ferreira's share / Debtor credits / Other holdings = Swordfish); **Client share** and **Our share** cycle by cycle;
+  **Needs attention** (was Needs doing); the owner-by-owner list kept below. All read off trust_cash_by_cycle
+  (`src/lib/trustComposition.ts`, the four add to accountedFromCash exactly; check-trust-composition).
+- **Payments in**: only what needs approving or placing -- three tiles, the queue, then **Backdated payments to approve**
+  (BackdatedPayments `embedded`, drawn only while one waits; "Not a separate tab"). Suspense and the money-out card left.
+- **To sort**: Suspense is a **tile** (count + total) that opens the searchable list; #suspense links open it. Money out
+  (bank charges, returned debits) stays under Statement lines to allocate, which offers both.
+- **Payover runs**: tabs **Approve and pay -> Waiting -> Collecting**; no History tab (?tab=history -> Client ledger).
+- **Client ledger** (`/trust/client-ledger`, new rail item): clients with paid-over runs (search by name/code), a
+  client's payovers (cycle, advice number, paid on the Johannesburg day, bank reference) each opening the run
+  (`/trust/runs/:id`: payments, the advice, the copy that was emailed), and a payment search (find_payments).
+  "Finished" is ONE rule, `isPaidOver` in `src/lib/paidOverLedger.ts`, shared with the runs page (check-paid-over-ledger).
+  NOTE: `src/lib/clientLedger.ts` is the OTHER client ledger (a client's running statement by payover, on the client
+  page) -- it was overwritten by mistake once in S21 and restored; `ls` before naming.
+- **Rail**: Client ledger in; **Bank statement** and **Backdated payments** off the menu (both routes stay; Not
+  accounted for links to the statement).
+- **Not done from the recommendations**: one payment-status wording across every Trust screen (item 1), and
+  near-match suggestions for suspense (item 6). Trust ledger left as it is (Stephan: "Perhaps I can look better at that
+  where there's some data in it").
+- Checks moved: check-payments-queue, check-backdated-payments, check-payout-day, check-payover-groups,
+  check-workspace-split, check-trust-cycles/split; e2e payments-in, payments-in-suspense-pages (now on To sort),
+  payments-in-tidy (now To sort), trust-big-lists, payover-sends (+ the Client ledger), backdated-payments,
+  workspace-split. Fast suite 23 882 green.
+
+### S21 -- EMAIL: CC ON A REPLY ALL, AND THE SIGNATURE IN THE MESSAGE (9 Nov)
+- "I try to add Nicholas and Camille ... it keeps removing one": a reply all pre-fills Cc as "Name <address>", which
+  only counted as finished if bare. `isRecipient` (recipientSuggest.ts) takes both; a finished person left last becomes
+  a chip on focus and a pick is added to everybody finished. e2e reproduces it on a real reply all.
+- "just make it part of the email": the signature is drawn inside the message box under the text (`SignatureInline`,
+  sandboxed, no label); on a forward under the original.
+
 ### S21 -- THE CASE NUMBER IS THE CLIENT-CODE REFERENCE (9 Nov; staging migration `h19_case_number_is_the_client_reference`, mirrored, md5 verified)
 Stephan: one Raptor reference, the client code + a running number (DRC0001), and a Swordfish handover continues the
 reference we gave before. Asked, he chose **replace RAP- everywhere** and **four digits** for a fresh client.
