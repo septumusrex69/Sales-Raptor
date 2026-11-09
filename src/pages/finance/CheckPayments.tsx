@@ -386,7 +386,7 @@ function PostedRow({ r, a, problems, opened, isOpen, onOpen, mayReverse, onRever
         <td className="px-2 py-1.5 text-slate-500" data-testid="history-captured">{r.capturedOn ? formatDate(r.capturedOn) : '\u2014'}</td>
         <td className="px-2 py-1.5 text-slate-500" data-testid="history-approved">{r.approvedOn ? formatDate(r.approvedOn) : '\u2014'}</td>
         {/* THE CLIENT'S NUMBER FIRST (prompt 11): KLR/1005 is the one on the statement and the
-            one the client quotes; our RAP- reference sits under it in grey. */}
+            one the client quotes; our case number sits under it in grey. */}
         <td className="px-2 py-1 text-slate-700 leading-tight" data-testid="history-account">
           <span className="font-medium">{r.accountNumber ?? r.caseNumber}</span>
           {r.accountNumber && r.caseNumber && (

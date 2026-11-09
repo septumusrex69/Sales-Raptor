@@ -4,7 +4,7 @@
  * The firm, 11 Oct, needing to reverse a wrongly allocated R3 500.00 on KLR/1005: History had no
  * search, the payment was four steps deep, and the account number they knew from the statement
  * and the client was not in the column they read. So one box searches every month and every client
- * for the things a person actually has in hand -- the client's account number, our RAP- reference,
+ * for the things a person actually has in hand -- the client's account number, our case number,
  * the client's own reference, the debtor's name, what the bank wrote, and the amount.
  *
  * Pure, so a check can import it.

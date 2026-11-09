@@ -100,15 +100,17 @@ reference we gave before. Asked, he chose **replace RAP- everywhere** and **four
 - Staging book renumbered (214): 74 kept their own number (ALP00001, DAL00017, BOP..., STC0001-0010); 140 STC accounts
   whose account_number reads STC-H0001.. became STC0011..STC0150 in that order. Every old number is in
   `legacy_case_number` (unique, never reissued).
-- Still found by the old number: `import_bank_lines` (edited in place: RAP- -> case or legacy; anything else -> case
-  number first, account number only when no case number has it), the portal login (`normaliseCaseNumber` reads
-  DRC0001 typed any way, a slash is still a client's reference; api looks in both columns), mail matching (emailSync).
+- (First kept old numbers in `legacy_case_number`; removed the same day -- see below.) The portal login
+  (`normaliseCaseNumber`) reads DRC0001 typed any way; a slash is still a client's reference.
 - The import's preview of the next number reads the client's CASE numbers (`fetchAccountReferences`), so it predicts
   what the database assigns; `suggestReference` starts a fresh series at 0001.
-- **The old RAP- numbers do not matter** (Stephan, 9 Nov: "All the app numbers are going to be irrelevant. Old RAP"):
-  none reached a real debtor. So global search does NOT need to find an old RAP- number -- not to be built.
-  legacy_case_number and the matching on it stay as a silent safety net (invisible, costs nothing); remove them if
-  they ever get in the way. **Production: not applied** -- run the migration there only with Stephan, after the
+- **The RAP- numbers are TAKEN OUT COMPLETELY** (Stephan, 9 Nov: "Take the old rep numbers out completely"; staging
+  migration `h19_rap_numbers_removed`, mirrored, md5 verified): `legacy_case_number` dropped, the sequence dropped,
+  `import_bank_lines` reads case number then account number (no RAP- branch), the portal login, mail matching and
+  `referenceFrom` read no RAP-. A client with NO CODE can no longer have an account opened -- `next_case_number`
+  raises "This client has no code ... Give the client a code first" (none with accounts lacks one on staging; check
+  production before applying). Old incident numbers in comments (RAP-124119 etc.) are history, left. Checks:
+  check-case-number, check-bank-statement, check-debtor-portal moved (breaks seen failing). **Production: not applied** -- run the migration there only with Stephan, after the
   backup: it renumbers every live account. Check first how many production accounts have an account_number that is NOT
   in their client's series (those get new numbers) and whether two clients' series collide.
 - Checks: check-case-number (+17, three breaks seen failing by name), check-debtor-portal (+5), check-new-debtor and

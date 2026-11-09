@@ -35,7 +35,7 @@ export interface Candidate {
   id: string
   amount: number
   label: string
-  /** The reference it was paid out on ('BF PO-LVM-2610', 'BF RAP-124059'); none for a drawing. */
+  /** The reference it was paid out on ('BF PO-LVM-2610', 'BF DRC0001'); none for a drawing. */
   reference?: string | null
 }
 

@@ -62802,6 +62802,179 @@ begin
   return next;
 end $$;
 
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_rap_numbers_removed (staging, 9 Nov)
+-- ============================================================================================
+-- The old RAP- numbers taken out completely (Stephan, 9 Nov: "All the app numbers are going to be irrelevant. Old
+-- RAP" -- then "Take the old rep numbers out completely"). None reached a real debtor. The case number is the
+-- client-code reference and nothing else: no saved old number, no RAP- fallback, no sequence. A client with no code
+-- cannot number an account: next_case_number says so rather than handing out a RAP- number instead.
+create or replace function public.next_case_number(p_company uuid, p_wanted text default null)
+returns text
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_code text := public.account_reference_code(p_company);
+  v_wanted text := upper(btrim(coalesce(p_wanted, '')));
+  v_width integer;
+  v_max bigint;
+  v_try text;
+begin
+  -- Codes are letters and digits starting with a letter (clientCode.ts), so the code is safe inside a pattern.
+  if v_code is null or v_code !~ '^[A-Z][A-Z0-9]{1,7}$' then
+    raise exception 'This client has no code, and an account''s case number is built on it. Give the client a code first (the client''s page, Edit).'
+      using errcode = '23514';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('raptor.case_number.' || v_code));
+  -- THE NUMBER THE HANDOVER ALREADY GAVE IT, where it is in the series and nobody has it.
+  if v_wanted ~ ('^' || v_code || '[0-9]+$')
+     and not exists (select 1 from public.debtor_accounts x where upper(x.case_number) = v_wanted) then
+    return v_wanted;
+  end if;
+  select max(length(x.case_number) - length(v_code)), max(substr(x.case_number, length(v_code) + 1)::numeric)
+    into v_width, v_max
+    from public.debtor_accounts x
+   where upper(x.case_number) ~ ('^' || v_code || '[0-9]+$');
+  v_width := coalesce(v_width, 4);
+  v_max := coalesce(v_max, 0);
+  loop
+    v_max := v_max + 1;
+    -- greatest(): lpad CUTS a longer string, so a series past its width grows a digit rather than wrapping.
+    v_try := v_code || lpad(v_max::text, greatest(v_width, length(v_max::text)), '0');
+    exit when not exists (select 1 from public.debtor_accounts x where upper(x.case_number) = v_try);
+  end loop;
+  return v_try;
+end $$;
+revoke all on function public.next_case_number(uuid, text) from public, anon, authenticated;
+
+-- THE BANK IMPORT: the case number, then -- only if no case number has it -- the account number. (Edited in place on
+-- staging; the whole definition as it now stands:)
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+  v_late date;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to import into.' using errcode = '42501';
+  end if;
+
+  -- A STATEMENT CANNOT RUN AHEAD OF THE CLOCK (prompt 10): a line dated after today refuses the
+  -- whole statement, before anything is written, so it cannot be half imported.
+  select min((l->>'date')::date) filter (where (l->>'date')::date > public.raptor_today())
+    into v_late from jsonb_array_elements(p_lines) l;
+  if v_late is not null then
+    raise exception 'That statement has a line dated %, after today (%). A statement cannot be dated after today.',
+      to_char(v_late, 'DD Mon YYYY'), to_char(public.raptor_today(), 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'note' then 'excluded' else 'unallocated' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- THE CASE NUMBER FIRST (S18; since 9 Nov the client-code reference, S21): every notice tells the debtor to
+    -- pay with it, and it is unique, so it names exactly one account or none.
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.case_number) = v_ref;
+    -- THEN THE ACCOUNT NUMBER, only if no case number has it. It is not unique the way case_number is, so a
+    -- reference naming two accounts is counted and left for a person.
+    if v_ids is null then
+      select array_agg(a.id) into v_ids
+        from public.debtor_accounts a
+       where upper(a.account_number) = v_ref;
+    end if;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by,
+      bank_line_id
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid(),
+      v_id
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = public.raptor_now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;
+
+alter table public.debtor_accounts drop column legacy_case_number;
+drop sequence public.debtor_account_case_seq;
+comment on column public.debtor_accounts.case_number is
+  'Raptor''s reference: the client''s code and a running number (DRC0001; a Swordfish series such as ACF10085 continues). Unique, never reused, quoted on every notice. Numbered by next_case_number on insert (S21, 9 Nov 2026).';
+
 
 -- ============================================================================================
 -- staging migration h19_clear_staging_leave_applications (Raptor H19, 9 Nov): CLEAR STAGING WORKS AGAIN.

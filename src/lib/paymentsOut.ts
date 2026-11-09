@@ -6,7 +6,7 @@
  * "should be matched to a payment going out ... with the debtor's reference number".
  *
  * THE REFERENCE IS 'BF ' + SOMETHING ALREADY UNIQUE: a run's number (client code and month, e.g.
- * PO-LVM-2610) or a debtor's case number (RAP-124059). Written once in the database
+ * PO-LVM-2610) or a debtor's case number (DRC0001). Written once in the database
  * (payment_out_reference) and once here; check-payments-out holds the two together, because the
  * reference typed at the bank and the reference Raptor looks for on the statement must be the same
  * string or the match it exists for never happens.

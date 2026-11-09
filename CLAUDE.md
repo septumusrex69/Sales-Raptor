@@ -442,10 +442,10 @@ been given to it by us before, and then just continue from where it was."* He ch
 with **four digits** for a client starting fresh. `case_number` keeps its name and every place that prints it;
 what it holds is now `DRC0001` / `ACF10085`. The database numbers it (`next_case_number`, trigger
 `debtor_accounts_case_number`, locked per code): an account whose `account_number` is already ours keeps it; anything
-else takes the next in its client's series; a series keeps its width and grows a digit rather than wrapping. **The old
-RAP- number lives on in `legacy_case_number`** and is still found by the bank import, the debtor portal and mail
-matching -- notices already sent quote it; it is never reissued. A client with no code still gets a RAP- number
-rather than an account being refused. Never wider than RAP-100001, so no SMS got dearer.
+else takes the next in its client's series; a series keeps its width and grows a digit rather than wrapping. **The
+RAP- numbers are gone completely** (Stephan: *"Take the old rep numbers out completely"* -- none reached a real
+debtor): no saved copy, no sequence, nothing reads them. **A client with no code cannot have an account opened** --
+`next_case_number` refuses and says to give the client a code. Never wider than RAP-100001 was, so no SMS got dearer.
 
 **ONLY THE BIG BOSS DECIDES WHAT GETS BUILT.** Stephan: *"I am the only person that can approve a suggestion for
 building Raptor"* -- and, asked what Big Boss meant, *"above admin"*. It is a tick in no role, `raptor.boss`, held by
