@@ -31,6 +31,9 @@ export const NOTIFICATION_KINDS: NotificationKind[] = [
   { kind: 'campaign', label: 'Call campaigns', blurb: 'A collector kept an account from your campaign without a promise.' },
   { kind: 'change_request', label: 'Change requests', blurb: 'The light bulb: new requests, replies, questions and status changes.' },
   { kind: 'portal_photo', label: 'Portal photograph', blurb: 'Today’s portal photograph is not reaching clients.' },
+  // leave_round_two's triggers write leave.applied (to each approver) and leave.decided (to the applicant). Unseen
+  // by the check until that migration was copied into schema.sql on 9 Nov, so the list above missed it.
+  { kind: 'leave', label: 'Leave', blurb: 'Somebody applied for leave you approve, or your own application was decided.' },
 ]
 
 /** The kind of a notification's type: the part before the first dot. Mirrors notification_kind() in SQL. */
