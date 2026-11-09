@@ -40,8 +40,8 @@
 - **Staging was emptied at Stephan's word** ("Clear all the information, the data on staging ... the debtors ... the
   clients, everything"): 214 accounts, 7 clients, every lead / deal / contact / handover batch, payments, trust
   entries, bank lines, payover runs, the trust opening. Users, settings, templates, workflows, mail kept. Clock
-  restarted on **9 Nov 2026**, logged in finance_setting_changes as Stephan. Staging is EMPTY now -- a session that
-  expects the 214-account book will not find it.
+  restarted on **9 Nov 2026**, logged in finance_setting_changes as Stephan. The 214-account book is GONE -- staging
+  now holds only the **finance test book** (below).
 - **The button was broken**: "cannot truncate ... leave_applications references leave_records". Cause: migration
   `leave_round_two` (23 Oct) was only described in schema.sql, so check-clear-staging could not see the key, and S14's
   and S20's rewrites of clear_staging (built from the file's last body) dropped `leave_applications`. That one clear
@@ -51,7 +51,16 @@
   rolled-back block -- it runs to the end. `leave_round_two` is now **copied verbatim** into schema.sql where its note
   was (md5 9b2684d5c3224a335dce0120f1ec1eec verified), so `check-clear-staging` sees the key: it failed on the old
   body naming exactly this table, passes on the new one (15/15), and names leave_applications in its list.
-- Also on the branch: an empty `raptor/` folder (finances, trust) Stephan asked for, for test material.
+- **The finance & trust test book** (`raptor/`, Stephan, 9 Nov): two made-up clients (TFA 10%, TFB 20%) and ten
+  debtors TFA0001-TFB0005, each built for one rule (roll to capital, 50/50, in duplum, overpayment, interest, PTC,
+  reversal, unmatched, reject); `raptor/trust/statement-2026-11-09.csv` to import; `raptor/finances/EXPECTED.md`
+  has every figure. **Loaded on staging** by `raptor/finances/seed-test-book.sql` (refuses a non-empty or
+  non-staging database). Every figure was read from the engine by running import/place/approve/reject/reverse in
+  rolled-back blocks AND re-worked by hand -- all agree. Stephan runs the steps in `raptor/README.md` himself.
+  **Keep the staging clock on 9 Nov 2026** until he reaches the payover runs (TFA0003/TFA0005 carry interest).
+  Two things it surfaced for him to judge, not bugs asserted: a PTC's `payment_allocations.due_to_bf` (221.20)
+  leaves out the VAT on commission while the trust ledger charges it (235.41) -- FINANCE-TESTING B4 says Due to BF
+  includes it; and an overpayment's receipt fee is 10% of what the account needed, not of the payment.
 - **Production**: the fix is staging-only by nature (clear_staging refuses anywhere but staging); production needs it
   only if leave_round_two is ever taken there.
 
