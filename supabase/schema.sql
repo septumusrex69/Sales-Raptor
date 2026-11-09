@@ -63048,3 +63048,169 @@ begin
 
   return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_suspense_near_matches (staging, 9 Nov)
+--
+-- SUSPENSE: THE ACCOUNT A RECEIPT PROBABLY MEANT, OFFERED, NEVER PLACED (Stephan, 9 Nov: "proceed with the suspense
+-- near match. Give options still a search option"). A debtor types the case number off a notice and slips one
+-- character -- two digits swapped (DRC0081 for DRC0018), one wrong, one missing, one extra -- and the receipt lands in
+-- suspense because nothing matches exactly. Each reference-like word on the receipt is tried in every one-slip form
+-- and each form looked up EXACTLY (the case number's unique index, the account number's index): nothing fuzzy, so the
+-- options are few and each is a real account a person can recognise. A reference that is on several accounts already
+-- (the "matched more than one account" receipts) offers those accounts too. NOTHING IS PLACED HERE: a person picks an
+-- option and confirms, or searches with Place it as before.
+-- ============================================================================================
+create or replace function public.near_reference_accounts(p_tokens text[])
+returns table(token text, account_id uuid, case_number text, account_number text, debtor text, client text,
+              matched_on text, how text, rank integer)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  t text;
+  n integer;
+  i integer;
+  d integer;
+  v text;
+  toks text[] := '{}';
+  vars text[] := '{}';
+  hows text[] := '{}';
+  ranks integer[] := '{}';
+  seen integer := 0;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Suspense is for people with the trust account.' using errcode = '42501';
+  end if;
+  for t in select distinct upper(regexp_replace(x, '[^A-Za-z0-9]', '', 'g')) from unnest(coalesce(p_tokens, '{}'::text[])) x loop
+    n := length(t);
+    -- A reference is letters and digits with at least one digit, of a sensible length; a name is not tried.
+    continue when n < 4 or n > 14 or t !~ '[0-9]' or t !~ '^[A-Z0-9]+$';
+    seen := seen + 1;
+    exit when seen > 400;
+    toks := toks || t; vars := vars || t; hows := hows || 'same reference'::text; ranks := ranks || 0;
+    for i in 1..n loop
+      v := substr(t, 1, i - 1) || substr(t, i + 1);
+      if length(v) >= 4 then toks := toks || t; vars := vars || v; hows := hows || 'one character too many'::text; ranks := ranks || 4; end if;
+      if i < n and substr(t, i, 1) <> substr(t, i + 1, 1) then
+        v := substr(t, 1, i - 1) || substr(t, i + 1, 1) || substr(t, i, 1) || substr(t, i + 2);
+        toks := toks || t; vars := vars || v; hows := hows || 'two characters swapped'::text; ranks := ranks || 1;
+      end if;
+      if substr(t, i, 1) ~ '[0-9]' then
+        for d in 0..9 loop
+          continue when d::text = substr(t, i, 1);
+          v := substr(t, 1, i - 1) || d::text || substr(t, i + 1);
+          toks := toks || t; vars := vars || v; hows := hows || 'one digit different'::text; ranks := ranks || 2;
+        end loop;
+      end if;
+    end loop;
+    -- A digit left out: one put back at each place from the first digit on (a missing letter is not guessed).
+    for i in greatest(1, coalesce(nullif(position(substring(t from '[0-9]') in t), 0), 1))..(n + 1) loop
+      for d in 0..9 loop
+        v := substr(t, 1, i - 1) || d::text || substr(t, i);
+        toks := toks || t; vars := vars || v; hows := hows || 'one digit missing'::text; ranks := ranks || 3;
+      end loop;
+    end loop;
+  end loop;
+
+  return query
+    with forms as (
+      select * from unnest(toks, vars, hows, ranks) as f(token, variant, how, rank)
+    ), hits as (
+      select f.token, a.id as account_id, a.case_number, a.account_number,
+             nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), '') as debtor,
+             c.name as client,
+             'case number'::text as matched_on, f.how, f.rank
+        from forms f
+        join public.debtor_accounts a on a.case_number = f.variant
+        left join public.companies c on c.id = a.company_id
+      union all
+      select f.token, a.id, a.case_number, a.account_number,
+             nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), ''),
+             c.name, 'account number'::text, f.how, f.rank
+        from forms f
+        join public.debtor_accounts a on a.account_number = f.variant
+        left join public.companies c on c.id = a.company_id
+    )
+    select distinct on (h.token, h.account_id) h.token, h.account_id, h.case_number, h.account_number, h.debtor, h.client,
+           h.matched_on, h.how, h.rank
+      from hits h
+     order by h.token, h.account_id, h.rank, (h.matched_on = 'case number') desc;
+end $$;
+revoke all on function public.near_reference_accounts(text[]) from public, anon;
+grant execute on function public.near_reference_accounts(text[]) to authenticated;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_near_matches_in_the_revoke_list (staging, 9 Nov)
+-- ============================================================================================
+-- The finance revoke list restated whole with near_reference_accounts added (S20's rule: the checks read the LAST
+-- loop, so a new one carries every name). Anon could not call it already -- the function revoked it itself -- this
+-- keeps the one list complete.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)',
+    /* THE PAYOUT DAY GATE AND ITS OVERRIDE (11 Oct). */
+    'assert_payover_run_due(uuid)', 'release_payover_run_early(uuid, text)',
+    'payover_run_due(uuid)',
+    /* S10: suspense from Needs an account, and the fee credit note. */
+    'suspend_bank_line(uuid, text)', 'release_bank_line_from_suspense(uuid)', 'suspended_bank_lines()',
+    'credit_fee(uuid, numeric, text)',
+    /* S10: HELD FOR SWORDFISH PAYOVERS. */
+    'swordfish_holding_figures()', 'swordfish_holding_position()',
+    'set_swordfish_holding(numeric, text)', 'allocate_swordfish_line(uuid, text, text)',
+    /* S10: BALANCES BROUGHT FORWARD FROM SWORDFISH. */
+    'bring_forward_client_balances(text, date, date, jsonb)',
+    /* S20: the cycle-day reads and the withdraw box. */
+    'payover_run_payment_dates(uuid)', 'payover_run_takes(uuid, date, boolean, date)', 'receipts_on_file(uuid)',
+    'payment_cycle_day(public.account_payments)', 'payment_counts_at(public.account_payments)', 'ptc_cycle_on_capture()',
+    /* S20: payments found late -- the corrections. */
+    'payover_run_corrections(uuid)', 'backdated_payment_restatements()', 'propose_restatement(uuid, text)',
+    'approve_restatement(uuid)', 'cancel_restatement(uuid, text)', 'restatement_figures(jsonb)',
+    'near_reference_accounts(text[])'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

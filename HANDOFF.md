@@ -91,6 +91,27 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- SUSPENSE NEAR MATCHES; THE SIGNATURE LIKE OUTLOOK (9 Nov; staging migrations `h19_suspense_near_matches`, `h19_near_matches_in_the_revoke_list`, mirrored, md5 verified)
+- Stephan: "proceed with the suspense near match. Give options still a search option." Each suspense receipt on screen
+  offers "Did they mean": accounts whose case or account number is ONE SLIP from a reference-like word on the receipt
+  (two characters swapped, one digit different, one digit missing, one character too many), or that share the
+  reference exactly (the "matched more than one account" receipts). `near_reference_accounts(text[])` (definer,
+  finance.view, in the finance revoke list) builds every one-slip form in SQL and looks each up EXACTLY on the two
+  indexes -- nothing fuzzy; ~35 ms. `src/lib/suspenseNearMatch.ts` picks the words and orders the options.
+- **The name is the check**: case numbers run in sequence, so one digit different nearly always hits a real account --
+  the neighbour. An option whose debtor's surname is on the bank line comes first ("the name on the bank line
+  matches", green); one without says "does not match, so check it" (amber). At most three.
+- Nothing is placed by offering: "Place it here" asks "Place R x on DRC0018?", and only "Yes, place it" calls
+  place_bank_line -- the same call Place it makes. Place it (the search) and the reference box stay beside the options.
+- Checks: check-suspense-near-match (name-first break seen failing after the fixture was corrected to need it),
+  e2e payments-in-tidy (+8: offered, ordered, asks first, places once).
+- Signature: the message box grows with the words (two rows at least) and the signature follows one blank line under
+  the last line, like Outlook (Stephan: "The signature is way below the text"); e2e measures it.
+- **Asked, not built**: a "profitability" view -- of what is collected, the firm's share against the clients' share,
+  as an amount and a ratio (Stephan's word: "profitability margin ratio"). Belongs behind business.income (Business ->
+  Income), not on Trust or the company dashboard (CLAUDE.md: no commission/Annexure B income there). Ask him to confirm
+  the place and the name.
+
 ### S21 -- TRUST IN FIVE, AND ONE SEARCH FOR PAYMENTS (9 Nov; Stephan: "it's still a little bit complicated ... the search a payment. Like, is it necessary to do it there"; no migration)
 - **Menu: Overview, Payments in, To sort, Payover runs, Client ledger** -- the order a payment travels. Moved, routes
   kept: Payments out = the foot of Payover runs (`TrustPaymentsOut embedded`, `#paying-out`; /trust/payments-out

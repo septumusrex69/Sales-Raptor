@@ -417,7 +417,9 @@ ok('what is already stored is cleaned when read', /fromName: senderName\(r\.from
  * and you could see at the bottom the previous email that it is going to reply to."
  */
 ok('the composer is a place to write, not a dialog to answer', /width=\{760\}/.test(composer))
-ok('...with room for more than a sentence', /rows=\{quotedHtml \? 7 : 12\}/.test(composer))
+/* S21: room that grows with the words, like Outlook (Stephan: "The signature is way below the text"), in a box at least
+   18rem tall -- still more than a sentence, without twelve empty rows above the signature. */
+ok('...with room for more than a sentence', /min-h-\[18rem\]/.test(composer) && /el\.style\.height = `\$\{el\.scrollHeight\}px`/.test(composer))
 
 /*
  * THE MESSAGE BEING ANSWERED, UNDER THE BOX AND NOT IN IT. Quoting into the box was tried and
