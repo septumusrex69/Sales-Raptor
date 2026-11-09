@@ -4,6 +4,7 @@ import { refreshNavCounts } from '../lib/navCounts'
 import { useAuth } from './AuthContext'
 import { TODAY } from '../data/mockData'
 import { DEAL_STAGE_PROBABILITY } from '../types'
+import { listValues, loadSalesLists, stageProbability } from '../lib/salesLists'
 import { normalizeDeal, normalizeLead } from '../lib/legacyValues'
 import { dealKind, kindForService } from '../lib/dealKind'
 import { RaptorCelebration } from '../components/ui/RaptorCelebration'
@@ -520,13 +521,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       fetchTable<AppNotification>('notifications', 'created_at', failed),
       fetchTable<Target>('targets', 'created_at', failed),
       fetchTable<DepartmentRow>('departments', 'created_at', failed),
+      // The firm's own stages (Raptor H19), so a stage it added is not mistaken for a retired one below.
+      loadSalesLists(),
     ])
-      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg, dp]) => {
+      .then(([l, d, ct, co, tk, ac, pr, hv, us, tm, nt, tg, dp, sl]) => {
         if (!active) return
         // A row still carrying a retired stage or status would render in no column at all —
         // not last, gone — so map anything stale onto the current vocabulary on the way in.
         setLeads(l.map(normalizeLead))
-        setDeals(d.map(normalizeDeal))
+        const firmStages = listValues(sl, 'deal_stage')
+        setDeals(d.map((x) => normalizeDeal(x, firmStages)))
         setContacts(ct)
         setCompanies(co)
         setTasks(rollOverMissedTasks(tk))
@@ -925,7 +929,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const moveDealStage = useCallback<AppActions['moveDealStage']>(
     (id, stage) => {
-      const patch: Partial<Deal> = { stage, probability: DEAL_STAGE_PROBABILITY[stage] }
+      const patch: Partial<Deal> = { stage, probability: stageProbability(stage) }
       if (stage === 'Won') patch.wonAt = nowIso()
       if (stage === 'Rejected') patch.rejectedAt = nowIso()
       let previous: Deal | undefined
@@ -1005,7 +1009,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (document !== 'invoice' && deal?.stage === 'New Deal') {
         const next: DealStage = document === 'mandate' ? 'Mandate Sent' : 'Quotation Sent'
         patch.stage = next
-        patch.probability = DEAL_STAGE_PROBABILITY[next]
+        patch.probability = stageProbability(next)
       }
       let previous: Deal | undefined
       setDeals((prev) => {

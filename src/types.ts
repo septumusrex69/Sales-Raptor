@@ -15,15 +15,19 @@ export type LeadStatus =
  * is deliberately its own reason: a book turned down on our side isn't a loss, and lumping
  * it in with the rest would make a deliberately selective month read as a bad one.
  */
-export type RejectionReason =
+/* The six Raptor shipped with. Since Raptor H19 the list is the firm's (Settings -> Rejection Reasons,
+ * sales_list_items), so a reason is any saved string; the union keeps the names the code reasons about. */
+export type BuiltInRejectionReason =
   | 'Not interested anymore'
   | 'Too expensive'
   | 'Went with another provider'
   | 'No response'
   | 'We declined them'
   | 'Other'
+export type RejectionReason = BuiltInRejectionReason | (string & {})
 
-export type LeadSource =
+/* The sources Raptor shipped with. Since Raptor H19 the list is the firm's (Settings -> Lead Sources). */
+export type BuiltInLeadSource =
   | 'Website'
   | 'Google Ads'
   | 'Referral'
@@ -40,6 +44,7 @@ export type LeadSource =
   /* A prospect list the marketer uploaded on News & campaigns (S10, 22 Oct). */
   | 'Imported list'
   | 'Other'
+export type LeadSource = BuiltInLeadSource | (string & {})
 
 export type LeadCategory = 'Cold' | 'Warm' | 'Hot' | 'Priority'
 
@@ -145,7 +150,10 @@ export interface Lead {
  * existing client — then ends Won or Rejected. Anything finer than this was stages nobody
  * moved a deal into.
  */
-export type DealStage = 'New Deal' | 'Quotation Sent' | 'Mandate Sent' | 'Won' | 'Rejected'
+/* The five stages Raptor's code moves deals through by name. Since Raptor H19 the firm may add its own open stages
+ * (Settings -> Pipelines, sales_list_items), so a stage is any saved string. */
+export type BuiltInDealStage = 'New Deal' | 'Quotation Sent' | 'Mandate Sent' | 'Won' | 'Rejected'
+export type DealStage = BuiltInDealStage | (string & {})
 
 /**
  * Two different businesses sharing one pipeline.
@@ -211,17 +219,17 @@ export interface Handover {
 
 export type DealKind = 'Service' | 'Handover'
 
-export const DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent', 'Won', 'Rejected']
+export const DEAL_STAGES: BuiltInDealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent', 'Won', 'Rejected']
 
 /** The steps a deal is still being worked in — everything before it ends one way or the other. */
-export const OPEN_DEAL_STAGES: DealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent']
+export const OPEN_DEAL_STAGES: BuiltInDealStage[] = ['New Deal', 'Quotation Sent', 'Mandate Sent']
 
 /**
  * How likely a deal at each step is to close, used for the weighted forecast. Derived from the
  * stage rather than typed in per deal — nobody keeps a hand-entered percentage honest, and a
  * quote that's out is genuinely further along than one that isn't.
  */
-export const DEAL_STAGE_PROBABILITY: Record<DealStage, number> = {
+export const DEAL_STAGE_PROBABILITY: Record<BuiltInDealStage, number> = {
   'New Deal': 20,
   'Quotation Sent': 60,
   'Mandate Sent': 60,

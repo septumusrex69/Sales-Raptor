@@ -39,7 +39,8 @@ import { SortHeader } from '../../components/ui/SortHeader'
 import { DATE_GROUP_CLASS } from '../../components/ui/DateGroupHeading'
 import { dateGroupLabel, relativeDayLabel } from '../../lib/dateLabels'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
-import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, leadSources, provinces, services, TODAY } from '../../data/mockData'
+import { useSalesLists } from '../../lib/salesLists'
+import { formatCurrency, formatDate, formatLeadNumber, daysAgoLabel, industries, leadClassifications, provinces, services, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { decodeSalesMonthParam, getCurrentSalesMonth, isWithinPeriod, type SalesMonthPeriod } from '../../lib/salesMonth'
 import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
@@ -76,6 +77,7 @@ function isStaleClassAContact(lead: Lead) {
 
 export function LeadsList() {
   const store = useAppStore()
+  const { sources: leadSources } = useSalesLists()
   const { leads, deals, activities, users, userById, updateLead, rejectLead, deleteLead, convertLeadToClient, addActivity } = store
   const { currentUser } = useAuth()
   const buzzbox = useBuzzBox()

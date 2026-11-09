@@ -7,7 +7,8 @@ import { canSendMarketing } from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { MultiSelectChips } from '../../components/ui/MultiSelectChips'
-import { leadSources, services as SERVICES } from '../../data/mockData'
+import { services as SERVICES } from '../../data/mockData'
+import { useSalesLists } from '../../lib/salesLists'
 import { fetchFirmSettings, type FirmSettings } from '../../lib/firmSettings'
 import {
   ACTIVE_LEAD_STATUSES, AUDIENCE_LABELS, CAMPAIGN_KIND_LABELS, DEFAULT_DORMANT_DAYS, LEAD_AUDIENCES, MERGE_FIELDS,
@@ -566,6 +567,7 @@ function PreviewList({ preview, kind }: { preview: AudiencePreview; kind: Campai
 const STATUSES: LeadStatus[] = ['No Contact Yet', 'Interested', 'Hot Lead', 'Rejected']
 
 function AudiencePicker({ audience, onChange, leadsOnly = false }: { audience: Audience; onChange: (a: Audience) => void; leadsOnly?: boolean }) {
+  const { sources: leadSources } = useSalesLists()
   const pick = (kind: Audience['kind']) => {
     switch (kind) {
       case 'all_clients': onChange({ kind }); break

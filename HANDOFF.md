@@ -12,13 +12,9 @@
 
 ## START HERE (S21) -- both sessions' open work, in one list (Raptor · Handover 19, 9 Nov)
 
-1. **QUEUED BY STEPHAN (9 Nov: "Cue this connection. For some other next build."): connect the five Settings tabs that
-   do not save** -- Pipelines, Lead Sources, Rejection Reasons, Custom Fields, Notifications. Demo leftovers: React
-   state over constants, nothing in the database; the app reads the constants (`REJECTION_REASONS` in
-   `lib/rejection.ts`, `DEAL_STAGES`, ...). Marked "not saved" in the Settings menu and on each page. Each needs a table
-   (or firm_settings columns) with RLS, the tab writing it, and the app reading it with the constants as fallback.
-   **Ask first:** who may edit each list, and whether removing a stage/source that rows still use is refused or moves
-   them. (A suggested-task card with the full brief was queued in S19.)
+1. ~~Connect the five Settings tabs that do not save~~ -- **done** by `claude/trusting-newton-wowy32` (section "SETTINGS
+   TABS THAT SAVE" below), merged onto the preview branch by S21 on 9 Nov. Left from it: whether the built-in stages'
+   chances (20/60/60) should be editable too; the two migrations go to production in order.
 2. **Camille tests backdated corrections on staging** (Trust -> Backdated payments; S20 Part 3). S20's open questions
    for Stephan, each with a conservative choice already made: negative runs from a late correction, commission VAT on
    a correction, no limit on how far back, in duplum -> finance, the one "Interest corrected" line on the debtor's
@@ -41,10 +37,9 @@
 
 ## S21 -- S17'S COMPOSE PROBLEMS (Raptor · Handover 19, 9 Nov; branch `claude/new-session-84tmki` from `claude/sales-raptor-review-p1pzx2` at 6bf5d15)
 
-**Item 1 (the five Settings tabs) is being built by ANOTHER session** -- found mid-start: staging migration
-`h19_settings_lists_and_notification_switches` (06:38 UTC, 9 Nov) created `sales_list_items`, `notification_preferences`
-and eight `sales_list_*` functions, and no branch carried its code yet. S21 left it alone. Whoever writes Handover 20:
-find that session's branch before touching Settings.
+**Item 1 (the five Settings tabs) was being built by another session** when S21 started (its migration landed on
+staging at 06:38). S21 left it alone; that session pushed `claude/trusting-newton-wowy32` at 07:03 and S21 merged it
+onto the preview branch (clean merge, checks below re-run on the merged code).
 
 Stephan chose S17's compose items instead ("Several CCS ... Is 17"). Nothing of the 5 Nov helper had landed (no commit
 since 4 Nov touched Cc, the signature or the compose box). No migration. Commits `Raptor H19: S21 -- ...`.
@@ -75,6 +70,48 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
   word, 9 Nov.
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
+
+## SETTINGS TABS THAT SAVE (Raptor · Handover 19, 9 Nov; queued by Stephan 8 Nov; branch `claude/trusting-newton-wowy32` from `claude/sales-raptor-review-p1pzx2`)
+
+S19 marked five Settings tabs "not saved" (demo leftovers: React state only, the app read lists fixed in code). All
+five are settled; the "not saved" marks and banner are gone. Staging migrations `h19_settings_lists_and_notification_switches`
+and `h19_settings_lists_staging_clock`, mirrored at the end of `supabase/schema.sql`.
+
+**Stephan's answers (9 Nov, asked before building):** Administrators AND the Sales Manager change the sales lists
+(everyone signed in reads them); a stage/source/reason still on rows is MOVED, never orphaned; Notifications show the
+real kinds, each person switches their own off; Custom Fields hidden until somebody asks for an actual field.
+
+- **`sales_list_items`** (list = deal_stage | lead_source | rejection_reason, value, position, probability, built_in,
+  removed_at). Browser: SELECT only. Writes only via definer functions gated by `sales_list_editor()` (role
+  Administrator / Sales Manager): `sales_list_add` (a removed value comes back), `_rename` (renames every lead/deal
+  row and draft campaign `leads_by` audiences), `_remove(list, value, move_to)` (refused while rows use it unless
+  `move_to`; never moves deals into Won/Rejected), `_reorder`, `_set_probability` (added stages only), `_usage`.
+  Rows are never removed (removed_at) -- the Supabase tool's "delete" trap avoided by design. Stamps on raptor_now().
+- **Built-in values cannot be renamed or removed** (Raptor's code uses them by name): the five stages, sources
+  Website / Direct / Email / Imported list / Other, reason Other. Seeded from the old constants, plus any value already
+  on a row. Added stages sit before Won/Rejected with their own chance of closing (default 40).
+- **App:** `src/lib/salesListValues.ts` (pure; the old constants are the FALLBACK when nothing is saved/loaded) and
+  `src/lib/salesLists.ts` (load once, `useSalesLists()`, the writes). Every screen that offered a list reads it:
+  QuickAdd lead form, Edit lead, Leads filter, Reject lead, Convert lead, Mark rejected, Loss reasons card, Deals
+  board (columns, sort, stage picker, "at least" funnel), Reports, campaign audience picker. `DealStage`, `LeadSource`,
+  `RejectionReason` are now `BuiltIn... | (string & {})`. The lead import turns a removed source/reason into Other.
+  **Trap fixed on the way:** `normalizeDeal` turned any unknown stage into New Deal -- it would have hidden every stage
+  the firm adds. It now maps only retired names the firm does not use; the board gives an unlisted stage its own column.
+- **Notifications:** `notification_preferences(user_id, kind, muted)` (own rows only); kind = `notification_kind(type)`
+  = the part before the dot; a BEFORE INSERT trigger on `notifications` drops a muted kind, whoever writes it (SQL,
+  portals, screens). The tab lists 11 real kinds (`src/lib/notificationKinds.ts`); `check-sales-lists` fails when code
+  writes a kind with no switch. Muting `handover` also silences the new-work popup (it reads the bell) -- by design.
+- **Custom Fields:** tab removed (an old `?tab=Custom Fields` link lands on Profile). `mockData.customFields` and the
+  `CustomField` type are left in place, unused by Settings.
+
+**Checks (each seen failing on broken code):** `check-sales-lists` (41), `e2e/settings-lists` (18),
+`e2e/settings-departments` (moved to the new state); live probe `scripts/qa/live/h19-settings-lists.sql` (rolled
+back; 9 Nov `failures []`, and with the role gate and the mute trigger broken it named both). Fast suite, build, lint
+(no new warnings) green; deal-stages, lead-form-order, news-*, sales-comms-dashboards, send-mandate, client-welcome,
+dashboard-landing, settings-users, spelling-settings e2e green.
+
+**Before production:** apply the two migrations in order. Then ask Stephan whether the built-in stages' chances
+(20/60/60) should become editable too (only added stages' are today).
 
 ## S20 -- LATE MONEY (Raptor · Handover 19, 8 Nov; branch `claude/s20-late-money` from `claude/sales-raptor-review-p1pzx2` at 34e3f08)
 
