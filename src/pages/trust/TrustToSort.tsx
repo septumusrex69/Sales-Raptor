@@ -1,6 +1,8 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { rand } from '../../lib/money'
+import { fetchLinesToAllocate } from '../../lib/bankAllocationApi'
+import { fetchExceptions, type ExceptionJob } from '../../lib/payover'
 import { UnallocatedReceipts } from '../finance/UnallocatedReceipts'
 import { BankLinesToAllocate } from '../../components/finance/BankLinesToAllocate'
 import { ParkedCredits } from '../../components/finance/ParkedCredits'
@@ -26,64 +28,93 @@ export function TrustToSort() {
   const [changed, setChanged] = useState(0)
   const bump = useCallback(() => setChanged((n) => n + 1), [])
   /*
-   * SUSPENSE AS A TILE THAT OPENS (S21 · Raptor H19). Stephan, 9 Nov: "the suspense is basically, you click on the
-   * suspense and it opens it. So it will show you the suspense and total number ... Then you can search a payment, for
-   * example, in there." Folded, it is the count and the total; open, the whole list with its search. Opened already
-   * when a link names it (#suspense, as the overview's Needs attention does). The list stays MOUNTED while folded, so
-   * the tile's figures are the list's own (onTotals) rather than a second read that could disagree with it.
+   * EVERY SECTION A TILE THAT OPENS (S21 · Raptor H19). Stephan, 9 Nov, of suspense first: "you click on the suspense
+   * and it opens it. So it will show you the suspense and total number"; then of the whole Trust area: "it's still a
+   * little bit complicated". So each of the four is folded to its count and total, and opens to the list it always
+   * was. A link that names a section (#suspense, #overpayments) opens it already.
+   *
+   * THE FIGURES ARE THE SECTIONS' OWN DATA: suspense counts itself (onTotals, the list stays mounted while folded);
+   * the other three read the same functions their lists read (fetchLinesToAllocate, finance_exception_jobs), so a
+   * tile cannot say one thing and open on another.
    */
-  const [suspenseOpen, setSuspenseOpen] = useState(() => typeof window !== 'undefined' && window.location.hash === '#suspense')
+  const hash = typeof window !== 'undefined' ? window.location.hash : ''
   const [suspense, setSuspense] = useState<{ count: number; total: number } | null>(null)
   const onSuspense = useCallback((count: number, total: number) => setSuspense({ count, total }), [])
+  const [lines, setLines] = useState<{ count: number; total: number } | null>(null)
+  const [jobs, setJobs] = useState<ExceptionJob[] | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchLinesToAllocate()
+      .then((l) => { if (live) setLines({ count: l.length, total: r2(l.reduce((t, x) => t + Math.abs(x.amount), 0)) }) })
+      .catch(() => { if (live) setLines(null) })
+    fetchExceptions()
+      .then((j) => { if (live) setJobs(j) })
+      .catch(() => { if (live) setJobs(null) })
+    return () => { live = false }
+  }, [changed])
+  const over = jobs?.filter((j) => j.kind === 'excess_credit') ?? null
+  const other = jobs?.filter((j) => j.kind !== 'excess_credit') ?? null
+  const sum = (xs: ExceptionJob[]) => r2(xs.reduce((t, x) => t + Math.abs(x.amount ?? 0), 0))
+
   return (
-    <div className="space-y-6" data-testid="to-sort">
+    <div className="space-y-4" data-testid="to-sort">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-slate-800">To sort</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Money in the trust account that is not yet anybody&rsquo;s: suspense, statement lines to allocate,
-          overpayments to decide, and anything else holding a payover up.
+          Money in the trust account that is not yet anybody&rsquo;s. Open the one you are working on.
         </p>
-        <nav className="mt-3 flex flex-wrap gap-2 text-[12.5px]">
-          {[['#suspense', 'Suspense'], ['#lines', 'Statement lines'], ['#overpayments', 'Overpayments'], ['#other', 'Other']].map(([href, label]) => (
-            <a key={href} href={href} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600 hover:bg-slate-50">{label}</a>
-          ))}
-        </nav>
       </div>
 
-      <section id="suspense" className="space-y-2">
-        <button type="button" onClick={() => setSuspenseOpen((o) => !o)} aria-expanded={suspenseOpen} data-testid="suspense-tile"
-          className="card flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50">
-          {suspenseOpen ? <ChevronDown size={18} className="text-slate-400" /> : <ChevronRight size={18} className="text-slate-400" />}
-          <span className="min-w-0 flex-1">
-            <span className="block text-lg font-semibold tracking-tight text-slate-800">Suspense</span>
-            <span className="block text-[12.5px] text-slate-500">
-              {suspense ? `${suspense.count.toLocaleString('en-ZA')} receipt${suspense.count === 1 ? '' : 's'} with no account yet` : 'Reading suspense…'}
-              {suspenseOpen ? '' : ' · open it to search and place them'}
-            </span>
-          </span>
-          <span className={`text-xl font-semibold tabular-nums ${suspense && suspense.count > 0 ? 'text-amber-700' : 'text-slate-800'}`} data-testid="suspense-total">
-            {suspense ? rand(suspense.total) : '—'}
-          </span>
-        </button>
-        <div hidden={!suspenseOpen}>
-          <UnallocatedReceipts refreshKey={changed} onPlaced={bump} hidePayouts onTotals={onSuspense} />
-        </div>
-      </section>
+      <Fold id="suspense" testId="suspense-tile" title="Suspense" open={hash === '#suspense'}
+        figures={suspense} noun={['receipt with no account yet', 'receipts with no account yet']} totalTestId="suspense-total">
+        <UnallocatedReceipts refreshKey={changed} onPlaced={bump} hidePayouts onTotals={onSuspense} />
+      </Fold>
 
-      <section id="lines" className="space-y-2">
-        <h2 className="text-lg font-semibold tracking-tight text-slate-800">Statement lines to allocate</h2>
+      <Fold id="lines" testId="lines-tile" title="Statement lines to allocate" open={hash === '#lines'}
+        figures={lines} noun={['line to allocate', 'lines to allocate']}>
         <BankLinesToAllocate />
-      </section>
+      </Fold>
 
-      <section className="space-y-2">
+      <Fold id="overpayments" testId="overpayments-tile" title="Overpayments" open={hash === '#overpayments'}
+        figures={over ? { count: over.length, total: sum(over) } : null} noun={['overpayment to decide', 'overpayments to decide']}>
         <TrustOverpayments embedded />
         <ParkedCredits />
-      </section>
+      </Fold>
 
-      <section id="other" className="space-y-2">
-        <h2 className="text-lg font-semibold tracking-tight text-slate-800">Anything else holding a payover up</h2>
+      <Fold id="other" testId="other-tile" title="Anything else holding a payover up" open={hash === '#other'}
+        figures={other ? { count: other.length, total: sum(other) } : null} noun={['item', 'items']}>
         <FinanceExceptions embedded />
-      </section>
+      </Fold>
     </div>
+  )
+}
+
+const r2 = (v: number): number => Math.round(v * 100) / 100
+
+/* One folded section: the title, how many and how much, and the list under it. The list stays mounted while folded
+   (hidden), so it keeps its own state -- a search typed, a row opened -- when the tile is folded and opened again. */
+function Fold({ id, testId, title, open: startOpen, figures, noun, totalTestId, children }: {
+  id: string; testId: string; title: string; open: boolean
+  figures: { count: number; total: number } | null; noun: [string, string]; totalTestId?: string; children: ReactNode
+}) {
+  const [open, setOpen] = useState(startOpen)
+  const busy = !!figures && figures.count > 0
+  return (
+    <section id={id} className="scroll-mt-4 space-y-2">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid={testId}
+        className="card flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50">
+        {open ? <ChevronDown size={18} className="text-slate-400" /> : <ChevronRight size={18} className="text-slate-400" />}
+        <span className="min-w-0 flex-1">
+          <span className="block text-lg font-semibold tracking-tight text-slate-800">{title}</span>
+          <span className="block text-[12.5px] text-slate-500">
+            {figures ? (figures.count === 0 ? 'Nothing to sort' : `${figures.count.toLocaleString('en-ZA')} ${figures.count === 1 ? noun[0] : noun[1]}`) : 'Reading…'}
+          </span>
+        </span>
+        <span className={`text-xl font-semibold tabular-nums ${busy ? 'text-amber-700' : 'text-slate-800'}`} data-testid={totalTestId}>
+          {figures ? rand(figures.total) : '—'}
+        </span>
+      </button>
+      <div hidden={!open}>{children}</div>
+    </section>
   )
 }

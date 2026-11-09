@@ -78,7 +78,7 @@ export function currentHoldings(input: {
       what: f
         ? `Fees, interest and commission not yet transferred, less bank charges · ${randPlain(f.drawable)} may be drawn now${f.waiting > 0.004 ? `, ${randPlain(f.waiting)} waits for its clients` : ''}`
         : 'Fees, interest and commission not yet transferred, less bank charges',
-      amount: firm, to: '/trust/payments-out',
+      amount: firm, to: '/trust/payover#paying-out',
     })
   }
   const debtors = r2(input.cash.reduce((t, c) => t + c.forDebtors, 0))
@@ -132,16 +132,16 @@ export function todoItems(input: {
       label: `${input.overpaymentsToDecide} ${input.overpaymentsToDecide === 1 ? 'overpayment' : 'overpayments'} to decide`, detail: 'Refund, move, release or park.' })
   }
   if (input.paymentsOut.ready > 0 || input.paymentsOut.pending > 0) {
-    out.push({ key: 'payout', tone: 'info', to: '/trust/payments-out',
+    out.push({ key: 'payout', tone: 'info', to: '/trust/payover#paying-out',
       label: `${input.paymentsOut.ready} ${input.paymentsOut.ready === 1 ? 'payment' : 'payments'} ready to go out`,
       detail: `${randPlain(input.paymentsOut.readyAmount)} in the bank file${input.paymentsOut.pending ? ` · ${input.paymentsOut.pending} pending` : ''}.` })
   }
   if (input.firmDrawable > 0.004) {
-    out.push({ key: 'draw', tone: 'info', to: '/trust/payments-out?draw=1',
+    out.push({ key: 'draw', tone: 'info', to: '/trust/payover?draw=1#paying-out',
       label: `${randPlain(input.firmDrawable)} of the firm’s share can be drawn`, detail: 'Its clients have been paid.' })
   }
   if (input.clientsOwe.count > 0) {
-    out.push({ key: 'owe', tone: 'info', to: '/trust/clients',
+    out.push({ key: 'owe', tone: 'info', to: '/trust/client-ledger?view=owe',
       label: `Clients owe us ${randPlain(input.clientsOwe.total)}`, detail: `${input.clientsOwe.count} ${input.clientsOwe.count === 1 ? 'client' : 'clients'}.` })
   }
   return out

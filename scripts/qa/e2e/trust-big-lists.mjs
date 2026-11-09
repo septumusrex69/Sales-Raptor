@@ -52,7 +52,8 @@ try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
 
   /* ---- To sort: 2 135 statement lines ---- */
-  await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions`, { waitUntil: 'domcontentloaded' })
+  /* S21: each To sort section is a tile; #lines opens this one. */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions#lines`, { waitUntil: 'domcontentloaded' })
   const line = page.getByTestId('line-to-allocate')
   await line.first().waitFor({ timeout: 20000 })
   t.check('To sort draws a hundred statement lines, not 2 135', await line.count(), 100)

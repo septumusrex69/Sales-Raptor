@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, BookOpen, Briefcase, CircleGauge, Users, Scale, Search, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, BookOpen, Briefcase, CircleGauge, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -28,27 +28,19 @@ import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceR
  * with a pay over queue." Overview sits above all of it because it is the only screen that
  * answers "is the trust account right", and that question comes before any day's work on it.
  */
+/*
+ * FIVE, IN THE ORDER A PAYMENT TRAVELS (S21 · Raptor H19). Stephan, 9 Nov: "I think it's still a little bit
+ * complicated, everything." In: approve it (Payments in). No home yet: To sort. Waiting to go to a client: Payover
+ * runs, which now ends with paying out (the bank file, refunds, the firm's transfer). Gone to the client: Client ledger,
+ * which also filters the clients who owe us. Finding a payment is the search bar at the top. The Trust ledger is under
+ * Trust settings -- the accountant's view, not the day's work. Every old address still opens or redirects.
+ */
 const ITEMS: RailItem[] = [
   { to: '/trust', label: 'Overview', icon: CircleGauge, end: true },
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
-  { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
-  /* S21 · Raptor H19 (Stephan, 9 Nov): a run approved and paid leaves Payover runs for here, filed by client. */
-  { to: '/trust/client-ledger', label: 'Client ledger', icon: BookOpen },
-  /* The one place money leaves trust (S7): clients, refunds, the firm's transfer, and the bank file. */
-  { to: '/trust/payments-out', label: 'Payments out', icon: Send },
-  /* TO SORT (S7, the firm, 13 Oct: "there's a tab for overpayments and then there's another tab for
-     exceptions ... I don't know where we can see the suspense account"): one page for all three. */
   { to: '/trust/exceptions', label: 'To sort', icon: TriangleAlert },
-  /* BACKDATED PAYMENTS ARE IN PAYMENTS IN NOW (S21; Stephan: "shown for approval in the payments in. Not a separate
-     tab. It's unnecessary"). /trust/backdated still opens the page, for links already sent. */
-  /* "A dedicated tab ... the clients that owe us money" (13 Oct). */
-  { to: '/trust/clients', label: 'Clients owe us', icon: Users },
-  /* BANK STATEMENT IS OFF THE MENU (S21; Stephan, 9 Nov: "the bank statement ... is unnecessary"). It is still how the
-     account is reconciled -- Not accounted for is worked out against it -- so /trust/statement stays and that page
-     links to it. */
-  /* Request #18: where did this payment go? Beside the statement, which answers the same question for bank lines only. */
-  { to: '/trust/find', label: 'Find a payment', icon: Search },
-  { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
+  { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
+  { to: '/trust/client-ledger', label: 'Client ledger', icon: BookOpen },
 ]
 
 export function TrustLayout() {

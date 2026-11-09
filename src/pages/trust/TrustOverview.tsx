@@ -264,7 +264,7 @@ export function TrustOverview() {
             {firmRows.length === 0 && <li className="py-3 text-sm text-slate-500">Nothing of the firm&rsquo;s is held.</li>}
             {firmRows.map((r) => (
               <li key={r.key}>
-                <Link to="/trust/payments-out" className="flex items-baseline gap-3 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+                <Link to="/trust/payover#paying-out" className="flex items-baseline gap-3 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
                   <span className="min-w-0 flex-1">
                     <span className="block text-[13.5px] font-medium text-slate-800">{cycleLabel(r.periodStart, r.periodEnd)}</span>
                     <span className="block text-[12px] text-slate-500">
@@ -279,35 +279,15 @@ export function TrustOverview() {
         </div></Card>
       </section>
 
+      {/* WHAT NEEDS ATTENTION, FULL WIDTH, under the shares (S21 · Raptor H19): "and then at the bottom all the other
+          discrepancies that needs doing". */}
       <section>
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">What is in the trust account, owner by owner</h2>
-        <p className="text-sm text-slate-500 mt-1">
-          Only money in the account today. Payovers already paid and the firm&rsquo;s transfers are history, on Bank statement and the Trust ledger.
-        </p>
-
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          <Card className="lg:col-span-7 px-6 py-2"><div data-testid="holdings">
-            {holdings.length === 0 && <p className="py-6 text-center text-sm text-slate-500">Nothing is held for anybody.</p>}
-            {holdings.map((h) => (
-              <Owner key={h.key} who={h.who} what={h.what} amount={h.amount} to={h.to} />
-            ))}
-            {/* Ownership-block markers kept for the rule checks: the totals, then what has no owner. */}
-            <Subtotal label="Total accounted for" value={head.accounted} />
-            {head.notAccounted !== 0 && (
-              <Link to="/trust/unaccounted" className="block">
-                <Owner who="Not accounted for" what="Needs placing or explaining, see every item" amount={head.notAccounted} />
-              </Link>
-            )}
-            <Subtotal label="Total not accounted for" value={head.notAccounted} />
-            <Subtotal label="In the trust account" value={head.inTrust} strong />
-          </div></Card>
-
           {/*
             WHAT NEEDS DOING, INSTEAD OF A RECONCILIATION CARD (the firm, 13 Oct: "the ownership
             reconciliation, is that really necessary ... isn't there anything better"). Each line is
             a job and opens where it is done; nothing to do says so plainly.
           */}
-          <Card className="lg:col-span-5 px-6 py-5"><div data-testid="needs-doing">
+          <Card className="px-6 py-5"><div data-testid="needs-doing">
             <div className="flex items-center justify-between gap-3">
               <div className="text-lg font-semibold text-slate-800">Needs attention</div>
               <span className={clsx('rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap',
@@ -342,8 +322,34 @@ export function TrustOverview() {
               </p>
             )}
           </div></Card>
-        </div>
       </section>
+
+      {/* EVERY OWNER, LINE BY LINE, FOLDED (S21 · Raptor H19; Stephan: "it's still a little bit complicated"). The bar
+          above shows the same money; this is the detail for whoever wants each line, a press away. */}
+      <details className="group" data-testid="owners-fold">
+        <summary className="cursor-pointer list-none text-[14px] font-medium text-sky-700 hover:text-sky-900">
+          <h2 className="inline text-[14px] font-medium">What is in the trust account, owner by owner</h2>
+          <span className="ml-1 group-open:hidden">&rarr;</span>
+        </summary>
+        <p className="text-sm text-slate-500 mt-1">
+          Only money in the account today. Payovers already paid are in the Client ledger; the firm&rsquo;s transfers on the Trust ledger.
+        </p>
+          <Card className="mt-3 px-6 py-2"><div data-testid="holdings">
+            {holdings.length === 0 && <p className="py-6 text-center text-sm text-slate-500">Nothing is held for anybody.</p>}
+            {holdings.map((h) => (
+              <Owner key={h.key} who={h.who} what={h.what} amount={h.amount} to={h.to} />
+            ))}
+            {/* Ownership-block markers kept for the rule checks: the totals, then what has no owner. */}
+            <Subtotal label="Total accounted for" value={head.accounted} />
+            {head.notAccounted !== 0 && (
+              <Link to="/trust/unaccounted" className="block">
+                <Owner who="Not accounted for" what="Needs placing or explaining, see every item" amount={head.notAccounted} />
+              </Link>
+            )}
+            <Subtotal label="Total not accounted for" value={head.notAccounted} />
+            <Subtotal label="In the trust account" value={head.inTrust} strong />
+          </div></Card>
+      </details>
     </div>
   )
 }

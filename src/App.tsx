@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Navigate, Route, Routes, useParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
 import { ThemeProvider } from './store/ThemeContext'
@@ -62,15 +62,14 @@ const TrustLayout = lazy(() => import('./pages/trust/TrustLayout').then((m) => (
 const TrustOverview = lazy(() => import('./pages/trust/TrustOverview').then((m) => ({ default: m.TrustOverview })))
 const TrustLedger = lazy(() => import('./pages/trust/TrustLedger').then((m) => ({ default: m.TrustLedger })))
 const ClientBalances = lazy(() => import('./pages/trust/ClientBalances').then((m) => ({ default: m.ClientBalances })))
-const TrustPaymentsOut = lazy(() => import('./pages/trust/TrustPaymentsOut').then((m) => ({ default: m.TrustPaymentsOut })))
 const TrustToSort = lazy(() => import('./pages/trust/TrustToSort').then((m) => ({ default: m.TrustToSort })))
-const ClientsOweUs = lazy(() => import('./pages/trust/ClientsOweUs').then((m) => ({ default: m.ClientsOweUs })))
 const TrustBankStatement = lazy(() => import('./pages/trust/TrustBankStatement').then((m) => ({ default: m.TrustBankStatement })))
 const FindPayment = lazy(() => import('./pages/trust/FindPayment').then((m) => ({ default: m.FindPayment })))
 const TrustUnaccounted = lazy(() => import('./pages/trust/TrustUnaccounted').then((m) => ({ default: m.TrustUnaccounted })))
 const TrustOverpayments = lazy(() => import('./pages/trust/TrustOverpayments').then((m) => ({ default: m.TrustOverpayments })))
 const BroughtForward = lazy(() => import('./pages/trust/BroughtForward').then((m) => ({ default: m.BroughtForward })))
 const BackdatedPayments = lazy(() => import('./pages/trust/BackdatedPayments').then((m) => ({ default: m.BackdatedPayments })))
+const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
 const ClientLedger = lazy(() => import('./pages/trust/ClientLedger').then((m) => ({ default: m.ClientLedger })))
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
@@ -128,6 +127,13 @@ const RepDetailPage = lazy(() => import('./pages/reps/RepDetailPage').then((m) =
 function RunRedirect() {
   const { id } = useParams()
   return <Navigate to={`/trust/runs/${id}`} replace />
+}
+
+/* PAYMENTS OUT LIVES AT THE FOOT OF PAYOVER RUNS (S21 · Raptor H19); ?draw=1 is carried, so "Record the transfer"
+   links already sent still open the box. */
+function PaymentsOutRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/trust/payover${search}#paying-out`} replace />
 }
 
 function App() {
@@ -244,10 +250,12 @@ function App() {
                 {/* PAYMENT HISTORY LIVES IN PAYMENTS IN NOW, as its History tab, filed by client (the
                     firm, 10 Oct: "it should live inside the payment in ... under the client. So it's
                     organized, it's filed"). The address stays, for links already sent. */}
-                <Route path="check" element={<Navigate to="/trust/payments?tab=history" replace />} />
+                {/* EVERY PROCESSED PAYMENT, FILED BY CLIENT (the old History tab): off the menu since S21, opened from the
+                    Client ledger's foot. */}
+                <Route path="check" element={<CheckPayments />} handle={{ title: 'Processed payments' }} />
                 <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
                 <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
-                <Route path="payments-out" element={<TrustPaymentsOut />} handle={{ title: 'Payments out' }} />
+                <Route path="payments-out" element={<PaymentsOutRedirect />} />
                 {/* Overpayments live on To sort now (S7); the address still opens the page itself, for links already sent. */}
                 <Route path="overpayments" element={<TrustOverpayments />} handle={{ title: 'Overpayments' }} />
                 <Route path="statement" element={<TrustBankStatement />} handle={{ title: 'Bank statement' }} />
@@ -257,7 +265,7 @@ function App() {
                 <Route path="unaccounted" element={<TrustUnaccounted />} handle={{ title: 'Not accounted for' }} />
                 <Route path="ledger" element={<TrustLedger />} handle={{ title: 'Trust ledger' }} />
                 {/* Clients owe us (S7): the dedicated list; every balance both ways moves one level down. */}
-                <Route path="clients" element={<ClientsOweUs />} handle={{ title: 'Clients owe us' }} />
+                <Route path="clients" element={<Navigate to="/trust/client-ledger?view=owe" replace />} />
                 <Route path="clients/all" element={<ClientBalances />} handle={{ title: 'Client balances' }} />
                 {/* TO SORT (S7): suspense, statement lines, overpayments and exceptions on one page, at the old address. */}
                 <Route path="exceptions" element={<TrustToSort />} handle={{ title: 'To sort' }} />

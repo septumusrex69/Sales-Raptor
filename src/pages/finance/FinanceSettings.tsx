@@ -156,6 +156,13 @@ export function FinanceSettings() {
 
   return (
     <div className="space-y-4">
+      {/* THE TRUST LEDGER, FROM HERE (S21 · Raptor H19): the accountant's view of the books -- creditors, debtors and the
+          reconciliation -- off the day's menu at the firm's wish to simplify, and one press away for whoever checks it. */}
+      <Link to="/trust/ledger" data-testid="open-trust-ledger"
+        className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13.5px] hover:bg-slate-50">
+        <span><span className="font-semibold text-slate-800">Trust ledger</span><span className="ml-2 text-slate-500">The books behind the trust account, for checking and the accountant</span></span>
+        <span className="text-sky-700">Open &rarr;</span>
+      </Link>
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">

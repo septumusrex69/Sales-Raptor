@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import clsx from 'clsx'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { firmToday } from '../../lib/dateLabels'
@@ -10,7 +9,6 @@ import { BankImportCard, LatestStatement } from './BankImportCard'
 import { BackdatedPayments } from '../trust/BackdatedPayments'
 import { RecordPaymentModal } from './RecordPaymentModal'
 import { AwaitingApproval } from './AwaitingApproval'
-import { CheckPayments } from './CheckPayments'
 
 /**
  * PAYMENTS IN: WHERE THE DAY'S MONEY IS PROCESSED, AND NOTHING ELSE.
@@ -38,8 +36,7 @@ export function FinancePayments() {
    * report, it should live there ... under the client. So it's organized, it's filed"). Processing
    * stays the default; History is every processed payment, filed by client and month.
    */
-  const [params, setParams] = useSearchParams()
-  const tab: 'process' | 'history' = params.get('tab') === 'history' ? 'history' : 'process'
+  const [params] = useSearchParams()
   /* Bumped whenever an import, a placement or an approval changes the ledger, so the queue, the
      tiles and suspense reload together rather than disagreeing about what has been placed. */
   const [changed, setChanged] = useState(0)
@@ -59,31 +56,16 @@ export function FinancePayments() {
 
   const onLoaded = useCallback((count: number, total: number) => setPending({ count, total }), [])
 
-  const tabs = (
-    <div className="flex gap-4 border-b border-slate-200">
-      {([['process', 'To process'], ['history', 'History']] as const).map(([k, label]) => (
-        <button key={k} type="button" data-testid={`payments-tab-${k}`}
-          onClick={() => setParams(k === 'process' ? {} : { tab: k }, { replace: true })}
-          className={clsx('-mb-px border-b-2 px-1 pb-2 text-[13.5px] font-medium transition-colors',
-            tab === k ? 'border-navy-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700')}>
-          {label}
-        </button>
-      ))}
-    </div>
-  )
-
-  if (tab === 'history') {
-    return (
-      <div className="space-y-5">
-        {tabs}
-        <CheckPayments />
-      </div>
-    )
-  }
+  /*
+   * NO HISTORY TAB (S21 · Raptor H19). Stephan, 9 Nov: "the payments in should only show what needs to be approved. Or
+   * where to put something" -- and a payment already processed is found by the search bar at the top (it says where
+   * the money is now and opens the account, where it can be reversed), or under its client in the Client ledger once
+   * it is paid over. An old ?tab=history link opens the list it was (/trust/check), linked from the Client ledger.
+   */
+  if (params.get('tab') === 'history') return <Navigate to="/trust/check" replace />
 
   return (
     <div className="space-y-5">
-      {tabs}
       {/*
         THE FIRM'S OWN MOCK-UP, 7 October: two buttons on one line, one card of four figures, the
         last statement folded into a line, then the queue and what needs an account -- "This looks

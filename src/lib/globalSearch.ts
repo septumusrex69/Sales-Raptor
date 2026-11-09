@@ -55,3 +55,30 @@ export function asksTheBook(typed: string): boolean {
   const q = typed.trim()
   return q.length >= 3 || /^[tr]-?\d+$/i.test(q)
 }
+
+/*
+ * PAYMENTS, IN THE ONE SEARCH (S21 · Raptor H19). Stephan, 9 Nov, on the Trust area: "the search a payment. Like, is it
+ * necessary to do it there". There were five places to look for a payment (this bar, Find a payment, the Client
+ * ledger's box, Payments in's History tab and suspense's own filter); now this bar is the one, for whoever holds the
+ * trust account. What is typed is read the way Find a payment read it: an amount when it is one (R1 500,00, 1500.00),
+ * otherwise words from the proof of payment or a case number -- three letters at least, as for the book.
+ *
+ * WHERE IT GOES: the account, where the payment can be reversed or moved; a bank line with no account yet goes to
+ * suspense on To sort. PURE, so a check can hold it.
+ */
+export type PaymentQuery = { amount: number; words: null } | { amount: null; words: string } | null
+
+export function paymentQuery(typed: string, parseAmount: (s: string) => number | null): PaymentQuery {
+  const t = typed.trim()
+  if (/^R?\s*\d[\d\s.,]*$/i.test(t)) {
+    /* A bare number of seven digits or more is an ID or a phone number, not an amount anybody pays. */
+    if (/^\d{7,}$/.test(t.replace(/\s/g, ''))) return null
+    const amount = parseAmount(t)
+    return amount !== null && amount > 0 ? { amount, words: null } : null
+  }
+  return t.length >= 3 ? { amount: null, words: t } : null
+}
+
+export function paymentPath(p: { accountId: string | null }): string {
+  return p.accountId ? `/accounts/${p.accountId}` : '/trust/exceptions#suspense'
+}

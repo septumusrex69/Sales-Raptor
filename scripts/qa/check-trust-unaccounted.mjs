@@ -37,7 +37,7 @@ check('...one line each, confirmed ones left out', s.items.length, 5)
 check('...in their own group, biggest first', s.items.map((i) => [i.group, i.amount]),
   [['paid_out', 4538.6], ['paid_out', 4451.47], ['paid_out', 2343.1], ['paid_out', 1925.47], ['paid_out', 1000]])
 check('...a payover opens its run', s.items[0].action, { label: 'Open the run', to: '/trust/runs/HTH-2607' })
-check('...a refund goes to Payments to make', s.items[3].action.to, '/trust/payments-out')
+check('...a refund goes to paying out, at the foot of Payover runs (S21)', s.items[3].action.to, '/trust/payover#paying-out')
 check('...and names how it was marked paid', s.items[0].detail, 'Payover, marked paid on BF HTH-2607')
 
 /* A STATEMENT LINE: a receipt raises the figure, a debit lowers it; awaiting raises it. */

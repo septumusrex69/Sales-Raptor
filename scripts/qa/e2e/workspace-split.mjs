@@ -247,10 +247,11 @@ try {
     const rail = page.locator('nav').filter({ hasText: 'Money held for other people' }).first()
     t.ok('the trust rail is on the page', (await rail.count()) > 0)
     /* S21: Client ledger in; Bank statement and Backdated payments off the menu (Stephan, 9 Nov). */
-    for (const item of ['Overview', 'Payments in', 'Payover runs', 'Client ledger', 'To sort', 'Clients owe us']) {
+    /* S21: five, the order a payment travels (Stephan: "it's still a little bit complicated"). */
+    for (const item of ['Overview', 'Payments in', 'To sort', 'Payover runs', 'Client ledger']) {
       t.ok(`...listing ${item}`, (await rail.getByRole('link', { name: item }).count()) > 0)
     }
-    for (const gone of ['Bank statement', 'Backdated payments']) {
+    for (const gone of ['Bank statement', 'Backdated payments', 'Payments out', 'Clients owe us', 'Find a payment', 'Trust ledger']) {
       t.check(`...and not ${gone}`, await rail.getByRole('link', { name: gone }).count(), 0)
     }
     t.ok('...and its settings', (await rail.getByRole('link', { name: 'Trust settings' }).count()) > 0)
@@ -291,6 +292,8 @@ try {
      * under it tells somebody they have a problem and nothing about where to start.
      */
     /* ---- S7: ONLY THE MONEY IN THE ACCOUNT NOW, AND WHAT NEEDS DOING ---- */
+    /* The owners are folded since S21 (the bar above shows the same money); opened to read each line. */
+    await page.getByTestId('owners-fold').locator('summary').click()
     const holdings = plain(await page.getByTestId('holdings').innerText())
     t.ok('the closed cycle\'s clients are a line, with when they are paid', /Clients · to be paid over[\s\S]*11 Aug – 10 Sep 2026 · paid over 11 October 2026[\s\S]*R 1 920\.40/.test(holdings))
     t.ok('...this month\'s clients too', /Clients · this month[\s\S]*R 637\.50/.test(holdings))
@@ -307,7 +310,7 @@ try {
     t.ok('...names the receipt in suspense and the lines to allocate', /1 receipt in suspense[\s\S]*R 485\.00/.test(todoText) && /2 statement lines to allocate/.test(todoText))
     t.ok('...and what clients owe us', /Clients owe us R 2 275\.00/.test(todoText))
     t.ok('...each opening where it is done', (await page.getByTestId('needs-doing').locator('a[href="/trust/exceptions#suspense"]').count()) === 1
-      && (await page.getByTestId('needs-doing').locator('a[href="/trust/clients"]').count()) === 1)
+      && (await page.getByTestId('needs-doing').locator('a[href="/trust/client-ledger?view=owe"]').count()) === 1)
     t.ok('...and it says it does not balance', /Does not balance/.test(plain(await page.getByTestId('needs-doing').innerText())))
     t.ok('with no opening balance captured it says where to capture it', /Capture it in Trust settings/.test(body))
     await t.shot(page, 'trust-overview')
@@ -353,7 +356,7 @@ try {
      * name alone; now the name heads a rail of icons, the way the main menu folds.
      */
     const folded = page.getByRole('navigation', { name: 'Trust menu' })
-    for (const label of ['Overview', 'Payments in', 'Payover runs', 'Trust ledger', 'To sort', 'Trust settings']) {
+    for (const label of ['Overview', 'Payments in', 'Payover runs', 'Client ledger', 'To sort', 'Trust settings']) {
       t.ok(`folded, ${label} is still an icon on screen`, await folded.getByRole('link', { name: label, exact: true }).isVisible())
     }
     const foldedBox = await folded.boundingBox()

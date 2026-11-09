@@ -99,6 +99,8 @@ try {
   const held = await signedInPage(browser, ADMIN, withHolding, [])
   await held.page.goto(`http://127.0.0.1:${PORT}/trust`, { waitUntil: 'domcontentloaded' })
   const card = held.page.getByTestId('holdings')
+  /* The owners are folded since S21; opened to read the holding's own line. */
+  await held.page.getByTestId('owners-fold').locator('summary').click({ timeout: 20000 })
   await card.waitFor({ timeout: 20000 })
   await held.page.getByText('Held for Swordfish payovers').first().waitFor({ timeout: 10000 })
   t.ok('the overview draws the Swordfish holding as its own line, set, paid out and left',

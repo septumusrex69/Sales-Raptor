@@ -46,7 +46,8 @@ const t = todoItems({ ...base, notAccounted: -1000, suspense: { count: 2, amount
 check('every job, the shortfall first and red', t.map((x) => [x.key, x.tone]),
   [['unaccounted', 'bad'], ['suspense', 'warn'], ['lines', 'warn'], ['overpay', 'warn'], ['payout', 'info'], ['draw', 'info'], ['owe', 'info']])
 check('...each opening where it is done', t.map((x) => x.to),
-  ['/trust/unaccounted', '/trust/exceptions#suspense', '/trust/exceptions#lines', '/trust/exceptions#overpayments', '/trust/payments-out', '/trust/payments-out?draw=1', '/trust/clients'])
+  /* S21: paying out is at the foot of Payover runs; clients who owe us are a Client ledger filter. */
+  ['/trust/unaccounted', '/trust/exceptions#suspense', '/trust/exceptions#lines', '/trust/exceptions#overpayments', '/trust/payover#paying-out', '/trust/payover?draw=1#paying-out', '/trust/client-ledger?view=owe'])
 check('...in words', [t[0].label, t[1].label, t[4].detail], ['R 1 000.00 not accounted for', '2 receipts in suspense', 'R 13 426.07 in the bank file · 3 pending.'])
 check('money in the bank with no owner is a warning, not a shortfall', todoItems({ ...base, notAccounted: 50 })[0].tone, 'warn')
 

@@ -175,7 +175,10 @@ const businessTargets = railTargets(businessLayout)
 /* TEN since 8 Nov (Raptor H19 / S20): Backdated payments joined beside To sort. */
 /* NINE since 9 Nov (S21): Client ledger joined; Backdated payments went into Payments in and Bank statement off the
    menu (Stephan: "not a separate tab", "the bank statement ... is unnecessary"). */
-check('the trust rail has its nine, settings and the door (S21: Client ledger in, Backdated and Bank statement out)', trustTargets.length, 11)
+/* FIVE since the same day (S21; Stephan: "it's still a little bit complicated"): Overview, Payments in, To sort, Payover
+   runs, Client ledger -- the order a payment travels. Payments out is the foot of Payover runs, Clients owe us a Client
+   ledger filter, Find a payment the search bar at the top, the Trust ledger under Trust settings. */
+check('the trust rail has its five, settings and the door (S21)', trustTargets.length, 7)
 /* FIVE AND THE DOOR: overview, income (drawn only for whoever holds business.income), expenses,
    drawings, back office -- and the door to the trust. */
 check('the business rail has its five and the door', businessTargets.length, 6)
@@ -194,7 +197,7 @@ for (const to of [...trustTargets, ...businessTargets]) {
 /* THE LEDGER IS LISTED NOW THAT IT OPENS. It was deliberately absent while it was database-only;
    the general assertion above -- every rail item points at a route that exists -- is what kept it
    honest then and what keeps the next one honest now. */
-ok('the trust ledger is in the rail', trustTargets.includes('/trust/ledger'))
+ok('the trust ledger is under Trust settings, one press away (S21)', /to="\/trust\/ledger"/.test(readFileSync('src/pages/finance/FinanceSettings.tsx', 'utf8')))
 
 /* Each rail carries a door to the other book, which is how somebody crosses without a tab. */
 ok('trust has a door to business', trustTargets.includes('/business'))

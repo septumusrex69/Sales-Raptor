@@ -34,7 +34,13 @@ import { clockNowMs, clockToday } from '../../lib/clock.ts'
 type Tab = 'pay' | 'paid'
 export type Paying = { kind: 'payover' | 'refund'; id: string; payee: string; amount: number; reference: string }
 
-export function TrustPaymentsOut() {
+/*
+ * INSIDE PAYOVER RUNS (S21 · Raptor H19). Stephan, 9 Nov: "I think it's still a little bit complicated". Paying a client
+ * is the last step of a payover, so the money going out -- the bank file, refunds and the firm's own transfer -- is
+ * drawn at the foot of Payover runs (`embedded`) instead of on a menu item of its own. /trust/payments-out redirects
+ * there, ?draw=1 included.
+ */
+export function TrustPaymentsOut({ embedded = false }: { embedded?: boolean } = {}) {
   const { currentUser } = useAuth()
   const [tab, setTab] = useState<Tab>('pay')
   const [rows, setRows] = useState<OutgoingPayment[] | null>(null)
@@ -77,7 +83,8 @@ export function TrustPaymentsOut() {
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    if (params.get('draw') === '1' && firm && firm.drawable > 0.004) { setDrawing(true); setParams({}, { replace: true }) }
+    /* Only `draw` is taken off the address: inside Payover runs the page's own ?tab= must survive. */
+    if (params.get('draw') === '1' && firm && firm.drawable > 0.004) { setDrawing(true); setParams((p) => { p.delete('draw'); return p }, { replace: true }) }
   }, [params, firm, setParams])
 
   /* FNB's file names the account it pays from; without a usable trust account number there is no file. */
@@ -131,7 +138,9 @@ export function TrustPaymentsOut() {
   return (
     <div className="space-y-5">
       <div className="flex items-baseline gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Payments out</h1>
+        {embedded
+          ? <h2 className="text-lg font-semibold tracking-tight text-slate-800" id="paying-out">Paying out</h2>
+          : <h1 className="text-xl font-semibold tracking-tight text-slate-800">Payments out</h1>}
         <span className="text-xs text-slate-400">The one place money leaves the trust account: clients, refunds and the firm&rsquo;s own transfer</span>
       </div>
 

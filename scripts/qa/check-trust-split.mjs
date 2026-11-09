@@ -81,7 +81,7 @@ ok('the overview reads the bank money by cycle', /fetchTrustCashByCycle\(\)/.tes
 /* S7: the overview is money in the account now and what needs doing. The PTCs and their ages moved to
    Clients owe us, the payover check to the Trust ledger -- each still drawn, in the firm's order. */
 const owe = read('src/pages/trust/ClientsOweUs.tsx')
-ok('the overview keeps the bank list and Needs attention (S21)', page.indexOf('What is in the trust account') > 0 && page.indexOf('Needs attention') > page.indexOf('What is in the trust account'))
+ok('the overview keeps the bank list (folded) and Needs attention above it (S21)', page.indexOf('What is in the trust account') > 0 && page.indexOf('Needs attention') > 0 && page.indexOf('Needs attention') < page.indexOf('What is in the trust account') && /data-testid="owners-fold"/.test(page))
 ok('...the ages and the PTCs are on Clients owe us, in that order', owe.indexOf('How old it is') > 0 && owe.indexOf('Paid straight to clients (PTCs)') > owe.indexOf('How old it is'))
 ok('...and the payover check on the Trust ledger', /Each payover, checked/.test(read('src/pages/trust/TrustLedger.tsx')))
 ok('the old "owed back by clients" line is gone from the bank list', !/Less: owed back by clients/.test(page))

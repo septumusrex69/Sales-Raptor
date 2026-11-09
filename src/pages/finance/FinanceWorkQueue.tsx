@@ -1,14 +1,14 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CreditCard, FileText, Filter, Loader2, Search, Users } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Filter, Loader2, Search } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import {
   NEXT_STEP_LABEL, RUN_STATUS_LABEL,
-  approveRun, buildRun, fetchBuildable, markRunPaid, fetchCycle, fetchTiles, fetchWorkQueue,
-  fetchReleasedRunIds, fetchUnallocatedReceipts, isStagingDeployment, refreshRuns, resetRun,
-  type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
+  approveRun, buildRun, fetchBuildable, markRunPaid, fetchCycle, fetchWorkQueue,
+  fetchReleasedRunIds, isStagingDeployment, refreshRuns, resetRun,
+  type Buildable, type Cycle, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
 import {
@@ -27,6 +27,7 @@ import { fetchPaymentsOutPaid } from '../../lib/bankAllocationApi'
 import { canApprovePayover, canDrawFromTrust, canMarkPaidOut } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
 import { MarkPaidModal, type PayableRun } from './MarkPaidModal'
+import { TrustPaymentsOut } from '../trust/TrustPaymentsOut'
 import { rand as randAmount } from '../../lib/money'
 
 /**
@@ -76,37 +77,6 @@ function Pill({ status, tab }: { status: RunStatus; tab: QueueTab }) {
   )
 }
 
-/**
- * The four figures above the queue.
- *
- * EACH ONE OPENS THE LIST BEHIND IT, because a number nobody can get to the rows of is a number
- * people stop believing. "Unmatched payments" is honestly zero: it counts trust-account payments
- * no account matches, which arrive from a bank statement import Raptor does not have yet, and
- * every payment in the database is already keyed to an account because that is the only way one
- * can be captured. Shown rather than dropped, so the tile is there the day the import is.
- */
-function Tile({ icon, label, value, note, to, accent, action }: {
-  icon: ReactNode; label: string; value: string; note?: string; to?: string
-  /** The one card that is a call to work (Ready to approve): tinted, with its action under it. */
-  accent?: boolean; action?: ReactNode
-}) {
-  const body = (
-    <div className="flex gap-3">
-      <span className={clsx('mt-0.5 shrink-0', accent ? 'text-sky-700' : 'text-slate-500')}>{icon}</span>
-      <div className="min-w-0">
-        <div className={clsx('text-[13px] font-medium', accent ? 'text-sky-800' : 'text-slate-700')}>{label}</div>
-        <div className="mt-1 text-[22px] font-semibold tabular-nums text-slate-800">{value}</div>
-        {note && <div className="mt-0.5 text-xs text-slate-400">{note}</div>}
-        {action}
-      </div>
-    </div>
-  )
-  const box = clsx('block rounded-xl border p-4 transition-colors',
-    accent ? 'border-sky-100 bg-sky-50/60' : 'border-slate-100 bg-white')
-  return to
-    ? <Link to={to} className={clsx(box, 'hover:bg-slate-50')}>{body}</Link>
-    : <div className={box}>{body}</div>
-}
 
 export function FinanceWorkQueue() {
   const navigate = useNavigate()
@@ -121,7 +91,6 @@ export function FinanceWorkQueue() {
   const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
 
   const [cycle, setCycle] = useState<Cycle | null>(null)
-  const [tiles, setTiles] = useState<CycleTiles | null>(null)
   const [rows, setRows] = useState<WorkQueueRow[]>([])
   /* Runs below nil the client has paid into the business account -- "Paid to us", not "owes us". */
   const [settled, setSettled] = useState<Set<string>>(new Set())
@@ -140,9 +109,6 @@ export function FinanceWorkQueue() {
   const [progress, setProgress] = useState<string | null>(null)
   /* Approved runs released for payout before their day (release_payover_run_early). */
   const [released, setReleased] = useState<Set<string>>(new Set())
-  /* THE REAL UNMATCHED STATEMENT LINES (prompt 11): the tile said "Bank import unavailable" long
-     after the import worked, beside a zero the database hard-coded. */
-  const [unmatched, setUnmatched] = useState<{ count: number; amount: number } | null>(null)
   /* How long after a cycle closes it is paid (Trust settings); one month unless the firm changed it. */
   const [lag, setLag] = useState(1)
   /* MARK PAID, FROM HERE (the firm, 10 Oct: "the mark as paid button should ... just immediately
@@ -173,17 +139,13 @@ export function FinanceWorkQueue() {
       /* THE WHOLE QUEUE, NOT ONE CYCLE. The firm asked for "a run in the current or last closed
          cycle": on the 11th the new cycle has nothing in it yet and last month's is what everybody
          is working, so filtering to today's period would open the screen empty every month end. */
-      const [q, t, f] = await Promise.all([fetchWorkQueue(null), fetchTiles(c?.periodStart ?? null),
+      const [q, f] = await Promise.all([fetchWorkQueue(null),
         supabase.from('firm_settings').select('payover_lag_months').limit(1).maybeSingle()])
       setLag(Number((f.data as { payover_lag_months?: number } | null)?.payover_lag_months ?? 1))
       setRows(q)
       setSettled(await fetchSettledRunIds().catch(() => new Set<string>()))
       setReleased(await fetchReleasedRunIds().catch(() => new Set<string>()))
-      setUnmatched(await fetchUnallocatedReceipts()
-        .then((u) => ({ count: u.length, amount: Math.round(u.reduce((t, x) => t + Math.abs(x.amount), 0) * 100) / 100 }))
-        .catch(() => null))
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
-      setTiles(t)
       setFirm(await fetchFirmTrustSplit().catch(() => null))
       /* A quarter back is enough to find this payout day's BF FEES drawing, wherever it was recorded. */
       const since = new Date(Date.parse(`${c?.today ?? firmDay(clockNow().toISOString())}T00:00:00Z`) - 92 * 86400000).toISOString().slice(0, 10)
@@ -326,10 +288,6 @@ export function FinanceWorkQueue() {
   /* S20: nothing to approve, issue or pay in bulk without the tick for it (payover.approve / payover.pay). */
   const toApprove = !mayApprove ? [] : pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r)).map((r) => r.runId)
   const approveLater = pickedRows.filter(waitsForDay)
-  const readyNow = rows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r))
-  const readyLater = rows.filter((r) => r.status === 'ready' && (stillOpen(r) || waitsForDay(r)))
-  /* The soonest day any of them may be approved: the payout day, or for a running cycle its own. */
-  const readyLaterDay = readyLater.map((r) => paysOn(r)).sort()[0] ?? null
   const scheduled = pickedRows.filter((r) => r.status === 'approved' && !isDue(r))
   const toEmail = !mayApprove ? [] : pickedRows.filter((r) => r.status === 'approved' && isDue(r)).map((r) => r.runId)
   /* Only what is ready to pay: approved or sent, on its day, and not below nil -- a run below nil is
@@ -364,51 +322,15 @@ export function FinanceWorkQueue() {
         </div>
       )}
 
-      {/*
-        FOUR CARDS, NOT A STRIP (the firm, 10 Oct, with a drawing). The cycle and cut-off line and
-        the Needs review -> Ready -> Approved -> Sent -> Paid legend went: the legend explained the
-        pills every row already wears, and the firm read it as noise ("I don't know what that ...
-        is"). What the cut-off said lives in each cycle's band ("closes at midnight on 10 Oct").
-        The last card is the one that is work, so it is tinted and says where to go.
-      */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="run-tiles">
-        <Tile icon={<CreditCard size={20} />} label="Money received" value={rand(tiles?.moneyReceived ?? 0)}
-          note="Trust account, this cycle" to="/trust/payments" />
-        <Tile icon={<Users size={20} />} label="Net due to clients" value={rand(tiles?.dueToClients ?? 0)}
-          note="After commission, VAT and set-offs" />
-        <Tile icon={<FileText size={20} />} label="Unmatched payments"
-          value={unmatched ? `${unmatched.count} · ${rand(unmatched.amount)}` : '—'}
-          note={unmatched === null ? 'Could not read the statement lines'
-            : unmatched.count > 0 ? 'Statement lines with no account yet' : 'Every statement line is placed'}
-          to="/trust/exceptions" />
-        {/* ONLY WHAT CAN BE APPROVED NOW (prompt 11): it counted runs in the cycle still running, and
-            -- since 11 Oct -- closed runs waiting for their payout day; neither can be approved. */}
-        <Tile icon={<CheckCircle2 size={20} />} label="Ready to approve" accent
-          value={String(readyNow.length)}
-          note={readyLater.length > 0
-            ? `${readyLater.length} more ready on ${fmtDay(readyLaterDay ?? '')}${(tiles?.needsReviewCount ?? 0) > 0 ? ` · ${tiles?.needsReviewCount} need review` : ''}`
-            : (tiles?.needsReviewCount ?? 0) > 0 ? `${tiles?.needsReviewCount} more need review` : undefined}
-          action={(
-            <button type="button" data-testid="review-runs"
-              onClick={() => {
-                /* To the tab the ready runs are on -- those that may be approved now first -- showing only them. */
-                const to: QueueTab = readyNow.length > 0 ? tabOf(readyNow[0])
-                  : byTab.waiting.some((r) => r.status === 'ready') ? 'waiting' : 'collecting'
-                setParams({ tab: to }, { replace: true })
-                setStatusFilter('ready')
-              }}
-              className="mt-1 inline-flex items-center gap-1 text-[13px] font-medium text-sky-700 hover:text-sky-900">
-              Review runs <ArrowRight size={14} />
-            </button>
-          )} />
-      </div>
-
+      {/* NO FIGURE CARDS (S21 · Raptor H19; Stephan: "it's still a little bit complicated"). Money received, due to
+          clients and what is unmatched are the Overview's; the tabs below already count what is ready. This page is
+          for doing the runs. */}
       {firm && firm.drawable > 0.004 && canDrawFromTrust(currentUser) && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold-200 bg-gold-50 px-4 py-3" data-testid="firm-drawable">
           <span className="text-[13.5px] text-slate-800">
             Its clients have been paid: <b>{rand(firm.drawable)}</b> of Bredell Ferreira&rsquo;s share can now be drawn, on <span className="font-mono">{transferReference(cycle?.today ?? '')}</span>.
           </span>
-          <Link to="/trust/payments-out?draw=1" className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
+          <Link to="/trust/payover?draw=1#paying-out" className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
             Record the transfer
           </Link>
         </div>
@@ -765,7 +687,7 @@ export function FinanceWorkQueue() {
                   </td>
                   <td className="px-3 py-2">
                     {drawing.state === 'draw' && canDrawFromTrust(currentUser) ? (
-                      <Link to="/trust/payments-out?draw=1" className="whitespace-nowrap rounded-md bg-navy-900 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-navy-800">
+                      <Link to="/trust/payover?draw=1#paying-out" className="whitespace-nowrap rounded-md bg-navy-900 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-navy-800">
                         Record the transfer
                       </Link>
                     ) : drawing.state === 'done' && drawing.statementDate ? (
@@ -795,6 +717,12 @@ export function FinanceWorkQueue() {
           onOpen={(runId) => { setBuilding(false); navigate(`/trust/runs/${runId}`) }}
         />
       )}
+
+      {/* PAYING OUT, THE LAST STEP OF A PAYOVER (S21 · Raptor H19): the bank file, refunds and the firm's transfer, here
+          rather than on a menu item of their own (Stephan: "it's still a little bit complicated"). */}
+      <section className="pt-4 scroll-mt-4" data-testid="paying-out">
+        <TrustPaymentsOut embedded />
+      </section>
     </div>
   )
 }

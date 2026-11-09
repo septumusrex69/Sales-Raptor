@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Loader2, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -6,8 +6,7 @@ import { rand } from '../../lib/money'
 import { fetchWorkQueue, type WorkQueueRow } from '../../lib/payover'
 import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
 import { clientPayovers, ledgerClients, matchesClient, payoverDay } from '../../lib/paidOverLedger'
-import { findPayments, type FoundPayment } from '../../lib/trust'
-import { parseRandAmount } from '../../lib/findPaymentAmount'
+import { ClientsOweUs } from './ClientsOweUs'
 
 /**
  * THE CLIENT LEDGER (S21 · Raptor H19): every payover that has left the trust account, filed by client.
@@ -26,6 +25,8 @@ import { parseRandAmount } from '../../lib/findPaymentAmount'
 export function ClientLedger() {
   const [params, setParams] = useSearchParams()
   const companyId = params.get('client')
+  /* CLIENTS OWE US, AS A FILTER HERE (S21 · Raptor H19) rather than a menu item: the same clients, the other way round. */
+  const view: 'paid' | 'owe' = params.get('view') === 'owe' ? 'owe' : 'paid'
   const [rows, setRows] = useState<WorkQueueRow[] | null>(null)
   const [settled, setSettled] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
@@ -109,6 +110,17 @@ export function ClientLedger() {
         </p>
       </div>
 
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Which clients">
+        {([['paid', 'Paid over'], ['owe', 'Owe us']] as const).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} data-testid={`ledger-view-${k}`}
+            onClick={() => setParams(k === 'owe' ? { view: 'owe' } : {})}
+            className={`rounded-full border px-3 py-1 text-[13px] font-medium ${view === k ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'owe' ? <ClientsOweUs embedded /> : (<>
       <label className="flex max-w-md items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
         <Search size={15} className="text-slate-400" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a client by name or code"
@@ -149,58 +161,13 @@ export function ClientLedger() {
         )}
       </Card>
 
-      <PaymentSearch />
-    </div>
-  )
-}
+      </>)}
 
-/*
- * A PAYMENT, BY WHAT THE PROOF OF PAYMENT SAYS: the same search as Find a payment (find_payments), here because the
- * firm looks for a paid-over payment where the payovers are. Each answer says where the money is now and opens the
- * account, where the payment can still be worked.
- */
-function PaymentSearch() {
-  const [text, setText] = useState('')
-  const [rows, setRows] = useState<FoundPayment[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  async function go(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    const t = text.trim()
-    if (!t) { setError('Type an amount, a case number or some words from the proof of payment.'); return }
-    const amount = /^[\d\s.,R]+$/i.test(t) ? parseRandAmount(t) : null
-    setBusy(true)
-    try { setRows(await findPayments({ amount, from: null, to: null, words: amount === null ? t : null })) }
-    catch (x) { setError(x instanceof Error ? x.message : String(x)) }
-    finally { setBusy(false) }
-  }
-  return (
-    <Card className="px-5 py-4" data-testid="client-ledger-payment-search">
-      <h2 className="text-[15px] font-semibold text-slate-800">Search a payment</h2>
-      <form onSubmit={go} className="mt-2 flex flex-wrap gap-2">
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="1 500,00 · DRC0001 · a name on the proof of payment"
-          aria-label="Search a payment" className="min-w-[16rem] flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13px] outline-none" />
-        <button type="submit" disabled={busy} className="rounded-lg bg-navy-900 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
-          {busy ? 'Searching…' : 'Search'}
-        </button>
-      </form>
-      {error && <p className="mt-2 text-[12.5px] text-negative-700">{error}</p>}
-      {rows && (
-        <ul className="mt-3 divide-y divide-slate-100 text-[13px]">
-          {rows.length === 0 && <li className="py-2 text-slate-500">No payment matches that.</li>}
-          {rows.map((p) => (
-            <li key={`${p.kind}-${p.id}`} className="flex flex-wrap items-baseline gap-x-3 py-2">
-              <span className="tabular-nums text-slate-500">{shortDay(p.onDay)}</span>
-              <span className="font-medium tabular-nums text-slate-800">{rand(p.amount)}</span>
-              <span className="text-slate-600">{[p.caseNumber, p.debtor, p.client].filter(Boolean).join(' · ') || p.bankWords || '—'}</span>
-              <span className="text-slate-500">{p.state}</span>
-              {p.accountId && <Link to={`/accounts/${p.accountId}`} className="ml-auto text-[12.5px] font-medium text-sky-700 hover:text-sky-900">Open the account</Link>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
+      <p className="text-[12.5px] text-slate-500">
+        Looking for one payment? Type its amount, case number or a name in the search bar at the top.{' '}
+        <Link to="/trust/check" className="font-medium text-sky-700 hover:text-sky-900" data-testid="all-processed">Every processed payment, by client &rarr;</Link>
+      </p>
+    </div>
   )
 }
 

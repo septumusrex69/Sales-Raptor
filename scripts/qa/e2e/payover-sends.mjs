@@ -228,9 +228,8 @@ try {
     const c = m.cloneNode(true); c.querySelectorAll('select').forEach((x) => x.remove()); return c.innerText ?? c.textContent
   })
   t.ok('the status legend is gone', !/Needs review[\s\S]{0,6}Ready[\s\S]{0,6}Approved[\s\S]{0,6}Sent[\s\S]{0,6}Paid/.test(pageText))
-  t.ok('the four cards are drawn, ending on Ready to approve',
-    /Money received[\s\S]*Net due to clients[\s\S]*Unmatched payments[\s\S]*Ready to approve[\s\S]*Review runs/
-      .test(await page.getByTestId('run-tiles').innerText()))
+  /* S21: no figure cards -- they are the Overview's (Stephan: "it's still a little bit complicated"). */
+  t.check('the figure cards are gone: this page is for doing the runs', await page.getByTestId('run-tiles').count(), 0)
   await page.getByLabel('Search clients').fill('no such client')
   await page.getByText('No run on this tab matches').waitFor({ timeout: 5000 })
   t.check('a search with no match empties the list, and says why', await page.getByTestId('queue-run').count(), 0)

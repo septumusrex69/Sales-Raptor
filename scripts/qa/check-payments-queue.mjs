@@ -264,7 +264,7 @@ ok('Record payment and Import bank statement sit on one line', /<BankImportCard 
 ok('the three overview tiles', ['Waiting for approval', 'Processed into trust', 'Paid to clients · PTC']
   .every((l) => page.includes(`label="${l}"`)) && !page.includes('label="Needs an account"'))
 ok('suspense is not on Payments in', !page.includes('<UnallocatedReceipts'))
-ok('...it is a tile on To sort that opens', /data-testid="suspense-tile"/.test(read('src/pages/trust/TrustToSort.tsx')))
+ok('...it is a tile on To sort that opens', /testId="suspense-tile"/.test(read('src/pages/trust/TrustToSort.tsx')))
 ok('backdated payments come after the queue, for approval', page.includes('<AwaitingApproval') && page.includes('<BackdatedPayments embedded')
   && page.indexOf('<AwaitingApproval') < page.indexOf('<BackdatedPayments embedded'))
 const month = sql.slice(sql.lastIndexOf('create or replace function public.payments_in_month('))

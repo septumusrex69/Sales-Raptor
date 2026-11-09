@@ -49,7 +49,9 @@ ok('Payover runs lets go of exactly what the ledger takes (one rule)', /const is
 const page = read('src/pages/trust/ClientLedger.tsx')
 ok('the ledger lists clients from the same rule', /ledgerClients\(rows, settled\)/.test(page))
 ok('...a payover opens as the run, with its payments and the advice that was sent', /to=\{`\/trust\/runs\/\$\{r\.runId\}`\}/.test(page))
-ok('...and a payment can be searched there', /<PaymentSearch \/>/.test(page) && /findPayments\(/.test(page))
+/* S21 (Stephan: "the search a payment. Like, is it necessary to do it there"): one search, the bar at the top. */
+ok('...and sends a payment search to the bar at the top, with no box of its own', !/function PaymentSearch/.test(page) && /search bar at the top/.test(page))
+ok('...and filters the clients who owe us', /view === 'owe' \? <ClientsOweUs embedded \/>/.test(page))
 ok('it is on the Trust menu, after Payover runs', /to: '\/trust\/client-ledger', label: 'Client ledger'/.test(read('src/pages/trust/TrustLayout.tsx'))
   && read('src/pages/trust/TrustLayout.tsx').indexOf("label: 'Client ledger'") > read('src/pages/trust/TrustLayout.tsx').indexOf("label: 'Payover runs'"))
 

@@ -292,7 +292,10 @@ const from = page.indexOf('What is in the trust account')
 const control = from < 0 ? '' : page.slice(from)
 ok('the ownership block was found', control.length > 500 && control.length < 14000)
 let at = -1
-for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"', 'Needs attention']) {
+/* S21: Needs attention moved ABOVE the owners, full width, and the owners folded (Stephan: "still a little bit
+   complicated"); the owners still end on the three totals, in order. */
+ok('Needs attention comes before the folded owners', page.indexOf('Needs attention') > 0 && page.indexOf('Needs attention') < from)
+for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"']) {
   const found = control.indexOf(line)
   ok(`the ownership block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)

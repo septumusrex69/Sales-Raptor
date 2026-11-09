@@ -115,8 +115,10 @@ try {
 
     /* FILED, NOT LISTED (the firm, 10 Oct: "it should live inside the payment in ... under the
        client. So it's organized, it's filed"). The old address lands on Payments in's History tab. */
-    t.ok('the old address opens Payments in, on History', /\/trust\/payments\?tab=history/.test(page.url()))
-    t.ok('...with History the chosen tab', await page.getByTestId('payments-tab-history').isVisible())
+    /* S21: no History tab on Payments in ("only what needs to be approved"); the list is its own page, off the menu,
+       opened from the Client ledger's foot, and the old address opens it. */
+    t.ok('the old address opens the processed payments, on their own page', /\/trust\/check$/.test(page.url()))
+    t.check('...and Payments in has no History tab any more', await page.getByTestId('payments-tab-history').count(), 0)
     const folders = page.getByTestId('history-client')
     t.ok('the receipts sit under their client\'s folder', (await folders.count()) >= 1
       && /Rinda Roo Company/.test(await folders.first().innerText()))

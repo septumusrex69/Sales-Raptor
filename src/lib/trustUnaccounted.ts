@@ -115,7 +115,7 @@ export function unaccountedItems(input: {
       detail: `${what}, marked paid${p.paidReference ? ` on ${p.paidReference}` : ''}`,
       amount: r2(p.amount),
       action: p.kind === 'payover' ? { label: 'Open the run', to: `/trust/runs/${p.id}` }
-        : p.kind === 'refund' ? { label: 'Payments out', to: '/trust/payments-out' }
+        : p.kind === 'refund' ? { label: 'Paying out', to: '/trust/payover#paying-out' }
           : { label: 'Drawings', to: '/business/drawings' },
     })
   }

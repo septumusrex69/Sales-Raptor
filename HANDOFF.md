@@ -91,6 +91,25 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- TRUST IN FIVE, AND ONE SEARCH FOR PAYMENTS (9 Nov; Stephan: "it's still a little bit complicated ... the search a payment. Like, is it necessary to do it there"; no migration)
+- **Menu: Overview, Payments in, To sort, Payover runs, Client ledger** -- the order a payment travels. Moved, routes
+  kept: Payments out = the foot of Payover runs (`TrustPaymentsOut embedded`, `#paying-out`; /trust/payments-out
+  redirects, ?draw=1 carried, and the embedded copy deletes only `draw` from the address); Clients owe us = the Client
+  ledger's "Owe us" filter (?view=owe; /trust/clients redirects); Find a payment off the menu (/trust/find still opens);
+  Trust ledger linked from the top of Trust settings; the old History tab (CheckPayments) is /trust/check, off the menu,
+  linked from the Client ledger's foot.
+- **One search**: the top bar finds payments for finance holders (`paymentQuery`/`paymentPath` in globalSearch.ts,
+  find_payments): an amount, a case number or words off the proof of payment; opens the account (reverse is there) or
+  suspense. The Client ledger's own box and Payments in's History tab are gone. check-search-payments.
+- **Pages**: overview -- Needs attention full width under the shares, the owner-by-owner list folded (`owners-fold`);
+  Payover runs -- no figure cards (they are the Overview's); To sort -- four tiles (Suspense, Statement lines,
+  Overpayments, Anything else), each its count and total from the same data its list reads, opened by a press or by a
+  link naming it (#suspense, #lines, #overpayments, #other).
+- **Also fixed**: the dashboard photograph's credit sat at the TOP edge, half under the bar (`.collections-hero > *`
+  made it relative); `!absolute` puts it back in the bottom-right corner (e2e company-dashboard measures it).
+- Checks and e2e moved to the new places (workspace-split, payments-out, check-payments, payover-sends, find-payment,
+  trust-big-lists, trust-sort-statement, trust-unaccounted, and the source checks). Fast suite 23 892 green.
+
 ### S21 -- THE TRUST AREA, SIMPLIFIED (9 Nov; Stephan's walk-through of a ChatGPT layout he liked; no migration)
 - **Overview**: four figures (In the trust account, Accounted for, Not accounted for -> its list, **Ready for payover**
   = clients' money in closed cycles -> Payover runs); **What the account is made of** (bar + Client funds / Bredell
