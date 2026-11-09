@@ -94,12 +94,14 @@ ok('the server re-exports the screen\'s functions', /export \{ SIGNATURE_CID, co
 check('...so the two are ONE function, not two copies', served.signatureHtml, signatureHtml)
 check('...and one composeBody', served.composeBody, composeBody)
 ok('the send still calls them', /composeBody\(message\.bodyHtml, signatureHtml\(signatureText, image, imageSrc\), emailStyle\)/.test(read('../../api/_lib/email/sendAsUser.ts')))
-ok('the preview draws with the same three', /signatureHtml\(user\?\.emailSignature/.test(compose)
-  && /composeBody\(lead, signature, style\)/.test(compose) && /emailBodyStyle\(firm\)/.test(compose))
-ok('...in the box under the message', /<SignaturePreview user=\{currentUser\} firm=\{firm\} body=\{body\}/.test(compose))
+ok('the signature is drawn with the same three', /signatureHtml\(user\?\.emailSignature/.test(compose)
+  && /composeBody\('', signature, style\)/.test(compose) && /emailBodyStyle\(firm\)/.test(compose))
+/* Stephan, 9 Nov: "just make it part of the email. It's not necessary to have like a separate box for that." */
+ok('...INSIDE the message box, under the text', compose.indexOf('data-testid="message-box"') > 0
+  && compose.indexOf('<SignatureInline user={currentUser} firm={firm} />') > compose.indexOf('data-testid="message-box"'))
+ok('...with no label and no preview panel of its own', !/How the email ends/.test(compose) && !/SignaturePreview/.test(compose))
 ok('...sandboxed, so stored HTML never runs', /sandbox="allow-same-origin"/.test(compose) && !/allow-scripts/.test(compose))
-ok('...and says so when there is no signature', /No signature goes under this email/.test(compose))
-ok('...and where it goes on a forward', /Your signature goes under the original message/.test(compose))
+ok('...and under the original on a forward', /\{quotedHtml && <SignatureInline user=\{currentUser\} firm=\{firm\} afterOriginal \/>\}/.test(compose))
 /* The gap the send puts between the message and the signature is the preview's gap: composeBody's own. */
 check('composeBody leaves two breaks before the signature', composeBody('Body', 'Sig'), 'Body<br><br>Sig')
 

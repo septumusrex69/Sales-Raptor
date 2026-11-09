@@ -108,13 +108,16 @@ try {
   await modal.locator('input:not([role]):not([type=file])').first().fill('Statement attached')
   await modal.locator('textarea').first().fill('Good morning.\n\nPlease find the statement attached.')
   await page.waitForTimeout(400)
-  const frame = modal.locator('iframe[title="Your signature as it goes out"]')
-  t.check('the signature is drawn under the box', await frame.count(), 1)
+  /* PART OF THE EMAIL (Stephan, 9 Nov: "just make it part of the email ... not necessary to have like a separate
+     box"): inside the message box, under the text, with no label of its own. */
+  const frame = modal.locator('[data-testid="message-box"] iframe[title="Your signature"]')
+  t.check('the signature is drawn inside the message box', await frame.count(), 1)
   t.check('...in a frame that cannot run scripts', await frame.getAttribute('sandbox'), 'allow-same-origin')
   const inside = await frame.evaluate((f) => f.contentDocument?.body?.innerText ?? '')
   t.ok('...with the signature in it', inside.includes('Bredell Ferreira Attorneys'))
-  t.ok('...under the last paragraph typed', inside.indexOf('Please find the statement attached.') > -1
-    && inside.indexOf('Please find the statement attached.') < inside.indexOf('Test Leader'))
+  t.check('...and no preview panel or label beside it', await modal.getByText('How the email ends').count(), 0)
+  const order = await modal.locator('[data-testid="message-box"]').evaluate((box) => [...box.children].map((c) => c.tagName).join(','))
+  t.check('...under what is typed', order, 'TEXTAREA,IFRAME')
   const face = await frame.evaluate((f) => f.contentDocument?.body?.firstElementChild?.getAttribute('style') ?? '')
   t.ok('...in the firm\'s face, as the send wraps it', /font-family:/.test(face))
   await t.shot(page, '10-cc-and-signature')
