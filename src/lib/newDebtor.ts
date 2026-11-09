@@ -182,12 +182,13 @@ export function suggestReference(existing: string[], clientCode?: string | null)
      * came up blank on exactly the clients where somebody is least likely to know the convention.
      * Clients have a code now, which is what every later reference will be built on anyway.
      *
-     * FIVE DIGITS FROM 00001, matching the shape already in the book — ACF10085, APM20097 — and
-     * starting at one rather than at ten thousand, because a first account numbered 10001 reads
-     * as ten thousand accounts that were never there.
+     * FOUR DIGITS FROM 0001 (Stephan, 9 Nov, choosing: "DRC ... 0001, 0002 ... build it up from there"),
+     * starting at one rather than at a thousand, because a first account numbered 1001 reads as a thousand
+     * accounts that were never there. A series already on the book keeps its own width (ACF10085 goes on to
+     * ACF10086) -- the database's next_case_number follows the same rule and has the last word.
      */
     const code = (clientCode ?? '').trim().toUpperCase()
-    return code ? `${code}00001` : null
+    return code ? `${code}0001` : null
   }
 
   // The commonest prefix, not the first: a client with a stray legacy reference should not have

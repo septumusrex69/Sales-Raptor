@@ -70,7 +70,10 @@ type LoginAccount = { id: string; case_number: string; debtor_first_name: string
 async function accountsFor(admin: SupabaseClient, login: DebtorLogin): Promise<LoginAccount[]> {
   const cols = 'id, case_number, debtor_first_name, assigned_to, ended_as'
   if (login.kind === 'case') {
-    const { data } = await admin.from('debtor_accounts').select(cols).eq('case_number', login.value).limit(1)
+    /* The number on the account, or the RAP- number it carried before 9 Nov (S21) -- a debtor holding an old notice
+       is still let in. The value is letters, digits and one dash by normaliseCaseNumber, so it is safe in the filter. */
+    const { data } = await admin.from('debtor_accounts').select(cols)
+      .or(`case_number.eq.${login.value},legacy_case_number.eq.${login.value}`).limit(1)
     return (data ?? []) as LoginAccount[]
   }
   if (login.kind === 'id') {

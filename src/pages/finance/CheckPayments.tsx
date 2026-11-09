@@ -176,7 +176,7 @@ export function CheckPayments() {
             <label className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} data-testid="history-search"
-                aria-label="Search payments" placeholder="Account, RAP-, debtor, bank reference or amount"
+                aria-label="Search payments" placeholder="Account, case number, debtor, bank reference or amount"
                 className="w-72 max-w-full rounded-lg border border-slate-200 bg-white py-1 pl-7 pr-7 text-[12.5px] text-slate-700" />
               {searching && (
                 <button type="button" onClick={() => setQuery('')} aria-label="Clear the search"

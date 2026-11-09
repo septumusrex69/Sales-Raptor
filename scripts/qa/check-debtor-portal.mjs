@@ -28,6 +28,9 @@ const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8')
 for (const typed of ['RAP-125318', 'rap-125318', 'RAP 125318', 'RAP125318', ' 125318 ', 'rap.125318']) check(`"${typed}" is RAP-125318`, normaliseCaseNumber(typed), 'RAP-125318')
 check('words are not a case number', normaliseCaseNumber('my account'), null)
 check('a client reference is not a case number', normaliseCaseNumber('ALIANNAPH/30182'), null)
+/* S21 · Raptor H19: the case number is the client-code reference, typed any way. */
+for (const typed of ['DRC0001', 'drc 0001', 'DRC-0001', ' acf10085 ']) check(`"${typed}" is a case number`, normaliseCaseNumber(typed), typed.trim().toUpperCase().replace(/[\s-]/g, ''))
+check('a bare word with a few digits is not', normaliseCaseNumber('R76'), null)
 check('nothing is not a case number', normaliseCaseNumber(''), null)
 
 /* ---------- where the code goes ---------- */

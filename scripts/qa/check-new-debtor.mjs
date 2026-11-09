@@ -52,8 +52,8 @@ const TODAY = '2026-09-10'
    * loaded?" It could not be, on the one client where it matters most -- with nothing on the book
    * there is no prefix to read. The client's code starts the series instead.
    */
-  check('a first account starts the series off the client code', suggestReference([], 'ACF'), 'ACF00001')
-  check('the code is normalised', suggestReference([], ' acf '), 'ACF00001')
+  check('a first account starts the series off the client code', suggestReference([], 'ACF'), 'ACF0001')
+  check('the code is normalised', suggestReference([], ' acf '), 'ACF0001')
   check('a client with no code still gives nothing', suggestReference([], ''), null)
   check('a client with no code at all still gives nothing', suggestReference([], null), null)
   // An existing series is the client's own convention and outranks the code, even where the two
@@ -75,7 +75,7 @@ const TODAY = '2026-09-10'
   check('a batch continues the series without repeating itself',
     nextReferences(['ACF10085'], 'ACF', 3), ['ACF10086', 'ACF10087', 'ACF10088'])
   check('...and starts one from the code where there is no series',
-    nextReferences([], 'BF', 3), ['BF00001', 'BF00002', 'BF00003'])
+    nextReferences([], 'BF', 3), ['BF0001', 'BF0002', 'BF0003'])
   check('...keeping the padding the client uses', nextReferences(['AIS0009'], 'AIS', 2),
     ['AIS0010', 'AIS0011'])
   check('...and a prefix with a slash in it', nextReferences(['GPS3/10103'], 'GPS3', 2),

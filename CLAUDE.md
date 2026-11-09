@@ -435,6 +435,18 @@ still means what it always meant (the reference the *debtor* knows); `{{case_num
 The SMSs quote ours only, and that swap was free **because the two are the same width** — a
 longer case number is a price rise on every SMS, paid by the debtor, under item 1(c).
 
+**SINCE 9 NOV THE CASE NUMBER IS THE CLIENT-CODE REFERENCE (Stephan, S21 · Raptor H19).** *"we will give a client
+code, for example ... DRC, and then it should start with the account ... 0001, 0002 ... that should be the only other
+reference that is in Raptor"*, and a Swordfish handover *"should take the client initial and the reference that has
+been given to it by us before, and then just continue from where it was."* He chose to **replace RAP- everywhere**,
+with **four digits** for a client starting fresh. `case_number` keeps its name and every place that prints it;
+what it holds is now `DRC0001` / `ACF10085`. The database numbers it (`next_case_number`, trigger
+`debtor_accounts_case_number`, locked per code): an account whose `account_number` is already ours keeps it; anything
+else takes the next in its client's series; a series keeps its width and grows a digit rather than wrapping. **The old
+RAP- number lives on in `legacy_case_number`** and is still found by the bank import, the debtor portal and mail
+matching -- notices already sent quote it; it is never reissued. A client with no code still gets a RAP- number
+rather than an account being refused. Never wider than RAP-100001, so no SMS got dearer.
+
 **ONLY THE BIG BOSS DECIDES WHAT GETS BUILT.** Stephan: *"I am the only person that can approve a suggestion for
 building Raptor"* -- and, asked what Big Boss meant, *"above admin"*. It is a tick in no role, `raptor.boss`, held by
 him; the database refuses approving, declining, reopening a declined request or asking Claude to build without it,

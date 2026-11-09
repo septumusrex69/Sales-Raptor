@@ -253,7 +253,7 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * cannot be identified by it, and a debtor reading theirs back down the phone lands the clerk
      * on several files at once. This one is unique and never reused.
      */
-    { key: 'case_number', label: 'Our case number, which a notice leads with', sample: 'RAP-100001' },
+    { key: 'case_number', label: 'Our case number, which a notice leads with', sample: 'DRC0001' },
     { key: 'reference', label: 'The reference the debtor knows', sample: 'GPS3/10103' },
     { key: 'client_name', label: 'The client whose book it is', sample: 'Gauteng Property Services' },
     /*

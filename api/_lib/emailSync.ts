@@ -618,7 +618,8 @@ async function accountFromReference(
        RAP-123829 where the column holds one of the two. */
     const variants = [...new Set([token, normaliseReference(token)])]
     const or = variants
-      .flatMap((v) => [`case_number.ilike."${v}"`, `account_number.ilike."${v}"`, `client_reference.ilike."${v}"`])
+      /* legacy_case_number: a reply quoting the RAP- number on a notice sent before 9 Nov (S21). */
+      .flatMap((v) => [`case_number.ilike."${v}"`, `legacy_case_number.ilike."${v}"`, `account_number.ilike."${v}"`, `client_reference.ilike."${v}"`])
       .join(',')
     const { data, error } = await admin.from('debtor_accounts').select('id').or(or).limit(2)
     if (error) {

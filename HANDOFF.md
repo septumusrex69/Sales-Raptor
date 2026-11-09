@@ -71,6 +71,30 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- THE CASE NUMBER IS THE CLIENT-CODE REFERENCE (9 Nov; staging migration `h19_case_number_is_the_client_reference`, mirrored, md5 verified)
+Stephan: one Raptor reference, the client code + a running number (DRC0001), and a Swordfish handover continues the
+reference we gave before. Asked, he chose **replace RAP- everywhere** and **four digits** for a fresh client.
+- `case_number` now holds it (CLAUDE.md, "THREE numbers", has the rule). `next_case_number(company, wanted)` (definer,
+  advisory lock per code, not callable from the API) and BEFORE INSERT trigger `debtor_accounts_case_number`; the
+  RAP- default is dropped (the sequence still serves a client with no code). Code = the client's, else its parent's.
+- Staging book renumbered (214): 74 kept their own number (ALP00001, DAL00017, BOP..., STC0001-0010); 140 STC accounts
+  whose account_number reads STC-H0001.. became STC0011..STC0150 in that order. Every old number is in
+  `legacy_case_number` (unique, never reissued).
+- Still found by the old number: `import_bank_lines` (edited in place: RAP- -> case or legacy; anything else -> case
+  number first, account number only when no case number has it), the portal login (`normaliseCaseNumber` reads
+  DRC0001 typed any way, a slash is still a client's reference; api looks in both columns), mail matching (emailSync).
+- The import's preview of the next number reads the client's CASE numbers (`fetchAccountReferences`), so it predicts
+  what the database assigns; `suggestReference` starts a fresh series at 0001.
+- **Not done:** global search does not find an account by its OLD RAP- number (the search index is an expression over
+  case_number etc.; adding legacy_case_number means rebuilding it). **Production: not applied** -- run the migration
+  there only with Stephan, after the backup: it renumbers every live account, and any debtor told a RAP- number keeps
+  being matched by legacy_case_number. Check first how many production accounts have an account_number that is NOT
+  in their client's series (those get new numbers) and whether two clients' series collide.
+- Checks: check-case-number (+17, three breaks seen failing by name), check-debtor-portal (+5), check-new-debtor and
+  the SMS-width rule moved ("never wider"). Fast suite 23 847 green; e2e debtor-portal 46, accounts 164, payments-in 40,
+  check-payments 29, bank-line-allocation 12, find-payment 9, account-sms 8.
+- Mail folders, asked in passing: Raptor's own (S19 note) -- nothing is created or moved on the mail server.
+
 ### S21 -- A REQUEST CAN CARRY AN EXCEL OR WORD FILE (9 Nov; staging migration `h19_request_files_office_documents`, mirrored)
 Stephan: "when you make a suggestion [you can] upload a file as well, like an Excel file or a Word document". The light
 bulb takes .xlsx .xls .csv .docx .doc .pptx .txt beside pictures and PDFs, 5 MB each, five a request. The type is

@@ -23,15 +23,25 @@ export const DEBTOR_CODE_MINUTES = 10
 export const DEBTOR_SESSION_DAYS = 7
 
 /**
- * READ A CASE NUMBER THE WAY A DEBTOR TYPES IT. "RAP-125318", "rap 125318", "RAP125318" and "125318" are the same
- * case: the prefix is the same on every account and a debtor copying it off an SMS drops or mangles it. Anything
- * that is not digits after an optional RAP is not a case number. Null rather than a guess.
+ * READ A CASE NUMBER THE WAY A DEBTOR TYPES IT.
+ *
+ * SINCE 9 NOV (S21 · Raptor H19) THE CASE NUMBER IS THE CLIENT-CODE REFERENCE -- DRC0001, ACF10085 (Stephan: "that
+ * should be the only other reference ... living in Raptor"). "drc 0001", "DRC-0001" and "DRC0001" are one case: the
+ * spaces and dashes a debtor copies off an SMS are taken out, and what is left must be a code (a letter, then letters
+ * or digits) ending in digits.
+ *
+ * AN OLD RAP- NUMBER STILL WORKS: notices already sent quote it, so "RAP-125318", "rap 125318" and a bare "125318"
+ * come back as RAP-125318, which the portal looks up in legacy_case_number. Null rather than a guess.
  */
 export function normaliseCaseNumber(typed: unknown): string | null {
   if (typeof typed !== 'string') return null
   const s = typed.trim().toUpperCase().replace(/[\s ._/-]+/g, '')
-  const m = /^(?:RAP)?(\d{4,9})$/.exec(s)
-  return m ? `RAP-${m[1]}` : null
+  const old = /^(?:RAP)?(\d{4,9})$/.exec(s)
+  if (old) return `RAP-${old[1]}`
+  /* A SLASH IS A CLIENT'S REFERENCE (ALIANNAPH/30182), never ours: Raptor's numbers are a code and digits, so a
+     typed slash keeps the old answer -- not a case number -- rather than being read through. */
+  if (/\//.test(typed)) return null
+  return /^[A-Z][A-Z0-9]{0,11}\d{3,}$/.test(s) && s.length <= 16 ? s : null
 }
 
 export interface ContactRow { kind: string; value: string; is_primary: boolean | null; retired_at: string | null }
@@ -292,7 +302,7 @@ export function debtorLogin(typed: unknown): DebtorLogin | null {
   return c ? { kind: 'case', value: c } : null
 }
 
-export const DEBTOR_LOGIN_HINT = 'Type your case number (for example RAP-123456), your ID number or your email address.'
+export const DEBTOR_LOGIN_HINT = 'Type your case number (for example DRC0001), your ID number or your email address.'
 
 /* ---------------------------------------------------------------- where the account stands */
 

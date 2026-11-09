@@ -144,8 +144,10 @@ ok('...and no longer claims the creditor\'s number is ours',
  * the debtor, and nothing on any screen would have said so.
  */
 const samples = sampleValues()
-check('the case number sample is the width of the reference it replaced',
-  samples.case_number.length, samples.reference.length)
+/* S21 · Raptor H19: the case number is the client-code reference now (DRC0001, 7 characters) -- SHORTER than
+   RAP-100001, so the rule is "never wider", which is the half that costs the debtor money. */
+ok(`the case number sample is no wider than the reference it replaced (${samples.case_number.length} <= ${samples.reference.length})`,
+  samples.case_number.length <= samples.reference.length)
 
 /*
  * MEASURED MERGED, which is what the network bills for -- the braces never reach a handset. The
@@ -203,6 +205,41 @@ ok('the email composer is told through the account context it already takes',
   /audience=\{letterContext\.audience\}/.test(readFileSync('src/components/ComposeEmailModal.tsx', 'utf8')))
 
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------- S21 · Raptor H19: the client-code reference */
+
+/*
+ * STEPHAN, 9 Nov: the client's code and then 0001, 0002 -- "the only other reference ... living in Raptor" -- and a
+ * Swordfish handover "should take the client initial and the reference that has been given to it by us before, and
+ * then just continue from where it was". He chose: replace RAP- everywhere; four digits for a fresh client.
+ */
+const lastFn = (name) => {
+  const i = schema.lastIndexOf(`create or replace function public.${name}(`)
+  return i < 0 ? '' : schema.slice(i, schema.indexOf('end $$;', i) > 0 ? schema.indexOf('end $$;', i) : i + 4000)
+}
+const nextFn = lastFn('next_case_number')
+ok('the database hands out the number, per client', nextFn.length > 0 && /public\.account_reference_code\(p_company\)/.test(nextFn))
+ok('...locked per code, so two handovers cannot take one number', /pg_advisory_xact_lock\(hashtext\('raptor\.case_number\.' \|\| v_code\)\)/.test(nextFn))
+ok('...taking the number the handover gave when it is in the series and free', /if v_wanted ~ \('\^' \|\| v_code \|\| '\[0-9\]\+\$'\)/.test(nextFn))
+ok('...four digits for a client with no series yet', /v_width := coalesce\(v_width, 4\)/.test(nextFn))
+ok('...a series grows a digit rather than being cut', /lpad\(v_max::text, greatest\(v_width, length\(v_max::text\)\), '0'\)/.test(nextFn))
+ok('...never a number an account once had', /upper\(x\.legacy_case_number\) = v_try/.test(nextFn))
+ok('...and a client with no code still gets one', /return 'RAP-' \|\| nextval\('public\.debtor_account_case_seq'\)/.test(nextFn))
+ok('every new account is numbered by it', /create trigger debtor_accounts_case_number\s+before insert on public\.debtor_accounts/.test(schema)
+  && /new\.case_number := public\.next_case_number\(new\.company_id, new\.account_number\)/.test(lastFn('assign_case_number')))
+ok('...and RAP- is no longer the default', /alter table public\.debtor_accounts alter column case_number drop default;/.test(schema))
+ok('the old RAP- number is kept', /set legacy_case_number = case_number\s+where case_number ~ '\^RAP-\[0-9\]\+\$'/.test(schema))
+const bank = lastFn('import_bank_lines')
+ok('the bank import finds an old RAP- number by the number it replaced', /upper\(a\.case_number\) = v_ref or upper\(a\.legacy_case_number\) = v_ref/.test(bank))
+ok('...tries the case number before the account number', bank.indexOf('where upper(a.case_number) = v_ref;') > 0
+  && bank.indexOf('where upper(a.case_number) = v_ref;') < bank.indexOf('where upper(a.account_number) = v_ref;'))
+ok('...and the account number only when no case number has it', /if v_ids is null then\s+select array_agg\(a\.id\) into v_ids\s+from public\.debtor_accounts a\s+where upper\(a\.account_number\) = v_ref;/.test(bank))
+const portalApi = readFileSync('api/_lib/debtorPortal.ts', 'utf8')
+ok('the portal lets in a debtor holding an old notice', /case_number\.eq\.\$\{login\.value\},legacy_case_number\.eq\.\$\{login\.value\}/.test(portalApi))
+ok('a reply quoting an old number still finds its account', /legacy_case_number\.ilike/.test(readFileSync('api/_lib/emailSync.ts', 'utf8')))
+ok('the import previews the next number off the case numbers, not the account numbers',
+  /supabase\.from\('debtor_accounts'\)\.select\('case_number'\)/.test(book) && /!\/\^RAP-\/i\.test\(r\)/.test(book))
+check('a sample notice quotes a client-code number', samples.case_number, 'DRC0001')
 
 for (const f of failures) console.error(`  ✗ ${f}`)
 console.log(`check-case-number: ${pass} passed, ${failures.length} failed`)

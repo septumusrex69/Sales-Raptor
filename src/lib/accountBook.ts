@@ -1095,13 +1095,21 @@ export async function createDebtorAccount(
  * that had the tail of their own series invisible -- and `suggestReference` would then propose a
  * number already in use, on the field CLAUDE.md calls the creditor's own reference.
  */
+/*
+ * THE CLIENT'S SERIES IS ITS CASE NUMBERS (S21 · Raptor H19). Since 9 Nov the case number IS the client-code reference
+ * (Stephan: "it should take the client initial and the reference that has been given to it by us before, and then just
+ * continue from where it was"), so the next number is read off those -- not off account_number, which can hold the
+ * creditor's own number or an odd shape (STC-H0004) and would start a second series beside ours. An old RAP- number is
+ * left out: it is no series. What this suggests is a preview; the database's next_case_number assigns the number, and
+ * takes this one when it is in the series and free.
+ */
 export async function fetchAccountReferences(companyId: string): Promise<string[]> {
-  const data = await fetchAllRows<{ account_number: string | null }>(
-    () => supabase.from('debtor_accounts').select('account_number')
+  const data = await fetchAllRows<{ case_number: string | null }>(
+    () => supabase.from('debtor_accounts').select('case_number')
       .eq('company_id', companyId).order('id'),
-    { table: 'account numbers' },
+    { table: 'case numbers' },
   )
-  return data.map((r) => r.account_number).filter((r): r is string => !!r)
+  return data.map((r) => r.case_number).filter((r): r is string => !!r && !/^RAP-/i.test(r))
 }
 
 /**
