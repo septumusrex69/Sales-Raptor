@@ -13,7 +13,7 @@
 import {
   PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
-import { COLLEAGUE, COMPANY, PROFILE, TEAM, USER_ID } from './fixtures.mjs'
+import { COLLEAGUE, COMPANY, MAIL, PROFILE, TEAM, USER_ID } from './fixtures.mjs'
 
 const t = makeRunner('compose-cc-signature')
 
@@ -31,7 +31,11 @@ const handlers = [
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
   [(u) => /rpc\/mail_recipient_history/.test(u), () => ({ body: [] })],
-  [(u) => u.includes('/rest/v1/user_emails'), () => ({ body: [], headers: { 'content-range': '*/0' } })],
+  [(u) => u.includes('/rest/v1/user_emails'), (u, req) => {
+    if (req.method() === 'PATCH') return { body: [] }
+    const rows = MAIL.filter((m) => !m.is_junk && !m.is_sent)
+    return { body: rows, headers: { 'content-range': `0-${rows.length - 1}/${rows.length}` } }
+  }],
 ]
 
 const server = await startServer()
@@ -127,6 +131,33 @@ try {
   await page.waitForTimeout(1200)
   t.check('fixed, it posts', posts.length, 1)
   t.check('...with both people on the Cc, once each', posts[0]?.cc, 'attorney@example.co.za, thandi@raptor.test')
+
+  /* ---------- 1b. Stephan, 9 Nov, on staging: "I try to add Nicholas and Camille to the same email, it keeps
+     removing one." A REPLY ALL opens with Camille already on the Cc line; tapping into the box and adding a colleague
+     must ADD them. It replaced her: the pre-filled address, with no comma after it, became the text being typed the
+     moment the box took focus, and the pick was written over it. ---------- */
+  await page.route('**/api/email/attachment*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ body: 'Hello' }) }))
+  await page.getByText('Debt collection enquiry').first().click()
+  await page.waitForTimeout(800)
+  await page.getByRole('button', { name: 'Reply all' }).first().click()
+  await page.waitForTimeout(600)
+  const skipMatch = page.getByRole('button', { name: /reply without matching it/i })
+  if (await skipMatch.count()) await skipMatch.click()
+  const replyModal = page.locator('[data-modal-open]')
+  const replyChips = replyModal.locator('[data-testid="recipient-chip"]')
+  await replyChips.first().waitFor({ timeout: 8000 }).catch(() => {})
+  t.ok('a reply all opens with Camille on the Cc line', (await replyChips.allInnerTexts()).join(' ').includes('camille@bredellferreira.co.za'))
+  const replyCc = replyModal.locator('input[role="combobox"]').nth(1)
+  await replyCc.click()
+  t.ok('...and tapping into the box leaves her a chip', (await replyChips.allInnerTexts()).join(' ').includes('camille@bredellferreira.co.za'))
+  await replyCc.fill('than')
+  const replyOptions = replyModal.locator('ul[role="listbox"] li[role="option"]')
+  await replyOptions.first().waitFor({ timeout: 5000 }).catch(() => {})
+  if (await replyOptions.count()) await replyOptions.first().locator('button').first().click()
+  const both = (await replyChips.allInnerTexts()).join(' ')
+  t.ok(`adding a colleague keeps Camille (${both.replace(/\s+/g, ' ')})`, both.includes('camille@bredellferreira.co.za') && both.includes('thandi@raptor.test'))
+  await replyModal.getByRole('button', { name: 'Close' }).first().click().catch(() => {})
+  await page.waitForTimeout(300)
 
   /* ---------- 2. the keyboard ---------- */
 

@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { inputClass } from './ui/Modal'
 import { supabase } from '../lib/supabase'
 import {
-  joinRecipientLine, looksLikeAddress, splitRecipientLine, suggestRecipients, type Suggestion,
+  isRecipient, joinRecipientLine, looksLikeAddress, splitRecipientLine, suggestRecipients, type Suggestion,
 } from '../lib/recipientSuggest.ts'
 
 /**
@@ -65,7 +65,7 @@ export function RecipientField({ value, onChange, contextual, colleagues, taken,
   const line = useMemo(() => {
     if (!multiple) return { chosen: [] as string[], draft: value }
     const { chosen, draft } = splitRecipientLine(value)
-    if (!focused && looksLikeAddress(draft)) return { chosen: [...chosen, draft.trim()], draft: '' }
+    if (!focused && isRecipient(draft)) return { chosen: [...chosen, draft.trim()], draft: '' }
     return { chosen, draft }
   }, [multiple, value, focused])
   const query = line.draft
@@ -171,10 +171,17 @@ export function RecipientField({ value, onChange, contextual, colleagues, taken,
     })
   }
 
+  /* Everybody already finished on the line -- a pre-filled "Name <address>" left last with no comma after it included
+     -- so nothing anybody chose is ever written over. */
+  const finished = (): string[] => {
+    const { chosen, draft } = splitRecipientLine(value)
+    return isRecipient(draft) ? [...chosen, draft.trim()] : chosen
+  }
+
   function take(s: Suggestion) {
     if (multiple) {
-      /* Added to the line, and the cursor stays for the next person. */
-      onChange(joinRecipientLine([...line.chosen, s.address]))
+      /* ADDED to the line, and the cursor stays for the next person. */
+      onChange(joinRecipientLine([...finished(), s.address]))
       input.current?.focus()
     } else {
       onChange(s.address)
@@ -185,8 +192,10 @@ export function RecipientField({ value, onChange, contextual, colleagues, taken,
   /* A finished address in the box becomes a chip: on a comma, a semicolon, Enter with nothing highlighted, or
      leaving the box. Anything that is not yet an address stays where it is, to be finished or corrected. */
   function commitDraft(): boolean {
-    if (!multiple || !looksLikeAddress(line.draft)) return false
-    onChange(joinRecipientLine([...line.chosen, line.draft.trim()]))
+    if (!multiple) return false
+    const { chosen, draft } = splitRecipientLine(value)
+    if (!isRecipient(draft)) return false
+    onChange(joinRecipientLine([...chosen, draft.trim()]))
     return true
   }
 
@@ -198,7 +207,7 @@ export function RecipientField({ value, onChange, contextual, colleagues, taken,
   function typed(next: string) {
     if (multiple) {
       const m = /^(.*?)[,;]\s*$/.exec(next)
-      if (m && looksLikeAddress(m[1])) { onChange(joinRecipientLine([...line.chosen, m[1].trim()])); return }
+      if (m && isRecipient(m[1])) { onChange(joinRecipientLine([...line.chosen, m[1].trim()])); return }
       onChange(joinRecipientLine(line.chosen, next))
     } else {
       onChange(next)
@@ -217,7 +226,12 @@ export function RecipientField({ value, onChange, contextual, colleagues, taken,
       className={multiple ? 'min-w-[10rem] flex-1 bg-transparent py-0.5 text-sm outline-none' : inputClass}
       value={query}
       onChange={(e) => typed(e.target.value)}
-      onFocus={() => { setFocused(true); if (!looksLikeAddress(query)) setOpen(true) }}
+      onFocus={() => {
+        /* A finished person waiting last on the line (a reply-all's pre-fill) becomes a chip before anything is typed. */
+        if (multiple) commitDraft()
+        setFocused(true)
+        if (!looksLikeAddress(query)) setOpen(true)
+      }}
       onBlur={() => { setFocused(false); commitDraft() }}
       onKeyDown={(e) => {
         if (multiple && e.key === 'Backspace' && query === '' && line.chosen.length > 0) {
