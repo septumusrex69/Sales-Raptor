@@ -51,13 +51,19 @@
   rolled-back block -- it runs to the end. `leave_round_two` is now **copied verbatim** into schema.sql where its note
   was (md5 9b2684d5c3224a335dce0120f1ec1eec verified), so `check-clear-staging` sees the key: it failed on the old
   body naming exactly this table, passes on the new one (15/15), and names leave_applications in its list.
-- **Test-phase client Bonnitta Pharmacy (BNP), on staging 10 Nov** (Stephan sent the sheet): 16 accounts BNP0001-0016,
-  R6 581.02, handed over 3 Apr 2026, **25% commission, 24% interest**. Debtor names MADE UP at his say-so; the mobile
-  numbers, emails and street addresses are exactly the sheet's -- **the emails are the firm's own staff addresses,
-  so anything sent from these accounts really arrives**. Loaded like the import (same columns, same address join, two
-  lost leading zeros put back, the sheet's all-zero ID numbers left blank). **None allocated, no workflow started**:
-  allocating one starts the Handover workflow, which sends. No bank details on the client yet (needed before a
-  payover can be paid). The sheet and the load script are NOT in the repo (public; real contact details).
+- **Test-phase client Bonnitta Pharmacy (BNP) -- the ONLY book on staging since 10 Nov.** Stephan asked for a fresh
+  start: Clear staging was pressed (26 accounts, clock **10 Nov 2026**) -- so the TFA/TFB finance test book below is
+  NOT loaded now (re-run its seed to get it back; its EXPECTED.md figures assume the clock on 9 Nov). BNP0001-0016,
+  R6 581.02, handed over 3 Apr 2026, 25% commission, 24% interest. Debtor names made up; mobiles, emails and street
+  addresses exactly as his sheet -- **the emails are staff work addresses, so (a) Raptor's sends really arrive, which
+  he wants, and (b) the mail sync files staff work email onto these accounts and charges item 6 on each, which he
+  chose to keep as part of testing.** Worked history Apr-Oct written as notes + their Annexure B fees (2026 schedule:
+  emails, SMSs, calls, consultations, one bureau search), credited to Tumisang Mose / Leanette Mathebe / Samuel Ndaba;
+  R61.53-R192.06 an account, none at in duplum. Statuses (sub_status): Payment default + a broken promise (0001, 0005,
+  0011, 0013), Promise To Pay + an OPEN promise due 20 Nov-1 Dec (0002, 0006, 0010, 0014 -- each started the
+  "Promise to pay" workflow, which will send), Refuses to pay (0003, 0007, 0015), Cannot pay (0004, 0016),
+  Negotiating (0009), Tracing (0008), In progress (0012). None allocated (allocating starts the Handover workflow).
+  No bank details on the client. Nothing of the sheet is in the repo (public; real contact details).
 - **The finance & trust test book** (`raptor/`, Stephan, 9 Nov): two made-up clients (TFA 10%, TFB 20%) and ten
   debtors TFA0001-TFB0005, each built for one rule (roll to capital, 50/50, in duplum, overpayment, interest, PTC,
   reversal, unmatched, reject); `raptor/trust/statement-2026-11-09.csv` to import; `raptor/finances/EXPECTED.md`
