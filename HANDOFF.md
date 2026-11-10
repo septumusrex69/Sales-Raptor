@@ -51,6 +51,13 @@
   rolled-back block -- it runs to the end. `leave_round_two` is now **copied verbatim** into schema.sql where its note
   was (md5 9b2684d5c3224a335dce0120f1ec1eec verified), so `check-clear-staging` sees the key: it failed on the old
   body naming exactly this table, passes on the new one (15/15), and names leave_applications in its list.
+- **Test-phase client Bonnitta Pharmacy (BNP), on staging 10 Nov** (Stephan sent the sheet): 16 accounts BNP0001-0016,
+  R6 581.02, handed over 3 Apr 2026, **25% commission, 24% interest**. Debtor names MADE UP at his say-so; the mobile
+  numbers, emails and street addresses are exactly the sheet's -- **the emails are the firm's own staff addresses,
+  so anything sent from these accounts really arrives**. Loaded like the import (same columns, same address join, two
+  lost leading zeros put back, the sheet's all-zero ID numbers left blank). **None allocated, no workflow started**:
+  allocating one starts the Handover workflow, which sends. No bank details on the client yet (needed before a
+  payover can be paid). The sheet and the load script are NOT in the repo (public; real contact details).
 - **The finance & trust test book** (`raptor/`, Stephan, 9 Nov): two made-up clients (TFA 10%, TFB 20%) and ten
   debtors TFA0001-TFB0005, each built for one rule (roll to capital, 50/50, in duplum, overpayment, interest, PTC,
   reversal, unmatched, reject); `raptor/trust/statement-2026-11-09.csv` to import; `raptor/finances/EXPECTED.md`
