@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
-import { Paperclip, Plus, X } from 'lucide-react'
+import { Loader2, Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { draftKeyFor, dropDraft, findDraft, saveDraft, type MailDraft } from '../lib/mailDrafts'
 import { AttachLetter } from './letters/AttachLetter'
@@ -41,6 +41,9 @@ const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
  * JSON rather than the files, because a forwarded message's inline pictures are in it too.
  */
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024
+
+/** How long one forwarded file may take to come out of the mailbox before the forward stops waiting for it (S21). */
+const FORWARD_FETCH_MS = 45_000
 
 interface Attached { filename: string; contentType: string; size: number; content: string }
 
@@ -283,13 +286,31 @@ export function ComposeEmailModal({
    */
   const [fetchingForward, setFetchingForward] = useState((forwardAttachments?.names.length ?? 0) > 0)
   const [forwardNote, setForwardNote] = useState('')
+  /*
+   * A FORWARD NEVER WAITS SILENTLY, OR FOR EVER (S21 · Raptor H19). Stephan, 10 Nov, forwarding the Thriftgen
+   * partnership agreement to Julian: "it literally just doesn't want to send." No send ever reached the server: Send
+   * was greyed out while the PDF was fetched from his mailbox -- slow that morning, the mailbox sync itself running into
+   * the five-minute limit -- and the only word of it was a small "Fetching the attachments" beside Attach. Each file
+   * now has FORWARD_FETCH_MS to arrive and is otherwise left off with the note saying so; the Send button says what it
+   * is waiting for; and "Send without it" lets the message go at once, the files named as not attached.
+   */
+  const skipForward = useRef<() => void>(() => {})
   useEffect(() => {
     const wanted = forwardAttachments
     const token = session?.access_token
     if (!wanted || wanted.names.length === 0) return
     if (!token) { setForwardNote(leftOffNote(wanted.names)); setFetchingForward(false); return }
     let cancelled = false
-    void fetchForwardAttachments({ ...wanted, accessToken: token, maxBytes: MAX_ATTACHMENT_BYTES, fetchOne: fetchAttachment })
+    skipForward.current = () => {
+      cancelled = true
+      setForwardNote(leftOffNote(wanted.names))
+      setFetchingForward(false)
+    }
+    const fetchOne = (a: Parameters<typeof fetchAttachment>[0]) => Promise.race([
+      fetchAttachment(a),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('slow')), FORWARD_FETCH_MS)),
+    ])
+    void fetchForwardAttachments({ ...wanted, accessToken: token, maxBytes: MAX_ATTACHMENT_BYTES, fetchOne })
       .then(({ files: got, left }) => {
         if (cancelled) return
         setFiles((list) => [...list, ...got])
@@ -778,7 +799,12 @@ export function ComposeEmailModal({
               onAttached={addAttachment} />
           )}
           {fetchingForward && (
-            <span className="text-xs text-slate-500">Fetching the attachments{'\u2026'}</span>
+            <span className="inline-flex flex-wrap items-center gap-2 text-xs text-slate-600" data-testid="forward-fetching">
+              <Loader2 size={12} className="animate-spin" />
+              Fetching {forwardAttachments?.names.join(', ') || 'the attachments'} from your mailbox{'\u2026'}
+              <button type="button" onClick={() => skipForward.current()} data-testid="forward-skip"
+                className="font-medium text-sky-700 underline-offset-2 hover:underline">Send without it</button>
+            </span>
           )}
           {forwardNote && (
             <span role="status" className="basis-full text-xs text-negative-700">{forwardNote}</span>
@@ -839,7 +865,7 @@ export function ComposeEmailModal({
             Cancel
           </button>
           <button type="submit" disabled={submitting || fetchingForward || quotedLoading} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            {submitting ? 'Sending…' : 'Send'}
+            {submitting ? 'Sending…' : fetchingForward ? 'Fetching the attachment…' : quotedLoading ? 'Fetching the original…' : 'Send'}
           </button>
         </div>
       </form>

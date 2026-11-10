@@ -91,6 +91,22 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
 
+### S21 -- A FORWARD THAT WOULD NOT SEND (10 Nov; no migration)
+- Stephan forwarding "Fwd: THRIFTGEN PARTNERSHIP" (one PDF, TPPP_Questionnaire_Response.pdf, ~610 KB) to Julian: "it
+  literally just doesn't want to send." Logs: the message was opened twice (09:02, 09:04), NO /api/email/send at all;
+  the mailbox sync was hitting Vercel's 300 s limit at the same time (mail server slow). Send is disabled while a
+  forward's attachments are fetched (`fetchingForward`), the browser fetch had no limit (only the function's 300 s),
+  and the only sign was a small "Fetching the attachments" beside Attach. A browser repro with a prompt mailbox sends
+  first time -- the box was not broken, it was waiting.
+- Fixed in ComposeEmailModal: each forwarded file gets FORWARD_FETCH_MS (45 s) and is otherwise left off with the
+  note; the button reads "Fetching the attachment…" / "Fetching the original…" instead of a grey Send; "Send without
+  it" (forward-skip) lets it go at once, the files named as not attached. e2e/forward-attachment (a mailbox that never
+  answers, and one that does; fails on the old box).
+- **Not fixed, look next**: `/api/email/sync` timing out at 300 s repeatedly this morning (and ~950 sync log lines in
+  12 h). A sync that runs to the limit holds an IMAP connection for five minutes; with several open tabs that can
+  starve the attachment and body fetches on the same mailbox. Worth finding which folder walk is slow (the mailbox
+  has hundreds of INBOX.Clients.* folders).
+
 ### S21 -- OUR SHARE OF COLLECTIONS (9 Nov; staging migrations `h19_collections_share`, `h19_collections_share_vat_apart`, mirrored)
 - Stephan: "if we collect 2 million, or 3 million, how much of that is [our] share? How much of that is the client
   share? ... the profitability margin ratio." Agreed: **Business -> Income**, behind business.income (no role has it,
