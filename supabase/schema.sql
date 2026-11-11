@@ -47438,6 +47438,155 @@ begin
     insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
     values ('client', new.company_id, -new.net_payover,
             'Payover ' || new.invoice_number || ' paid to the client', new.id);
+  end if;
+  return new;
+end $$;
+
+-- "AGAINST THE BANK": THE SET-OFF NOT YET COVERED IS THE FIRM'S, WAITING -- the PTC share's treatment,
+-- in the same derived figure. Per client: PTC fees debited + charges set off (client entries) less
+-- what the firm was credited for either, less what the client paid into the business account; never
+-- below nil, and summed BEFORE the floor, because a business payment may have paid either. Every run
+-- approved before 22 Oct wrote both sides of its set-off, so its part here is nil and the figure is
+-- unchanged for history. Not drawable: firm_trust_split reads only real entries.
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(max(f.trust_opening_balance), 0) + coalesce(sum(l.amount), 0) as bal
+      from public.firm_settings f
+      left join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+  ),
+  /*
+   * THE FIRM'S SHARE NOT YET RECOVERED IS THE FIRM'S, WAITING: the PTC share (the firm, 13 Oct) and,
+   * since 22 Oct, charges set off on a run below nil. DERIVED, NOT WRITTEN: the ledger is immutable,
+   * and a credit written now would be credited again at approval.
+   */
+  ptc_pending as (
+    select coalesce(sum(greatest(owed, 0)), 0) as bal from (
+      select company_id,
+             sum(case when party = 'client' and reason like '%Paid straight to the client%' then -amount
+                      when party = 'firm' and reason like 'PTC share recovered%' then -amount
+                      when party = 'client' and reason like 'Paid to the business account against PO-%' then -amount
+                      when party = 'client' and reason like 'Charges set off against payover %' then -amount
+                      when party = 'firm' and reason like 'Charges recovered from payover %' then -amount
+                      else 0 end) as owed
+        from public.trust_creditor_entries
+       where company_id is not null
+       group by company_id) x
+  ),
+  by_party as (
+    select party, who, sum(bal) as bal from (
+    select party,
+           case party when 'client' then company_id::text
+                      when 'debtor' then coalesce(account_id::text, party)
+                      else party end as who,
+           amount as bal
+      from public.trust_creditor_entries
+    union all
+    select 'firm', 'firm', bal from ptc_pending
+    ) e group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  swordfish as (
+    select coalesce((select x.left_over from public.swordfish_holding_figures() x), 0) as bal
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal + s.bal,
+         h.owed_in,
+         (h.owed_out + u.bal + s.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal + s.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u, swordfish s
+   where public.has_capability('finance.view')
+$$;
+revoke all on function public.trust_position() from public, anon;
+grant execute on function public.trust_position() to authenticated;
+
+-- THE CASH VIEW: A RUN'S SET-OFF IS THE FIRM'S IN THAT RUN'S CYCLE, AS IT ALWAYS WAS. Its firm_other
+-- read the firm's "Charges recovered" entry, which until 22 Oct always sat on the same run as the
+-- client's "Charges set off" and matched it to the cent. The firm's credit may now land on a LATER run
+-- (when that run's collections cover it), or never (paid into the business account), so the cycles
+-- would stop totalling the bank. It reads the client's entry, negated, instead: for every run approved
+-- before 22 Oct that is the same number on the same run, so no cycle moves.
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id, x.reason,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) or x.reason like 'Paid to the business account%' as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc, e.reason,
+           (e.party = 'client' and coalesce(e.reason, '') like '%Paid straight to the client%') as ptc_fee,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           coalesce(public.firm_run_settled(r.id), false) as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0)
+        + coalesce(sum(amount) filter (where ptc_fee and not run_paid), 0) as clients_open,
+      coalesce(-sum(amount) filter (where ptc_fee and not run_paid), 0) as ptc_waiting,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt
+                                    and coalesce(reason, '') not like 'PTC share recovered%'
+                                    and coalesce(reason, '') not like 'Charges recovered from payover %'), 0)
+        + coalesce(-sum(amount) filter (where party = 'client'
+                                         and coalesce(reason, '') like 'Charges set off against payover %'), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         public.raptor_today() <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back + a.ptc_waiting, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.ptc_waiting + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned + a.ptc_waiting, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;
+revoke all on function public.trust_cash_by_cycle() from public, anon;
+grant execute on function public.trust_cash_by_cycle() to authenticated;
+
 -- ============================================================================================
 -- S10 / CALL CAMPAIGNS, ROUND TWO (22 Oct): the call follows the desk, a RECOVERY campaign on
 -- closed accounts, results for everybody.
