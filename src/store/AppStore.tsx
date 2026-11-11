@@ -584,6 +584,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         createdAt: nowIso(),
         name: lead.companyName,
         industry: lead.industry,
+        preferredLanguage: lead.preferredLanguage,
         province: lead.province,
         city: lead.city,
       }
@@ -1225,6 +1226,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       const { companyId, newCompany } = ensureLeadCompany(lead)
 
+      // A client that already existed keeps a language it already has; one it lacks comes from the lead.
+      const existingClient = newCompany ? undefined : companies.find((c) => c.id === companyId)
+      if (existingClient && !existingClient.preferredLanguage && lead.preferredLanguage) {
+        setCompanies((prev) => prev.map((c) => (c.id === companyId ? { ...c, preferredLanguage: lead.preferredLanguage } : c)))
+        updateRow('companies', companyId, { preferredLanguage: lead.preferredLanguage }, 'convertLeadToClient:language')
+      }
+
       let contactId: ID | undefined
       let newContact: Contact | undefined
       const existingContact = contacts.find((c) => c.companyId === companyId && c.firstName === lead.firstName && c.lastName === lead.lastName)
@@ -1456,7 +1464,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       return { companyId, deal: firstDeal }
     },
-    [leads, deals, contacts, ensureLeadCompany, updateLead, addActivity, showError, celebrate],
+    [leads, deals, contacts, companies, ensureLeadCompany, updateLead, addActivity, showError, celebrate],
   )
 
   const rejectLead = useCallback<AppActions['rejectLead']>(

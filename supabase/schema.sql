@@ -230,6 +230,19 @@ create table if not exists public.leads (
 -- above is a no-op in that case, so this catches it separately).
 alter table public.leads add column if not exists service_values jsonb;
 
+-- The commission quoted on a debt collection lead: one flat rate as a fraction (0.275), or one of
+-- the two sliding scales ('SS25', 'SS30', bands in src/lib/commissionPlans.ts). One or the other,
+-- never both. Same fraction convention as companies.commission_rate.
+alter table public.leads
+  add column if not exists commission_rate numeric,
+  add column if not exists commission_scale text check (commission_scale in ('SS25', 'SS30'));
+
+-- The language a lead, and the client they become, would rather be spoken to in. Text rather than
+-- a check: the list (src/lib/languages.ts) is South Africa's twelve official languages plus Other,
+-- and a value imported as written should still save.
+alter table public.leads add column if not exists preferred_language text;
+alter table public.companies add column if not exists preferred_language text;
+
 -- Contact persons captured against a lead, before there's a company to hang them off — at a
 -- prospect you're usually dealing with more than one person (whoever enquired, plus whoever
 -- actually signs). Declared here rather than in the contacts table above, which is created

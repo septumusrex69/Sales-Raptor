@@ -9,6 +9,21 @@
 export type CsvRow = Record<string, string>
 
 export function parseCsv(text: string): CsvRow[] {
+  const rows = parseCsvRows(text)
+  if (rows.length === 0) return []
+  const header = rows[0].map((h) => h.trim())
+  return rows.slice(1)
+    .filter((r) => r.length > 1 || (r[0] ?? '').trim() !== '')
+    .map((r) => Object.fromEntries(header.map((h, n) => [h, r[n] ?? ''])))
+}
+
+/**
+ * The same file as rows of cells, header included and nothing keyed.
+ *
+ * For sheets kept by hand, which do things an export never would — the leads list has two
+ * columns both called "Status", and keying by header silently keeps only the second.
+ */
+export function parseCsvRows(text: string): string[][] {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
   const rows: string[][] = []
   let row: string[] = []
@@ -32,11 +47,7 @@ export function parseCsv(text: string): CsvRow[] {
   }
   // A file not ending in a newline still has a last row worth keeping.
   if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row) }
-  if (rows.length === 0) return []
-  const header = rows[0].map((h) => h.trim())
-  return rows.slice(1)
-    .filter((r) => r.length > 1 || (r[0] ?? '').trim() !== '')
-    .map((r) => Object.fromEntries(header.map((h, n) => [h, r[n] ?? ''])))
+  return rows
 }
 
 /** Swordfish writes empty numerics as "", "N/A" and "-". All three mean "no figure", not zero. */

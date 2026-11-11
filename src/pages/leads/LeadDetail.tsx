@@ -29,6 +29,7 @@ import { buildDrilldownUrl } from '../../lib/drilldown'
 import { formatCurrency, formatDate, formatLeadNumber, industries, leadSources } from '../../data/mockData'
 import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
+import { commissionLabel, describeScale } from '../../lib/commissionPlans'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 import { summaryLine } from '../../lib/summaryLine'
 import { hasDealValue } from '../../lib/dealKind'
@@ -430,6 +431,10 @@ export function LeadDetail() {
                   <div key={sv.service} className="col-span-2 grid grid-cols-2 gap-x-6 gap-y-3.5">
                     <Field label="Estimated Handover Amount" value={sv.handoverAmount != null ? formatCurrency(sv.handoverAmount) : undefined} />
                     <Field label="Estimated Number of Accounts / Matters" value={sv.accountsCount != null ? String(sv.accountsCount) : undefined} />
+                    <Field
+                      label="Commission"
+                      value={commissionLabel(lead) && (lead.commissionScale ? `${commissionLabel(lead)} — ${describeScale(lead.commissionScale)}` : commissionLabel(lead))}
+                    />
                   </div>
                 ) : (
                   <Field
@@ -482,6 +487,7 @@ export function LeadDetail() {
               <Field label="Province" value={lead.province} />
               <Field label="City / Town" value={lead.city} />
               <Field label="Address" value={lead.address} />
+              <Field label="Preferred Language" value={lead.preferredLanguage} />
             </dl>
           </Card>
 
