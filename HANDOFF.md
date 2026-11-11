@@ -35,6 +35,31 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## RYNO · THE PORTAL'S HELP SECTION AND THE 50/50 FILM (Raptor · Handover 19, 11 Nov; branch `claude/ryno-portal-help` from `claude/sales-raptor-review-p1pzx2` at 27befca)
+
+Ryno: *"a section where there is like help / advisory option ... guides explaining some core functions that the
+clients could be wondering about. Like with the reporting, then we will have a fun and professional video explaining
+the 50/50 allocation split to our clients and how payments are allocated."* Portal only; no database, no money file
+touched (allocationRules.ts is READ by the check, not changed).
+
+- **Help** is the portal's sixth menu item, after Hand over (`PortalHelp.tsx`). Top to bottom: the 50/50 film, the
+  guides (searchable, by topic), and "Raise a ticket" / "Ask us to call you".
+- **The film is drawn, not recorded** (`help/SplitExplainer.tsx`): eight chapters, about 50 seconds, play/pause,
+  chapter bar, captions that say everything the picture does, nothing autoplays, reduce-motion respected. One bar --
+  the R1 000 payment -- divides through the whole story. Its figures come from `help/splitExample.ts`, which the
+  "Try your own numbers" calculator also uses.
+- **`check-portal-help` holds every example to the firm's real rules** (`checkAllocation`) -- the three shown
+  examples plus 864 awkward inputs -- and holds the guide's "10% plus VAT" to annexureB, the positions guide to
+  `clientPosition.ts` (built from it, never retyped), and the menu to having Help. Broken four ways and seen to fail.
+  `e2e/portal-help` plays the film, opens guides, follows a guide's button, uses the calculator, reaches a person.
+- **Guides (13)** are content in `help/helpGuides.ts`: around the portal, signing in, positions, the Accounts
+  columns, handing over, the 50/50 split, reading the remittance advice, progress report vs advice, paid to you
+  directly, interest/Annexure B/commission, tickets, call me, updating or stopping an account. No tariff figure is
+  written out except the receipt fee's 10% (the split cannot be told without it).
+- **Open for Ryno / Stephan:** a produced video file can go in `public/help/` with its path in `HELP_VIDEO_SRC`
+  (PortalHelp.tsx); it then plays above the drawn film. The guide wording is Ryno's first draft for the firm to read
+  -- especially "Paid to you" (set-off) and the remittance terms, which Stephan should confirm before clients see it.
+
 ## STAGING CLEARED, AND THE CLEAR STAGING BUTTON FIXED (Raptor · Handover 19, 9 Nov; branch `claude/gallant-hypatia-t8oofh` from `claude/sales-raptor-review-p1pzx2` at 60a3a2f)
 
 - **Staging was emptied at Stephan's word** ("Clear all the information, the data on staging ... the debtors ... the
