@@ -101,6 +101,12 @@ export interface Lead {
   estimatedHandoverAmount?: number
   /** Debt Collection specific — number of accounts/matters in the handover */
   estimatedAccountsCount?: number
+  /** The language they'd rather be spoken to in. One of SA_LANGUAGES (src/lib/languages.ts), or as written. */
+  preferredLanguage?: string
+  /** Debt Collection — the flat commission quoted, as a fraction (0.275). Never set alongside commissionScale. */
+  commissionRate?: number
+  /** Debt Collection — the sliding scale quoted instead of a flat rate. See src/lib/commissionPlans.ts. */
+  commissionScale?: 'SS25' | 'SS30'
   /** Per-service value breakdown when multiple services are selected. estimatedProjectValue/estimatedHandoverAmount/estimatedAccountsCount are derived sums of this, kept for backward-compat reads (LeadsList, Reports). Undefined on leads created before this existed. */
   serviceValues?: LeadServiceValue[]
   notes?: string
@@ -276,6 +282,8 @@ export interface Company {
   estimatedAtConversion?: string
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
+  /** The language the client would rather be spoken to in, carried over from their lead. */
+  preferredLanguage?: string
 }
 
 export type TaskType =

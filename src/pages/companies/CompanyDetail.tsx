@@ -547,6 +547,7 @@ export function CompanyDetail() {
               <Field label="Province" value={company.province} />
               <Field label="City" value={company.city} />
               <Field label="Address" value={company.address} />
+              <Field label="Preferred Language" value={company.preferredLanguage} />
               <Field label="Signed by (Marketing Agent)" value={company.marketingAgent} />
               <div className="flex justify-between gap-3 items-center">
                 <dt className="text-slate-400">Account Owner</dt>

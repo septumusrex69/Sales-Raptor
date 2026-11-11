@@ -2,6 +2,10 @@ import { FormField, inputClass } from '../ui/Modal'
 import { MultiSelectChips } from '../ui/MultiSelectChips'
 import { countries, leadClassifications, provinces, services } from '../../data/mockData'
 import type { Lead, LeadClassification, LeadServiceValue, ProductService } from '../../types'
+import { SA_LANGUAGES } from '../../lib/languages'
+import {
+  COMMISSION_OPTIONS, CUSTOM, choiceFromTerms, describeScale, termsFromChoice, type CommissionChoice,
+} from '../../lib/commissionPlans'
 
 /**
  * Shared field set for the new location / products-services / opportunity
@@ -22,11 +26,16 @@ export interface LeadOpportunityFormValue {
   country: string
   province: string
   city: string
+  preferredLanguage: string
   services: ProductService[]
   otherServiceDetail: string
   classification: LeadClassification | ''
   /** Each selected service gets its own value entry, keyed by service name. */
   serviceValues: Partial<Record<ProductService, LeadServiceFormValue>>
+  /** Debt Collection only: a flat rate as its fraction, 'SS25'/'SS30', 'custom' or ''. */
+  commission: CommissionChoice
+  /** The percentage typed when commission is 'custom', e.g. "28". */
+  customCommission: string
 }
 
 const emptyServiceFormValue: LeadServiceFormValue = { value: '', handoverAmount: '', accountsCount: '' }
@@ -36,10 +45,13 @@ export function emptyLeadOpportunityValue(): LeadOpportunityFormValue {
     country: 'South Africa',
     province: '',
     city: '',
+    preferredLanguage: '',
     services: [],
     otherServiceDetail: '',
     classification: '',
     serviceValues: {},
+    commission: '',
+    customCommission: '',
   }
 }
 
@@ -81,10 +93,15 @@ export function leadOpportunityValueFromLead(lead: Lead): LeadOpportunityFormVal
     country: lead.country ?? 'South Africa',
     province: lead.province ?? '',
     city: lead.city ?? '',
+    preferredLanguage: lead.preferredLanguage ?? '',
     services: lead.services ?? [],
     otherServiceDetail: lead.otherServiceDetail ?? '',
     classification: lead.classification ?? '',
     serviceValues,
+    ...(() => {
+      const { choice, custom } = choiceFromTerms(lead)
+      return { commission: choice, customCommission: custom }
+    })(),
   }
 }
 
@@ -116,6 +133,7 @@ export function leadOpportunityPatch(value: LeadOpportunityFormValue): Partial<L
     country: value.country || undefined,
     province: value.province || undefined,
     city: value.city || undefined,
+    preferredLanguage: value.preferredLanguage || undefined,
     services: value.services.length ? value.services : undefined,
     otherServiceDetail: hasOther && value.otherServiceDetail ? value.otherServiceDetail : undefined,
     classification: value.classification || undefined,
@@ -124,6 +142,10 @@ export function leadOpportunityPatch(value: LeadOpportunityFormValue): Partial<L
     estimatedProjectValue: estimatedProjectValue > 0 ? estimatedProjectValue : undefined,
     estimatedHandoverAmount: debtCollectionEntry?.handoverAmount,
     estimatedAccountsCount: debtCollectionEntry?.accountsCount,
+    // Commission only means something on a debt collection lead; dropping the service drops it.
+    ...(debtCollectionEntry
+      ? termsFromChoice(value.commission, value.customCommission)
+      : { commissionRate: undefined, commissionScale: undefined }),
   }
 }
 
@@ -189,6 +211,17 @@ export function LeadOpportunityFields({ value, onChange }: { value: LeadOpportun
         </FormField>
       </div>
 
+      <FormField label="Preferred Language">
+        <select className={inputClass} value={value.preferredLanguage} onChange={(e) => onChange({ ...value, preferredLanguage: e.target.value })}>
+          <option value="">—</option>
+          {/* A value imported as written, or typed before this list, still shows as itself. */}
+          {value.preferredLanguage && !(SA_LANGUAGES as readonly string[]).includes(value.preferredLanguage) && (
+            <option value={value.preferredLanguage}>{value.preferredLanguage}</option>
+          )}
+          {SA_LANGUAGES.map((l) => <option key={l}>{l}</option>)}
+        </select>
+      </FormField>
+
       <FormField label="Products / Services Interested In">
         <MultiSelectChips
           options={services}
@@ -225,7 +258,8 @@ export function LeadOpportunityFields({ value, onChange }: { value: LeadOpportun
             const entry = value.serviceValues[service] ?? emptyServiceFormValue
             if (service === 'Debt Collection') {
               return (
-                <div key={service} className="grid grid-cols-2 gap-3">
+                <div key={service} className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
                   <FormField label="Estimated Handover Amount (R)">
                     <input
                       type="number"
@@ -244,6 +278,36 @@ export function LeadOpportunityFields({ value, onChange }: { value: LeadOpportun
                       placeholder="e.g. 40"
                     />
                   </FormField>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="Commission">
+                    <select
+                      className={inputClass}
+                      value={value.commission}
+                      onChange={(e) => onChange({ ...value, commission: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      {COMMISSION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </FormField>
+                  {value.commission === CUSTOM && (
+                    <FormField label="Custom commission (%)">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="100"
+                        className={inputClass}
+                        value={value.customCommission}
+                        onChange={(e) => onChange({ ...value, customCommission: e.target.value })}
+                        placeholder="e.g. 28"
+                      />
+                    </FormField>
+                  )}
+                </div>
+                {(value.commission === 'SS25' || value.commission === 'SS30') && (
+                  <p className="text-[11px] text-slate-500 -mt-1">Per account: {describeScale(value.commission)}</p>
+                )}
                 </div>
               )
             }
