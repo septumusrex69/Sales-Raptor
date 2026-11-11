@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, KeyRound, LayoutDashboard, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
+import { ArrowRight, Bell, ChevronDown, ChevronsLeft, ChevronsRight, Eye, EyeOff, FileText, FolderUp, KeyRound, LayoutDashboard, LifeBuoy, List, Lock, LogOut, Mail, Phone, Search, Ticket } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { CLIENT_POSITIONS, clientFlag, CLIENT_FLAGS } from '../../lib/clientPosition'
 import { PORTAL_PASSWORD_MIN, portalPasswordProblem, type PortalTopic } from '../../lib/clientPortal'
@@ -12,6 +12,7 @@ import { PortalAsk, type AskAbout, type AskMode } from './PortalAsk'
 import { PortalDashboard } from './PortalDashboard'
 import { PortalReports } from './PortalReports'
 import { PortalHandovers } from './PortalHandovers'
+import { PortalHelp } from './PortalHelp'
 import { PortalLabel } from './portalStyle'
 import './portal.css'
 import { PortalSplash } from './PortalSplash'
@@ -226,7 +227,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (token: string, remember: boolean)
 
 /* ------------------------------------------------------------------ signed in */
 
-export type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts' | 'handover'
+export type Section = 'dashboard' | 'reports' | 'tickets' | 'accounts' | 'handover' | 'help'
 const SECTIONS: { id: Section; label: string; icon: typeof LayoutDashboard; title: string; blurb: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, title: 'Dashboard', blurb: 'How your book is doing.' },
   { id: 'reports', label: 'Reports', icon: FileText, title: 'Reports', blurb: 'Every remittance advice we have sent you.' },
@@ -234,6 +235,8 @@ const SECTIONS: { id: Section; label: string; icon: typeof LayoutDashboard; titl
   { id: 'accounts', label: 'Accounts', icon: List, title: 'Accounts', blurb: 'One line for every debtor you have handed over.' },
   /* S15, phase 2b: "go ahead with handover accounts". After Accounts, because it adds to them. */
   { id: 'handover', label: 'Hand over', icon: FolderUp, title: 'Hand over accounts', blurb: 'Send us a sheet, or one account. We check it and load it.' },
+  /* Ryno, 11 Nov (Raptor · Handover 19): "a help / advisory option". Last, because it explains the rest. */
+  { id: 'help', label: 'Help', icon: LifeBuoy, title: 'Help & guides', blurb: 'How the portal works, and where every rand of a payment goes.' },
 ]
 
 /* THE FOLD IS REMEMBERED in this browser, the way Raptor's own is -- and only as a convenience: a private
@@ -446,6 +449,9 @@ function Signed({ token, me, onSignedOut, onExpired }: { token: string; me: Port
           {section === 'tickets' && <PortalTickets token={token} onSignedOut={onExpired} refreshKey={refresh}
             onRaise={() => { setDone(null); setAsking({ about: null, mode: 'question' }) }} />}
           {section === 'handover' && <PortalHandovers token={token} onSignedOut={onExpired} />}
+          {section === 'help' && <PortalHelp onOpen={go}
+            onAsk={() => { setDone(null); setAsking({ about: null, mode: 'question' }) }}
+            onCall={() => { setDone(null); setAsking({ about: null }) }} />}
           {section === 'accounts' && (
             <Book key={lookFor} token={token} onSignedOut={onExpired} initialSearch={lookFor}
               onAsk={(about, mode) => { setDone(null); setAsking({ about, mode }) }} />
