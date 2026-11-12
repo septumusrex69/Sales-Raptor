@@ -64,6 +64,10 @@
   "Promise to pay" workflow, which will send), Refuses to pay (0003, 0007, 0015), Cannot pay (0004, 0016),
   Negotiating (0009), Tracing (0008), In progress (0012). None allocated (allocating starts the Handover workflow).
   No bank details on the client. Nothing of the sheet is in the repo (public; real contact details).
+- **Second test client Riverside Veterinary Clinic (RVC), on staging 12 Nov**, made up, for Stephan to import himself:
+  code RVC, 25% commission, 24% interest, mandate 12 Nov 2026; contact person Bongi Ndlovu with the firm's own email and
+  number (on the client AND as a linked contact). No accounts yet -- he imports the 16-row sheet Claude sent him
+  (same staff mobiles/emails as BNP, made-up names/addresses, two business debtors, R23 719.09). Not in the repo.
 - **The finance & trust test book** (`raptor/`, Stephan, 9 Nov): two made-up clients (TFA 10%, TFB 20%) and ten
   debtors TFA0001-TFB0005, each built for one rule (roll to capital, 50/50, in duplum, overpayment, interest, PTC,
   reversal, unmatched, reject); `raptor/trust/statement-2026-11-09.csv` to import; `raptor/finances/EXPECTED.md`
