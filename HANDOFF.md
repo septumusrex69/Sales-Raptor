@@ -35,6 +35,28 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## R-30 -- INTEREST MONTH BY MONTH ON THE STATEMENT (Raptor · Handover 19, 13 Nov; branch `claude/h19-r30` from `claude/sales-raptor-review-p1pzx2` at 27befca)
+
+- **Asked by Rinda (call centre), answered by Stephan in a session on 13 Nov** (his answer is on R-30 as a comment).
+  Interest still runs daily and is still worked out when it is looked at -- **no job, nothing new written, nothing
+  posted differently**; this changes only how interest is DRAWN. `accrueToDate` hands back `months` (one piece per
+  calendar month, adding to its amount to the cent); `buildStatement` draws the open period one line per month (dated
+  at the month's end, the last dated today and alone in saying "still accruing"), and draws a period POSTED at a
+  payment that runs across months month by month too (`postedMonths`: worked out again the way open_interest worked it,
+  the payment it was posted for left out, scaled to the posted figure; one line as before if it is more than R1/2% away
+  or inside one month, so every imported Swordfish row is untouched).
+- **Staff vs debtor (Stephan: "one entry line per month" for the debtor, so nobody says "you've charged me interest
+  twice"; both pieces on Raptor's own screen "for record keeping ... or for double checking").** The account page keeps
+  the payment month in two pieces; `oneInterestLinePerMonth` joins a month's pieces into one line inside
+  `statementOfAccount`, which every debtor-facing statement is drawn through (Documents button, portal download, the
+  reminder that carries it). Totals and the foot never move. Checked on Rinda's own staging account
+  (d684ee9e...): the one R126,91 line "3 April to 10 November" is now April to October plus 1-10 November; her PDF shows
+  1-13 November as one line; balance R1 060,08 either way.
+- `check-interest-monthly` (30), each part broken once and seen failing. The account page's note on a running line now
+  says it is posted when the next payment is allocated (it said "charged as part of this month", which was never how
+  Raptor posts). Known, not from this: `e2e/debtor-portal.mjs` cannot load `clientPortal.js` without the ts loader
+  (fails the same on the preview branch before this change; with `--import ./scripts/qa/tsresolve.mjs` it passes 46/0).
+
 ## STAGING CLEARED, AND THE CLEAR STAGING BUTTON FIXED (Raptor · Handover 19, 9 Nov; branch `claude/gallant-hypatia-t8oofh` from `claude/sales-raptor-review-p1pzx2` at 60a3a2f)
 
 - **Staging was emptied at Stephan's word** ("Clear all the information, the data on staging ... the debtors ... the

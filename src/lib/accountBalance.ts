@@ -27,7 +27,7 @@
  * write-off, where the account stopped and accrual stopped with it.
  */
 import { receiptFeeInclVat, settlementReceiptFee, roundToCents, type AnnexureBSchedule } from './annexureB.js'
-import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay, dayBefore } from './interestAccrual.js'
+import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay, dayBefore, type AccrualMonth } from './interestAccrual.js'
 import { feeLabel } from './feeLabel.js'
 
 export interface LedgerLines {
@@ -191,6 +191,11 @@ export interface BalanceBreakdown {
   interestAccruingDays: number
   /** First day of the open period, for the statement line. */
   interestAccruingFrom: string | null
+  /**
+   * The accruing figure month by month (R-30), adding up to `interestAccruing` to the cent. Optional so a breakdown
+   * built anywhere else (a fixture, a projection) still type-checks; absent reads as one line, as before.
+   */
+  interestAccruingMonths?: AccrualMonth[]
 }
 
 /**
@@ -372,6 +377,32 @@ function computedReceiptFees(
   return out
 }
 
+/**
+ * EVERY MOVEMENT THAT IS NOT INTEREST, DATED: fees as debits, each payment (net of the receipt fee it attracts) as a
+ * credit, money paid out as a debit. Split out of computeBalance so the statement can work out the months of a posted
+ * interest period over the same list the balance ran its open period over (R-30) -- two lists would split a period
+ * one way and charge it another. `isPayment` lets the statement leave out the payment a period was posted for.
+ */
+function datedMovements(
+  input: BalanceInput,
+  { receiptRows, costRows, computed }: ReturnType<typeof splitFeeLedger>,
+): { date: string; amount: number; isPayment?: boolean }[] {
+  const { ledgers } = input
+  const stopAt = input.writtenOffAt ?? input.settledOn ?? null
+  const within = (date: string) => !stopAt || date <= stopAt
+  return [
+    ...costRows.filter((f) => within(f.date)).map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
+    ...receiptRows.filter((f) => within(f.date))
+      .map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
+    ...ledgers.payments.map((p) => ({
+      date: p.date,
+      amount: -p.amount + (computed.get(p) ?? 0),
+      isPayment: true,
+    })),
+    ...(ledgers.paidOut ?? []).map((o) => ({ date: o.date, amount: o.amount })),
+  ]
+}
+
 export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
   /* A SETTLED ACCOUNT STOPS LIKE A WRITTEN-OFF ONE -- nothing accrues on a debt that has ended --
@@ -383,7 +414,8 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const interest = roundToCents(
     ledgers.interest.filter((i) => within(i.from)).reduce((t, i) => t + i.amount, 0),
   )
-  const { receiptRows, costRows, computed } = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
+  const split = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
+  const { receiptRows, costRows, computed } = split
   /* `fees` IS ITEMS 1-7 ONLY now, which is what the account's own "What is left to take" panel
      has always called it. Item 9 is counted below, once. */
   const chargedFees = costRows.filter((f) => within(f.date))
@@ -416,16 +448,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
    * row of their own -- the same `covered` set the totals above use, so the fee cannot be counted
    * here and there.
    */
-  const movements: { date: string; amount: number }[] = [
-    ...chargedFees.map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
-    ...receiptRows.filter((f) => within(f.date))
-      .map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
-    ...ledgers.payments.map((p) => ({
-      date: p.date,
-      amount: -p.amount + (computed.get(p) ?? 0),
-    })),
-    ...(ledgers.paidOut ?? []).map((o) => ({ date: o.date, amount: o.amount })),
-  ]
+  const movements = datedMovements(input, split)
 
   // Interest between the last posted accrual (or the handover) and today. Computed, never written:
   // see interestAccrual.ts for why a daily figure does not need a daily row.
@@ -564,6 +587,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     interestAccruing: open.amount,
     interestAccruingDays: open.days,
     interestAccruingFrom: open.from,
+    interestAccruingMonths: open.months,
   }
 }
 
@@ -606,8 +630,8 @@ function openAccrual(
   postedBase: number,
   /** Every fee as a debit and every payment as a credit, each on its own day. */
   movements: { date: string; amount: number }[],
-): { amount: number; days: number; from: string | null } {
-  const none = { amount: 0, days: 0, from: null }
+): { amount: number; days: number; from: string | null; months: AccrualMonth[] } {
+  const none = { amount: 0, days: 0, from: null, months: [] }
   if (!input.accrueTo || input.writtenOffAt || input.settledOn) return none
   const covered = lastCoveredDay(input.ledgers.interest)
     ?? (input.handoverDate ? dayBefore(input.handoverDate) : null)
@@ -632,7 +656,7 @@ function openAccrual(
     asAt: input.accrueTo,
     movements: inside,
   })
-  return open ? { amount: open.amount, days: open.days, from: open.from } : none
+  return open ? { amount: open.amount, days: open.days, from: open.from, months: open.months } : none
 }
 
 /**
@@ -710,6 +734,11 @@ export interface StatementLine {
   credit: number
   /** What is owed after this line. */
   balance: number
+  /**
+   * THE DAYS AN INTEREST LINE COVERS (R-30), so the debtor's statement can join a month's pieces into one line and
+   * still name the month correctly. Set on interest lines only.
+   */
+  period?: { from: string; to: string }
 }
 
 export interface Statement {
@@ -739,7 +768,8 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
   /* THE SAME SPLIT THE BALANCE USED. The statement printed the item 9 ROW as an ordinary fee and
      then printed the computed receipt fee under the payment as well -- the same fee on two lines,
      and a running balance that ended at the doubled figure. */
-  const { receiptRows, costRows, covered, computed } = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
+  const split = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
+  const { receiptRows, costRows, covered, computed } = split
 
   type Pending = Omit<StatementLine, 'balance'> & { at?: string }
   const pending: Pending[] = []
@@ -767,6 +797,7 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
    * the 7th, seven days. Printing it as "6 days" was reading that field as if it meant what it
    * says. `accrualEnd` holds the convention.
    */
+  const movements = datedMovements(input, split)
   for (const i of ledgers.interest) {
     if (stopAt && i.from > stopAt) continue
     if (i.amount === 0) continue
@@ -784,30 +815,57 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
       })
       continue
     }
-    pending.push({
-      date: to,
-      kind: 'interest',
-      description: `Interest, ${periodLabel(i.from, to)}`,
-      debit: i.amount,
-      credit: 0,
-    })
+    /* A PERIOD POSTED AT A PAYMENT RUNS ACROSS MONTHS (R-30): allocate_payment posts everything from the last posting
+       to the day the money came in, so a debtor who paid in September after nothing since April had ONE line, "3
+       April to 14 September". It is drawn month by month, at the end of each month, as the open period now is. */
+    for (const m of postedMonths(i, to, input, movements)) {
+      pending.push({
+        date: m.to,
+        kind: 'interest',
+        description: `Interest, ${periodLabel(m.from, m.to)}`,
+        debit: m.amount,
+        credit: 0,
+        period: { from: m.from, to: m.to },
+      })
+    }
   }
 
-  // The open period, dated today and marked as still running. It is the last debit on the
-  // statement by construction: nothing can be dated after the day it is accrued to.
+  /*
+   * THE OPEN PERIOD, ONE LINE PER CALENDAR MONTH (R-30), each dated at the month's end, and the last one dated today
+   * and marked as still running. Rinda: "Interest as at the 31st of July and 31st of August and 30th of September ...
+   * and as of today's date 12 November (partially calculated up to date)". Stephan: "today is the 13th ... it shows
+   * the interest from the 1st of November to the 13th of November as well. Tomorrow it'll show the 1st to the 14th."
+   * Nothing is written: the months are worked out each time the statement is drawn, so nothing can be charged twice.
+   * A month that has closed is still not POSTED -- it joins the ledger when a payment is allocated -- but it is the
+   * month's whole interest, so only the running month says "still accruing".
+   */
   if (breakdown.interestAccruing > 0 && input.accrueTo) {
     const from = breakdown.interestAccruingFrom
-    pending.push({
-      date: input.accrueTo,
-      kind: 'interest-accruing',
-      // Pull the statement on the 7th and this reads "1 to 7 September": the days since the last
-      // posting are on the page, named, rather than left for the reader to work out from a count.
-      description: from
-        ? `Interest, ${periodLabel(from, input.accrueTo)} — still accruing`
-        : 'Interest — still accruing',
-      debit: breakdown.interestAccruing,
-      credit: 0,
-    })
+    const months = breakdown.interestAccruingMonths?.filter((m) => m.amount !== 0) ?? []
+    if (months.length > 0) {
+      months.forEach((m, n) => {
+        const last = n === months.length - 1
+        pending.push({
+          date: m.to,
+          kind: 'interest-accruing',
+          description: `Interest, ${periodLabel(m.from, m.to)}${last ? ' — still accruing' : ''}`,
+          debit: m.amount,
+          credit: 0,
+          period: { from: m.from, to: m.to },
+        })
+      })
+    } else {
+      pending.push({
+        date: input.accrueTo,
+        kind: 'interest-accruing',
+        description: from
+          ? `Interest, ${periodLabel(from, input.accrueTo)} — still accruing`
+          : 'Interest — still accruing',
+        debit: breakdown.interestAccruing,
+        credit: 0,
+        ...(from ? { period: { from, to: input.accrueTo } } : {}),
+      })
+    }
   }
 
   for (const f of costRows) {
@@ -998,6 +1056,105 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
         ? `The account was written off on ${stopAt}. ${money(breakdown.withheld)} of later interest and fees is excluded.`
         : undefined,
   }
+}
+
+/**
+ * A POSTED INTEREST PERIOD, MONTH BY MONTH (R-30), adding up to exactly what was posted.
+ *
+ * The row holds one amount, not its months, so the months are worked out again here the way open_interest worked out
+ * the period when allocate_payment posted it: capital plus the interest posted before it plus every movement before it
+ * is the opening balance, the movements inside it land on their own days, and the payment it was posted FOR is left
+ * out (open_interest is called with that payment excluded). The months are then scaled to the posted figure, so the
+ * lines can never add up to anything other than what the ledger holds -- the ledger is the record, this is only how it
+ * is drawn.
+ *
+ * ONE LINE, AS IT WAS, wherever that cannot be done honestly: a row inside one month (every imported Swordfish row), a
+ * correction, or a recomputation more than R1 or 2% away from what was posted (an account whose rate or history has
+ * changed since). Splitting a period by a guess would print monthly figures nobody charged.
+ */
+function postedMonths(
+  row: { from: string; days: number; amount: number },
+  to: string,
+  input: BalanceInput,
+  movements: { date: string; amount: number; isPayment?: boolean }[],
+): AccrualMonth[] {
+  const whole = [{ from: row.from, to, amount: row.amount }]
+  if (row.amount <= 0 || row.from.slice(0, 7) === to.slice(0, 7)) return whole
+  const priorInterest = input.ledgers.interest
+    .filter((i) => i !== row && accrualEnd(i.from, i.days) < row.from)
+    .reduce((t, i) => t + i.amount, 0)
+  let opening = input.capitalHandedOver + priorInterest
+  const inside: { date: string; amount: number }[] = []
+  for (const m of movements) {
+    if (m.date < row.from) opening += m.amount
+    else if (m.date < to || (m.date === to && !m.isPayment)) inside.push(m)
+  }
+  const again = accrueToDate({
+    openingBalance: roundToCents(opening),
+    annualRate: input.interestRateAnnual ?? 0,
+    coveredTo: dayBefore(row.from),
+    asAt: to,
+    movements: inside,
+  })
+  if (!again || again.amount <= 0) return whole
+  if (Math.abs(again.amount - row.amount) > Math.max(1, row.amount * 0.02)) return whole
+  /* Scaled on the running total, so the months add up to the posted figure to the cent. */
+  const scale = row.amount / again.amount
+  let running = 0
+  let shown = 0
+  return again.months.map((m) => {
+    running += m.amount * scale
+    const piece = roundToCents(roundToCents(running) - shown)
+    shown = roundToCents(shown + piece)
+    return { from: m.from, to: m.to, amount: piece }
+  }).filter((m) => m.amount !== 0)
+}
+
+/**
+ * ONE INTEREST LINE PER CALENDAR MONTH, FOR EVERYTHING THE DEBTOR SEES (R-30).
+ *
+ * Stephan, 13 Nov: "I think we should be able to see ... the two interests before and after a payment, just for
+ * record keeping purposes or for double checking ... But I think the [debtor] should see one ... Because sometimes
+ * they can come and say, oh, but you've charged me interest twice." So the account page keeps the payment month in two
+ * pieces (posted at the payment, and accruing after it) and the statement a debtor is given joins every interest line
+ * of a month into one, dated where the month's last piece is dated -- the month's end, or today for this month -- and
+ * called by the whole span. The amounts are only added: nothing is worked out again, so the statement's foot is the
+ * same figure and the running balance is recomputed down the page.
+ *
+ * A CORRECTION STAYS ITS OWN LINE (a credit, "Interest corrected"): joining it into a month would hide why the month
+ * is smaller than the month before.
+ */
+export function oneInterestLinePerMonth(lines: StatementLine[]): StatementLine[] {
+  const isPiece = (l: StatementLine) => (l.kind === 'interest' || l.kind === 'interest-accruing') && l.debit > 0 && l.credit === 0 && !!l.period
+  const byMonth = new Map<string, StatementLine[]>()
+  for (const l of lines) {
+    if (!isPiece(l)) continue
+    const key = l.period!.to.slice(0, 7)
+    byMonth.set(key, [...(byMonth.get(key) ?? []), l])
+  }
+  const out: StatementLine[] = []
+  for (const l of lines) {
+    if (!isPiece(l)) { out.push(l); continue }
+    const pieces = byMonth.get(l.period!.to.slice(0, 7))!
+    if (pieces.length === 1) { out.push(l); continue }
+    /* The month is drawn where its LAST piece sits, which is its end (or today), and once. */
+    if (l !== pieces[pieces.length - 1]) continue
+    const from = pieces.reduce((a, p) => (p.period!.from < a ? p.period!.from : a), pieces[0].period!.from)
+    const to = l.period!.to
+    const running = pieces.some((p) => p.kind === 'interest-accruing') && l.kind === 'interest-accruing' && /still accruing/.test(l.description)
+    out.push({
+      ...l,
+      kind: pieces.some((p) => p.kind === 'interest-accruing') ? 'interest-accruing' : 'interest',
+      description: `Interest, ${periodLabel(from, to)}${running ? ' — still accruing' : ''}`,
+      debit: roundToCents(pieces.reduce((t, p) => t + p.debit, 0)),
+      period: { from, to },
+    })
+  }
+  let balance = 0
+  return out.map((l) => {
+    balance = roundToCents(balance + l.debit - l.credit)
+    return { ...l, balance }
+  })
 }
 
 const MONTH_NAMES = [

@@ -31,6 +31,7 @@ import type { Block, LetterDocument, Span, TableCell } from './letterDocument.ts
 import { BF_LOCKUP_PNG, BF_LOCKUP_RATIO } from './brandLogo.js'
 import { BRAND_STACK } from './brandFonts.js'
 import type { BalanceBreakdown, StatementLine } from './accountBalance.ts'
+import { oneInterestLinePerMonth } from './accountBalance.js'
 import { longDate } from './messageTemplates.js'
 import { moneyProgress, progressPercent } from './paymentProgress.js'
 
@@ -97,7 +98,11 @@ export function statementOfAccount(input: AccountLetterInput): LetterDocument {
 }
 
 function accountDocument(input: AccountLetterInput, kind: AccountDocKind): LetterDocument {
-  const lines = input.lines ?? []
+  /* THE DEBTOR READS ONE INTEREST LINE A MONTH (R-30; Stephan, 13 Nov: "to give them one entry line per month would be
+     better"), even in a month a payment split in two on the account page. Every statement a debtor is handed is drawn
+     here -- the collector's Documents button, the portal's download, the reminder that carries it -- so this is the
+     one place it is done. */
+  const lines = oneInterestLinePerMonth(input.lines ?? [])
   const b = input.breakdown
   const m = moneyProgress({ payments: b.payments, balance: b.balance, settlementFee: b.settlementFee })
   const pct = progressPercent(m)

@@ -5040,12 +5040,12 @@ function StatementTable({
                 <td className={`px-2 py-1.5 max-w-[28rem] truncate ${l.kind === 'payment' ? 'text-positive-700'
                   : l.kind === 'fee-no-charge' ? 'text-slate-500' : 'text-slate-700'}`}
                   title={l.kind === 'interest-accruing'
-                    ? `${l.description} · Running since the last monthly posting. It will be charged as part of this month.`
+                    ? `${l.description} · Worked out to today, not yet posted. It is posted to the ledger when the next payment is allocated.`
                     : l.description}>
                   {l.description}
                   {l.kind === 'interest-accruing' && (
                     <span className="text-[11px] text-slate-400">
-                      {' · '}Running since the last monthly posting. It will be charged as part of this month.
+                      {' · '}Not yet posted: it is posted when the next payment is allocated.
                     </span>
                   )}
                 </td>

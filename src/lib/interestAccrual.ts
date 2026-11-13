@@ -71,6 +71,21 @@ export interface OpenAccrual {
   days: number
   /** Interest accrued and not yet posted. */
   amount: number
+  /**
+   * THE SAME AMOUNT, CALENDAR MONTH BY CALENDAR MONTH (R-30). Rinda, 12 Nov: "Interest as at the 31st of July and
+   * 31st of August and 30th of September ... and as of today's date 12 November (partially calculated up to date)".
+   * The statement used to print the whole open period as one line -- "3 April to 10 November, R126,91" -- which reads
+   * like one big charge landing on the day. Each piece is one month's segment of the period (the first and last can be
+   * part-months), and the pieces add up to `amount` TO THE CENT: each is the rounded running total less the rounded
+   * total before it, so rounding never makes the lines disagree with the figure at the foot.
+   */
+  months: AccrualMonth[]
+}
+
+export interface AccrualMonth {
+  from: string
+  to: string
+  amount: number
 }
 
 export interface AccrualInput {
@@ -170,6 +185,8 @@ export function accrueToDate(input: AccrualInput): OpenAccrual | null {
   const monthlyRate = annualRate / 100 / MONTHS_PER_YEAR
   let balance = openingBalance
   let accrued = 0
+  const months: AccrualMonth[] = []
+  let shown = 0
 
   // In date order, so one cursor can walk both the calendar and the ledger. Movements outside the
   // open period are not this function's business: what falls before `from` is already inside the
@@ -209,8 +226,11 @@ export function accrueToDate(input: AccrualInput): OpenAccrual | null {
     }
     accrued += monthInterest
     balance += monthInterest
+    const piece = round(round(accrued) - shown)
+    shown = round(shown + piece)
+    months.push({ from: cursor, to: segmentEnd, amount: piece })
     cursor = addDays(segmentEnd, 1)
   }
 
-  return { from, to: asAt, days: daysBetween(from, asAt) + 1, amount: round(accrued) }
+  return { from, to: asAt, days: daysBetween(from, asAt) + 1, amount: round(accrued), months }
 }
