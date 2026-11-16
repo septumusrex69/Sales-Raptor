@@ -1,39 +1,57 @@
-# Raptor · Handover 19 — where Raptor stands
+# Raptor · Handover 20 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 19**, written by TWO sessions that ran side by side from Raptor Handover 18 (Stephan, 7-9 Nov):
-> **S19** (branch `claude/ecstatic-feynman-emzuez`: requests, mail folders and conversations, trust speed, payment
-> dates, spell check, settings) and **S20 "Late Money"** (branch `claude/s20-late-money`: backdated payments, cycle
-> dates, money permissions). Both are on the preview branch `claude/sales-raptor-review-p1pzx2`. The next session is
-> **S21**; it starts from Handover 19, writes Handover 20, and -- by CLAUDE.md's rule, N is the handover a session
-> started from -- its commits start **`Raptor H19: ...`** (S20's own section below says H20; CLAUDE.md wins).
-> **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word, and the file
-> keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
+> **Raptor Handover 20**, written 16 Nov by the session on branch `claude/gallant-hypatia-t8oofh` (Stephan, 9-16 Nov:
+> Clear staging fixed, the staging test books, payment files, the run-blocker links). It started from Handover 19 and
+> ran **side by side with S21** (`claude/new-session-84tmki` and the preview branch: compose, the Trust area
+> simplified, R-30 and more), whose sections below are kept exactly as S21 wrote them. The next session starts from
+> **Handover 20** and its commits start **`Raptor H20: ...`**. **"Handover", not "handoff"** (Stephan, 28 Oct); the
+> file keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name -- when Stephan asks for "a new
+> handoff file", this is the file.
 
-## START HERE (S21) -- both sessions' open work, in one list (Raptor · Handover 19, 9 Nov)
+## START HERE -- open work, in one list (Raptor · Handover 20, 16 Nov)
 
-1. ~~Connect the five Settings tabs that do not save~~ -- **done** by `claude/trusting-newton-wowy32` (section "SETTINGS
-   TABS THAT SAVE" below), merged onto the preview branch by S21 on 9 Nov. Left from it: whether the built-in stages'
-   chances (20/60/60) should be editable too; the two migrations go to production in order.
-2. **Camille tests backdated corrections on staging** (Trust -> Backdated payments; S20 Part 3). S20's open questions
-   for Stephan, each with a conservative choice already made: negative runs from a late correction, commission VAT on
-   a correction, no limit on how far back, in duplum -> finance, the one "Interest corrected" line on the debtor's
-   statement, whether unapproved receipts in a cycle BLOCK its run, collector credit for a late receipt (commission at
-   approval vs collections at the bank date -- unify?), and reversals of earlier receipts on a corrected account.
-   Detail in S20's section below. **None of S20 is on production**; its migrations go in the order of its commits.
-3. **Waiting on Stephan -- do not build until he says:** when a mail folder is linked to a client, should Raptor offer
-   to link the client's email address(es) so their mail files itself? ("Don't automatically throw emails into
-   folders. I don't know ... Let me come back to you on that.") Nothing auto-files today.
-4. **Requests waiting on a ticked answer** (off the builder's queue until answered and re-sent): R-23 (does the refund
-   on the account Rinda named now show after S18's fix?), R-24 ("Record transfer": rename / help line / tooltip /
-   nothing). R-13 (folders + conversations) carries a how-to-test comment; Stephan must approve it and mark it Done.
-5. **Still open from Handover 18:** debtor offers under Disputes (Sonia's email; "not as important"). ~~S17's
-   email-compose items~~ -- built by S21 (section below); the body-jumping fix wants Stephan on his iPad.
-6. **Ideas offered to Stephan, not chosen:** Afrikaans versions of the templates with a preferred language per debtor;
-   storing In-Reply-To/References in the mail sync (exact threads, better auto-matching); a morning email per
-   collector; the CSV export's ID numbers showing as 8.0E+12 in Excel; e2e/people's two date-dependent failures;
-   Itumeleng's BuzzBox extension is Barry's (140).
-
+1. **Staging is a TEST BOOK, not the firm's book** (section "THE STAGING TEST BOOKS" below). Two made-up clients,
+   Bonnitta Pharmacy (BNP, 16 accounts) and Riverside Veterinary Clinic (RVC, 16 accounts), whose debtors' mobiles and
+   emails are the **firm's own staff** -- anything Raptor sends really arrives, at Stephan's wish. **Staging clock: 10
+   Nov 2026** (real date 16 Nov); statements dated after the clock are refused, so test files are dated 10 Nov until
+   somebody moves it. Stephan and the testers are working the money side by hand right now -- **do not Clear staging
+   or rewrite this data without asking him.**
+2. **Half-done on staging, for Stephan (16 Nov):** BNP0013's R50 (an account closed paid-up) waits in the approval
+   queue and blocks the Bonnitta run; RVC0001's R300 and RVC0012's R938 (placed by hand) wait too and will block the
+   Riverside run; **both RVC0002 R200 lines were approved** -- that pair was a deliberate bank duplicate (the statement
+   reverses one), so one should be reversed. The trust opening balance is **not captured** (R0.00 at 31 Oct 2026 was
+   the advice). Neither client has bank details, so no run can be paid.
+3. **The run-blocker links fix is on `claude/gallant-hypatia-t8oofh`, not yet on the preview branch** -- Stephan has
+   not yet said merge. The branch already carries the preview branch at 4b46786 merged in (clean), so it fast-forwards.
+4. **Questions the test books raised, for Stephan to decide -- none is a bug asserted:**
+   - A PTC's **"Due to BF"** (`payment_allocations.due_to_bf`) leaves out the VAT on commission; the trust ledger
+     charges it (TFB0002 R221.20 vs R235.41; RVC0006 R227.44 vs R249.84). FINANCE-TESTING B4 says it should include it.
+   - **Commission and VAT are rounded per payment and summed** on a run, not worked on the run's total (Riverside:
+     R2 087.35 / R313.11 against R2 087.33 / R313.10 on the total). Stephan asked how it rounds; it was explained, not
+     changed. Half a cent rounds up (`roundToCents`).
+   - On an **overpayment the receipt fee is 10% of what the account needed**, not of the payment.
+   - The **statement importer** does not recognise **bank interest credits** ("CREDIT INTEREST" lands in Needs an
+     account) and does not match the **client's own reference** (`RVC-10284` is not even read as a reference).
+   - **Staff work addresses as debtor emails** make the mail sync file staff mail onto test accounts and charge item 6
+     (R14.95) on each. Stephan chose to keep it as part of testing.
+5. **Carried from Handover 19 (S21's list), still open as far as this session knows:**
+   - **Camille tests backdated corrections on staging** (Trust -> Backdated payments; S20 Part 3), with S20's open
+     questions for Stephan: negative runs from a late correction, commission VAT on a correction, no limit on how far
+     back, in duplum -> finance, the one "Interest corrected" line on the debtor's statement, whether unapproved
+     receipts in a cycle BLOCK its run (they do -- that is item 2's blocker), collector credit for a late receipt, and
+     reversals of earlier receipts on a corrected account. **None of S20 is on production.** Note the staging book S20
+     tested on is gone (cleared 9-10 Nov); the test books replace it.
+   - **Waiting on Stephan -- do not build until he says:** when a mail folder is linked to a client, should Raptor
+     offer to link the client's email address(es) so their mail files itself? Nothing auto-files today.
+   - **Requests waiting on a ticked answer:** R-23, R-24; R-13 carries a how-to-test comment for Stephan to approve.
+   - **Still open from Handover 18:** debtor offers under Disputes (Sonia's email; "not as important"); the compose
+     body-jumping fix wants Stephan on his iPad. Built-in stages' chances (20/60/60) editable or not -- unasked.
+   - **Ideas offered, not chosen:** Afrikaans templates; In-Reply-To/References in the mail sync; a morning email per
+     collector; CSV ID numbers as 8.0E+12 in Excel; e2e/people's two date-dependent failures; Itumeleng's BuzzBox
+     extension is Barry's (140).
+6. **Known failing on the preview branch, not from this session:** `e2e/change-requests` (a "Parked" shelf the test
+   does not expect) and `e2e/leave` (two date-dependent pay rows) fail the same with or without its commits.
 
 ## R-30 -- INTEREST MONTH BY MONTH ON THE STATEMENT (Raptor · Handover 19, 13 Nov; branch `claude/h19-r30` from `claude/sales-raptor-review-p1pzx2` at 27befca)
 
@@ -57,51 +75,68 @@
   Raptor posts). Known, not from this: `e2e/debtor-portal.mjs` cannot load `clientPortal.js` without the ts loader
   (fails the same on the preview branch before this change; with `--import ./scripts/qa/tsresolve.mjs` it passes 46/0).
 
-## STAGING CLEARED, AND THE CLEAR STAGING BUTTON FIXED (Raptor · Handover 19, 9 Nov; branch `claude/gallant-hypatia-t8oofh` from `claude/sales-raptor-review-p1pzx2` at 60a3a2f)
+## THE STAGING TEST BOOKS, CLEAR STAGING, AND THE RUN-BLOCKER LINKS (Raptor · Handover 19 → 20, 9-16 Nov; branch `claude/gallant-hypatia-t8oofh`)
 
-- **Staging was emptied at Stephan's word** ("Clear all the information, the data on staging ... the debtors ... the
-  clients, everything"): 214 accounts, 7 clients, every lead / deal / contact / handover batch, payments, trust
-  entries, bank lines, payover runs, the trust opening. Users, settings, templates, workflows, mail kept. Clock
-  restarted on **9 Nov 2026**, logged in finance_setting_changes as Stephan. The 214-account book is GONE -- staging
-  now holds only the **finance test book** (below).
-- **The button was broken**: "cannot truncate ... leave_applications references leave_records". Cause: migration
-  `leave_round_two` (23 Oct) was only described in schema.sql, so check-clear-staging could not see the key, and S14's
-  and S20's rewrites of clear_staging (built from the file's last body) dropped `leave_applications`. That one clear
-  was run as the function's body with the table added (rolled back on its first try, nothing lost).
-- **Fixed**: staging migration `h19_clear_staging_leave_applications` (S20's body + `public.leave_applications`;
-  mirrored at the end of schema.sql, md5 3b70c497e01c6a9ab5903a7827b51e73 verified); probed as an Administrator in a
-  rolled-back block -- it runs to the end. `leave_round_two` is now **copied verbatim** into schema.sql where its note
-  was (md5 9b2684d5c3224a335dce0120f1ec1eec verified), so `check-clear-staging` sees the key: it failed on the old
-  body naming exactly this table, passes on the new one (15/15), and names leave_applications in its list.
-- **Test-phase client Bonnitta Pharmacy (BNP) -- the ONLY book on staging since 10 Nov.** Stephan asked for a fresh
-  start: Clear staging was pressed (26 accounts, clock **10 Nov 2026**) -- so the TFA/TFB finance test book below is
-  NOT loaded now (re-run its seed to get it back; its EXPECTED.md figures assume the clock on 9 Nov). BNP0001-0016,
-  R6 581.02, handed over 3 Apr 2026, 25% commission, 24% interest. Debtor names made up; mobiles, emails and street
-  addresses exactly as his sheet -- **the emails are staff work addresses, so (a) Raptor's sends really arrive, which
-  he wants, and (b) the mail sync files staff work email onto these accounts and charges item 6 on each, which he
-  chose to keep as part of testing.** Worked history Apr-Oct written as notes + their Annexure B fees (2026 schedule:
-  emails, SMSs, calls, consultations, one bureau search), credited to Tumisang Mose / Leanette Mathebe / Samuel Ndaba;
-  R61.53-R192.06 an account, none at in duplum. Statuses (sub_status): Payment default + a broken promise (0001, 0005,
-  0011, 0013), Promise To Pay + an OPEN promise due 20 Nov-1 Dec (0002, 0006, 0010, 0014 -- each started the
-  "Promise to pay" workflow, which will send), Refuses to pay (0003, 0007, 0015), Cannot pay (0004, 0016),
-  Negotiating (0009), Tracing (0008), In progress (0012). None allocated (allocating starts the Handover workflow).
-  No bank details on the client. Nothing of the sheet is in the repo (public; real contact details).
-- **Second test client Riverside Veterinary Clinic (RVC), on staging 12 Nov**, made up, for Stephan to import himself:
-  code RVC, 25% commission, 24% interest, mandate 12 Nov 2026; contact person Bongi Ndlovu with the firm's own email and
-  number (on the client AND as a linked contact). No accounts yet -- he imports the 16-row sheet Claude sent him
-  (same staff mobiles/emails as BNP, made-up names/addresses, two business debtors, R23 719.09). Not in the repo.
-- **The finance & trust test book** (`raptor/`, Stephan, 9 Nov): two made-up clients (TFA 10%, TFB 20%) and ten
-  debtors TFA0001-TFB0005, each built for one rule (roll to capital, 50/50, in duplum, overpayment, interest, PTC,
-  reversal, unmatched, reject); `raptor/trust/statement-2026-11-09.csv` to import; `raptor/finances/EXPECTED.md`
-  has every figure. **Loaded on staging** by `raptor/finances/seed-test-book.sql` (refuses a non-empty or
-  non-staging database). Every figure was read from the engine by running import/place/approve/reject/reverse in
-  rolled-back blocks AND re-worked by hand -- all agree. Stephan runs the steps in `raptor/README.md` himself.
-  **Keep the staging clock on 9 Nov 2026** until he reaches the payover runs (TFA0003/TFA0005 carry interest).
-  Two things it surfaced for him to judge, not bugs asserted: a PTC's `payment_allocations.due_to_bf` (221.20)
-  leaves out the VAT on commission while the trust ledger charges it (235.41) -- FINANCE-TESTING B4 says Due to BF
-  includes it; and an overpayment's receipt fee is 10% of what the account needed, not of the payment.
-- **Production**: the fix is staging-only by nature (clear_staging refuses anywhere but staging); production needs it
-  only if leave_round_two is ever taken there.
+**Clear staging fixed (9 Nov).** Pressed, it failed: "cannot truncate ... leave_applications references
+leave_records". `leave_round_two` (23 Oct) was only DESCRIBED in schema.sql, so `check-clear-staging` (which reads the
+keys from the file) could not see the key, and S14's and S20's rewrites of clear_staging dropped the table. Staging
+migration `h19_clear_staging_leave_applications` (S20's body + `public.leave_applications`; mirrored at the end of
+schema.sql, md5 3b70c497e01c6a9ab5903a7827b51e73) and `leave_round_two` **copied verbatim** into schema.sql where its
+note stood (md5 9b2684d5c3224a335dce0120f1ec1eec) -- the check now sees the key, failed on the old body, passes on the
+new. Copying it in also surfaced `leave.applied` / `leave.decided` notifications with no switch: a **Leave** switch was
+added to Settings -> Notifications (`notificationKinds.ts`). The button has since run for real twice (9 Nov, 214
+accounts; 10 Nov, 26). Staging-only by nature; production needs it only if leave_round_two is ever taken there.
+
+**What staging holds now (16 Nov), and how it got there.** Stephan cleared staging (9 Nov, the 214-account book; again
+10 Nov for a fresh start). Nothing of the real book is left.
+- **Bonnitta Pharmacy (BNP)** -- from Stephan's own sheet (`Bonnitta_Pharmacy.xlsx`), loaded 10 Nov with the import's
+  columns: BNP0001-0016, R6 581.02, handed over 3 Apr 2026, **25% commission, 24% interest**, mandate 1 Apr. Debtor
+  names made up at his say-so; mobiles, emails and street addresses exactly as the sheet (two lost leading zeros put
+  back, all-zero IDs left blank). **The emails are staff work addresses** (amanda@, amelia@, ... valencia@). Worked
+  history Apr-Oct written as notes + their Annexure B fees on the 2026 schedule (emails, SMSs, calls, consultations,
+  one bureau search), credited to Tumisang Mose / Leanette Mathebe / Samuel Ndaba -- **notes, not rows in the SMS or
+  email logs**, so nothing old could be re-sent. Statuses: Payment default + broken promise (0001, 0005, 0011, 0013),
+  Promise To Pay + open promise (0002, 0006, 0010, 0014 -- each started the "Promise to pay" workflow), Refuses to pay
+  (0003, 0007, 0015), Cannot pay (0004, 0016), Negotiating (0009), Tracing (0008), In progress (0012). Testers have
+  worked it since (more fees, promises kept, BNP0013 closed paid-up).
+- **Riverside Veterinary Clinic (RVC)** -- made up: client created 12 Nov (code RVC, 25%, 24%, mandate 12 Nov; contact
+  Bongi Ndlovu with the firm's own email and number, on the client and as a linked contact). **Stephan imported its
+  16 accounts himself** (RVC0001-0016, R23 719.09) from a sheet Claude wrote with the app's own builder
+  (`scripts/handover-template.mjs --rows`): the same 16 staff mobiles/emails in the same order as BNP, made-up names
+  and addresses, two business debtors, amounts R388-R4 785.20 (seven above the R1 225 items 1-7 cap).
+- **None of either sheet is in the repo** (public; real contact details). The load scripts were never committed.
+- **Payment files** in `raptor/trust/` (case numbers, amounts and made-up names only), each tried on staging with the
+  import run and rolled back, and the engine's split for every line written beside it:
+  `bonnitta-payments-2026-11-10.csv` (+ `.md`; imported by Stephan, all approved) and `test-payments-2-2026-11-10.csv`
+  (+ `.md`; 18 lines, 13 matched -- Riverside's first payments, a bank duplicate and its reversal, a payment on a
+  closed account, the client's-reference and name-only lines, bank interest; imported). Two PTC confirmations to
+  attach by hand: `ptc-confirmation-RVC0006.pdf` (R675.40), `ptc-confirmation-RVC0013.pdf` (R300.00).
+- **The TFA/TFB finance test book** (`raptor/README.md`, `raptor/finances/EXPECTED.md`, `seed-test-book.sql`,
+  `trust/statement-2026-11-09.csv`) is **not loaded** -- cleared on 10 Nov. Its seed refuses a non-empty staging, and
+  its figures assume the clock on 9 Nov. Every figure in it was read from the engine (import / place / approve /
+  reject / reverse in rolled-back blocks) and re-worked by hand; all agreed.
+
+**The run-blocker links (16 Nov).** A payover run "cannot be approved yet" offered one link under every blocker, "Work
+through the exceptions" -> To sort. Stephan, on a run held by a receipt waiting for approval: "when i go to review it
+does not show anything" -- a waiting receipt is on Payments in, never on To sort. `src/lib/runBlockers.ts` names a
+place per `payover_run_blockers` kind (awaiting_approval -> Payments in; excess_credit -> To sort; needs_rate and
+no_client_code -> the client), one link per place; `check-run-blocker-links` (11) holds it to the function's kinds in
+both directions and was seen failing on the old link. Fast suite green (23 851 / 390), e2e payover-sends 57 and
+run-late-lines 8. Routes re-checked after merging S21's Trust reorganisation (unchanged).
+
+**How to load test data on staging without breaking things** (what this session learned):
+- Accounts: write the columns `newDebtor.toAccountRow` writes; the client needs a **code, a commission and a signed
+  mandate** (`refuse_account_without_terms`). `interest_rate_annual` is a **percent** (24, not 0.24); commission is a
+  **fraction** (0.25).
+- Fees: what `chargeEngine` writes -- `source 'raptor'`, `vat_rate 15`, VAT `round(x * 0.15, 2)`; action codes as the
+  app uses them (`email`, `SMS`, `phone_call`, `consultation`, `TRC`). Pair each with the note the app writes
+  (`dialledNote`, `consultationNote`, `smsNote`, `sentEmailNote`).
+- **A promise insert starts a workflow** (`workflow_start_on_promise`), and allocating an account starts the Handover
+  workflow -- both send. A PTC needs a proof document. Statement lines dated after the staging clock are refused.
+- Guarded functions run as a person: `set_config('request.jwt.claims', '{"sub": <profile id>, "role":
+  "authenticated"}', true)` inside the same transaction. Probe in a block that ends `raise exception`.
+- Reading an xlsx in Node: `src/lib/xlsx.ts` needs a browser DOMParser; read cells another way and feed
+  `planHandover` to check a sheet before handing it over.
 
 ## S21 -- S17'S COMPOSE PROBLEMS (Raptor · Handover 19, 9 Nov; branch `claude/new-session-84tmki` from `claude/sales-raptor-review-p1pzx2` at 6bf5d15)
 
