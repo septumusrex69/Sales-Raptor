@@ -35,6 +35,15 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## R-34 -- SORT THE PAYOVER RUNS BY CLICKING A HEADING (Raptor · Handover 19, 16 Nov, builder run; branch `claude/h19-r34` from `claude/sales-raptor-review-p1pzx2` at 8e744e5)
+
+- **Asked from Finance** on Trust -> Payover runs: "sort when you click on the headings". Every heading but the checkbox and
+  Next step is now a button (`SortHead` in `FinanceWorkQueue`); `sortRuns`/`nextRunSort`/`parseRunSort` in `payoverGroups.ts`.
+  It sorts the clients **inside each cycle band** -- the bands keep their order, the cycle due first on top. Amounts open
+  largest first, words A to Z, Status by the firm's ladder (Needs review -> Void), a missing date/reference last. Kept in
+  the address as `?sort=topay.desc`. No migration, no money logic, commit 24aacda.
+- Checks: `check-payover-groups` +13 (a status-by-alphabet mutation caught), e2e `payover-sends` +7 (seen failing without the page change).
+
 ## R-32 -- THE BANK STATEMENT'S DESCRIPTION ON THE APPROVAL QUEUE (Raptor · Handover 19, 16 Nov, builder run; branch `claude/h19-r32` from `claude/sales-raptor-review-p1pzx2` at 296e260)
 
 - **Asked by Rinda (Finance)**: on Trust -> Payments in, the approval queue's Reference column showed our own account
