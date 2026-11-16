@@ -7,6 +7,7 @@ import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { Modal, controlClass, inputClass } from '../../components/ui/Modal'
 import { rand, ratePercent } from '../../lib/money'
+import { blockerActions } from '../../lib/runBlockers'
 import { supabase } from '../../lib/supabase'
 import {
   RUN_STATUS_LABEL, approveRun, approveRunEarly, cycleStillOpen, fetchPaymentAudit, fetchRunPayments, markRunPaid,
@@ -332,9 +333,15 @@ export function RunDetail() {
                 {b.amount !== null && <span className="shrink-0 tabular-nums">{rand(b.amount)}</span>}
               </div>
             ))}
-            <Link to="/trust/exceptions" className="inline-block pt-1 text-[12.5px] font-medium text-amber-800 underline">
-              Work through the exceptions
-            </Link>
+            {/* One link per place that puts a blocker right -- see runBlockers.ts for why not one for all. */}
+            <div className="flex flex-wrap gap-x-4 pt-1">
+              {blockerActions(blockers.map((b) => b.kind), run.company_id).map((a) => (
+                <Link key={a.to} to={a.to} data-testid="blocker-action"
+                  className="inline-block text-[12.5px] font-medium text-amber-800 underline">
+                  {a.label}
+                </Link>
+              ))}
+            </div>
           </div>
         )}
 
