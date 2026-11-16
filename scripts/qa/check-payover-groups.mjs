@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  defaultQueueTab, groupRunsByCycle, historyPayouts, parseQueueTab, payoutLabel, paysOnFor, queueTabOf, runPill,
+  defaultQueueTab, groupRunsByCycle, historyPayouts, nextRunSort, parseQueueTab, parseRunSort, payoutLabel, paysOnFor, queueTabOf, runPill, sortRuns,
 } from '../../src/lib/payoverGroups.ts'
 
 let pass = 0
@@ -86,6 +86,27 @@ check('...and only in To pay is it ready to approve', runPill('ready', 'topay'),
 check('every other status keeps its word whatever the tab', ['needs_review', 'approved', 'sent', 'paid'].map((x) => runPill(x, 'waiting').label),
   ['Needs review', 'Approved', 'Sent', 'Paid'])
 
+
+/* R-34 · Raptor H19 (Rinda, Finance: "sort when you click on the headings"). */
+const sr = (client, inv, net, status, ref = null) => ({ client, invoiceNumber: inv, payments: 1, trustCapital: net, ptcSetOff: 0,
+  netPayover: net, paidAt: null, eftReference: ref, status })
+const SR = [sr('baobab', 'PO-10', 50, 'sent'), sr('Acacia', 'PO-9', 900, 'approved', 'X'), sr('Cedar', 'PO-11', -20, 'needs_review', 'a')]
+const names = (list) => list.map((r) => r.client)
+check('no sort leaves the runs as they came', names(sortRuns(SR, null)), ['baobab', 'Acacia', 'Cedar'])
+check('Client sorts A to Z, ignoring case', names(sortRuns(SR, { key: 'client', dir: 'asc' })), ['Acacia', 'baobab', 'Cedar'])
+check('...and Z to A', names(sortRuns(SR, { key: 'client', dir: 'desc' })), ['Cedar', 'baobab', 'Acacia'])
+check('To pay sorts by amount, owed-us below nil last when largest first', names(sortRuns(SR, { key: 'topay', dir: 'desc' })), ['Acacia', 'baobab', 'Cedar'])
+check('Run numbers sort as numbers, PO-9 before PO-10', names(sortRuns(SR, { key: 'run', dir: 'asc' })), ['Acacia', 'baobab', 'Cedar'])
+check('Status sorts by the firm\'s ladder, not the alphabet', names(sortRuns(SR, { key: 'status', dir: 'asc' })), ['Cedar', 'Acacia', 'baobab'])
+check('a missing reference goes last either way', [names(sortRuns(SR, { key: 'reference', dir: 'asc' })), names(sortRuns(SR, { key: 'reference', dir: 'desc' }))],
+  [['Cedar', 'Acacia', 'baobab'], ['Acacia', 'Cedar', 'baobab']])
+check('the list given is not reordered in place', names(SR), ['baobab', 'Acacia', 'Cedar'])
+check('a first click: amounts largest first, words A to Z', [nextRunSort(null, 'topay'), nextRunSort(null, 'client')],
+  [{ key: 'topay', dir: 'desc' }, { key: 'client', dir: 'asc' }])
+check('...a second click turns it round', nextRunSort({ key: 'topay', dir: 'desc' }, 'topay'), { key: 'topay', dir: 'asc' })
+check('?sort= reads back, and nonsense is no sort', ['topay.desc', 'client.asc', 'balance.asc', 'client.up', null].map(parseRunSort),
+  [{ key: 'topay', dir: 'desc' }, { key: 'client', dir: 'asc' }, null, null, null])
+
 const page = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
 check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tabShown === 'history' \? 'paid' : 'open', lag, cycle\?\.today \?\? null\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
 check('...sorts every run with queueTabOf, once', (page.match(/queueTabOf\(/g) ?? []).length, 1)
@@ -95,6 +116,8 @@ check('...in three tabs, what needs a person first', /\['topay', 'waiting', 'col
 check('...and History is the Client ledger', /if \(tabParam === 'history'\) return <Navigate to="\/trust\/client-ledger" replace \/>/.test(page), true)
 check('...and draws the open cycle even with nothing in it', /emptyCollecting && cycle/.test(page) && /collectingState\(cycle\.periodEnd, lag\)/.test(page), true)
 
+check('...sorts inside each band, leaving the bands in order', /\.map\(\(g\) => \(\{ \.\.\.g, runs: sortRuns\(g\.runs, sort\) \}\)\)/.test(page), true)
+check('...from every heading but the checkbox and next step', (page.match(/<SortHead by="/g) ?? []).length, 11)
 check('...and the queue draws it from the tab', /<Pill status=\{r\.status\} tab=\{tabOf\(r\)\} \/>/.test(page), true)
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))

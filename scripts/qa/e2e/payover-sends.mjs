@@ -140,6 +140,26 @@ try {
   t.ok('...the one that closed, with its payover day and total',
     /^Waiting[\s\S]*3 clients[\s\S]*Nothing more goes in · approved, paid and advised on 11 Oct[\s\S]*R 18 625\.60/i.test(h[0] ?? ''))
 
+  /* ---- R-34 · Raptor H19 (Rinda, Finance: "sort when you click on the headings") ---- */
+  const order = async () => page.getByTestId('queue-run').evaluateAll((rows) => rows.map((r) => (r.children[1]?.textContent ?? '').split(' ')[0]))
+  /* The rows redraw after the click; read them once they have, or after 3 s as they stand. */
+  const sortedTo = async (want) => {
+    const w = JSON.stringify(want)
+    await page.waitForFunction((x) => JSON.stringify([...document.querySelectorAll('[data-testid="queue-run"]')]
+      .map((r) => (r.children[1]?.textContent ?? '').split(' ')[0])) === x, w, { timeout: 3000 }).catch(() => {})
+    return JSON.stringify(await order())
+  }
+  t.check('unsorted, the runs stand as they came', JSON.stringify(await order()), JSON.stringify(['Summit', 'Baobab', 'Silverleaf']))
+  await page.getByTestId('sort-topay').click()
+  t.check('a click on To pay puts the largest payover first', await sortedTo(['Baobab', 'Summit', 'Silverleaf']), JSON.stringify(['Baobab', 'Summit', 'Silverleaf']))
+  t.check('...and the heading says so', await page.locator('th', { has: page.getByTestId('sort-topay') }).getAttribute('aria-sort'), 'descending')
+  await page.getByTestId('sort-topay').click()
+  t.check('...a second click turns it round', await sortedTo(['Silverleaf', 'Summit', 'Baobab']), JSON.stringify(['Silverleaf', 'Summit', 'Baobab']))
+  await page.getByTestId('sort-client').click()
+  t.check('Client sorts A to Z', await sortedTo(['Baobab', 'Silverleaf', 'Summit']), JSON.stringify(['Baobab', 'Silverleaf', 'Summit']))
+  t.ok('...kept in the address, on the same tab', /sort=client\.asc/.test(page.url()) && /tab=waiting/.test(page.url()))
+  t.check('...and the cycle band stays above its clients', (await heads()).length, 1)
+
   /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
   t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
   t.check('...so there is no Build a run button', await page.getByRole('button', { name: /Build a run/ }).count(), 0)

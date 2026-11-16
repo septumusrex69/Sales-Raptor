@@ -13,7 +13,7 @@ import {
 import { Modal } from '../../components/ui/Modal'
 import {
   collectingState, defaultQueueTab, groupRunsByCycle, historyPayouts, parseQueueTab, payoutLabel, paysOnFor, periodLabel,
-  queueTabOf, runPill, type PillTone, type QueueTab,
+  nextRunSort, parseRunSort, queueTabOf, runPill, sortRuns, type PillTone, type QueueTab, type RunSortKey,
 } from '../../lib/payoverGroups'
 import { firmDay } from '../../lib/dateLabels'
 import { clockNow } from '../../lib/clock.ts'
@@ -84,6 +84,8 @@ export function FinanceWorkQueue() {
   /* FOUR TABS, ONE CYCLE EACH (S7, 12 Oct): Collecting, Waiting, To pay, History -- see queueTabOf.
      No ?tab= means "open on what is due" (defaultQueueTab), decided once the runs are in. */
   const tabParam = parseQueueTab(params.get('tab'))
+  /* R-34 · Raptor H19: a click on a heading sorts the clients inside each cycle (?sort=topay.desc). */
+  const sort = parseRunSort(params.get('sort'))
   const [query, setQuery] = useState('')
   /* HISTORY'S MONTH, by payout day. Empty is the latest payout. A search ignores it and looks across
      every month (the firm: "go and find them"). */
@@ -259,6 +261,22 @@ export function FinanceWorkQueue() {
       && (tabShown !== 'history' || !!q || paysOnFor(r.periodEnd, lag) === payoutShown))
   /* In cycles: the one that leaves soonest first (the firm, 8 Oct); History newest first. */
   const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'history' ? 'paid' : 'open', lag, cycle?.today ?? null)
+    .map((g) => ({ ...g, runs: sortRuns(g.runs, sort) }))
+  /* R-34: the heading is a button; the band order is untouched, so the cycle due first stays on top. */
+  const SortHead = ({ by, label, right, title }: { by: RunSortKey; label: string; right?: boolean; title?: string }) => {
+    const on = sort?.key === by
+    return (
+      <th className={clsx('px-2 py-2 font-medium', right && 'text-right')} title={title}
+        aria-sort={on ? (sort?.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+        <button type="button" data-testid={`sort-${by}`}
+          onClick={() => { const n = nextRunSort(sort, by); const p = new URLSearchParams(params); p.set('sort', `${n.key}.${n.dir}`); setParams(p, { replace: true }) }}
+          className={clsx('inline-flex items-center gap-1 font-medium hover:text-slate-700', on && 'text-slate-700')}>
+          {label}
+          <span className="text-[10px]" aria-hidden>{on ? (sort?.dir === 'asc' ? '\u25B2' : '\u25BC') : ''}</span>
+        </button>
+      </th>
+    )
+  }
   /* THE OPEN CYCLE IS SHOWN EVEN EMPTY (the firm, 12 Oct: "There's nothing in running. I don't know
      why"). On the first day of a cycle nothing has been processed yet; a bare 0 read as broken. */
   const emptyCollecting = tabShown === 'collecting' && groups.length === 0 && !q && !statusFilter && !!cycle
@@ -470,25 +488,25 @@ export function FinanceWorkQueue() {
                     checked={shown.length > 0 && shown.every((r) => picked.has(r.runId))}
                     onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((r) => r.runId)) : new Set())} />
                 </th>
-                <th className="px-2 py-2 font-medium">Client</th>
-                <th className="px-2 py-2 font-medium">Run</th>
+                <SortHead by="client" label="Client" />
+                <SortHead by="run" label="Run" />
                 {isHistory ? (
                   /* HISTORY READS WHAT WENT OUT (S7): how much, on what day, on which reference. */
                   <>
-                    <th className="px-2 py-2 text-right font-medium" title="Collected by Bredell Ferreira into trust">Collected</th>
-                    <th className="px-2 py-2 text-right font-medium">Paid out</th>
-                    <th className="px-2 py-2 font-medium">Date paid</th>
-                    <th className="px-2 py-2 font-medium">Reference</th>
+                    <SortHead by="collected" label="Collected" right title="Collected by Bredell Ferreira into trust" />
+                    <SortHead by="topay" label="Paid out" right />
+                    <SortHead by="paidOn" label="Date paid" />
+                    <SortHead by="reference" label="Reference" />
                   </>
                 ) : (
                   <>
-                    <th className="px-2 py-2 text-right font-medium">Payments</th>
-                    <th className="px-2 py-2 text-right font-medium" title="Collected by Bredell Ferreira into trust">Collected</th>
-                    <th className="px-2 py-2 text-right font-medium">PTC set-off</th>
-                    <th className="px-2 py-2 text-right font-medium">To pay</th>
+                    <SortHead by="payments" label="Payments" right />
+                    <SortHead by="collected" label="Collected" right title="Collected by Bredell Ferreira into trust" />
+                    <SortHead by="ptc" label="PTC set-off" right />
+                    <SortHead by="topay" label="To pay" right />
                   </>
                 )}
-                <th className="px-2 py-2 font-medium">Status</th>
+                <SortHead by="status" label="Status" />
                 <th className="px-3 py-2 font-medium">{isHistory ? '' : 'Next step'}</th>
               </tr>
             </thead>

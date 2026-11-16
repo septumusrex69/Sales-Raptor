@@ -189,3 +189,63 @@ export function runPill(status: string, tab: QueueTab): { label: string; tone: P
   if (status === 'paid') return { label: 'Paid', tone: 'paid' }
   return { label: 'Void', tone: 'void' }
 }
+
+/*
+ * R-34 · Raptor H19 (Rinda, Finance: "sort when you click on the headings"). A click on a column
+ * heading orders the clients INSIDE each cycle band -- the bands themselves stay in the order above,
+ * because which cycle leaves first is the point of the page (the firm, 8 Oct). No sort is the
+ * order the runs arrived in. Status sorts by the firm's ladder (RUN_STATUS_LABEL's order), not the
+ * alphabet; a missing date or reference goes last either way.
+ */
+export type RunSortKey = 'client' | 'run' | 'payments' | 'collected' | 'ptc' | 'topay' | 'paidOn' | 'reference' | 'status'
+export interface RunSort { key: RunSortKey; dir: 'asc' | 'desc' }
+export interface SortableRun {
+  client: string; invoiceNumber: string; payments: number; trustCapital: number; ptcSetOff: number
+  netPayover: number; paidAt: string | null; eftReference: string | null; status: string
+}
+
+const RUN_SORT_KEYS: RunSortKey[] = ['client', 'run', 'payments', 'collected', 'ptc', 'topay', 'paidOn', 'reference', 'status']
+const STATUS_LADDER = ['needs_review', 'ready', 'approved', 'sent', 'paid', 'void']
+/** Amounts open largest first, words A to Z. */
+export const NUMERIC_RUN_SORT: ReadonlySet<RunSortKey> = new Set(['payments', 'collected', 'ptc', 'topay'])
+
+/** `?sort=topay.desc` back into a sort; anything else is no sort. */
+export function parseRunSort(raw: string | null): RunSort | null {
+  if (!raw) return null
+  const [key, dir] = raw.split('.')
+  if (!RUN_SORT_KEYS.includes(key as RunSortKey) || (dir !== 'asc' && dir !== 'desc')) return null
+  return { key: key as RunSortKey, dir }
+}
+
+/** What a click on `key` asks for: the other way round if it is already sorted by it, else its natural way. */
+export function nextRunSort(now: RunSort | null, key: RunSortKey): RunSort {
+  if (now?.key === key) return { key, dir: now.dir === 'asc' ? 'desc' : 'asc' }
+  return { key, dir: NUMERIC_RUN_SORT.has(key) ? 'desc' : 'asc' }
+}
+
+export function sortRuns<T extends SortableRun>(runs: T[], sort: RunSort | null): T[] {
+  if (!sort) return runs
+  const value = (r: T): string | number | null => {
+    switch (sort.key) {
+      case 'client': return r.client.toLowerCase()
+      case 'run': return r.invoiceNumber
+      case 'payments': return r.payments
+      case 'collected': return r.trustCapital
+      case 'ptc': return r.ptcSetOff
+      case 'topay': return r.netPayover
+      case 'paidOn': return r.paidAt
+      case 'reference': return r.eftReference ? r.eftReference.toLowerCase() : null
+      case 'status': { const i = STATUS_LADDER.indexOf(r.status); return i < 0 ? STATUS_LADDER.length : i }
+    }
+  }
+  const sign = sort.dir === 'asc' ? 1 : -1
+  return runs
+    .map((r, i) => ({ r, i, v: value(r) }))
+    .sort((a, b) => {
+      if (a.v === null || b.v === null) return a.v === b.v ? a.i - b.i : a.v === null ? 1 : -1
+      const c = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v
+        : String(a.v).localeCompare(String(b.v), 'en-ZA', { numeric: true })
+      return c !== 0 ? sign * c : a.i - b.i
+    })
+    .map((x) => x.r)
+}
