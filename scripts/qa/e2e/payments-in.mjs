@@ -36,6 +36,8 @@ const NANDI = ROW({
   payment_id: 'nandi', account_id: 'acct-n', case_number: 'RAP-200001', account_number: 'SF0001',
   debtor: 'Nandi Zulu', client: 'Summit Fitness', received_on: '2026-10-05', amount: 8000,
   paid_to_client: false, reference: 'SF0001',
+  /* R-32: the bank's own words, which the queue shows beside the reference. */
+  bank_line_id: 'line-n', bank_description: 'ABSA CR TRF N ZULU GYM SF0001',
   receipt_fee: 610, receipt_fee_vat: 91.5,
   to_interest: 50.66, to_costs: 730.25, to_receipt_fees: 701.5, to_fees: 28.75,
   to_capital: 7219.09, excess: 0, commission: 2165.73, commission_vat: 324.86,
@@ -153,6 +155,14 @@ try {
   const head = (await page.locator('[data-testid="queue-scroll"] thead').innerText()).replace(/\s+/g, ' ')
   t.ok('the group heading says incl. VAT once', /Interest and fees ?· incl\. VAT/i.test(head) && /Final split ?· incl\. VAT/i.test(head))
   t.check('...and no column heading repeats it', /incl\. VAT/i.test(head.replace(/· incl\. VAT/gi, '')), false)
+
+  /* ---- R-32: the bank statement's description beside the reference ---- */
+  t.ok('the Review group has a Bank statement column', /Reference ?Bank statement ?Actions/i.test(head))
+  const nandiDesc = page.locator('[data-payment="nandi"] [data-testid="queue-bank-description"]')
+  t.check('Nandi shows what the bank statement said', (await nandiDesc.innerText()).trim(), 'ABSA CR TRF N ZULU GYM SF0001')
+  t.ok('...and still shows the reference it was matched on', /SF0001/.test(await page.locator('[data-payment="nandi"] td').nth(-3).innerText()))
+  t.check('a receipt with no bank line shows a dash',
+    (await page.locator('[data-payment="lowveld"] [data-testid="queue-bank-description"]').innerText()).trim(), '—')
 
   /* ---- the batch ---- */
   const summary = await page.getByTestId('batch-summary').innerText()

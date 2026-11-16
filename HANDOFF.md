@@ -35,6 +35,15 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## R-32 -- THE BANK STATEMENT'S DESCRIPTION ON THE APPROVAL QUEUE (Raptor · Handover 19, 16 Nov, builder run; branch `claude/h19-r32` from `claude/sales-raptor-review-p1pzx2` at 296e260)
+
+- **Asked by Rinda (Finance)**: on Trust -> Payments in, the approval queue's Reference column showed our own account
+  number, and the bank line's description only when there was no reference at all. `AwaitingApproval` now has a
+  **Bank statement** column after Reference (Review group spans 4) showing `bank_description` -- already returned by
+  `payments_awaiting_approval` from `bank_statement_lines.description`; "—" for a receipt with no bank line. Reference
+  shows only the reference. No migration, no money logic touched.
+- Check: e2e `payments-in` +4 (Nandi's fixture carries a bank description; seen failing without the component change).
+
 ## R-35 -- A CLOSED ACCOUNT HAS NOTHING LEFT TO TAKE (Raptor · Handover 19, 16 Nov, builder run; branch `claude/h19-r35` from `claude/sales-raptor-review-p1pzx2` at 4b46786)
 
 - **Asked by Rinda (Finance) on BNP0013**: closed paid up 10 Nov and refunded, then R50 more came in; "What is left to

@@ -380,7 +380,7 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
               <GroupHead span={3}>Capital</GroupHead>
               <GroupHead span={3}>Commission</GroupHead>
               <GroupHead span={4} note="incl. VAT">Final split</GroupHead>
-              <GroupHead span={3}>Review</GroupHead>
+              <GroupHead span={4}>Review</GroupHead>
             </tr>
             <tr>
               <th className={`${STICKY_HEAD} left-0 z-20 ${TICK_COL} py-2 border-b border-slate-100`}>
@@ -401,7 +401,7 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
               <Th first right>Rate</Th><Th right>Amount</Th><Th right>VAT on commission</Th>
               <Th first right>To client</Th><Th right>BF keeps</Th>
               <Th right>Debtor credit</Th><Th right>PTC due to BF</Th>
-              <Th first>Exceptions</Th><Th>Reference</Th><Th>Actions</Th>
+              <Th first>Exceptions</Th><Th>Reference</Th><Th>Bank statement</Th><Th>Actions</Th>
             </tr>
           </thead>
           <tbody>
@@ -477,8 +477,22 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                   <Td right>{f.ptcDueToBf !== null ? rand(f.ptcDueToBf) : <span className="text-slate-300">—</span>}</Td>
                   <Td first><Badges list={exceptions} /></Td>
                   <Td muted>
-                    <span className="block max-w-[12rem] truncate" title={r.bankDescription ?? r.details ?? ''}>
-                      {r.reference ?? r.bankDescription ?? '—'}
+                    <span className="block max-w-[12rem] truncate" title={r.details ?? ''}>
+                      {r.reference ?? '—'}
+                    </span>
+                  </Td>
+                  {/*
+                    THE BANK'S OWN WORDS, BESIDE OUR REFERENCE (R-32, Rinda, Finance: "can we please have the
+                    description as it appears on the bank statement also reflect here"). The reference is
+                    what Raptor matched on -- usually our own account number, so it said nothing new -- and
+                    the description used to show only when there was no reference at all. The person
+                    approving checks the match against what the debtor actually typed, so it is a column of
+                    its own, not a tooltip. A receipt with no bank line (captured, or from the portal) has none.
+                  */}
+                  <Td muted>
+                    <span className="block max-w-[16rem] truncate" title={r.bankDescription ?? ''}
+                      data-testid="queue-bank-description">
+                      {r.bankDescription ?? '—'}
                     </span>
                   </Td>
                   <Td>
