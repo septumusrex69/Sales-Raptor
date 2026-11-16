@@ -187,6 +187,8 @@ export interface MoneyPosition {
   excessCredit: number
   paymentsAllocated: number
   bfLeftToTake: number
+  /** Closed in Raptor or written off: the engine takes nothing more, so nothing is left (R-35). */
+  accountClosed: boolean
 }
 
 export interface Preview {
@@ -397,6 +399,7 @@ export async function fetchMoneyPosition(accountId?: string): Promise<MoneyPosit
     excessCredit: n(r.excess_credit),
     paymentsAllocated: n(r.payments_allocated),
     bfLeftToTake: n(r.bf_left_to_take),
+    accountClosed: Boolean(r.account_closed),
   }))
 }
 

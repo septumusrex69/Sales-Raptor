@@ -63488,3 +63488,181 @@ end $$;
 
 revoke all on function public.change_request_delete(integer) from public, anon;
 grant execute on function public.change_request_delete(integer) to authenticated;
+
+-- =====================================================================================================
+-- R-35 · Raptor H19 (builder, 16 Nov): A CLOSED ACCOUNT HAS NOTHING LEFT TO TAKE. Rinda (Finance): "On
+-- BNP0013 there is a refund due. The account was already closed and refunded before the new R50 payment
+-- was loaded. The full R50 should be available to refund, however on the what is left to take there shows
+-- R14.95 which in this case will be incorrect." The engine already agreed with her -- allocate_payment
+-- and preview_allocation hold every rand received after a close as the debtor's credit (prompt 11) --
+-- but account_money_position still counted a fee raised after the close as "left". It now makes the
+-- engine's own closed test and moves what was left to Cannot take. account_closed is appended for the
+-- panel's note. money_position returns setof this view and reads the new column without change.
+-- =====================================================================================================
+create or replace view public.account_money_position as
+with fee_rows as (
+  select f.account_id,
+         f.id,
+         f.incurred_at,
+         f.counts_toward_fee_cap,
+         f.annexure_item,
+         f.amount_excl_vat,
+         f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+         (f.cancelled_at is not null or f.billed is false) as unrecoverable
+    from public.account_fees_net f
+),
+/* What was already settled by the time this fee's turn came, oldest first. */
+ordered as (
+  select r.*,
+         coalesce(sum(case when r.unrecoverable then 0 else r.incl end)
+           over (partition by r.account_id order by r.incurred_at, r.id
+                 rows between unbounded preceding and 1 preceding), 0) as settled_before
+    from fee_rows r
+),
+pool as (
+  select a.account_id, coalesce(sum(a.to_costs), 0) as taken
+    from public.payment_allocations a where a.status <> 'reversed' group by a.account_id
+),
+/* IN DUPLUM'S ROOM FOR FEES (Raptor H16, 2 Nov; request #16): the capital handed over less the
+   interest posted as recoverable. Interest fills the ceiling first -- the firm's decision, because
+   interest carries no VAT -- and the fees share what is left, oldest first, so the newest fee is
+   the first one pushed out. This is in_duplum_cost_room's arithmetic over the whole book at once.
+   The panel used to leave it out: Camille's ALP00010 showed R204,14 of costs "left to take" on a
+   R177,50 ceiling, R26,64 more than the law lets anybody ask a debtor for. */
+room as (
+  select d.id as account_id,
+         greatest(0, greatest(coalesce(d.capital_handed_over, 0), 0)
+           - coalesce((select sum(x.amount_recoverable) from public.account_interest_accruals x
+                        where x.account_id = d.id), 0)) as room
+    from public.debtor_accounts d
+),
+fees as (
+  select o.account_id,
+         o.counts_toward_fee_cap,
+         o.annexure_item,
+         o.unrecoverable,
+         o.incl,
+         o.amount_excl_vat,
+         case when o.unrecoverable then 0
+              else least(greatest(coalesce(p.taken, 0) - o.settled_before, 0), o.incl) end as taken,
+         /* How much of this fee fits under the ceiling once interest and every older fee have had theirs. */
+         case when o.unrecoverable then 0
+              else least(greatest(coalesce(rm.room, 0) - o.settled_before, 0), o.incl) end as within
+    from ordered o
+    left join pool p on p.account_id = o.account_id
+    left join room rm on rm.account_id = o.account_id
+),
+cost_buckets as (
+  select account_id,
+         sum(incl) filter (where counts_toward_fee_cap)                   as c17_charged,
+         sum(incl - within) filter (where counts_toward_fee_cap)          as c17_cant,
+         sum(taken) filter (where counts_toward_fee_cap)                  as c17_taken,
+         sum(amount_excl_vat) filter (where counts_toward_fee_cap and not unrecoverable) as c17_excl_recoverable,
+         sum(incl) filter (where not counts_toward_fee_cap)                   as i9_charged,
+         sum(incl - within) filter (where not counts_toward_fee_cap)          as i9_cant,
+         sum(taken) filter (where not counts_toward_fee_cap)                  as i9_taken
+    from fees group by account_id
+),
+interest as (
+  select account_id,
+         coalesce(sum(amount_accrued), 0) as accrued,
+         coalesce(sum(amount_recoverable), 0) as recoverable
+    from public.account_interest_accruals group by account_id
+),
+allocated as (
+  select account_id,
+         coalesce(sum(to_interest), 0) as interest_taken,
+         coalesce(sum(to_capital), 0) as capital_taken,
+         coalesce(sum(commission), 0) as commission_earned,
+         coalesce(sum(commission_vat), 0) as commission_vat_earned,
+         coalesce(sum(payment_amount), 0) as payments_allocated,
+         coalesce(sum(excess_credit), 0) as excess_credit
+    from public.payment_allocations where status <> 'reversed' group by account_id
+),
+/* A CLOSED ACCOUNT HAS NOTHING LEFT TO TAKE (R-35, Rinda, 16 Nov · Raptor H19). The same test
+   allocate_payment and preview_allocation make (prompt 11): closed in Raptor on or before today, or
+   an imported write-off. allocate_payment posts NO split on such an account -- the whole receipt is
+   the debtor's credit -- so whatever costs, interest or receipt fees are still on it can never be
+   taken. BNP0013 closed paid up on 10 Nov; a R13 correspondence fee (R14.95) raised two days later
+   read "Left R 14.95" here, while the R50 that came in after was rightly all credit to refund.
+   What would have been "left" moves to "Cannot take", so Charged = Taken + Left + Cannot take
+   still adds up, and BF left to take is nil. */
+shut as (
+  select d.id as account_id,
+         ((d.ended_as is not null and public.raptor_today() >= d.ended_on)
+          or (d.ended_as is null and (coalesce(d.write_off_reason, '') <> ''
+                                      or d.status ~* '^(written.off|closed)'))) as closed
+    from public.debtor_accounts d
+)
+select d.id as account_id,
+       d.company_id,
+       d.case_number,
+       d.account_number,
+       d.assigned_to,
+       d.status,
+       d.capital_handed_over,
+       coalesce(d.capital_outstanding, 0) as capital_outstanding,
+       coalesce(al.capital_taken, 0) as capital_taken,
+
+       coalesce(i.accrued, 0) as interest_charged,
+       coalesce(al.interest_taken, 0) as interest_taken,
+       case when sh.closed then 0 else greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0) end as interest_left,
+       greatest(coalesce(i.accrued, 0) - coalesce(i.recoverable, 0), 0)
+         + case when sh.closed then greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0) else 0 end as interest_cant_take,
+
+       coalesce(cb.c17_charged, 0) as costs_charged,
+       coalesce(cb.c17_taken, 0) as costs_taken,
+       case when sh.closed then 0 else greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0) end as costs_left,
+       coalesce(cb.c17_cant, 0) + case when sh.closed then greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0) else 0 end as costs_cant_take,
+
+       coalesce(cb.i9_charged, 0) as receipt_fees_charged,
+       coalesce(cb.i9_taken, 0) as receipt_fees_taken,
+       case when sh.closed then 0 else greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0) end as receipt_fees_left,
+       coalesce(cb.i9_cant, 0) + case when sh.closed then greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0) else 0 end as receipt_fees_cant_take,
+
+       /* COMMISSION: earned when capital comes in, so it has no "left" -- only a potential. */
+       coalesce(al.commission_earned, 0) + coalesce(al.commission_vat_earned, 0) as commission_earned,
+       /* Nothing more comes in on a closed account, so no commission can either (R-35). */
+       case when sh.closed then 0 else
+       round(coalesce(d.capital_outstanding, 0)
+             * coalesce(d.commission_rate, c.commission_rate, 0)
+             * (1 + coalesce(fs.vat_rate, 0.15)), 2) end as commission_potential,
+       coalesce(d.commission_rate, c.commission_rate) as commission_rate,
+
+       /* THE ITEMS 1-7 CEILING: the capital handed over or R1 225, whichever is the lesser, and
+          measured EXCLUDING VAT -- which is the unit annexureB.ts's feeCeiling already works in
+          and the unit the gazette sets the figure in. */
+       least(coalesce(d.capital_handed_over, 0), 1225.00) as cost_cap,
+       coalesce(cb.c17_excl_recoverable, 0) as cost_cap_used,
+       greatest(least(coalesce(d.capital_handed_over, 0), 1225.00) - coalesce(cb.c17_excl_recoverable, 0), 0) as cost_cap_headroom,
+
+       /* IN DUPLUM (NCA s103(5)): interest + costs still to take may not pass the ceiling.
+          DERIVED, NOT ECHOED. This read `coalesce(d.in_duplum, false)` -- Swordfish's own "In
+          Duplum" column, which is false on everything Raptor ever created -- while the chip it
+          draws says "non-capital has reached the capital handed over". So the panel said "In
+          duplum ceiling R380,00" on an account whose non-capital was R441,91. The rule itself is
+          in open_interest and applies to every account; this is only the reading of it, and
+          in_duplum_reached is the one place it is worked out. */
+       public.in_duplum_reached(d.id) as in_duplum,
+       coalesce(d.in_duplum_ceiling, 0) as in_duplum_ceiling,
+
+       coalesce(al.excess_credit, 0) as excess_credit,
+       coalesce(al.payments_allocated, 0) as payments_allocated,
+
+       /* WHAT BF STILL HAS TO COME. Commission is not in it: it is not a debt the debtor owes. */
+       case when sh.closed then 0 else
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0)
+         + greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0)
+         + greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0)
+       end as bf_left_to_take,
+
+       /* APPENDED LAST (create or replace view only adds columns at the end): the panel says why. */
+       coalesce(sh.closed, false) as account_closed
+  from public.debtor_accounts d
+  join public.companies c on c.id = d.company_id
+  cross join (select vat_rate from public.firm_settings limit 1) fs
+  left join cost_buckets cb on cb.account_id = d.id
+  left join interest i on i.account_id = d.id
+  left join allocated al on al.account_id = d.id
+  left join shut sh on sh.account_id = d.id;
+

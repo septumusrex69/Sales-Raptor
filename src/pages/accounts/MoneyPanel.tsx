@@ -118,7 +118,18 @@ export function MoneyPanel({ accountId, refreshKey }: { accountId: string; refre
           {pos.commissionRate === null ? ' · no rate on file' : ` at ${ratePercent(pos.commissionRate)}`}
         </Chip>
       </div>
-      {capReached && (
+      {/* R-35 (Rinda, 16 Nov): BNP0013 was closed paid up, and a correspondence fee raised after the close
+          read "Left R 14.95" here while the R50 that came in after was rightly all credit to refund. A closed
+          account takes nothing more -- allocate_payment holds every rand as the debtor's credit -- so the view
+          puts what was left under Cannot take, and this says why in the firm's words. */}
+      {pos.accountClosed && (
+        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-700" data-testid="money-closed">
+          This account is closed, so nothing more is taken from it. Anything still charged sits under
+          Cannot take, and money that comes in now is the debtor's credit, to refund or move on
+          Trust → Overpayments.
+        </p>
+      )}
+      {capReached && !pos.accountClosed && (
         <p className="mt-2 text-xs text-slate-500">
           No further letters, calls, SMSs or consultations can be recovered from this debtor.
           Receipt fees sit outside the cap and still can.

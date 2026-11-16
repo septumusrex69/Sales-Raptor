@@ -35,6 +35,28 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## R-35 -- A CLOSED ACCOUNT HAS NOTHING LEFT TO TAKE (Raptor · Handover 19, 16 Nov, builder run; branch `claude/h19-r35` from `claude/sales-raptor-review-p1pzx2` at 4b46786)
+
+- **Asked by Rinda (Finance) on BNP0013**: closed paid up 10 Nov and refunded, then R50 more came in; "What is left to
+  take" said R14.95 left, which made the R50 look less than fully refundable. The ENGINE was already right -- prompt 11:
+  `allocate_payment`/`preview_allocation` post no split on a closed account, the whole receipt is the debtor's credit --
+  only `account_money_position` disagreed. The R14.95 is an item 6 "Correspondence" fee (R13 + VAT) raised 12 Nov, after
+  the close; a second one landed 16 Nov (so staging now shows R29.90 under Cannot take).
+- **Migration `r35_closed_account_nothing_left_to_take`** (staging, mirrored at the end of schema.sql): the view makes the
+  engine's own closed test (ended on/before `raptor_today()`, or an imported write-off), and on a closed account every
+  Left, the commission potential and BF left to take are nil, each Left moved to its Cannot take so the row still adds
+  up. `account_closed` appended last; `money_position` (setof the view) picks it up unchanged. Open accounts' total
+  left to take was R4 419.65 before and after. **Business -> Back office "Left to take" drops by whatever closed and
+  imported written-off accounts still carried** -- correct, the engine would never take it.
+- **MoneyPanel** says why on a closed account ("This account is closed, so nothing more is taken from it ..."), and
+  hides the items 1-7 "ceiling reached" line there.
+- Checks: new `check-money-closed` (15; seen failing 13, and a mutation of the costs line caught), new e2e
+  `money-closed` (7; seen failing without the panel change).
+- **NOT DONE, for Stephan to decide**: whether item 6 correspondence fees should be raised at all on an account closed
+  paid up. CLAUDE.md says nothing SENT to a paid-up account is charged (`planSend.paidUp`), but says nothing about mail
+  RECEIVED; these fees sit harmlessly under Cannot take now, but they are still on the debtor's ledger.
+
+
 ## R-30 -- INTEREST MONTH BY MONTH ON THE STATEMENT (Raptor · Handover 19, 13 Nov; branch `claude/h19-r30` from `claude/sales-raptor-review-p1pzx2` at 27befca)
 
 - **Asked by Rinda (call centre), answered by Stephan in a session on 13 Nov** (his answer is on R-30 as a comment).
