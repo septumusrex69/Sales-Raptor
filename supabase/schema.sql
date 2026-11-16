@@ -63446,3 +63446,45 @@ as $$
 $$;
 revoke all on function public.collections_share(date, date) from public, anon;
 grant execute on function public.collections_share(date, date) to authenticated;
+
+-- =====================================================================================================
+-- S21 · Raptor H19: THE BIG BOSS MAY DELETE A REQUEST. Stephan, 16 Nov: "There should be a place where you
+-- delete a request for a suggestion" -- a request had asked for something the report already showed. Declining
+-- keeps it on the list for good; a request that should never have been sent is better gone.
+--
+-- WHO: the Big Boss only, the person who decides what gets built (raptor.boss, never the Administrator role --
+-- six Administrators deleting one another's requests is what the tick exists to stop). The sender keeps the
+-- withdraw they always had (change_requests_withdraw: their own, while New).
+-- WHEN: anything not Being built. A request Claude has started has a branch behind it; deleting it would leave
+-- the builder working on a request nobody can find.
+-- WHAT GOES: the request, its files and its history (both cascade). A nightly review that named it keeps the id
+-- in request_ids, which is a report of what was looked at that night, not a link anything follows.
+-- SECURITY DEFINER because the delete policy lets only the sender delete; the check here is the whole rule.
+-- =====================================================================================================
+create or replace function public.change_request_delete(p_number integer)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  if not public.has_capability('raptor.boss') then
+    raise exception 'Only the Big Boss deletes a request.' using errcode = '42501';
+  end if;
+  select status into v_status from public.change_requests where number = p_number for update;
+  if not found then
+    raise exception 'Request % is not there any more.', p_number using errcode = 'P0002';
+  end if;
+  if v_status = 'building' then
+    raise exception 'Request % is being built. Wait until it is done, then delete it.', p_number using errcode = '22023';
+  end if;
+  delete from public.change_requests where number = p_number;
+end $$;
+
+revoke all on function public.change_request_delete(integer) from public, anon;
+grant execute on function public.change_request_delete(integer) to authenticated;

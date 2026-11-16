@@ -73,6 +73,10 @@ const handlers = (who, writes) => [
     writes.push({ table: 'edit', body: req.postDataJSON() })
     return { status: 200, body: null }
   }],
+  [(u, req) => u.includes('/rpc/change_request_delete'), (u, req) => {
+    writes.push({ table: 'delete', body: req.postDataJSON() })
+    return { status: 200, body: null }
+  }],
   [(u, req) => u.includes('/rpc/change_request_tested'), (u, req) => {
     writes.push({ table: 'tested', body: req.postDataJSON() })
     return { status: 200, body: null }
@@ -250,6 +254,7 @@ try {
       await od.locator('[data-testid="request-approve-build"], [data-testid="request-approve"], [data-testid="request-decline"], [data-testid="request-build"]').count(), 0)
     t.ok('...and is told who decides', /Only the Big Boss approves what gets built/.test(await od.getByTestId('request-actions').innerText()))
     t.ok('...but can still ask the person who sent it', await od.getByTestId('request-ask').isVisible())
+    t.check('...and is not offered Delete either', await od.getByTestId('request-delete').count(), 0)
     await op.context().close()
   }
 
@@ -290,6 +295,26 @@ try {
     && patch.body.status === 'declined' && patch.body.admin_note === 'Covered by R-8.')
   await t.shot(ap, 'change-requests-2-admin')
   await ap.context().close()
+
+  /* 3b. THE BIG BOSS DELETES A REQUEST (Stephan, 16 Nov: "a place where you delete a request"). Asked twice. */
+  {
+    const delWrites = []
+    const { page: dp } = await signedInPage(browser, ADMIN, handlers(ADMIN, delWrites), [], { now: '2026-10-26T10:00:00+02:00' })
+    await open(dp, '/requests?r=7')
+    const dd = dp.getByTestId('request-panel')
+    await dd.getByTestId('request-delete').waitFor({ timeout: 20000 })
+    await dd.getByTestId('request-delete').click()
+    t.ok('the first press only says what will go', /Delete request #7 for good\? Its files and history go with it\./.test(await dd.getByTestId('request-delete-row').innerText())
+      && delWrites.every((w) => w.table !== 'delete'))
+    await dd.getByTestId('request-delete-cancel').click()
+    t.ok('...Keep it takes the question away and deletes nothing', await dd.getByTestId('request-delete').isVisible() && delWrites.every((w) => w.table !== 'delete'))
+    await dd.getByTestId('request-delete').click()
+    await dd.getByTestId('request-delete-confirm').click()
+    await dp.waitForTimeout(600)
+    t.check('...Yes deletes that request, by its number', JSON.stringify(delWrites.find((w) => w.table === 'delete')?.body), JSON.stringify({ p_number: 7 }))
+    t.check('...and the panel closes', await dp.getByTestId('request-panel').count(), 0)
+    await dp.context().close()
+  }
 
   /*
    * 4. THE BELL (S14, Raptor H13). The firm, 27 Oct: every line said "just now", two replies on one

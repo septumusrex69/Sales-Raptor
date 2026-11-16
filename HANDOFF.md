@@ -4871,3 +4871,14 @@ public.deployment` inside a probe was cancelled once. Keep probes to what they n
 3. `npm run qa -- --fast` before touching anything, so you know what was already red.
 4. Work on staging; mirror every migration into `supabase/schema.sql`; verify by md5.
 5. Update §2, §3 and §5 of this file before you finish.
+
+### S21 · Raptor H19 -- the Big Boss deletes a request (16 Nov)
+
+Stephan: *"There should be a place where you delete a request"* -- Rinda asked for the handover amount on the report,
+which was already there. **Delete this request** sits at the foot of the request panel for `raptor.boss` only, asks
+twice ("Delete request #N for good? Its files and history go with it."), and calls `change_request_delete(p_number)`
+(staging migration `h19_big_boss_deletes_a_request`, mirrored). The database refuses anybody without the tick and any
+request **Being built** (Claude has a branch behind it). Files and history cascade; a nightly review's `request_ids`
+keeps the dead id, harmlessly. The sender's own Withdraw (theirs, while New) is unchanged. Held by
+`check-change-requests` (rule, function, button) and `e2e/change-requests` step 3b; tested on staging in a rolled-back
+transaction (a plain Administrator refused, Stephan's delete took the request and both history rows).
