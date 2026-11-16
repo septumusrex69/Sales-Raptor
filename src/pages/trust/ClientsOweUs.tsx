@@ -20,7 +20,8 @@ import { PtcAgeAnalysis, PtcByPayover } from './TrustPtc'
  * payment or set up an arrangement. Underneath, how old the debt is and the payments behind it, which
  * used to sit on the Trust overview -- the overview now carries the total and a link here.
  */
-export function ClientsOweUs() {
+/* A FILTER OF THE CLIENT LEDGER now (S21 · Raptor H19), not a menu item: `embedded` draws it there as a section. */
+export function ClientsOweUs({ embedded = false }: { embedded?: boolean } = {}) {
   const [rows, setRows] = useState<ClientOwing[] | null>(null)
   const [ageing, setAgeing] = useState<PtcAgeing[]>([])
   const [ptc, setPtc] = useState<PtcRun[]>([])
@@ -42,7 +43,9 @@ export function ClientsOweUs() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-800">Clients owe us</h1>
+          {embedded
+            ? <h2 className="text-lg font-semibold tracking-tight text-slate-800">Clients who owe us</h2>
+            : <h1 className="text-xl font-semibold tracking-tight text-slate-800">Clients owe us</h1>}
           <p className="mt-1 text-sm text-slate-500">
             Owing the trust is owing the firm: one figure per client, from payovers that came out below nil and invoices not yet paid.
           </p>

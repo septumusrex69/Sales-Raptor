@@ -62,17 +62,16 @@ const server = await startServer()
 const browser = await chromium.launch()
 try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
-  await page.goto(`http://127.0.0.1:${PORT}/trust`, { waitUntil: 'domcontentloaded' })
-  const link = page.getByRole('link', { name: 'Payments out' }).first()
-  await link.waitFor({ timeout: 20000 })
-  t.ok('Payments out is in the Trust menu', await link.isVisible())
-  await link.click()
-  await page.waitForURL(/\/trust\/payments-out/, { timeout: 10000 })
+  /* S21 · Raptor H19: paying out is the foot of Payover runs, off the menu (Stephan: "it's still a little bit
+     complicated"); the old address lands there. */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payments-out`, { waitUntil: 'domcontentloaded' })
+  await page.waitForURL(/\/trust\/payover#paying-out/, { timeout: 10000 })
+  t.ok('the old address lands on Payover runs, at Paying out', /\/trust\/payover#paying-out$/.test(page.url()))
   const rows = page.getByTestId('payment-to-make')
   await rows.first().waitFor({ timeout: 15000 })
   t.check('every payment waiting to leave trust is listed, the firm\'s transfer included', await rows.count(), 5)
-  t.check('the top bar names this screen, not Payments in', await page.getByRole('banner').getByText('Payments out', { exact: true }).count().catch(() => 0) > 0
-    || (await page.locator('header').first().innerText().catch(() => '')).includes('Payments out'), true)
+  t.check('...under its own heading at the foot of the runs', await page.getByTestId('paying-out').getByRole('heading', { name: 'Paying out' }).count(), 1)
+  t.check('Payments out is not on the Trust menu any more', await page.locator('nav').getByRole('link', { name: 'Payments out' }).count(), 0)
   const body = await page.locator('main').innerText().catch(async () => page.locator('body').innerText())
   for (const ref of ['BF PO-SMT-2610', 'BF PO-BPM-2610', 'BF RAP-124059', 'BF FEES-2610']) t.ok(`...with its reference ${ref}`, body.includes(ref))
   /* WHAT CAN BE PAID IS TICKED; WHAT CANNOT IS PENDING AND SAYS WHY (the firm, 13 Oct). */

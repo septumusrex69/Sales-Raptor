@@ -372,6 +372,16 @@ export function mayWithdraw(user: Pick<User, 'id'> | null | undefined, r: Pick<C
 }
 
 /*
+ * THE BIG BOSS MAY DELETE A REQUEST (S21 · Raptor H19). Stephan, 16 Nov: "There should be a place where you delete
+ * a request" -- one had asked for a figure the report already showed. Declining keeps it on the list for good; a
+ * request that should never have been sent is better gone, files and history with it. Anything but Being built:
+ * Claude has a branch behind that one. The browser's copy of change_request_delete, for drawing the button.
+ */
+export function mayDelete(user: Parameters<typeof can>[0], r: Pick<ChangeRequest, 'status'>): boolean {
+  return can(user, 'raptor.boss') && r.status !== 'building'
+}
+
+/*
  * TESTED IS THE ASKER'S WORD, DONE IS THE BUILDER'S (Raptor H12; the firm: "so that she can test it
  * and approve that ... it works"). An answer counts only if it came AFTER the request was last
  * marked Done -- a request sent back, rebuilt and marked Done again is waiting for a new answer,

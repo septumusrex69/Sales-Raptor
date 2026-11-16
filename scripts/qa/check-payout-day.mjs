@@ -75,9 +75,10 @@ ok('the queue holds a ready run until its day', /const waitsForDay = \(r: WorkQu
 
 /* FINALISED (the firm, 11 Oct): a run below nil whose advice went is finished, not "Due today" for ever. */
 const q11 = strip(read('src/pages/finance/FinanceWorkQueue.tsx'))
+/* S21: the rule moved to paidOverLedger.ts, shared with the Client ledger, unchanged. */
 ok('a sent run below nil is finalised, beside the paid ones',
-  /const isFinal = \(r: WorkQueueRow\) => r\.status === 'paid'\s*\|\| \(r\.netPayover <= 0 && \(r\.status === 'sent'/.test(q11)
-  && /final: isFinal\(r\)/.test(q11))
+  /return r\.status === 'paid'\s*\|\| \(r\.netPayover <= 0 && \(r\.status === 'sent'/.test(strip(read('src/lib/paidOverLedger.ts')))
+  && /const isFinal = \(r: WorkQueueRow\) => isPaidOver\(r, settled\)/.test(q11) && /final: isFinal\(r\)/.test(q11))
 /* S7: Finalised became History, one payout at a time. */
 ok('...under the History tab', /history: 'History'/.test(q11))
 

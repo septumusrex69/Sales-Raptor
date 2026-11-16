@@ -983,6 +983,22 @@ export async function fetchBankImportHistory(): Promise<BankImportHistory[]> {
   }))
 }
 
+/**
+ * THE ACCOUNTS A SUSPENSE RECEIPT PROBABLY MEANT (S21 · Raptor H19): every one-slip form of each word looked up exactly
+ * (near_reference_accounts). Offered, never placed -- see suspenseNearMatch.ts.
+ */
+export async function fetchNearMatches(tokens: string[]): Promise<import('./suspenseNearMatch').NearMatchRow[]> {
+  if (tokens.length === 0) return []
+  const { data, error } = await supabase.rpc('near_reference_accounts', { p_tokens: tokens })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    token: String(r.token), accountId: String(r.account_id), caseNumber: String(r.case_number),
+    accountNumber: (r.account_number as string | null) ?? null, debtor: (r.debtor as string | null) ?? null,
+    client: (r.client as string | null) ?? null, matchedOn: r.matched_on === 'account number' ? 'account number' : 'case number',
+    how: String(r.how), rank: Number(r.rank),
+  }))
+}
+
 /** Place an unmatched receipt against an account. This is what creates the payment. */
 export async function placeBankLine(lineId: string, accountId: string): Promise<string> {
   const { data, error } = await supabase.rpc('place_bank_line', {

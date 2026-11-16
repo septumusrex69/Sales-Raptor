@@ -38,6 +38,7 @@
 /src/lib/client*Payovers.ts             @septumusrex69
 /src/lib/clientBusinessReceipts.ts      @septumusrex69
 /src/lib/clientLedger.ts                @septumusrex69
+/src/lib/paidOverLedger.ts              @septumusrex69
 /src/lib/clientStatement.ts             @septumusrex69
 /src/lib/commission*.ts                 @septumusrex69
 /src/lib/excessCredit*.ts               @septumusrex69

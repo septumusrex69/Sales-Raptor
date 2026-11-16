@@ -89,7 +89,10 @@ check('every other status keeps its word whatever the tab', ['needs_review', 'ap
 const page = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
 check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tabShown === 'history' \? 'paid' : 'open', lag, cycle\?\.today \?\? null\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
 check('...sorts every run with queueTabOf, once', (page.match(/queueTabOf\(/g) ?? []).length, 1)
-check('...in the four tabs, in order', /\['collecting', 'waiting', 'topay', 'history'\] as const/.test(page), true)
+/* S21 · Raptor H19 (Stephan: "first is the ones that should be approved and paid ... then these ones in waiting, and
+   then the collecting ones ... The history of the payovers would be then in the client ledger"). */
+check('...in three tabs, what needs a person first', /\['topay', 'waiting', 'collecting'\] as const/.test(page), true)
+check('...and History is the Client ledger', /if \(tabParam === 'history'\) return <Navigate to="\/trust\/client-ledger" replace \/>/.test(page), true)
 check('...and draws the open cycle even with nothing in it', /emptyCollecting && cycle/.test(page) && /collectingState\(cycle\.periodEnd, lag\)/.test(page), true)
 
 check('...and the queue draws it from the tab', /<Pill status=\{r\.status\} tab=\{tabOf\(r\)\} \/>/.test(page), true)

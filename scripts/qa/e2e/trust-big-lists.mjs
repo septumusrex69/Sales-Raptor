@@ -52,7 +52,8 @@ try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
 
   /* ---- To sort: 2 135 statement lines ---- */
-  await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions`, { waitUntil: 'domcontentloaded' })
+  /* S21: each To sort section is a tile; #lines opens this one. */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions#lines`, { waitUntil: 'domcontentloaded' })
   const line = page.getByTestId('line-to-allocate')
   await line.first().waitFor({ timeout: 20000 })
   t.check('To sort draws a hundred statement lines, not 2 135', await line.count(), 100)
@@ -72,11 +73,12 @@ try {
   await page.waitForTimeout(200)
   t.ok('a month past the old cap opens, at its first hundred', (await row.count()) > 0 && (await row.count()) <= 100)
 
-  /* ---- Payments in: 330 payments out ---- */
+  /* ---- Payments in: no list of payments out any more (S21) ----
+     Suspense and the money out beside it left Payments in (Stephan: "the payments in should only show what needs to be
+     approved"). The 330 payments out are To sort's Statement lines to allocate, drawn a hundred at a time above. */
   await page.goto(`http://127.0.0.1:${PORT}/trust/payments`, { waitUntil: 'domcontentloaded' })
-  const more = page.getByTestId('payouts-more')
-  await more.waitFor({ timeout: 20000 })
-  t.ok('Payments in draws a hundred payments out, of 330', /Showing 100 of 330/.test(plain(await more.innerText())))
+  await page.getByTestId('payments-overview').waitFor({ timeout: 20000 })
+  t.check('Payments in no longer draws the payments out', await page.getByTestId('payouts-more').count(), 0)
   await context.close()
 } catch (e) {
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message.split('\n')[0] : e})`, false)

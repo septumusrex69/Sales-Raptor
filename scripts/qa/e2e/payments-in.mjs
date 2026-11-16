@@ -121,9 +121,10 @@ try {
   /* ---- the page ---- */
   t.check('the three payments are in the queue', await rows.count(), 3)
   const tiles = await page.getByTestId('payments-overview').innerText()
-  t.ok('the four figures: waiting, processed into trust, paid to clients, needs an account',
+  /* S21: suspense left Payments in for To sort (Stephan: "the payments in should only show what needs to be approved"). */
+  t.ok('the three figures: waiting, processed into trust, paid to clients -- no suspense',
     /Waiting for approval/.test(tiles) && /Processed into trust/.test(tiles)
-    && /Paid to clients · PTC/.test(tiles) && /Needs an account/.test(tiles))
+    && /Paid to clients · PTC/.test(tiles) && !/Needs an account/.test(tiles))
   t.ok('...pending is the queue’s total', money(tiles).includes('R18000.00'))
   t.ok('...and processed is the month the database summed', money(tiles).includes('R34500.00') && /12 payments this month/.test(tiles))
   t.check('the old list of every payment is gone', await page.getByRole('option', { name: 'Every client' }).count(), 0)

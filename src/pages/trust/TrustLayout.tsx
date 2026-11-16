@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, History, Landmark, Users, Scale, Search, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, BookOpen, Briefcase, CircleGauge, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -28,26 +28,19 @@ import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceR
  * with a pay over queue." Overview sits above all of it because it is the only screen that
  * answers "is the trust account right", and that question comes before any day's work on it.
  */
+/*
+ * FIVE, IN THE ORDER A PAYMENT TRAVELS (S21 · Raptor H19). Stephan, 9 Nov: "I think it's still a little bit
+ * complicated, everything." In: approve it (Payments in). No home yet: To sort. Waiting to go to a client: Payover
+ * runs, which now ends with paying out (the bank file, refunds, the firm's transfer). Gone to the client: Client ledger,
+ * which also filters the clients who owe us. Finding a payment is the search bar at the top. The Trust ledger is under
+ * Trust settings -- the accountant's view, not the day's work. Every old address still opens or redirects.
+ */
 const ITEMS: RailItem[] = [
   { to: '/trust', label: 'Overview', icon: CircleGauge, end: true },
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
-  { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
-  /* The one place money leaves trust (S7): clients, refunds, the firm's transfer, and the bank file. */
-  { to: '/trust/payments-out', label: 'Payments out', icon: Send },
-  /* TO SORT (S7, the firm, 13 Oct: "there's a tab for overpayments and then there's another tab for
-     exceptions ... I don't know where we can see the suspense account"): one page for all three. */
   { to: '/trust/exceptions', label: 'To sort', icon: TriangleAlert },
-  /* S20 (the Claude Doc "Payments found late"): payments dated before one already split -- a receipt out of
-     suspense, a PTC captured late -- each worked out again in date order and corrected on the next run. Beside To
-     sort because it is the same kind of work: something found late, to be put right before the payover. */
-  { to: '/trust/backdated', label: 'Backdated payments', icon: History },
-  /* "A dedicated tab ... the clients that owe us money" (13 Oct). */
-  { to: '/trust/clients', label: 'Clients owe us', icon: Users },
-  /* "Every single transaction somewhere ... so we don't need to go into the bank" (13 Oct). */
-  { to: '/trust/statement', label: 'Bank statement', icon: Landmark },
-  /* Request #18: where did this payment go? Beside the statement, which answers the same question for bank lines only. */
-  { to: '/trust/find', label: 'Find a payment', icon: Search },
-  { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
+  { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
+  { to: '/trust/client-ledger', label: 'Client ledger', icon: BookOpen },
 ]
 
 export function TrustLayout() {

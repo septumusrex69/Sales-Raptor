@@ -35,6 +35,28 @@
    Itumeleng's BuzzBox extension is Barry's (140).
 
 
+## R-30 -- INTEREST MONTH BY MONTH ON THE STATEMENT (Raptor · Handover 19, 13 Nov; branch `claude/h19-r30` from `claude/sales-raptor-review-p1pzx2` at 27befca)
+
+- **Asked by Rinda (call centre), answered by Stephan in a session on 13 Nov** (his answer is on R-30 as a comment).
+  Interest still runs daily and is still worked out when it is looked at -- **no job, nothing new written, nothing
+  posted differently**; this changes only how interest is DRAWN. `accrueToDate` hands back `months` (one piece per
+  calendar month, adding to its amount to the cent); `buildStatement` draws the open period one line per month (dated
+  at the month's end, the last dated today and alone in saying "still accruing"), and draws a period POSTED at a
+  payment that runs across months month by month too (`postedMonths`: worked out again the way open_interest worked it,
+  the payment it was posted for left out, scaled to the posted figure; one line as before if it is more than R1/2% away
+  or inside one month, so every imported Swordfish row is untouched).
+- **Staff vs debtor (Stephan: "one entry line per month" for the debtor, so nobody says "you've charged me interest
+  twice"; both pieces on Raptor's own screen "for record keeping ... or for double checking").** The account page keeps
+  the payment month in two pieces; `oneInterestLinePerMonth` joins a month's pieces into one line inside
+  `statementOfAccount`, which every debtor-facing statement is drawn through (Documents button, portal download, the
+  reminder that carries it). Totals and the foot never move. Checked on Rinda's own staging account
+  (d684ee9e...): the one R126,91 line "3 April to 10 November" is now April to October plus 1-10 November; her PDF shows
+  1-13 November as one line; balance R1 060,08 either way.
+- `check-interest-monthly` (30), each part broken once and seen failing. The account page's note on a running line now
+  says it is posted when the next payment is allocated (it said "charged as part of this month", which was never how
+  Raptor posts). Known, not from this: `e2e/debtor-portal.mjs` cannot load `clientPortal.js` without the ts loader
+  (fails the same on the preview branch before this change; with `--import ./scripts/qa/tsresolve.mjs` it passes 46/0).
+
 ## STAGING CLEARED, AND THE CLEAR STAGING BUTTON FIXED (Raptor · Handover 19, 9 Nov; branch `claude/gallant-hypatia-t8oofh` from `claude/sales-raptor-review-p1pzx2` at 60a3a2f)
 
 - **Staging was emptied at Stephan's word** ("Clear all the information, the data on staging ... the debtors ... the
@@ -116,6 +138,111 @@ since 4 Nov touched Cc, the signature or the compose box). No migration. Commits
   word, 9 Nov.
 - Not done: the central mailbox / legal@ fitting together (S17's note) -- the compose box never sends from the central
   mailbox, so the preview is always the writer's own signature.
+
+### S21 -- A FORWARD THAT WOULD NOT SEND (10 Nov; no migration)
+- Stephan forwarding "Fwd: THRIFTGEN PARTNERSHIP" (one PDF, TPPP_Questionnaire_Response.pdf, ~610 KB) to Julian: "it
+  literally just doesn't want to send." Logs: the message was opened twice (09:02, 09:04), NO /api/email/send at all;
+  the mailbox sync was hitting Vercel's 300 s limit at the same time (mail server slow). Send is disabled while a
+  forward's attachments are fetched (`fetchingForward`), the browser fetch had no limit (only the function's 300 s),
+  and the only sign was a small "Fetching the attachments" beside Attach. A browser repro with a prompt mailbox sends
+  first time -- the box was not broken, it was waiting.
+- Fixed in ComposeEmailModal: each forwarded file gets FORWARD_FETCH_MS (45 s) and is otherwise left off with the
+  note; the button reads "Fetching the attachment…" / "Fetching the original…" instead of a grey Send; "Send without
+  it" (forward-skip) lets it go at once, the files named as not attached. e2e/forward-attachment (a mailbox that never
+  answers, and one that does; fails on the old box).
+- **Not fixed, look next**: `/api/email/sync` timing out at 300 s repeatedly this morning (and ~950 sync log lines in
+  12 h). A sync that runs to the limit holds an IMAP connection for five minutes; with several open tabs that can
+  starve the attachment and body fetches on the same mailbox. Worth finding which folder walk is slow (the mailbox
+  has hundreds of INBOX.Clients.* folders).
+
+### S21 -- OUR SHARE OF COLLECTIONS (9 Nov; staging migrations `h19_collections_share`, `h19_collections_share_vat_apart`, mirrored)
+- Stephan: "if we collect 2 million, or 3 million, how much of that is [our] share? How much of that is the client
+  share? ... the profitability margin ratio." Agreed: **Business -> Income**, behind business.income (no role has it,
+  not even Administrator), named **Our share of collections**. Under the month picker: the chosen month and the twelve
+  to it (ratio, a bar, Collected / Our share / VAT for SARS / Clients' share), a month-by-month table, and client by
+  client for the month.
+- OURS = commission + Annexure B fees and costs + interest earned on receipts; VAT on commission apart (SARS's); the
+  CLIENTS' share = collected less both, i.e. what the clients get. Collected and earned are the Income graph's own
+  figures (business_income_months; `collections_share(from, to)` per client, same rules, dated by approval). The
+  graph's existing "earned as a share of collected" also counts charges to clients and bank interest, so it can read a
+  little higher -- the page says so. `src/lib/collectionsShare.ts`; a period's ratio is the ratio of its totals, never
+  an average of ratios. The chosen month is read BY ITS DATE (a month with no row is nothing collected).
+- Checks: check-collections-share (average-of-ratios break seen failing), e2e business-income (+4; the by-date break
+  seen failing). Staging's reloaded book has no payments yet, so the figures there are empty until there are some.
+
+### S21 -- SUSPENSE NEAR MATCHES; THE SIGNATURE LIKE OUTLOOK (9 Nov; staging migrations `h19_suspense_near_matches`, `h19_near_matches_in_the_revoke_list`, mirrored, md5 verified)
+- Stephan: "proceed with the suspense near match. Give options still a search option." Each suspense receipt on screen
+  offers "Did they mean": accounts whose case or account number is ONE SLIP from a reference-like word on the receipt
+  (two characters swapped, one digit different, one digit missing, one character too many), or that share the
+  reference exactly (the "matched more than one account" receipts). `near_reference_accounts(text[])` (definer,
+  finance.view, in the finance revoke list) builds every one-slip form in SQL and looks each up EXACTLY on the two
+  indexes -- nothing fuzzy; ~35 ms. `src/lib/suspenseNearMatch.ts` picks the words and orders the options.
+- **The name is the check**: case numbers run in sequence, so one digit different nearly always hits a real account --
+  the neighbour. An option whose debtor's surname is on the bank line comes first ("the name on the bank line
+  matches", green); one without says "does not match, so check it" (amber). At most three.
+- Nothing is placed by offering: "Place it here" asks "Place R x on DRC0018?", and only "Yes, place it" calls
+  place_bank_line -- the same call Place it makes. Place it (the search) and the reference box stay beside the options.
+- Checks: check-suspense-near-match (name-first break seen failing after the fixture was corrected to need it),
+  e2e payments-in-tidy (+8: offered, ordered, asks first, places once).
+- Signature: the message box grows with the words (two rows at least) and the signature follows one blank line under
+  the last line, like Outlook (Stephan: "The signature is way below the text"); e2e measures it.
+- **Asked, not built**: a "profitability" view -- of what is collected, the firm's share against the clients' share,
+  as an amount and a ratio (Stephan's word: "profitability margin ratio"). Belongs behind business.income (Business ->
+  Income), not on Trust or the company dashboard (CLAUDE.md: no commission/Annexure B income there). Ask him to confirm
+  the place and the name.
+
+### S21 -- TRUST IN FIVE, AND ONE SEARCH FOR PAYMENTS (9 Nov; Stephan: "it's still a little bit complicated ... the search a payment. Like, is it necessary to do it there"; no migration)
+- **Menu: Overview, Payments in, To sort, Payover runs, Client ledger** -- the order a payment travels. Moved, routes
+  kept: Payments out = the foot of Payover runs (`TrustPaymentsOut embedded`, `#paying-out`; /trust/payments-out
+  redirects, ?draw=1 carried, and the embedded copy deletes only `draw` from the address); Clients owe us = the Client
+  ledger's "Owe us" filter (?view=owe; /trust/clients redirects); Find a payment off the menu (/trust/find still opens);
+  Trust ledger linked from the top of Trust settings; the old History tab (CheckPayments) is /trust/check, off the menu,
+  linked from the Client ledger's foot.
+- **One search**: the top bar finds payments for finance holders (`paymentQuery`/`paymentPath` in globalSearch.ts,
+  find_payments): an amount, a case number or words off the proof of payment; opens the account (reverse is there) or
+  suspense. The Client ledger's own box and Payments in's History tab are gone. check-search-payments.
+- **Pages**: overview -- Needs attention full width under the shares, the owner-by-owner list folded (`owners-fold`);
+  Payover runs -- no figure cards (they are the Overview's); To sort -- four tiles (Suspense, Statement lines,
+  Overpayments, Anything else), each its count and total from the same data its list reads, opened by a press or by a
+  link naming it (#suspense, #lines, #overpayments, #other).
+- **Also fixed**: the dashboard photograph's credit sat at the TOP edge, half under the bar (`.collections-hero > *`
+  made it relative); `!absolute` puts it back in the bottom-right corner (e2e company-dashboard measures it).
+- Checks and e2e moved to the new places (workspace-split, payments-out, check-payments, payover-sends, find-payment,
+  trust-big-lists, trust-sort-statement, trust-unaccounted, and the source checks). Fast suite 23 892 green.
+
+### S21 -- THE TRUST AREA, SIMPLIFIED (9 Nov; Stephan's walk-through of a ChatGPT layout he liked; no migration)
+- **Overview**: four figures (In the trust account, Accounted for, Not accounted for -> its list, **Ready for payover**
+  = clients' money in closed cycles -> Payover runs); **What the account is made of** (bar + Client funds / Bredell
+  Ferreira's share / Debtor credits / Other holdings = Swordfish); **Client share** and **Our share** cycle by cycle;
+  **Needs attention** (was Needs doing); the owner-by-owner list kept below. All read off trust_cash_by_cycle
+  (`src/lib/trustComposition.ts`, the four add to accountedFromCash exactly; check-trust-composition).
+- **Payments in**: only what needs approving or placing -- three tiles, the queue, then **Backdated payments to approve**
+  (BackdatedPayments `embedded`, drawn only while one waits; "Not a separate tab"). Suspense and the money-out card left.
+- **To sort**: Suspense is a **tile** (count + total) that opens the searchable list; #suspense links open it. Money out
+  (bank charges, returned debits) stays under Statement lines to allocate, which offers both.
+- **Payover runs**: tabs **Approve and pay -> Waiting -> Collecting**; no History tab (?tab=history -> Client ledger).
+- **Client ledger** (`/trust/client-ledger`, new rail item): clients with paid-over runs (search by name/code), a
+  client's payovers (cycle, advice number, paid on the Johannesburg day, bank reference) each opening the run
+  (`/trust/runs/:id`: payments, the advice, the copy that was emailed), and a payment search (find_payments).
+  "Finished" is ONE rule, `isPaidOver` in `src/lib/paidOverLedger.ts`, shared with the runs page (check-paid-over-ledger).
+  NOTE: `src/lib/clientLedger.ts` is the OTHER client ledger (a client's running statement by payover, on the client
+  page) -- it was overwritten by mistake once in S21 and restored; `ls` before naming.
+- **Rail**: Client ledger in; **Bank statement** and **Backdated payments** off the menu (both routes stay; Not
+  accounted for links to the statement).
+- **Not done from the recommendations**: one payment-status wording across every Trust screen (item 1), and
+  near-match suggestions for suspense (item 6). Trust ledger left as it is (Stephan: "Perhaps I can look better at that
+  where there's some data in it").
+- Checks moved: check-payments-queue, check-backdated-payments, check-payout-day, check-payover-groups,
+  check-workspace-split, check-trust-cycles/split; e2e payments-in, payments-in-suspense-pages (now on To sort),
+  payments-in-tidy (now To sort), trust-big-lists, payover-sends (+ the Client ledger), backdated-payments,
+  workspace-split. Fast suite 23 882 green.
+
+### S21 -- EMAIL: CC ON A REPLY ALL, AND THE SIGNATURE IN THE MESSAGE (9 Nov)
+- "I try to add Nicholas and Camille ... it keeps removing one": a reply all pre-fills Cc as "Name <address>", which
+  only counted as finished if bare. `isRecipient` (recipientSuggest.ts) takes both; a finished person left last becomes
+  a chip on focus and a pick is added to everybody finished. e2e reproduces it on a real reply all.
+- "just make it part of the email": the signature is drawn inside the message box under the text (`SignatureInline`,
+  sandboxed, no label); on a forward under the original.
 
 ### S21 -- THE CASE NUMBER IS THE CLIENT-CODE REFERENCE (9 Nov; staging migration `h19_case_number_is_the_client_reference`, mirrored, md5 verified)
 Stephan: one Raptor reference, the client code + a running number (DRC0001), and a Swordfish handover continues the
@@ -4770,3 +4897,14 @@ public.deployment` inside a probe was cancelled once. Keep probes to what they n
 3. `npm run qa -- --fast` before touching anything, so you know what was already red.
 4. Work on staging; mirror every migration into `supabase/schema.sql`; verify by md5.
 5. Update §2, §3 and §5 of this file before you finish.
+
+### S21 · Raptor H19 -- the Big Boss deletes a request (16 Nov)
+
+Stephan: *"There should be a place where you delete a request"* -- Rinda asked for the handover amount on the report,
+which was already there. **Delete this request** sits at the foot of the request panel for `raptor.boss` only, asks
+twice ("Delete request #N for good? Its files and history go with it."), and calls `change_request_delete(p_number)`
+(staging migration `h19_big_boss_deletes_a_request`, mirrored). The database refuses anybody without the tick and any
+request **Being built** (Claude has a branch behind it). Files and history cascade; a nightly review's `request_ids`
+keeps the dead id, harmlessly. The sender's own Withdraw (theirs, while New) is unchanged. Held by
+`check-change-requests` (rule, function, button) and `e2e/change-requests` step 3b; tested on staging in a rolled-back
+transaction (a plain Administrator refused, Stephan's delete took the request and both history rows).

@@ -9,11 +9,11 @@ import { UserAvatar } from '../ui/Avatar'
 import { ZoomableImage } from '../ui/ZoomableImage'
 import { formatDateTime } from '../../data/mockData'
 import {
-  MAX_CHOICES, OTHER_CHOICE, waitingOn, questionFor, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, isParked, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw,
+  MAX_CHOICES, OTHER_CHOICE, waitingOn, questionFor, PRIORITY_LABEL, STATUS_LABEL, VERDICT_LABEL, answerBody, answerTo, choicesOk, isParked, mayAnswer, mayApproveBuild, mayDecide, mayEdit, mayTest, mayWithdraw, mayDelete,
   parseChoices, requestLabel, stageOf, testState, tickedOf, titleOf,
   type ChangeRequest, type RequestEvent, type RequestFileMeta, type RequestPriority, type RequestStatus,
 } from '../../lib/changeRequests'
-import { addEvent, answerQuestion, answerTest, askClaude, editRequest, fileDataUrl, listEvents, updateRequest, withdrawRequest, parkRequest } from '../../lib/changeRequestsApi'
+import { addEvent, answerQuestion, answerTest, askClaude, deleteRequest, editRequest, fileDataUrl, listEvents, updateRequest, withdrawRequest, parkRequest } from '../../lib/changeRequestsApi'
 import type { User } from '../../types'
 import { refreshNavCounts } from '../../lib/navCounts'
 
@@ -59,12 +59,14 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
   const [choiceWords, setChoiceWords] = useState('')
   /* Correcting the words (mayEdit): null while not editing, else the draft. */
   const [draft, setDraft] = useState<string | null>(null)
+  /* Deleting asks twice: the first press only says what will go. */
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const choices = parseChoices(choiceWords)
 
   const loadEvents = useCallback(() => {
     listEvents(r.id).then(setEvents).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [r.id])
-  useEffect(() => { setEvents(null); setComposing(null); setWords(''); setChoiceWords(''); setDraft(null); setError(null); loadEvents() }, [loadEvents])
+  useEffect(() => { setEvents(null); setComposing(null); setWords(''); setChoiceWords(''); setDraft(null); setError(null); setConfirmDelete(false); loadEvents() }, [loadEvents])
 
   async function act(fn: () => Promise<void>) {
     setBusy(true); setError(null)
@@ -321,6 +323,20 @@ export function RequestPanel({ r, files, users, me, onClose, onPrev, onNext, onC
         <div className="border-t border-slate-100 px-5 py-3">
           <button type="button" disabled={busy} onClick={() => void act(async () => { await withdrawRequest(r.id); onClose() })}
             className="text-xs text-slate-500 hover:text-red-700" data-testid="request-withdraw">Withdraw this request</button>
+        </div>
+      )}
+      {mayDelete(me, r) && composing === null && (
+        <div className="border-t border-slate-100 px-5 py-3" data-testid="request-delete-row">
+          {confirmDelete ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-700">Delete request #{r.number} for good? Its files and history go with it.</span>
+              <Button variant="danger" disabled={busy} onClick={() => void act(async () => { await deleteRequest(r.number); onClose() })} data-testid="request-delete-confirm">Yes, delete it</Button>
+              <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(false)} data-testid="request-delete-cancel">Keep it</Button>
+            </div>
+          ) : (
+            <button type="button" disabled={busy} onClick={() => setConfirmDelete(true)}
+              className="text-xs text-slate-500 hover:text-red-700" data-testid="request-delete">Delete this request</button>
+          )}
         </div>
       )}
     </aside>

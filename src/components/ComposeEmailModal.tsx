@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
-import { Paperclip, Plus, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { Loader2, Paperclip, Plus, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from './ui/Modal'
 import { draftKeyFor, dropDraft, findDraft, saveDraft, type MailDraft } from '../lib/mailDrafts'
 import { AttachLetter } from './letters/AttachLetter'
@@ -41,6 +41,9 @@ const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
  * JSON rather than the files, because a forwarded message's inline pictures are in it too.
  */
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024
+
+/** How long one forwarded file may take to come out of the mailbox before the forward stops waiting for it (S21). */
+const FORWARD_FETCH_MS = 45_000
 
 interface Attached { filename: string; contentType: string; size: number; content: string }
 
@@ -252,6 +255,20 @@ export function ComposeEmailModal({
   const [showCc, setShowCc] = useState(initialCc !== undefined)
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
+  /*
+   * THE BOX GROWS WITH WHAT IS TYPED, LIKE OUTLOOK (S21 · Raptor H19). Stephan, 9 Nov, with a screenshot: "The signature
+   * is way below the text ... I think do it like Outlook does it." A twelve-row textarea put a one-line message twelve
+   * rows above the signature. The textarea is now as tall as its words (two rows at least), the signature follows one
+   * blank line under the last of them, and the room for writing is the space below, which a press brings back to the
+   * text -- one document, as in Outlook.
+   */
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [body])
   const spell = useSpellGate()
   /*
    * THE FIRM'S OWN FACE, IN THE BOX SOMEBODY TYPES IN.
@@ -269,13 +286,31 @@ export function ComposeEmailModal({
    */
   const [fetchingForward, setFetchingForward] = useState((forwardAttachments?.names.length ?? 0) > 0)
   const [forwardNote, setForwardNote] = useState('')
+  /*
+   * A FORWARD NEVER WAITS SILENTLY, OR FOR EVER (S21 · Raptor H19). Stephan, 10 Nov, forwarding the Thriftgen
+   * partnership agreement to Julian: "it literally just doesn't want to send." No send ever reached the server: Send
+   * was greyed out while the PDF was fetched from his mailbox -- slow that morning, the mailbox sync itself running into
+   * the five-minute limit -- and the only word of it was a small "Fetching the attachments" beside Attach. Each file
+   * now has FORWARD_FETCH_MS to arrive and is otherwise left off with the note saying so; the Send button says what it
+   * is waiting for; and "Send without it" lets the message go at once, the files named as not attached.
+   */
+  const skipForward = useRef<() => void>(() => {})
   useEffect(() => {
     const wanted = forwardAttachments
     const token = session?.access_token
     if (!wanted || wanted.names.length === 0) return
     if (!token) { setForwardNote(leftOffNote(wanted.names)); setFetchingForward(false); return }
     let cancelled = false
-    void fetchForwardAttachments({ ...wanted, accessToken: token, maxBytes: MAX_ATTACHMENT_BYTES, fetchOne: fetchAttachment })
+    skipForward.current = () => {
+      cancelled = true
+      setForwardNote(leftOffNote(wanted.names))
+      setFetchingForward(false)
+    }
+    const fetchOne = (a: Parameters<typeof fetchAttachment>[0]) => Promise.race([
+      fetchAttachment(a),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('slow')), FORWARD_FETCH_MS)),
+    ])
+    void fetchForwardAttachments({ ...wanted, accessToken: token, maxBytes: MAX_ATTACHMENT_BYTES, fetchOne })
       .then(({ files: got, left }) => {
         if (cancelled) return
         setFiles((list) => [...list, ...got])
@@ -672,7 +707,13 @@ export function ComposeEmailModal({
             Set to the language chosen for dictation, because somebody dictating in Afrikaans is
             writing in Afrikaans.
           */}
-          <textarea className={inputClass} rows={quotedHtml ? 7 : 12} value={body} lang={lang}
+          {/* THE SIGNATURE IS PART OF THE MESSAGE, IN THE SAME BOX (S21 · Raptor H19). Stephan: "just make it part of the
+              email. It's not necessary to have like a separate box for that." The box is drawn round both; the
+              textarea inside it has no frame of its own, and the signature sits under what is typed as it will in
+              the inbox. On a forward it goes under the original instead -- where composeBody puts it. */}
+          <div className={`${inputClass} !p-0 overflow-hidden cursor-text min-h-[18rem] focus-within:ring-2 focus-within:ring-brand-500/40 focus-within:border-brand-500`} data-testid="message-box"
+            onClick={(e) => { if (e.target === e.currentTarget) bodyRef.current?.focus() }}>
+          <textarea ref={bodyRef} className="block w-full resize-none overflow-hidden border-0 bg-transparent px-3 pt-2 text-sm outline-none" rows={2} value={body} lang={lang}
             style={emailBodyCss(firm) as CSSProperties}
             spellCheck={spellCheckEnabled()} onChange={(e) => { touch(); setBody(e.target.value) }} required={!quotedHtml}
             placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
@@ -681,6 +722,8 @@ export function ComposeEmailModal({
                address; To and Message both asked for focus and the later one won, as Subject once
                did above. */
             autoFocus={!!initialSubject && !!address} />
+          {!quotedHtml && <SignatureInline user={currentUser} firm={firm} />}
+          </div>
         </FormField>
         {/*
           SAID, NOT SHOWN. The original goes out underneath as it was written, tables and all --
@@ -703,7 +746,7 @@ export function ComposeEmailModal({
         {appendHtml && appendNote && (
           <p className="-mt-2 mb-3 text-xs text-slate-500">{appendNote}</p>
         )}
-        <SignaturePreview user={currentUser} firm={firm} body={body} afterOriginal={!!quotedHtml} />
+        {quotedHtml && <SignatureInline user={currentUser} firm={firm} afterOriginal />}
 
         {/*
           THE SAME MICROPHONE AS THE REST OF RAPTOR. It has been on the diary and the account
@@ -756,7 +799,12 @@ export function ComposeEmailModal({
               onAttached={addAttachment} />
           )}
           {fetchingForward && (
-            <span className="text-xs text-slate-500">Fetching the attachments{'\u2026'}</span>
+            <span className="inline-flex flex-wrap items-center gap-2 text-xs text-slate-600" data-testid="forward-fetching">
+              <Loader2 size={12} className="animate-spin" />
+              Fetching {forwardAttachments?.names.join(', ') || 'the attachments'} from your mailbox{'\u2026'}
+              <button type="button" onClick={() => skipForward.current()} data-testid="forward-skip"
+                className="font-medium text-sky-700 underline-offset-2 hover:underline">Send without it</button>
+            </span>
           )}
           {forwardNote && (
             <span role="status" className="basis-full text-xs text-negative-700">{forwardNote}</span>
@@ -817,7 +865,7 @@ export function ComposeEmailModal({
             Cancel
           </button>
           <button type="submit" disabled={submitting || fetchingForward || quotedLoading} className="text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            {submitting ? 'Sending…' : 'Send'}
+            {submitting ? 'Sending…' : fetchingForward ? 'Fetching the attachment…' : quotedLoading ? 'Fetching the original…' : 'Send'}
           </button>
         </div>
       </form>
@@ -826,66 +874,48 @@ export function ComposeEmailModal({
 }
 
 /*
- * THE SIGNATURE, AS IT GOES OUT UNDER THE MESSAGE (S21 · Raptor H19). Stephan, 5 Nov: "show me the email
- * signature that I uploaded ... how it will look relative to the text." It was added on the server and seen for
- * the first time in the recipient's inbox.
+ * THE SIGNATURE, IN THE MESSAGE (S21 · Raptor H19). Stephan, 5 Nov: "show me the email signature that I uploaded ...
+ * how it will look relative to the text" -- then, 9 Nov: "just make it part of the email. It's not necessary to have
+ * like a separate box for that." So it is drawn inside the message box, under what is typed, with no frame or label
+ * of its own; on a forward, under the original, where composeBody appends it.
  *
- * DRAWN BY THE SEND'S OWN FUNCTIONS -- signatureHtml, composeBody and emailBodyStyle, the very three sendAsUser
- * calls -- around the last paragraph typed, so the gap, the face, the size and the picture's width and side are
- * the send's and not a copy of them. The one difference is the picture's address: the send embeds it (cid:) and
- * the screen shows the same file from storage.
+ * DRAWN BY THE SEND'S OWN FUNCTIONS -- signatureHtml, composeBody and emailBodyStyle, the very three sendAsUser calls
+ * -- so the gap, the face, the size and the picture's width and side are the send's. composeBody is given an empty
+ * body: its two breaks are the gap between the last line typed and the signature. The picture shows from storage; the
+ * send embeds the same file (cid:).
  *
- * IN A SANDBOXED FRAME, because the signature is stored HTML (signatureHtml does not escape it -- what is typed
- * there is what goes out) and the page must not run it. No allow-scripts; allow-same-origin only so the frame
- * can be measured to its height.
- *
- * ON A FORWARD the signature goes under the ORIGINAL, because composeBody appends it to everything -- said rather
- * than drawn, since the original is already on screen above.
+ * IN A SANDBOXED FRAME, because the signature is stored HTML (signatureHtml does not escape it -- what is typed there is
+ * what goes out) and the page must not run it. No allow-scripts; allow-same-origin only so the frame can be measured.
+ * No signature: nothing is drawn.
  */
-function SignaturePreview({ user, firm, body, afterOriginal }: {
+function SignatureInline({ user, firm, afterOriginal = false }: {
   user: { emailSignature?: string; emailSignatureImageUrl?: string; emailSignatureImageWidth?: number; emailSignatureImageAlign?: 'left' | 'center' | 'right' } | null
   firm: FirmSettings
-  body: string
-  afterOriginal: boolean
+  afterOriginal?: boolean
 }) {
   const frame = useRef<HTMLIFrameElement>(null)
-  const [height, setHeight] = useState(80)
+  const [height, setHeight] = useState(60)
   const url = user?.emailSignatureImageUrl ?? null
   const signature = signatureHtml(user?.emailSignature ?? null,
     url ? { width: user?.emailSignatureImageWidth ?? 160, align: user?.emailSignatureImageAlign ?? 'left' } : null, url)
-  const paragraphs = body.trim() ? body.trim().split(/\n\s*\n/) : []
-  const last = paragraphs.length ? paragraphs[paragraphs.length - 1] : ''
-  const lead = afterOriginal ? '' : last
-    ? (paragraphs.length > 1 ? '<span style="color:#94a3b8">\u2026</span><br><br>' : '') + emailBodyHtml(last)
-    : '<span style="color:#94a3b8">Your message</span>'
+  if (!signature) return null
   const style = firm.emailFont ? emailBodyStyle(firm) : null
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body style="margin:0;padding:12px 14px;background:#fff">${
-    afterOriginal ? composeBody('<span style="color:#94a3b8">\u2026the original message</span>', signature, style) : composeBody(lead, signature, style)}</body></html>`
-  if (!signature) {
-    return (
-      <p className="-mt-1 mb-3 text-xs text-slate-500" data-testid="signature-preview-none">
-        No signature goes under this email. Add one in <a href="/settings?tab=Profile" className="font-medium text-brand-700 hover:underline">Settings → Profile</a>.
-      </p>
-    )
+  /* The page's own margin matches the textarea's padding, so the signature lines up under the text; the top padding is
+     the one blank line composeBody puts between the message and the signature. */
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body style="margin:0;padding:1.5em 12px 10px;background:transparent">${
+    /* The first two breaks are composeBody's gap after an empty body; the box's own space under the text stands in. */
+    composeBody('', signature, style).replace('<br><br>', '')}</body></html>`
+  const measure = () => {
+    const h = frame.current?.contentDocument?.documentElement.scrollHeight
+    if (h) setHeight(Math.min(h, 320))
   }
   return (
-    <div className="-mt-1 mb-3" data-testid="signature-preview">
-      <p className="mb-1 text-xs text-slate-500">
-        {afterOriginal ? 'Your signature goes under the original message, like this.' : 'How the email ends: your signature, under what you typed.'}
-      </p>
-      <iframe ref={frame} title="Your signature as it goes out" sandbox="allow-same-origin" srcDoc={doc}
-        onLoad={() => {
-          const h = frame.current?.contentDocument?.documentElement.scrollHeight
-          if (h) setHeight(Math.min(h, 320))
-          /* A picture that arrives after the page is measured makes it taller; measure again when it does. */
-          for (const img of Array.from(frame.current?.contentDocument?.images ?? [])) {
-            img.addEventListener('load', () => {
-              const again = frame.current?.contentDocument?.documentElement.scrollHeight
-              if (again) setHeight(Math.min(again, 320))
-            })
-          }
-        }}
-        className="block w-full rounded-lg border border-slate-200" style={{ height }} />
-    </div>
+    <iframe ref={frame} title="Your signature" sandbox="allow-same-origin" srcDoc={doc} data-testid="signature-inline"
+      onLoad={() => {
+        measure()
+        /* A picture that arrives after the page is measured makes it taller; measure again when it does. */
+        for (const img of Array.from(frame.current?.contentDocument?.images ?? [])) img.addEventListener('load', measure)
+      }}
+      className={afterOriginal ? 'mb-3 block w-full border-0' : 'block w-full border-0'} style={{ height }} />
   )
 }

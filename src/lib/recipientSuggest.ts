@@ -200,7 +200,19 @@ export function normaliseRecipients(value: string): string {
   return recipientList(value).join(', ')
 }
 
+/*
+ * "NAME <ADDRESS>" IS A FINISHED PERSON TOO (S21 · Raptor H19). Stephan, on staging: "I try to add Nicholas and Camille
+ * to the same email, it keeps removing one." A reply-all fills the Cc line the way the message carried it --
+ * "Stephan <stephan@...>, Camille <camille@...>" -- and only a bare address counted as finished, so the last person
+ * written with a name stayed in the box as half-typed text and the next pick was written over her (and Send would have
+ * called her "not an email address"). nodemailer takes this form as it is.
+ */
+export function isRecipient(piece: string): boolean {
+  const t = piece.trim()
+  return looksLikeAddress(t) || /^[^<>]*<\s*[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+\s*>$/.test(t)
+}
+
 /** The pieces on the line that are not addresses, so Send can name them rather than let a mail server bounce them. */
 export function notAddresses(value: string): string[] {
-  return recipientList(value).filter((a) => !looksLikeAddress(a))
+  return recipientList(value).filter((a) => !isRecipient(a))
 }

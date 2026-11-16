@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { questionFor, waitingOn } from '../../src/lib/changeRequests.ts'
 import {
-  MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, documentType, DOCUMENT_TYPES, fitWithin, isOpen, mayDecide, mayWithdraw,
+  MAX_FILE_BYTES, PICTURE_MAX_SIDE, REQUEST_DEPARTMENTS, base64Bytes, paneOf, fileProblem, documentType, DOCUMENT_TYPES, fitWithin, isOpen, mayDecide, mayWithdraw, mayDelete,
   STATUS_LABEL, OTHER_CHOICE, waitingOnAsker, answerBody, answerTo, choicesOk, mayAnswer, parseChoices, tickedOf, mayTest, mayEdit, onShelf, SHELVES, parseReviewGroups, requestLabel, reviewTiles, sortRequests, stageOf, testState, titleOf,
 } from '../../src/lib/changeRequests.ts'
 
@@ -317,6 +317,29 @@ check('only the person who asked answers, and only a question with choices',
     /supabase\.rpc\('nav_request_count'\)/.test(read('src/lib/navCounts.ts')),
     /loadEvents\(\); refreshNavCounts\(\)/.test(read('src/components/requests/RequestPanel.tsx')),
   ].join(), 'true,true,true')
+}
+
+/* ---------- the Big Boss deletes a request (Stephan, 16 Nov: "a place where you delete a request") ---------- */
+{
+  const boss = { id: 'b', role: 'Administrator', grants: ['raptor.boss'], revokes: [] }
+  const admin = { id: 'x', role: 'Administrator', grants: [], revokes: [] }
+  check('the Big Boss may delete a request in any state but Being built',
+    ['new', 'accepted', 'done', 'declined', 'building'].map((status) => mayDelete(boss, { status })).join(), 'true,true,true,true,false')
+  check('...and an Administrator without the tick may not, nor nobody', [mayDelete(admin, { status: 'new' }), mayDelete(null, { status: 'new' })].join(), 'false,false')
+  const sch = read('supabase/schema.sql')
+  const at = sch.lastIndexOf('create or replace function public.change_request_delete(')
+  const fn = at < 0 ? '' : sch.slice(at, sch.indexOf('end $$;', at))
+  ok('the database has change_request_delete', at >= 0)
+  ok('...refusing anybody without raptor.boss before it deletes', /if not public\.has_capability\('raptor\.boss'\) then\s+raise exception/.test(fn)
+    && fn.indexOf("has_capability('raptor.boss')") < fn.indexOf('delete from public.change_requests'))
+  ok('...and a request being built', /if v_status = 'building' then\s+raise exception/.test(fn)
+    && fn.indexOf("v_status = 'building'") < fn.indexOf('delete from public.change_requests'))
+  ok('...and nobody signed out may call it', /revoke all on function public\.change_request_delete\(integer\) from public, anon;/.test(sch))
+  const panel = code('src/components/requests/RequestPanel.tsx')
+  ok('the panel offers it to whoever mayDelete allows', /\{mayDelete\(me, r\) && composing === null && \(/.test(panel))
+  ok('...asking twice: the first press only says what will go', /onClick=\{\(\) => setConfirmDelete\(true\)\}/.test(panel)
+    && /await deleteRequest\(r\.number\); onClose\(\)/.test(panel) && panel.indexOf('setConfirmDelete(true)') > 0)
+  ok('...through the database function, not a table delete', /supabase\.rpc\('change_request_delete', \{ p_number: number \}\)/.test(read('src/lib/changeRequestsApi.ts')))
 }
 
 if (failures.length) {

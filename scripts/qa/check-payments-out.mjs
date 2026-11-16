@@ -84,8 +84,12 @@ const rows = [toPaymentToMake({ kind: 'payover', id: 'a', payee: 'X', amount: '8
 check('the total is the sum, to the cent', totalToPay(rows), 8916.49)
 
 /* ---- 4. where it shows ---- */
-ok('Payments out is in the Trust rail (renamed from Payments to make, S7)', /to: '\/trust\/payments-out', label: 'Payments out'/.test(read('src/pages/trust/TrustLayout.tsx')))
-ok('...and routed', /path="payments-out" element=\{<TrustPaymentsOut \/>\}/.test(read('src/App.tsx')))
+/* S21 · Raptor H19: paying out is the last step of a payover -- drawn at the foot of Payover runs, off the menu; the old
+   address redirects there, ?draw=1 carried. */
+ok('Payments out is at the foot of Payover runs', /<TrustPaymentsOut embedded \/>/.test(read('src/pages/finance/FinanceWorkQueue.tsx'))
+  && !/label: 'Payments out'/.test(read('src/pages/trust/TrustLayout.tsx')))
+ok('...and its old address redirects there, ?draw=1 carried', /path="payments-out" element=\{<PaymentsOutRedirect \/>\}/.test(read('src/App.tsx'))
+  && /<Navigate to=\{`\/trust\/payover\$\{search\}#paying-out`\} replace \/>/.test(read('src/App.tsx')))
 const run = strip(read('src/pages/finance/RunDetail.tsx'))
 ok('the run says which reference to pay it on', /Pay with reference/.test(run) && /paymentReference\(run\.invoice_number\)/.test(run))
 /* Mark paid is its own box since 10 Oct (opened from the run AND the runs list, one run or many);

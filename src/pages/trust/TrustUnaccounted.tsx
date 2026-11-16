@@ -76,6 +76,11 @@ export function TrustUnaccounted() {
         <p className="text-sm text-slate-500 mt-1">
           Everything that makes the trust account differ from what has an owner, in one list, with what to do about each.
         </p>
+        {/* THE BANK STATEMENT, FROM HERE (S21): off the Trust menu at the firm's word, and still the thing this list is
+            reconciled against. */}
+        <Link to="/trust/statement" data-testid="open-bank-statement" className="mt-1 inline-block text-[13px] font-medium text-sky-700 hover:text-sky-900">
+          Check it against the bank statement &rarr;
+        </Link>
       </div>
 
       <Card className="px-6 py-4">

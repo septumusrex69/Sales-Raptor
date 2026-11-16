@@ -158,6 +158,17 @@ try {
   t.ok('the hero is still the company hero', /two oceans meet the mountains/i.test(text))
   /* THE BREDELL FERREIRA SKIN, the default since 31 Oct, wears the client portal's photograph of the day and its line. */
   t.ok('the default skin\'s hero carries the day\'s line and its photographer', /Photo: .+ on Unsplash/.test(await page.getByTestId('hero-photo-credit').innerText().catch(() => '')))
+  /* IN THE BOTTOM-RIGHT CORNER, NOT THE TOP EDGE (S21 · Raptor H19; Stephan: "very small at the top ... white text
+     there"). index.css's `.collections-hero > *` made it relative and it fell to the top, half under the bar. */
+  const creditAt = await page.evaluate(() => {
+    const c = document.querySelector('[data-testid="hero-photo-credit"]')
+    const h = c?.closest('.collections-hero')
+    if (!c || !h) return null
+    const a = c.getBoundingClientRect(); const b = h.getBoundingClientRect()
+    return { position: getComputedStyle(c).position, fromBottom: Math.round(b.bottom - a.bottom), fromTop: Math.round(a.top - b.top) }
+  })
+  t.ok(`...in the photograph's bottom corner (${JSON.stringify(creditAt)})`,
+    !!creditAt && creditAt.position === 'absolute' && creditAt.fromBottom >= 0 && creditAt.fromBottom < 24 && creditAt.fromTop > 100)
   t.ok('...over the day\'s photograph, Llandudno beneath it', /portal-photo\.webp/.test(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--skin-collections-hero-image'))))
   /* DAYS NOBODY APPROVED (Stephan, 31 Oct: "pre-choose everything and approve it ... for the month"): nothing approved
      for the coming week here, so the Administrator is told, with the way to /portal-looks. */

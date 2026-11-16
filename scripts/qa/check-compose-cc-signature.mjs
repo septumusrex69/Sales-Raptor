@@ -12,7 +12,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  joinRecipientLine, normaliseRecipients, notAddresses, recipientList, splitRecipientLine, suggestRecipients,
+  isRecipient, joinRecipientLine, normaliseRecipients, notAddresses, recipientList, splitRecipientLine, suggestRecipients,
 } from '../../src/lib/recipientSuggest.ts'
 import { composeBody, signatureHtml } from '../../src/lib/emailSignature.ts'
 import * as served from '../../api/_lib/signature.ts'
@@ -43,6 +43,10 @@ check('what is sent has no trailing comma', normaliseRecipients('a@x.co.za, b@y.
 check('...and an empty line sends nothing', normaliseRecipients(' , '), '')
 check('half a name is named before it goes', notAddresses('a@x.co.za, rinda').join('|'), 'rinda')
 check('...and a line of addresses has nothing to name', notAddresses('a@x.co.za; b@y.co.za').length, 0)
+/* Stephan, 9 Nov: "I try to add Nicholas and Camille ... it keeps removing one." A reply-all writes "Name <address>". */
+check('a reply-all\'s "Name <address>" is a person, not a mistake', notAddresses('Stephan <stephan@x.co.za>, Camille <camille@x.co.za>').length, 0)
+check('...and is a finished entry', isRecipient(' Camille <camille@x.co.za> '), true)
+check('...while half a name still is not', isRecipient('Camille <camille@'), false)
 
 /* A colleague is found by her NAME from the first letters -- and is not thrown at an empty box. */
 const all = [
@@ -55,7 +59,9 @@ check('...and an empty box offers no colleague', suggestRecipients(all, '').leng
 const field = code('../../src/components/RecipientField.tsx')
 ok('the field has a several-people mode', /multiple\?: boolean/.test(field))
 ok('...drawn as chips, each with its own X', /data-testid="recipient-chip"/.test(field) && /aria-label=\{`Take \$\{a\} off`\}/.test(field))
-ok('...picking somebody ADDS them rather than replacing the line', /onChange\(joinRecipientLine\(\[\.\.\.line\.chosen, s\.address\]\)\)/.test(field))
+ok('...picking somebody ADDS them rather than replacing the line', /onChange\(joinRecipientLine\(\[\.\.\.finished\(\), s\.address\]\)\)/.test(field))
+ok('...counting a pre-filled person left last on the line as chosen', /return isRecipient\(draft\) \? \[\.\.\.chosen, draft\.trim\(\)\] : chosen/.test(field))
+ok('...and making them a chip the moment the box takes focus', /if \(multiple\) commitDraft\(\)/.test(field))
 ok('...a comma finishes an address', /\[,;\]\\s\*\$/.test(field))
 ok('...Backspace in an empty box takes the last one off', /e\.key === 'Backspace' && query === '' && line\.chosen\.length > 0/.test(field))
 ok('...leaving the box keeps a finished address', /onBlur=\{\(\) => \{ setFocused\(false\); commitDraft\(\) \}\}/.test(field))
@@ -88,12 +94,14 @@ ok('the server re-exports the screen\'s functions', /export \{ SIGNATURE_CID, co
 check('...so the two are ONE function, not two copies', served.signatureHtml, signatureHtml)
 check('...and one composeBody', served.composeBody, composeBody)
 ok('the send still calls them', /composeBody\(message\.bodyHtml, signatureHtml\(signatureText, image, imageSrc\), emailStyle\)/.test(read('../../api/_lib/email/sendAsUser.ts')))
-ok('the preview draws with the same three', /signatureHtml\(user\?\.emailSignature/.test(compose)
-  && /composeBody\(lead, signature, style\)/.test(compose) && /emailBodyStyle\(firm\)/.test(compose))
-ok('...in the box under the message', /<SignaturePreview user=\{currentUser\} firm=\{firm\} body=\{body\}/.test(compose))
+ok('the signature is drawn with the same three', /signatureHtml\(user\?\.emailSignature/.test(compose)
+  && /composeBody\('', signature, style\)/.test(compose) && /emailBodyStyle\(firm\)/.test(compose))
+/* Stephan, 9 Nov: "just make it part of the email. It's not necessary to have like a separate box for that." */
+ok('...INSIDE the message box, under the text', compose.indexOf('data-testid="message-box"') > 0
+  && compose.indexOf('<SignatureInline user={currentUser} firm={firm} />') > compose.indexOf('data-testid="message-box"'))
+ok('...with no label and no preview panel of its own', !/How the email ends/.test(compose) && !/SignaturePreview/.test(compose))
 ok('...sandboxed, so stored HTML never runs', /sandbox="allow-same-origin"/.test(compose) && !/allow-scripts/.test(compose))
-ok('...and says so when there is no signature', /No signature goes under this email/.test(compose))
-ok('...and where it goes on a forward', /Your signature goes under the original message/.test(compose))
+ok('...and under the original on a forward', /\{quotedHtml && <SignatureInline user=\{currentUser\} firm=\{firm\} afterOriginal \/>\}/.test(compose))
 /* The gap the send puts between the message and the signature is the preview's gap: composeBody's own. */
 check('composeBody leaves two breaks before the signature', composeBody('Body', 'Sig'), 'Body<br><br>Sig')
 

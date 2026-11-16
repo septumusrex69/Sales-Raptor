@@ -47438,6 +47438,155 @@ begin
     insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
     values ('client', new.company_id, -new.net_payover,
             'Payover ' || new.invoice_number || ' paid to the client', new.id);
+  end if;
+  return new;
+end $$;
+
+-- "AGAINST THE BANK": THE SET-OFF NOT YET COVERED IS THE FIRM'S, WAITING -- the PTC share's treatment,
+-- in the same derived figure. Per client: PTC fees debited + charges set off (client entries) less
+-- what the firm was credited for either, less what the client paid into the business account; never
+-- below nil, and summed BEFORE the floor, because a business payment may have paid either. Every run
+-- approved before 22 Oct wrote both sides of its set-off, so its part here is nil and the figure is
+-- unchanged for history. Not drawable: firm_trust_split reads only real entries.
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(max(f.trust_opening_balance), 0) + coalesce(sum(l.amount), 0) as bal
+      from public.firm_settings f
+      left join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+  ),
+  /*
+   * THE FIRM'S SHARE NOT YET RECOVERED IS THE FIRM'S, WAITING: the PTC share (the firm, 13 Oct) and,
+   * since 22 Oct, charges set off on a run below nil. DERIVED, NOT WRITTEN: the ledger is immutable,
+   * and a credit written now would be credited again at approval.
+   */
+  ptc_pending as (
+    select coalesce(sum(greatest(owed, 0)), 0) as bal from (
+      select company_id,
+             sum(case when party = 'client' and reason like '%Paid straight to the client%' then -amount
+                      when party = 'firm' and reason like 'PTC share recovered%' then -amount
+                      when party = 'client' and reason like 'Paid to the business account against PO-%' then -amount
+                      when party = 'client' and reason like 'Charges set off against payover %' then -amount
+                      when party = 'firm' and reason like 'Charges recovered from payover %' then -amount
+                      else 0 end) as owed
+        from public.trust_creditor_entries
+       where company_id is not null
+       group by company_id) x
+  ),
+  by_party as (
+    select party, who, sum(bal) as bal from (
+    select party,
+           case party when 'client' then company_id::text
+                      when 'debtor' then coalesce(account_id::text, party)
+                      else party end as who,
+           amount as bal
+      from public.trust_creditor_entries
+    union all
+    select 'firm', 'firm', bal from ptc_pending
+    ) e group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  swordfish as (
+    select coalesce((select x.left_over from public.swordfish_holding_figures() x), 0) as bal
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal + s.bal,
+         h.owed_in,
+         (h.owed_out + u.bal + s.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal + s.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u, swordfish s
+   where public.has_capability('finance.view')
+$$;
+revoke all on function public.trust_position() from public, anon;
+grant execute on function public.trust_position() to authenticated;
+
+-- THE CASH VIEW: A RUN'S SET-OFF IS THE FIRM'S IN THAT RUN'S CYCLE, AS IT ALWAYS WAS. Its firm_other
+-- read the firm's "Charges recovered" entry, which until 22 Oct always sat on the same run as the
+-- client's "Charges set off" and matched it to the cent. The firm's credit may now land on a LATER run
+-- (when that run's collections cover it), or never (paid into the business account), so the cycles
+-- would stop totalling the bank. It reads the client's entry, negated, instead: for every run approved
+-- before 22 Oct that is the same number on the same run, so no cycle moves.
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id, x.reason,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) or x.reason like 'Paid to the business account%' as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc, e.reason,
+           (e.party = 'client' and coalesce(e.reason, '') like '%Paid straight to the client%') as ptc_fee,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           coalesce(public.firm_run_settled(r.id), false) as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0)
+        + coalesce(sum(amount) filter (where ptc_fee and not run_paid), 0) as clients_open,
+      coalesce(-sum(amount) filter (where ptc_fee and not run_paid), 0) as ptc_waiting,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt
+                                    and coalesce(reason, '') not like 'PTC share recovered%'
+                                    and coalesce(reason, '') not like 'Charges recovered from payover %'), 0)
+        + coalesce(-sum(amount) filter (where party = 'client'
+                                         and coalesce(reason, '') like 'Charges set off against payover %'), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         public.raptor_today() <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back + a.ptc_waiting, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.ptc_waiting + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned + a.ptc_waiting, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;
+revoke all on function public.trust_cash_by_cycle() from public, anon;
+grant execute on function public.trust_cash_by_cycle() to authenticated;
+
 -- ============================================================================================
 -- S10 / CALL CAMPAIGNS, ROUND TWO (22 Oct): the call follows the desk, a RECOVERY campaign on
 -- closed accounts, results for everybody.
@@ -63048,3 +63197,294 @@ begin
 
   return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_suspense_near_matches (staging, 9 Nov)
+--
+-- SUSPENSE: THE ACCOUNT A RECEIPT PROBABLY MEANT, OFFERED, NEVER PLACED (Stephan, 9 Nov: "proceed with the suspense
+-- near match. Give options still a search option"). A debtor types the case number off a notice and slips one
+-- character -- two digits swapped (DRC0081 for DRC0018), one wrong, one missing, one extra -- and the receipt lands in
+-- suspense because nothing matches exactly. Each reference-like word on the receipt is tried in every one-slip form
+-- and each form looked up EXACTLY (the case number's unique index, the account number's index): nothing fuzzy, so the
+-- options are few and each is a real account a person can recognise. A reference that is on several accounts already
+-- (the "matched more than one account" receipts) offers those accounts too. NOTHING IS PLACED HERE: a person picks an
+-- option and confirms, or searches with Place it as before.
+-- ============================================================================================
+create or replace function public.near_reference_accounts(p_tokens text[])
+returns table(token text, account_id uuid, case_number text, account_number text, debtor text, client text,
+              matched_on text, how text, rank integer)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  t text;
+  n integer;
+  i integer;
+  d integer;
+  v text;
+  toks text[] := '{}';
+  vars text[] := '{}';
+  hows text[] := '{}';
+  ranks integer[] := '{}';
+  seen integer := 0;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Suspense is for people with the trust account.' using errcode = '42501';
+  end if;
+  for t in select distinct upper(regexp_replace(x, '[^A-Za-z0-9]', '', 'g')) from unnest(coalesce(p_tokens, '{}'::text[])) x loop
+    n := length(t);
+    -- A reference is letters and digits with at least one digit, of a sensible length; a name is not tried.
+    continue when n < 4 or n > 14 or t !~ '[0-9]' or t !~ '^[A-Z0-9]+$';
+    seen := seen + 1;
+    exit when seen > 400;
+    toks := toks || t; vars := vars || t; hows := hows || 'same reference'::text; ranks := ranks || 0;
+    for i in 1..n loop
+      v := substr(t, 1, i - 1) || substr(t, i + 1);
+      if length(v) >= 4 then toks := toks || t; vars := vars || v; hows := hows || 'one character too many'::text; ranks := ranks || 4; end if;
+      if i < n and substr(t, i, 1) <> substr(t, i + 1, 1) then
+        v := substr(t, 1, i - 1) || substr(t, i + 1, 1) || substr(t, i, 1) || substr(t, i + 2);
+        toks := toks || t; vars := vars || v; hows := hows || 'two characters swapped'::text; ranks := ranks || 1;
+      end if;
+      if substr(t, i, 1) ~ '[0-9]' then
+        for d in 0..9 loop
+          continue when d::text = substr(t, i, 1);
+          v := substr(t, 1, i - 1) || d::text || substr(t, i + 1);
+          toks := toks || t; vars := vars || v; hows := hows || 'one digit different'::text; ranks := ranks || 2;
+        end loop;
+      end if;
+    end loop;
+    -- A digit left out: one put back at each place from the first digit on (a missing letter is not guessed).
+    for i in greatest(1, coalesce(nullif(position(substring(t from '[0-9]') in t), 0), 1))..(n + 1) loop
+      for d in 0..9 loop
+        v := substr(t, 1, i - 1) || d::text || substr(t, i);
+        toks := toks || t; vars := vars || v; hows := hows || 'one digit missing'::text; ranks := ranks || 3;
+      end loop;
+    end loop;
+  end loop;
+
+  return query
+    with forms as (
+      select * from unnest(toks, vars, hows, ranks) as f(token, variant, how, rank)
+    ), hits as (
+      select f.token, a.id as account_id, a.case_number, a.account_number,
+             nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), '') as debtor,
+             c.name as client,
+             'case number'::text as matched_on, f.how, f.rank
+        from forms f
+        join public.debtor_accounts a on a.case_number = f.variant
+        left join public.companies c on c.id = a.company_id
+      union all
+      select f.token, a.id, a.case_number, a.account_number,
+             nullif(btrim(concat_ws(' ', a.debtor_first_name, a.debtor_surname)), ''),
+             c.name, 'account number'::text, f.how, f.rank
+        from forms f
+        join public.debtor_accounts a on a.account_number = f.variant
+        left join public.companies c on c.id = a.company_id
+    )
+    select distinct on (h.token, h.account_id) h.token, h.account_id, h.case_number, h.account_number, h.debtor, h.client,
+           h.matched_on, h.how, h.rank
+      from hits h
+     order by h.token, h.account_id, h.rank, (h.matched_on = 'case number') desc;
+end $$;
+revoke all on function public.near_reference_accounts(text[]) from public, anon;
+grant execute on function public.near_reference_accounts(text[]) to authenticated;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_near_matches_in_the_revoke_list (staging, 9 Nov)
+-- ============================================================================================
+-- The finance revoke list restated whole with near_reference_accounts added (S20's rule: the checks read the LAST
+-- loop, so a new one carries every name). Anon could not call it already -- the function revoked it itself -- this
+-- keeps the one list complete.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)',
+    /* THE PAYOUT DAY GATE AND ITS OVERRIDE (11 Oct). */
+    'assert_payover_run_due(uuid)', 'release_payover_run_early(uuid, text)',
+    'payover_run_due(uuid)',
+    /* S10: suspense from Needs an account, and the fee credit note. */
+    'suspend_bank_line(uuid, text)', 'release_bank_line_from_suspense(uuid)', 'suspended_bank_lines()',
+    'credit_fee(uuid, numeric, text)',
+    /* S10: HELD FOR SWORDFISH PAYOVERS. */
+    'swordfish_holding_figures()', 'swordfish_holding_position()',
+    'set_swordfish_holding(numeric, text)', 'allocate_swordfish_line(uuid, text, text)',
+    /* S10: BALANCES BROUGHT FORWARD FROM SWORDFISH. */
+    'bring_forward_client_balances(text, date, date, jsonb)',
+    /* S20: the cycle-day reads and the withdraw box. */
+    'payover_run_payment_dates(uuid)', 'payover_run_takes(uuid, date, boolean, date)', 'receipts_on_file(uuid)',
+    'payment_cycle_day(public.account_payments)', 'payment_counts_at(public.account_payments)', 'ptc_cycle_on_capture()',
+    /* S20: payments found late -- the corrections. */
+    'payover_run_corrections(uuid)', 'backdated_payment_restatements()', 'propose_restatement(uuid, text)',
+    'approve_restatement(uuid)', 'cancel_restatement(uuid, text)', 'restatement_figures(jsonb)',
+    'near_reference_accounts(text[])'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_collections_share (staging, 9 Nov)
+--
+-- OUR SHARE OF COLLECTIONS, CLIENT BY CLIENT (Stephan, 9 Nov: "if we collect 2 million, or 3 million, how much of that
+-- is [our] share? How much of that is the client share? ... the profitability margin ratio"; the name and the place --
+-- Business, Income, behind business.income -- agreed the same day).
+--
+-- THE SAME TWO FIGURES AS THE INCOME GRAPH, SPLIT BY CLIENT: `collected` is business_income_months' own rule (every
+-- debtor receipt, to the trust or straight to the client, less the reversed, rejected and returned unpaid, dated by
+-- APPROVAL), and `ours` is business_income's earnings on receipts -- commission, its VAT, Annexure B fees and costs,
+-- interest -- dated the same way, so the two sit in the same month. Charges to clients, bank interest and unclaimed
+-- credit are the firm's income but not a share of anything a debtor paid, so they are not in `ours`.
+-- Behind business.income: no rows for anybody without it.
+-- ============================================================================================
+create or replace function public.collections_share(p_from date, p_to date)
+returns table(company_id uuid, company_name text, collected numeric, ours numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with col as (
+    select a.company_id, sum(p.amount) as collected
+      from public.account_payments p
+      join public.debtor_accounts a on a.id = p.account_id
+     where (coalesce(p.approved_at, p.received_at) at time zone 'Africa/Johannesburg')::date between p_from and p_to
+       and p.reversed_at is null and p.rejected_at is null and p.returned_unpaid_on is null
+     group by a.company_id
+  ), earned as (
+    select b.company_id, b.company_name, b.interest + b.costs + b.commission + b.commission_vat as ours
+      from public.business_income(p_from, p_to) b
+     where b.company_id is not null
+  )
+  select coalesce(c.company_id, e.company_id), coalesce(co.name, e.company_name),
+         coalesce(c.collected, 0), coalesce(e.ours, 0)
+    from col c
+    full join earned e on e.company_id = c.company_id
+    left join public.companies co on co.id = coalesce(c.company_id, e.company_id)
+   where public.has_capability('business.income')
+     and coalesce(c.company_id, e.company_id) is not null
+   order by 3 desc, 2
+$$;
+revoke all on function public.collections_share(date, date) from public, anon;
+grant execute on function public.collections_share(date, date) to authenticated;
+
+-- ============================================================================================
+-- Raptor H19 (S21) -- h19_collections_share_vat_apart (staging, 9 Nov)
+-- Commission VAT apart from our share -- it is SARS's, neither the firm's nor the client's -- so the clients' share
+-- (collected less ours less VAT) is exactly what the clients get, and the ratio is the firm's own. The return columns
+-- change, so the function is replaced, not altered; nothing called it yet but the Income page.
+-- ============================================================================================
+drop function if exists public.collections_share(date, date);
+create function public.collections_share(p_from date, p_to date)
+returns table(company_id uuid, company_name text, collected numeric, ours numeric, vat numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with col as (
+    select a.company_id, sum(p.amount) as collected
+      from public.account_payments p
+      join public.debtor_accounts a on a.id = p.account_id
+     where (coalesce(p.approved_at, p.received_at) at time zone 'Africa/Johannesburg')::date between p_from and p_to
+       and p.reversed_at is null and p.rejected_at is null and p.returned_unpaid_on is null
+     group by a.company_id
+  ), earned as (
+    select b.company_id, b.company_name, b.interest + b.costs + b.commission as ours, b.commission_vat as vat
+      from public.business_income(p_from, p_to) b
+     where b.company_id is not null
+  )
+  select coalesce(c.company_id, e.company_id), coalesce(co.name, e.company_name),
+         coalesce(c.collected, 0), coalesce(e.ours, 0), coalesce(e.vat, 0)
+    from col c
+    full join earned e on e.company_id = c.company_id
+    left join public.companies co on co.id = coalesce(c.company_id, e.company_id)
+   where public.has_capability('business.income')
+     and coalesce(c.company_id, e.company_id) is not null
+   order by 3 desc, 2
+$$;
+revoke all on function public.collections_share(date, date) from public, anon;
+grant execute on function public.collections_share(date, date) to authenticated;
+
+-- =====================================================================================================
+-- S21 · Raptor H19: THE BIG BOSS MAY DELETE A REQUEST. Stephan, 16 Nov: "There should be a place where you
+-- delete a request for a suggestion" -- a request had asked for something the report already showed. Declining
+-- keeps it on the list for good; a request that should never have been sent is better gone.
+--
+-- WHO: the Big Boss only, the person who decides what gets built (raptor.boss, never the Administrator role --
+-- six Administrators deleting one another's requests is what the tick exists to stop). The sender keeps the
+-- withdraw they always had (change_requests_withdraw: their own, while New).
+-- WHEN: anything not Being built. A request Claude has started has a branch behind it; deleting it would leave
+-- the builder working on a request nobody can find.
+-- WHAT GOES: the request, its files and its history (both cascade). A nightly review that named it keeps the id
+-- in request_ids, which is a report of what was looked at that night, not a link anything follows.
+-- SECURITY DEFINER because the delete policy lets only the sender delete; the check here is the whole rule.
+-- =====================================================================================================
+create or replace function public.change_request_delete(p_number integer)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  if not public.has_capability('raptor.boss') then
+    raise exception 'Only the Big Boss deletes a request.' using errcode = '42501';
+  end if;
+  select status into v_status from public.change_requests where number = p_number for update;
+  if not found then
+    raise exception 'Request % is not there any more.', p_number using errcode = 'P0002';
+  end if;
+  if v_status = 'building' then
+    raise exception 'Request % is being built. Wait until it is done, then delete it.', p_number using errcode = '22023';
+  end if;
+  delete from public.change_requests where number = p_number;
+end $$;
+
+revoke all on function public.change_request_delete(integer) from public, anon;
+grant execute on function public.change_request_delete(integer) to authenticated;

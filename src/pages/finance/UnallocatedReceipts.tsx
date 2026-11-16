@@ -10,6 +10,7 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { matchReference } from '../../lib/receiptReference'
+import { optionsFor, referenceTokens, slipWords, type NearMatchRow } from '../../lib/suspenseNearMatch.ts'
 import { SplitReceiptModal } from './SplitReceiptModal'
 import { lineNature } from '../../lib/bankLineAllocation.ts'
 import { EMPTY_SUSPENSE_QUERY, isSuspenseQueryEmpty, suspenseMatches, type SuspenseQuery } from '../../lib/suspenseSearch.ts'
@@ -18,7 +19,7 @@ import { allocateBankLine, allocateSwordfishLine } from '../../lib/bankAllocatio
 import { fetchSwordfishHolding } from '../../lib/trust'
 import { SWORDFISH_KIND_LABEL, mayTakeOff, type SwordfishHolding, type SwordfishKind } from '../../lib/swordfishHolding'
 import {
-  fetchUnallocatedReceipts, placeBankLine,
+  fetchUnallocatedReceipts, placeBankLine, fetchNearMatches,
   fetchUnreconciledPayouts, reconcileBankDebit,
   fetchSuspendedPayments, releasePaymentFromSuspense, setPaymentAccount,
   fetchSuspendedBankLines, suspendBankLine, releaseBankLineFromSuspense,
@@ -84,6 +85,13 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
    * every receipt; only the drawing is a page. A new search starts again at the first hundred.
    */
   const [drawn, setDrawn] = useDrawn(query)
+  /*
+   * THE ACCOUNTS EACH RECEIPT PROBABLY MEANT (S21 · Raptor H19; Stephan: "proceed with the suspense near match. Give
+   * options still a search option"). Asked for the receipts on screen only -- a hundred at a time -- in one call, and
+   * offered under each; `confirmNear` is the one waiting for its "Yes, place it". Place it (the search) stays beside.
+   */
+  const [nearRows, setNearRows] = useState<NearMatchRow[]>([])
+  const [confirmNear, setConfirmNear] = useState<{ lineId: string; accountId: string } | null>(null)
   const search = setQuery
   /* Payments out to allocate: 330 on staging, every one a row of buttons -- the same hundred at a time. */
   const [payoutsDrawn, setPayoutsDrawn] = useDrawn(null)
@@ -184,6 +192,20 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
   const shownRows = rows.filter((r) => suspenseMatches({ date: r.txnDate, amount: r.amount, words: [r.description, r.reference] }, query))
   const shownSuspended = suspended.filter((r) => suspenseMatches({ date: r.txnDate, amount: r.amount, words: [r.description, r.reference, r.note, r.suspendedByName] }, query))
   const shownParked = parked.filter((r) => suspenseMatches({ date: r.receivedOn, amount: r.amount, words: [r.reference, r.details, r.reason, r.caseNumber, r.debtor] }, query))
+  const nearKey = shownRows.slice(0, drawn).map((r) => r.id).join(',')
+  useEffect(() => {
+    const tokens = [...new Set(shownRows.slice(0, drawn).flatMap((r) => referenceTokens(r)))]
+    let live = true
+    fetchNearMatches(tokens).then((m) => { if (live) setNearRows(m) }).catch(() => { if (live) setNearRows([]) })
+    return () => { live = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearKey])
+  async function placeNear(lineId: string, accountId: string) {
+    setTying(lineId)
+    try { await placeBankLine(lineId, accountId); setConfirmNear(null); await load(); onPlaced() }
+    catch (e) { setTypedError((x) => ({ ...x, [lineId]: e instanceof Error ? e.message : 'That receipt could not be placed.' })) }
+    finally { setTying(null) }
+  }
   const queueSize = rows.length + suspended.length + parked.length
   const shownSize = shownRows.length + shownSuspended.length + shownParked.length
 
@@ -299,6 +321,40 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayout
                     {r.hadReference && (
                       <span className="block text-[11px] text-amber-700">
                         {r.reference} matched more than one account
+                      </span>
+                    )}
+                    {/* THE ACCOUNTS IT PROBABLY MEANT, offered; a press asks to confirm, and only then is it placed. */}
+                    {optionsFor(r, nearRows).length > 0 && (
+                      <span className="mt-1.5 block space-y-1" data-testid="near-matches">
+                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Did they mean</span>
+                        {optionsFor(r, nearRows).map((m) => {
+                          const asking = confirmNear?.lineId === r.id && confirmNear.accountId === m.accountId
+                          return (
+                            <span key={m.accountId} className="block rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[12px]" data-testid="near-match">
+                              <span className="font-mono font-medium text-slate-800">{m.caseNumber}</span>
+                              <span className="text-slate-600"> · {m.debtor ?? 'no name'}{m.client ? ` · ${m.client}` : ''}</span>
+                              <span className={`block text-[11px] ${m.nameOnLine ? 'text-positive-700' : 'text-amber-700'}`}>
+                                {slipWords(m)} · {m.nameOnLine ? 'the name on the bank line matches' : 'the name on the bank line does not match, so check it'}
+                              </span>
+                              {asking ? (
+                                <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  <span className="text-slate-700">Place {rand(r.amount)} on {m.caseNumber}?</span>
+                                  <button type="button" disabled={tying === r.id} onClick={() => void placeNear(r.id, m.accountId)} data-testid="near-confirm"
+                                    className="rounded-md bg-brand-600 px-2 py-0.5 text-[11.5px] font-medium text-white disabled:opacity-40">
+                                    {tying === r.id ? 'Placing…' : 'Yes, place it'}
+                                  </button>
+                                  <button type="button" onClick={() => setConfirmNear(null)} className="rounded-md px-2 py-0.5 text-[11.5px] text-slate-500 hover:bg-slate-100">No</button>
+                                </span>
+                              ) : (
+                                <button type="button" onClick={() => setConfirmNear({ lineId: r.id, accountId: m.accountId })} data-testid="near-pick"
+                                  className="mt-0.5 text-[11.5px] font-medium text-sky-700 hover:text-sky-900">
+                                  Place it here
+                                </button>
+                              )}
+                            </span>
+                          )
+                        })}
+                        <span className="block text-[11px] text-slate-400">None of these? Use Place it to search.</span>
                       </span>
                     )}
                   </td>

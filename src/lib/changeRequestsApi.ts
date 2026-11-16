@@ -111,6 +111,12 @@ export async function withdrawRequest(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+/** The Big Boss deletes a request for good, its files and history with it (see mayDelete). */
+export async function deleteRequest(number: number): Promise<void> {
+  const { error } = await supabase.rpc('change_request_delete', { p_number: number })
+  if (error) throw new Error(error.message)
+}
+
 /** The asker's answer once it is Done: it works, or it goes back with what is wrong. */
 export async function answerTest(number: number, ok: boolean, note: string): Promise<void> {
   const { error } = await supabase.rpc('change_request_tested', { p_number: number, p_ok: ok, p_note: note.trim() || null })

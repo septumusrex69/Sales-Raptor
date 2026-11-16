@@ -38,9 +38,12 @@ try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
   await page.goto(`http://127.0.0.1:${PORT}/trust/exceptions`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('to-sort').waitFor({ timeout: 20000 })
+  /* S21: each section is a tile that opens (Stephan: "you click on the suspense and it opens it"); the tiles are read
+     in order, then suspense is opened to find the receipt. */
+  const heads = (await page.locator('[data-testid="to-sort"] > section > button').allInnerTexts()).map(plain)
+  await page.getByTestId('suspense-tile').click()
+  await page.getByText('CAPITEC P NAIDOO').first().waitFor({ timeout: 10000 }).catch(() => {})
   const body = plain(await page.locator('main').innerText())
-  /* Read the section headings, not the body: the chips at the top name the same sections first. */
-  const heads = (await page.locator('[data-testid="to-sort"] h2').allInnerTexts()).map(plain)
   const want = ['Suspense', 'Statement lines to allocate', 'Overpayments', 'Anything else holding a payover up']
   const at = want.map((h) => heads.findIndex((x) => x.startsWith(h)))
   t.ok(`To sort carries suspense, statement lines, overpayments and the rest, in that order (${JSON.stringify(heads)})`,

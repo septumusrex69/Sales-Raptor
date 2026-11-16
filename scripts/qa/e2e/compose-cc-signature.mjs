@@ -13,7 +13,7 @@
 import {
   PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
-import { COLLEAGUE, COMPANY, PROFILE, TEAM, USER_ID } from './fixtures.mjs'
+import { COLLEAGUE, COMPANY, MAIL, PROFILE, TEAM, USER_ID } from './fixtures.mjs'
 
 const t = makeRunner('compose-cc-signature')
 
@@ -31,7 +31,11 @@ const handlers = [
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
   [(u) => /rpc\/mail_recipient_history/.test(u), () => ({ body: [] })],
-  [(u) => u.includes('/rest/v1/user_emails'), () => ({ body: [], headers: { 'content-range': '*/0' } })],
+  [(u) => u.includes('/rest/v1/user_emails'), (u, req) => {
+    if (req.method() === 'PATCH') return { body: [] }
+    const rows = MAIL.filter((m) => !m.is_junk && !m.is_sent)
+    return { body: rows, headers: { 'content-range': `0-${rows.length - 1}/${rows.length}` } }
+  }],
 ]
 
 const server = await startServer()
@@ -104,13 +108,23 @@ try {
   await modal.locator('input:not([role]):not([type=file])').first().fill('Statement attached')
   await modal.locator('textarea').first().fill('Good morning.\n\nPlease find the statement attached.')
   await page.waitForTimeout(400)
-  const frame = modal.locator('iframe[title="Your signature as it goes out"]')
-  t.check('the signature is drawn under the box', await frame.count(), 1)
+  /* PART OF THE EMAIL (Stephan, 9 Nov: "just make it part of the email ... not necessary to have like a separate
+     box"): inside the message box, under the text, with no label of its own. */
+  const frame = modal.locator('[data-testid="message-box"] iframe[title="Your signature"]')
+  t.check('the signature is drawn inside the message box', await frame.count(), 1)
   t.check('...in a frame that cannot run scripts', await frame.getAttribute('sandbox'), 'allow-same-origin')
   const inside = await frame.evaluate((f) => f.contentDocument?.body?.innerText ?? '')
   t.ok('...with the signature in it', inside.includes('Bredell Ferreira Attorneys'))
-  t.ok('...under the last paragraph typed', inside.indexOf('Please find the statement attached.') > -1
-    && inside.indexOf('Please find the statement attached.') < inside.indexOf('Test Leader'))
+  t.check('...and no preview panel or label beside it', await modal.getByText('How the email ends').count(), 0)
+  const order = await modal.locator('[data-testid="message-box"]').evaluate((box) => [...box.children].map((c) => c.tagName).join(','))
+  t.check('...under what is typed', order, 'TEXTAREA,IFRAME')
+  /* LIKE OUTLOOK (Stephan, 9 Nov: "The signature is way below the text"): right under the last line typed, not twelve
+     rows down. Two short paragraphs leave the signature within a few lines of the text. */
+  const gap = await modal.locator('[data-testid="message-box"]').evaluate((box) => {
+    const ta = box.querySelector('textarea'); const fr = box.querySelector('iframe')
+    return ta && fr ? Math.round(fr.getBoundingClientRect().top - ta.getBoundingClientRect().top) : -1
+  })
+  t.ok(`...right under the text, as in Outlook (${gap}px from the top of the text)`, gap > 0 && gap < 140)
   const face = await frame.evaluate((f) => f.contentDocument?.body?.firstElementChild?.getAttribute('style') ?? '')
   t.ok('...in the firm\'s face, as the send wraps it', /font-family:/.test(face))
   await t.shot(page, '10-cc-and-signature')
@@ -127,6 +141,33 @@ try {
   await page.waitForTimeout(1200)
   t.check('fixed, it posts', posts.length, 1)
   t.check('...with both people on the Cc, once each', posts[0]?.cc, 'attorney@example.co.za, thandi@raptor.test')
+
+  /* ---------- 1b. Stephan, 9 Nov, on staging: "I try to add Nicholas and Camille to the same email, it keeps
+     removing one." A REPLY ALL opens with Camille already on the Cc line; tapping into the box and adding a colleague
+     must ADD them. It replaced her: the pre-filled address, with no comma after it, became the text being typed the
+     moment the box took focus, and the pick was written over it. ---------- */
+  await page.route('**/api/email/attachment*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ body: 'Hello' }) }))
+  await page.getByText('Debt collection enquiry').first().click()
+  await page.waitForTimeout(800)
+  await page.getByRole('button', { name: 'Reply all' }).first().click()
+  await page.waitForTimeout(600)
+  const skipMatch = page.getByRole('button', { name: /reply without matching it/i })
+  if (await skipMatch.count()) await skipMatch.click()
+  const replyModal = page.locator('[data-modal-open]')
+  const replyChips = replyModal.locator('[data-testid="recipient-chip"]')
+  await replyChips.first().waitFor({ timeout: 8000 }).catch(() => {})
+  t.ok('a reply all opens with Camille on the Cc line', (await replyChips.allInnerTexts()).join(' ').includes('camille@bredellferreira.co.za'))
+  const replyCc = replyModal.locator('input[role="combobox"]').nth(1)
+  await replyCc.click()
+  t.ok('...and tapping into the box leaves her a chip', (await replyChips.allInnerTexts()).join(' ').includes('camille@bredellferreira.co.za'))
+  await replyCc.fill('than')
+  const replyOptions = replyModal.locator('ul[role="listbox"] li[role="option"]')
+  await replyOptions.first().waitFor({ timeout: 5000 }).catch(() => {})
+  if (await replyOptions.count()) await replyOptions.first().locator('button').first().click()
+  const both = (await replyChips.allInnerTexts()).join(' ')
+  t.ok(`adding a colleague keeps Camille (${both.replace(/\s+/g, ' ')})`, both.includes('camille@bredellferreira.co.za') && both.includes('thandi@raptor.test'))
+  await replyModal.getByRole('button', { name: 'Close' }).first().click().catch(() => {})
+  await page.waitForTimeout(300)
 
   /* ---------- 2. the keyboard ---------- */
 
