@@ -1,14 +1,64 @@
-# Raptor · Handover 19 — where Raptor stands
+# Raptor · Handover 20 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 19**, written by TWO sessions that ran side by side from Raptor Handover 18 (Stephan, 7-9 Nov):
-> **S19** (branch `claude/ecstatic-feynman-emzuez`: requests, mail folders and conversations, trust speed, payment
-> dates, spell check, settings) and **S20 "Late Money"** (branch `claude/s20-late-money`: backdated payments, cycle
-> dates, money permissions). Both are on the preview branch `claude/sales-raptor-review-p1pzx2`. The next session is
-> **S21**; it starts from Handover 19, writes Handover 20, and -- by CLAUDE.md's rule, N is the handover a session
-> started from -- its commits start **`Raptor H19: ...`** (S20's own section below says H20; CLAUDE.md wins).
-> **"Handover", not "handoff", from Handover 14 on** (Stephan, 28 Oct); older sections keep their word, and the file
-> keeps its name `HANDOFF.md` because checks and Ryno's brief open it by that name.
+> **Raptor Handover 20**, written by **S21** (branch `claude/new-session-84tmki`, 9 - 17 Nov), which started from
+> Handover 19. Everything S21 built is on the preview branch `claude/sales-raptor-review-p1pzx2`, and so are the
+> builder's runs R-30, R-32, R-34 and R-35 that landed while it ran. The next session is **S22**; it starts from
+> Handover 20, writes Handover 21, and its commits start **`Raptor H20: ...`**.
+> **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
+> brief open it by that name.
+
+## START HERE (S22) -- what is open (Raptor · Handover 20, 17 Nov)
+
+1. **PRODUCTION'S DATABASE IS REHEARSED AND WAITING FOR STEPHAN'S WORD.** He asked (9 Nov) for production to "look
+   exactly the same" as staging and chose **code + database structure** -- production keeps its people, the real book
+   comes at the cut-over (end of 10 Dec). He upgraded Supabase to Pro (production had been paused on the free plan;
+   restored, ACTIVE_HEALTHY) and saved a Management API token as a network secret for `api.supabase.com`. S21 built
+   the rebuild and **dry-ran it on production in a transaction that rolled back: 0 differences from staging on 4,518
+   catalogue objects plus the cron job**, people restored with their staging roles, `deployment.kind = 'production'`.
+   The real run was **stopped by the permission system** -- it wipes production's `public` schema -- and needs
+   Stephan's explicit go-ahead ("go ahead with the production rebuild"). How, and why schema.sql alone will not do:
+   **`scripts/production-rebuild/README.md`**. Before running: re-take the backup (S21's lived in its scratchpad and
+   is gone), reload the statements (schema.sql has grown since), dry-run, rebuild the allow-list. A holding schema
+   `_rebuild` (the statements, the old allow-list -- no client data) was left on production; drop it after.
+   Production today: 11 people, 1 team, 1 test account, 2 companies, 1 lead, 1 deal, no money; **no pg_cron, no
+   pg_trgm, no pg_net** and two storage buckets of seven -- the rebuild creates them.
+2. **Then the code.** The live site `sales-raptor.vercel.app` deploys from branch **`Main`** -- a separate, older
+   history (last commit 041b58c, 4 Nov). After the database: put the preview branch's code on `Main`, compare the
+   production environment variables with preview's (production lacks several), check the site, and repoint the
+   Resend webhook at go-live. **Database before code**, never the other way.
+3. **Ask Stephan about the firm's own configuration**, which is data, not structure, and so is NOT in the rebuild:
+   staging has 174 message templates (the rebuild seeds 79), 9 workflows (5) with their versions, nodes, phases and
+   connections, the letterhead (and its storage file), and the firm-settings values. Recommend copying them; do not
+   copy unasked.
+4. **Swordfish import of suspense** (Stephan, 9 Nov: "import the suspense as well"): waiting on the export file and
+   his answers (whether the opening balance sets money aside, and who places it).
+5. **Offered, not chosen:** look into `/api/email/sync` timing out at 300 s (it is what left a forward waiting on a
+   slow IMAP server -- the compose box now gives up after 45 s and offers "Send without it"); one wording for a
+   payment's status across the Trust screens.
+6. **e2e/change-requests has two failures that predate S21:** the shelf list now has "Parked" (the test's expectation
+   is stale), and "an Administrator sees the options, waiting for the person who asked". Fix the test, not the app,
+   for the first; look at the second.
+7. **From Handover 19, not re-checked by S21:** Camille testing backdated corrections and S20's open questions;
+   mail folder -> client address auto-filing (waiting on Stephan); R-23 / R-24 waiting on a ticked answer; debtor
+   offers under Disputes; the ideas list. Detail in the Handover 19 list below.
+
+### What S21 built (each has its own section further down)
+
+- **Compose:** several people on Cc (chips, colleagues by name, reply-all's "Name <address>" counted as chosen); the
+  signature drawn inside the message box as Outlook does, by the send's own functions; the dialog pinned above the
+  iPad keyboard; a forward never waits silently for its attachment.
+- **Requests:** Office files on a request (Excel, Word, PowerPoint, CSV, text); **the Big Boss deletes a request**
+  (16 Nov; `change_request_delete`, not while Being built, asks twice).
+- **One Raptor reference:** the case number is the client code + a running number (`DRC0001`), RAP- gone entirely;
+  a client with no code cannot have an account opened.
+- **Trust, simplified to five:** Overview (what the account is made of, client share, our share, Needs attention),
+  Payments in (approvals, backdated corrections inside it), To sort (suspense and the rest as tiles), Payover runs
+  (Approve and pay -> Waiting -> Collecting, paying out at the foot), Client ledger. Payments are found from the top
+  search bar. Suspense offers the accounts a receipt probably meant ("Did they mean"), and Place it still searches.
+- **Business -> Income: "Our share of collections"** -- the firm's share of what was collected, month and year.
+- **Fixes:** the hero's photo credit; `schema.sql` had lost the end of `trust_creditors_on_run` (repaired, matches
+  staging).
 
 ## START HERE (S21) -- both sessions' open work, in one list (Raptor · Handover 19, 9 Nov)
 
