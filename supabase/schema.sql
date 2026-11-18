@@ -64867,3 +64867,212 @@ begin
   capital_after := b.capital - s.to_capital;
   return next;
 end $$;
+
+-- ============================================================================================
+-- Raptor H20 (18 Nov, S22) -- A SETTLEMENT PAUSES THE ACCOUNT'S WORKFLOWS, AND THEY GO BACK IF IT FALLS THROUGH.
+-- Migration h20_settlement_holds.
+--
+-- Stephan: "if it's not been accepted or if it's been breached or whatever, it should kind of go back to the
+-- previous workflow it was in. For example, if it was in a dispute, if it was in a payment default workflow, it
+-- should go back there."
+--
+-- The machinery is the promise's and the dispute's (workflow_run_holds, workflow_resume_account, and the morning
+-- sweep's redateResumedRuns that moves every remaining step on by the days it was paused, so nothing fires late in
+-- a bunch). A settlement is a third cause:
+--   put up            -> every running workflow is paused, once per run (the promise rule: repeated offers must not
+--                        keep the notices stopped); never the settlement's own letters;
+--   approved          -> stays paused while the debtor has until the expiry to pay;
+--   declined/withdrawn-> resumed at once (settlement_ticket);
+--   lapsed unpaid     -> resumed by the morning sweep (settlement_lapsed_resume) -- lapsed is derived, so there is
+--                        no moment in the database to hook;
+--   paid              -> the account closes as settled, which stops every workflow (settle_account).
+-- Only the SETTLEMENT holds are let go: a run a dispute had stopped stays stopped, which is "go back where it was".
+-- ============================================================================================
+alter table public.workflow_run_holds drop constraint if exists workflow_run_holds_cause_check;
+alter table public.workflow_run_holds add constraint workflow_run_holds_cause_check
+  check (cause in ('promise', 'dispute', 'on_hold', 'settlement'));
+
+create or replace function public.workflow_hold_account(
+  p_account_id uuid, p_cause text, p_reason text default null, p_cause_id uuid default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_held integer := 0;
+  v_reason text;
+begin
+  v_reason := coalesce(p_reason, case p_cause
+    when 'promise' then 'A promise to pay was made'
+    when 'dispute' then 'A dispute was raised in writing'
+    /* S22 (Raptor H20): Stephan -- a settlement "if it's not been accepted or if it's been breached ... should go
+       back to the previous workflow it was in". So an offer PAUSES what is running, and settlement_ticket /
+       settlement_lapsed_resume let it go again if the settlement falls through. */
+    when 'settlement' then 'A settlement offer is with the client'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow hold cause "%". It is one of promise, dispute, settlement.', p_cause;
+  end if;
+
+  /*
+   * ONCE PER RUN FOR A PROMISE, AND THAT IS THE FIRM'S RULE IN ONE CLAUSE.
+   *
+   * "People sometimes make a promise and then they break the promise, and then they make another
+   * promise and then they break that again. So if we stop it for all of that time, then that's a
+   * problem. Unless we can stop it only once. Not twice."
+   *
+   * The second promise is still recorded, still diarised and still worked -- it simply does not
+   * stop the sequence, because the debtor has already been told in writing that only payment
+   * will. A WRITTEN DISPUTE is not limited this way: a new objection is a new thing to answer,
+   * and the firm has to answer it before it can go on demanding.
+   */
+  with live as (
+    select r.id from public.workflow_runs r
+     join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state = 'running'
+       /* S10: NOT A SECTION 129 WHOSE FIRST NOTICE HAS NOT GONE YET -- see workflow_first_notice_pending. */
+       and not (p_cause in ('promise', 'settlement') and public.workflow_first_notice_pending(r.id))
+       /* ONCE PER RUN FOR A SETTLEMENT TOO, for the promise's reason: a debtor who keeps making offers and never
+          pays must not keep the sequence stopped. The second offer is still put up and still goes to the client --
+          it simply does not pause the notices again. */
+       and (p_cause not in ('promise', 'settlement') or not exists (
+         select 1 from public.workflow_run_holds h
+          where h.run_id = r.id and h.cause = p_cause))
+       /*
+        * AND NOT THE SEQUENCE THIS EVENT STARTED.
+        *
+        * A promise arrives, workflow_start_on_promise creates the arrangement sequence to confirm
+        * it in writing -- and a moment later this function stopped that sequence because a promise
+        * had been made. The confirmation the debtor was owed never went out, and the screen showed
+        * "Promise to pay -- Paused -- A promise to pay was made", which is a sentence with no
+        * meaning.
+        *
+        * MATCHED ON THE VERSION'S TRIGGER, not on when the run was created. "Started five seconds
+        * ago" is a guess about clocks; "this version exists to answer exactly this event" is a
+        * fact about the workflow, and it stays true if the run was created by a person pressing
+        * the button a minute before the promise was captured.
+        */
+       and coalesce(v.trigger_kind <> case p_cause
+         when 'promise' then 'promise_due'
+         when 'dispute' then 'dispute_logged'
+       end, true)
+       /* A SETTLEMENT NEVER PAUSES ITS OWN LETTERS (accepted / counter / declined) -- they are its answer. */
+       and not (p_cause = 'settlement' and v.trigger_kind like 'settlement\_%')
+  ), opened as (
+    insert into public.workflow_run_holds (run_id, cause, cause_id, reason, started_by)
+    select live.id, p_cause, p_cause_id, v_reason, auth.uid() from live
+    /* A run already held is left alone rather than held twice: whichever event arrived second
+       finds it stopped, and two open holds would count the clock twice. */
+    on conflict do nothing
+    returning run_id
+  )
+  update public.workflow_runs r
+     set state = 'held'
+    from opened
+   where r.id = opened.run_id;
+
+  get diagnostics v_held = row_count;
+  return v_held;
+end $$;
+
+
+/* THE SETTLEMENTS THAT LAPSED UNPAID let their holds go. Called by the morning sweep (api/_lib/workflow/run.ts)
+   for the accounts it is sweeping, or for every account when it is the cron. Idempotent: a hold already ended is
+   not touched again. */
+create or replace function public.settlement_lapsed_resume(p_accounts uuid[] default null)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare r record; v_n integer := 0;
+begin
+  for r in
+    select distinct s.account_id
+      from public.account_settlements s
+      join public.workflow_run_holds h on h.cause = 'settlement' and h.cause_id = s.id and h.ended_on is null
+     where s.status = 'approved'
+       and s.expires_on < public.settlement_today()
+       and (p_accounts is null or s.account_id = any (p_accounts))
+  loop
+    v_n := v_n + public.workflow_resume_account(r.account_id, 'The settlement lapsed unpaid', 'settlement');
+  end loop;
+  return v_n;
+end
+$$;
+revoke all on function public.settlement_lapsed_resume(uuid[]) from public, anon, authenticated;
+grant execute on function public.settlement_lapsed_resume(uuid[]) to service_role;
+
+create or replace function public.settlement_ticket()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_me text;
+        v_debtor text;
+        v_kind text;
+begin
+  if tg_op = 'INSERT' then
+    perform public.raise_settlement_ticket(new.id);
+    /* S22: THE OFFER PAUSES WHAT IS RUNNING, so no listing notice or summons goes out while the client weighs it. */
+    if new.status = 'proposed' then
+      perform public.workflow_hold_account(new.account_id, 'settlement', null, new.id);
+    end if;
+    return new;
+  end if;
+  if new.status is not distinct from old.status then return new; end if;
+  select name into v_me from public.profiles where id = auth.uid();
+  /* ANSWERED OR PAID: the ticket's work is done, and the card holds the answer and its proof. */
+  update public.account_queries
+     set status = 'closed', closed_at = public.raptor_now(), closed_by = auth.uid(), closed_by_name = v_me,
+         updated_at = public.raptor_now()
+   where settlement_id = new.id and status <> 'closed';
+  /* S22: FALLEN THROUGH -- the account goes back to the workflows it was in, from where they stopped. */
+  if new.status in ('declined', 'withdrawn') then
+    perform public.workflow_resume_account(new.account_id,
+      case new.status when 'declined' then 'The client declined the settlement' else 'The settlement offer was withdrawn' end,
+      'settlement');
+  end if;
+  if old.status = 'proposed' and new.status in ('approved', 'declined') then
+    v_kind := case when new.status = 'declined' then 'settlement_declined'
+                   when new.amount <> coalesce(new.offered_amount, new.amount) then 'settlement_countered'
+                   else 'settlement_accepted' end;
+    insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+    select new.account_id, v.id, public.raptor_today(), auth.uid()
+      from public.workflow_versions v
+     where v.state = 'active' and v.trigger_kind = v_kind
+       and not exists (select 1 from public.workflow_runs r
+                        where r.account_id = new.account_id and r.version_id = v.id and r.state = 'running');
+    if new.proposed_by is not null and new.proposed_by is distinct from auth.uid() then
+      select coalesce(nullif(btrim(concat_ws(' ', d.debtor_first_name, d.debtor_surname)), ''), d.case_number)
+        into v_debtor from public.debtor_accounts d where d.id = new.account_id;
+      insert into public.notifications (user_id, type, message, link)
+      values (new.proposed_by, 'settlement.' || new.status,
+        case when v_kind = 'settlement_declined'
+          then 'The client declined the settlement on ' || coalesce(v_debtor, 'the account') || '. The debtor has been sent the letter.'
+          when v_kind = 'settlement_countered'
+          then 'The client made a counter offer on ' || coalesce(v_debtor, 'the account') || ': R'
+               || to_char(new.amount, 'FM999999990.00') || ' by ' || to_char(new.expires_on, 'FMDD Mon YYYY')
+               || '. The debtor has been sent the letter.'
+          else 'The client approved the settlement on ' || coalesce(v_debtor, 'the account') || ': R'
+               || to_char(new.amount, 'FM999999990.00') || ', to be paid in full by '
+               || to_char(new.expires_on, 'FMDD Mon YYYY') || '. The debtor has been sent the letter.'
+        end,
+        '/accounts/' || new.account_id);
+    end if;
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.settlement_ticket() from public, anon, authenticated;
+
+/* THE OFFERS ALREADY UP pause their accounts now (RVC0010 has a section 129 running). Lapsed ones are left: the
+   sweep would let them straight go again. */
+select public.workflow_hold_account(s.account_id, 'settlement', null, s.id)
+  from public.account_settlements s
+ where s.status = 'proposed'
+    or (s.status = 'approved' and s.expires_on >= public.settlement_today());
+

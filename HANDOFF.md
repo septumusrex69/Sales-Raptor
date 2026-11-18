@@ -124,6 +124,23 @@ S22 is still running; this is its first piece, written down now so it is not los
   `check-moved-overpayment`, `check-payment-search` markers moved to `payment_split`; `check-workflow-triggers`
   knows the three kinds. Full fast QA green (24 143); e2e settlement, payments-in, library, workflow-builder,
   workflow-start all green.
+- **Round three: an offer pauses the workflows, a failed one gives them back** (migration `h20_settlement_holds`,
+  mirrored; `workflow_hold_account`, `settlement_lapsed_resume`, `settlement_ticket` md5-verified). Stephan: "if it's
+  not been accepted or if it's been breached ... it should kind of go back to the previous workflow it was in." A
+  third hold cause, `settlement`: putting an offer up holds every running run (once per run, the promise rule, so
+  repeated offers cannot keep the notices stopped; never the settlement letters; a 129 whose first notice has not
+  gone still sends it). Declined or withdrawn -> `workflow_resume_account(..., 'settlement')` at once; approved ->
+  stays held to the expiry; lapsed unpaid -> `settlement_lapsed_resume`, called by the morning sweep
+  (`api/_lib/workflow/run.ts`) BEFORE `redateResumedRuns`, so paused steps move on rather than fire in a bunch;
+  paid -> the close stops everything. Only settlement holds are released, so a run a dispute stopped stays stopped.
+  Backfilled: RVC0010's Section 129 is held ("A settlement offer is with the client"). Probed rolled back: decline ->
+  129 running + declined letter; a second offer does not re-hold; approve holds to expiry; lapse sweep resumes.
+  Checks: `check-settlement-ticket` 71; `check-promise-rules-s10` / `check-workflow-hold-clock` read the generalised
+  hold. Not done: a run already held by a dispute gets no settlement hold (one open hold per run), so if the dispute
+  is answered while a settlement is live, that run resumes.
+- **Stephan, 18 Nov: "push everything just through and push to main ... I don't want to approve shit."** Build and
+  push without asking. NOT pushed to `Main`: it is the live site and production's database has not been rebuilt for
+  this code (START HERE item 1), so code first would break it. The prompts themselves are his to switch off (Auto mode).
 - **Permission prompts:** Stephan asked why SQL keeps asking. The fix is his: **Auto** mode in the mode dropdown
   (cloud sessions ignore bypass). A session may not grant itself permissions (the classifier refused it), and the
   committed `.claude/settings.json` is shared with Ryno's sessions, so Supabase writes were not allowed there.

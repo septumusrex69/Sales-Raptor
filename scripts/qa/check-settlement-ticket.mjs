@@ -178,6 +178,29 @@ ok('a frozen proposal promises the exact figure and drops the interest caveat',
 ok('...and names the discount', /\(a 10% discount\)/.test(frozenDoc))
 ok('...and asks for a counter offer as one of the answers', /would accept a different amount, or decline/.test(frozenDoc))
 
+/* ---------------- S22, round three: the offer pauses the workflows, a failed one gives them back ---------------- */
+
+const hold = lastFn(sql, 'workflow_hold_account')
+const lapse = lastFn(sql, 'settlement_lapsed_resume')
+const trig3 = lastFn(sql, 'settlement_ticket')
+const holdCauses = sql.slice(sql.lastIndexOf('add constraint workflow_run_holds_cause_check'))
+ok('a settlement is a cause a run may be held for', /'settlement'\)\)/.test(holdCauses.slice(0, 200)))
+ok('the hold knows the cause and says why', /when 'settlement' then 'A settlement offer is with the client'/.test(hold))
+ok('...once per run, like a promise', /p_cause not in \('promise', 'settlement'\) or not exists/.test(hold))
+ok('...never its own letters', /not \(p_cause = 'settlement' and v\.trigger_kind like 'settlement\\_%'\)/.test(hold))
+ok('...and an unknown cause’s trigger match does not hold or skip everything', /coalesce\(v\.trigger_kind <> case p_cause/.test(hold))
+ok('putting an offer up pauses the account', /tg_op = 'INSERT'[\s\S]*workflow_hold_account\(new\.account_id, 'settlement', null, new\.id\)/.test(trig3))
+ok('declined or withdrawn gives the account back, settlement holds only',
+  /\n\s*if new\.status in \('declined', 'withdrawn'\) then\s*perform public\.workflow_resume_account\([\s\S]*?'settlement'\)/.test(trig3))
+ok('a lapse gives it back: approved, past expiry, its own holds still open',
+  /s\.status = 'approved'/.test(lapse) && /s\.expires_on < public\.settlement_today\(\)/.test(lapse)
+  && /h\.cause = 'settlement' and h\.cause_id = s\.id and h\.ended_on is null/.test(lapse)
+  && /workflow_resume_account\(r\.account_id, 'The settlement lapsed unpaid', 'settlement'\)/.test(lapse))
+const runTs = read('api/_lib/workflow/run.ts')
+const lapseAt = runTs.indexOf("admin.rpc('settlement_lapsed_resume'")
+ok('the morning sweep asks for it, before the paused steps are re-dated',
+  lapseAt > 0 && lapseAt < runTs.indexOf('await redateResumedRuns(admin, accountIds)'))
+
 /* ---------------- the screen ---------------- */
 
 const panel = read('src/components/accounts/SettlementPanel.tsx')
