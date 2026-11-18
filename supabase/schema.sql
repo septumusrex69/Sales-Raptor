@@ -63666,3 +63666,88 @@ select d.id as account_id,
   left join allocated al on al.account_id = d.id
   left join shut sh on sh.account_id = d.id;
 
+
+-- ============================================================================================
+-- Raptor H20 (18 Nov) -- ALL PAYMENTS: every receipt on every account, newest first, a page at a time.
+--
+-- Stephan, sending Swordfish's "All Payments" export as the shape he wants: "The Client ledger is for payments that
+-- was already done. Can we create a new menu under trust maybe call it 'All Payments' ... where we can search then
+-- for a specific payment?" The same eight columns, in the firm's words: Raptor reference, client reference, payment
+-- date, import date, import by, assigned to, amount, the bank statement's description -- plus where it is now, worded
+-- exactly as find_payments words it, so the two screens never describe one payment two ways.
+--
+-- WHY NOT find_payments: it answers "where did THIS payment go" -- nothing without a criterion, capped at 200, and it
+-- includes unplaced bank lines. This is the register: everything when nothing is typed, PAGED with a total, receipts
+-- on accounts only (an unplaced credit is on To sort, and is not yet a payment on anybody's account).
+--
+-- READ-ONLY and finance.view only, security definer like find_payments, so the profile names it reads for "Import
+-- by" and "Assigned to" do not depend on the reader's own profile policy.
+-- ============================================================================================
+create or replace function public.all_payments(
+  p_words text default null, p_amount numeric default null, p_from date default null, p_to date default null,
+  p_limit integer default 50, p_offset integer default 0)
+returns table (
+  id uuid, account_id uuid, case_number text, client_reference text, client text, debtor text,
+  paid_on date, imported_on date, imported_by text, assigned_to text, amount numeric, details text, state text,
+  total bigint)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with q as (
+    select nullif(btrim(coalesce(p_words, '')), '') as w,
+           '%' || replace(replace(replace(lower(btrim(coalesce(p_words, ''))), '\', '\\'), '%', '\%'), '_', '\_') || '%' as pat
+  ),
+  r as (
+    select p.id, a.id as account_id, a.case_number, a.client_reference, c.name as client,
+           public.debtor_full_name(a.debtor_first_name, a.debtor_second_name, a.debtor_surname) as debtor,
+           (p.received_at at time zone 'Africa/Johannesburg')::date as paid_on,
+           coalesce(p.captured_on, (p.created_at at time zone 'Africa/Johannesburg')::date) as imported_on,
+           /* An imported receipt was captured in Swordfish by somebody Raptor cannot name; say where it came from. */
+           case when p.source = 'swordfish' then 'Swordfish import' else cb.name end as imported_by,
+           coalesce(ag.name, a.swordfish_assigned_to) as assigned_to,
+           p.amount,
+           /* The bank statement's own words first (the CSV's "same as on the bank statement description"). */
+           coalesce(nullif(l.description, ''), nullif(p.details, ''), nullif(concat_ws(' · ', p.depositor_name, p.reference), '')) as details,
+           case
+             when p.rejected_at is not null then 'Rejected'
+             when p.reversed_at is not null and exists (select 1 from public.account_payments x where x.replaces_payment_id = p.id) then 'Moved to another account'
+             when p.reversed_at is not null and (p.returned_unpaid_on is not null
+                  or coalesce(p.reversal_reason, '') ilike 'Returned unpaid%') then 'Returned unpaid'
+             when p.reversed_at is not null then 'Reversed'
+             when p.suspended_at is not null then 'In suspense'
+             when p.approved_at is null then 'Waiting for approval'
+             when p.paid_to_client then 'Paid to the client direct'
+             else 'On the account'
+           end as state,
+           p.created_at,
+           concat_ws(' ', a.case_number, a.account_number, a.client_reference, a.swordfish_reference, c.name,
+             public.debtor_full_name(a.debtor_first_name, a.debtor_second_name, a.debtor_surname),
+             p.reference, p.depositor_name, p.details, l.description, l.reference, cb.name, ag.name, a.swordfish_assigned_to) as hay
+      from public.account_payments p
+      join public.debtor_accounts a on a.id = p.account_id
+      left join public.companies c on c.id = a.company_id
+      left join public.bank_statement_lines l on l.id = p.bank_line_id
+      left join public.profiles cb on cb.id = p.created_by
+      left join public.profiles ag on ag.id = a.assigned_to
+  )
+  select r.id, r.account_id, r.case_number, r.client_reference, r.client, r.debtor, r.paid_on, r.imported_on,
+         r.imported_by, r.assigned_to, r.amount, r.details, r.state, count(*) over () as total
+    from r, q
+   where public.has_capability('finance.view')
+     and (p_amount is null or abs(r.amount - p_amount) < 0.005)
+     and (p_from is null or r.paid_on >= p_from)
+     and (p_to is null or r.paid_on <= p_to)
+     and (q.w is null or lower(r.hay) like q.pat)
+   order by r.paid_on desc, r.created_at desc, r.id
+   limit least(greatest(coalesce(p_limit, 50), 1), 200)
+  offset greatest(coalesce(p_offset, 0), 0)
+$$;
+
+comment on function public.all_payments(text, numeric, date, date, integer, integer) is
+  'Raptor H20: Trust -> All Payments. Every receipt on every account, newest first, paged with a total, searchable '
+  'on words, amount and paid-between. Read-only; finance.view only.';
+
+revoke all on function public.all_payments(text, numeric, date, date, integer, integer) from public, anon;
+grant execute on function public.all_payments(text, numeric, date, date, integer, integer) to authenticated;

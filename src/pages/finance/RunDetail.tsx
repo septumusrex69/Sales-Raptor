@@ -565,7 +565,9 @@ function PaymentPanel({ row, audit, onClose }: {
           <table className="mt-4 w-full text-sm">
             <tbody>
               <Line label={row.paidToClient ? 'Paid to the client directly' : 'Paid into the trust account'} value={row.paymentAmount} />
-              <Line label="Receipt fee charged (Annexure B item 9)" value={row.receiptFee} sub />
+              {/* NO SEPARATE RECEIPT FEE LINE (Raptor H20, 18 Nov; Stephan: "remove the Receipt fee charge line"). The fee
+                  is still counted -- it is inside Half A's costs on the line below, which says so -- and the audit
+                  history still records it being charged. Shown on its own it read as a second deduction. */}
               <Line label="Half A → interest" value={row.toInterest} sub />
               <Line label="Half A → costs, incl the receipt fee" value={row.toCosts} sub />
               <Line label="Half B → capital (what the client sees)" value={row.toCapital} />
