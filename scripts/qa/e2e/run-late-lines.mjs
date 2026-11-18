@@ -8,6 +8,8 @@
  *  2. Mark paid is drawn for payover.pay; an Administrator with that tick revoked does not see it, and Send again
  *     (issuing the advice, payover.approve) stays.
  *
+ *  3. A payment opened has no separate "Receipt fee charged" line (Raptor H20, Stephan 18 Nov).
+ *
  * Seen failing with the late note taken out of the Note cell, and with the mayPay gate removed.
  *
  * Run: node scripts/qa/e2e/run-late-lines.mjs
@@ -70,6 +72,15 @@ try {
     t.ok('...and its Approved column says 12 Nov', /12 Nov/.test(await late.getByTestId('run-line-approved').innerText()))
     t.ok('the line in its own cycle says nothing about being late', !/Late/.test(await own.innerText()))
     t.check('an Administrator with payover.pay sees Mark paid', await page.getByRole('button', { name: 'Mark paid' }).count(), 1)
+    /* Raptor H20 (Stephan, 18 Nov): one payment opened shows no separate receipt fee line; the fee stays inside
+       Half A's costs, whose line still says so. */
+    await own.first().click()
+    const panel = page.locator('div.max-w-md').filter({ hasText: 'Audit history' })
+    await panel.waitFor({ timeout: 10000 })
+    const panelText = await panel.innerText()
+    t.ok('a payment opened has no "Receipt fee charged" line', !/Receipt fee charged/.test(panelText))
+    t.ok('...and still shows Half A\'s costs, incl the receipt fee', /Half A → costs, incl the receipt fee/.test(panelText))
+    await page.screenshot({ path: '.qa-screenshots/run-payment-panel.png' })
     await context.close()
   }
   {
