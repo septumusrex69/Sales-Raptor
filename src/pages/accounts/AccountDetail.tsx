@@ -1433,7 +1433,8 @@ function AccountPage() {
         reached: null,
         promise: due
           ? { amount: due.amount, dueOn: due.dueOn, takenOn: due.createdAt?.slice(0, 10) ?? null,
-              status: due.status === 'broken' ? 'broken' : 'open', arrangement: due.arrangement }
+              status: due.status === 'broken' ? 'broken' : 'open', arrangement: due.arrangement,
+              instalmentsKept: due.instalmentsKept }
           : null,
         /*
          * The account knows WHEN it comes back but not WHY — the kind lives on the diary entry,

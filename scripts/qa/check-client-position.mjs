@@ -827,6 +827,23 @@ ok('what the debtor said still comes first',
       readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')))
 }
 
+/*
+ * AN ARRANGEMENT ALREADY PAID ON SAYS SO, AND NAMES THE NEXT DATE, NOT A "BEGINNING" (Raptor H20, 18 Nov). Stephan, on
+ * DCR2181: "On 14 April 2026 ... monthly instalments, beginning on 15 December 2026" -- paid eight times since April.
+ * Seen failing with instalmentsKept left out of the account page and with the old sentence put back.
+ */
+{
+  const p = { amount: 1000, dueOn: '2026-12-15', takenOn: '2026-04-14', status: 'open', arrangement: 'monthly' }
+  const paid = clientLine({ position: 'arranged', promise: { ...p, instalmentsKept: 8 } }).happened
+  check('an arrangement paid on says how many and when the next is due', paid,
+    'On 14 April 2026, the debtor made an arrangement to pay monthly instalments and has paid 8 of them so far. The next is due on 15 December 2026.')
+  ok('...without the amount promised', !/1 ?000/.test(paid))
+  check('a new one still says when it begins', clientLine({ position: 'arranged', promise: { ...p, instalmentsKept: 0 } }).happened,
+    'On 14 April 2026, the debtor made an arrangement to pay monthly instalments, beginning on 15 December 2026.')
+  ok('the account page passes the instalments kept',
+    /instalmentsKept: due\.instalmentsKept/.test(readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')))
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

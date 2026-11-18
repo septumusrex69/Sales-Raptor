@@ -77,6 +77,8 @@ export interface NarrativeInput {
     status?: 'open' | 'broken' | 'kept'
     /** Once-off, weekly or monthly. A recurring promise reads differently. */
     arrangement?: Arrangement
+    /** Instalments already paid on it. Above nought, `dueOn` is the NEXT one, not the first (Raptor H20). */
+    instalmentsKept?: number
   } | null
   /** A payment received in the period. */
   paidInPeriod?: { amount: number; on: string } | null
@@ -316,6 +318,16 @@ function whatHappened(input: NarrativeInput): string {
      */
     if (p.arrangement && p.arrangement !== 'once_off') {
       const every = p.arrangement === 'weekly' ? 'weekly' : 'monthly'
+      /*
+       * ONCE IT HAS BEEN PAID ON, dueOn IS THE NEXT INSTALMENT, NOT THE FIRST (Raptor H20, 18 Nov). Stephan, on DCR2181's
+       * client line: "On 14 April 2026, the debtor made an arrangement to pay monthly instalments, beginning on 15
+       * December 2026" -- an arrangement paid eight times since April. Still no amount: see above.
+       */
+      const kept = p.instalmentsKept ?? 0
+      if (kept > 0) {
+        return `${when} debtor made an arrangement to pay ${every} instalments and has paid ${kept} of them so far. `
+          + `The next is due on ${onDate(p.dueOn)}.`
+      }
       return `${when} debtor made an arrangement to pay ${every} instalments, beginning on ${onDate(p.dueOn)}.`
     }
     return `${when} debtor made an arrangement to pay on ${onDate(p.dueOn)}.`
