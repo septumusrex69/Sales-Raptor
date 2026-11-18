@@ -50,6 +50,8 @@ const compose = read('src/components/ComposeEmailModal.tsx')
 ok('the compose box sends the mark in front of the quote',
   /\+ \(quotedHtml \? QUOTE_MARK \+ \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(compose))
 ok('...and shows the signature above it, not after the original', !/afterOriginal \/>/.test(compose))
+ok('a reply needs something typed or the original edited -- an untouched reply is refused',
+  /\(!body\.trim\(\) && \(!quotedHtml \|\| \(quoteKind === 'reply' && quoteTick === 0\)\)\) \? 'a message'/.test(compose))
 ok('a reply is not titled "Forward"', /quotedHtml && quoteKind === 'forward' \? 'Forward'/.test(compose))
 
 /* ---------------- the two places a reply is written ---------------- */
