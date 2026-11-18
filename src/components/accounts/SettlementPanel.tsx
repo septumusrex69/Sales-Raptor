@@ -8,12 +8,13 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { firmToday } from '../../lib/dateLabels'
 import {
-  SETTLEMENT_STATE_LABEL, isPaidInFull, type Settlement,
+  SETTLEMENT_STATE_LABEL, isPaidInFull, writtenOff, type Settlement, type SettlementBreakdown,
 } from '../../lib/settlement'
 import {
-  approveSettlement, closeAsSettled, closeSettlementOffer, fetchPinnableEmails, fetchSettlementProof,
-  proposeSettlement, type PinnableEmail, type SettlementProof,
+  approveSettlement, closeAsSettled, closeSettlementOffer, fetchPinnableEmails, fetchSettlementBreakdown,
+  fetchSettlementProof, proposeSettlement, type PinnableEmail, type SettlementProof,
 } from '../../lib/settlementApi'
+import { settlementProposalRefusal } from '../../lib/settlementProposalLetter'
 import { documentUrl, uploadDocument } from '../../lib/accountWorkspace'
 
 /**
@@ -30,7 +31,7 @@ import { documentUrl, uploadDocument } from '../../lib/accountWorkspace'
  * refusal is the database's, and this panel only spares somebody the trip.
  */
 export function SettlementPanel({
-  accountId, settlement, balance, open, canApprove, canClose, userId, nameOf, onChange,
+  accountId, settlement, balance, open, canApprove, canClose, userId, nameOf, onChange, onSendProposal,
 }: {
   accountId: string
   settlement: Settlement | null
@@ -45,6 +46,12 @@ export function SettlementPanel({
   userId: string | null
   nameOf: (id: string | null) => string | null
   onChange: () => void
+  /**
+   * OPEN THE COMPOSE BOX WITH THE PROPOSAL LETTER ATTACHED (S22 · Raptor H20). The account page owns the compose box
+   * -- it is the one path that sends from the liaison's mailbox, files the message and raises item 1(a) -- so this
+   * panel hands it the offer and the engine's figures and the page draws and attaches the letter.
+   */
+  onSendProposal?: (s: Settlement, b: SettlementBreakdown) => Promise<void>
 }) {
   const [dialog, setDialog] = useState<'propose' | 'approve' | 'declined' | 'withdrawn' | 'settle' | null>(null)
   const s = settlement
@@ -103,6 +110,9 @@ export function SettlementPanel({
             <Row label="Received towards it" value={`${rand(s.paidToward)} of ${rand(s.amount)}`} />
           )}
 
+          {s.state === 'proposed' && canApprove && (
+            <ProposalFigures settlement={s} onSend={onSendProposal} />
+          )}
           {s.state === 'proposed' && (
             <p className="text-[11px] text-slate-400">
               Put up by {nameOf(s.proposedBy) ?? 'somebody'} on {formatDate(s.proposedAt)}
@@ -166,6 +176,54 @@ export function SettlementPanel({
         <SettleModal settlement={s} onClose={() => setDialog(null)} onDone={done} />
       )}
     </Card>
+  )
+}
+
+/**
+ * WHAT THE OFFER WOULD PAY, BY THE ENGINE -- "an automatic calculation" (Stephan, 18 Nov). Shown to whoever records
+ * the client's answer, because it is what they will be asked: "what do I get out of it?" The figures are
+ * settlement_breakdown's, i.e. preview_allocation's, so the card, the letter and the payover say one thing.
+ */
+function ProposalFigures({ settlement, onSend }: {
+  settlement: Settlement
+  onSend?: (s: Settlement, b: SettlementBreakdown) => Promise<void>
+}) {
+  const [b, setB] = useState<SettlementBreakdown | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setB(null); setError(null)
+    fetchSettlementBreakdown(settlement.id)
+      .then((r) => { if (alive) setB(r) })
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)) })
+    return () => { alive = false }
+  }, [settlement.id, settlement.amount])
+  if (error) return <p className="text-[11px] text-[var(--c-rust-deep)]">{error}</p>
+  if (!b) return <p className="text-[11px] text-slate-400"><Loader2 size={11} className="inline animate-spin" /> Working out what it would pay…</p>
+  const off = writtenOff(b)
+  const refusal = settlementProposalRefusal(b)
+  return (
+    <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2 space-y-1" data-testid="settlement-figures">
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">If the client accepts</p>
+      <Row label="The client receives" value={rand(b.toClient)} strong
+        note={`${rand(b.toCapital)} to capital, less ${rand(b.commission + b.commissionVat)} commission and VAT`} />
+      <Row label="We take" value={rand(b.bfTakes)} note="fees, interest and commission" />
+      <Row label="Written off" value={rand(off.total)}
+        note={`${rand(off.byClient)} capital by the client, ${rand(off.byFirm)} fees and interest by us`} />
+      {refusal && <p className="text-[11px] text-[var(--c-rust-deep)]" data-testid="settlement-excess">{refusal}</p>}
+      {onSend && !refusal && (
+        <button type="button" disabled={busy} data-testid="settlement-send-proposal"
+          onClick={async () => {
+            setBusy(true); setError(null)
+            try { await onSend(settlement, b) } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+            finally { setBusy(false) }
+          }}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--c-steel)] hover:underline disabled:opacity-50">
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />} Send the proposal to the client
+        </button>
+      )}
+    </div>
   )
 }
 

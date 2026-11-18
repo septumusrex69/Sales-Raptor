@@ -42,6 +42,9 @@ import { AccountPaymentsList } from '../../components/accounts/AccountPaymentsLi
 import { isQuotable, type Settlement } from '../../lib/settlement'
 import { fetchSettlement } from '../../lib/settlementApi'
 import { SettlementPanel } from '../../components/accounts/SettlementPanel'
+import { settlementProposalLetter } from '../../lib/settlementProposalLetter'
+import { letterPdfBytes } from '../../lib/letterAttachment.ts'
+import { letterFilename, toBase64 } from '../../lib/letterPdf.ts'
 import { fetchStatusChanges } from '../../lib/accountEndingApi'
 import type { StatusChange } from '../../lib/accountTimeline'
 import { ENDING_LABEL, ENDING_SHORT } from '../../lib/accountEnding'
@@ -304,6 +307,8 @@ function AccountPage() {
     subject: string
     body: string
     missing: string[]
+    /** What the box says under the message. The simulation's own line where this is absent. */
+    note?: string
   } | null>(null)
 
   /**
@@ -1541,6 +1546,35 @@ function AccountPage() {
       userId={currentUser?.id ?? null}
       nameOf={(uid) => users.find((u) => u.id === uid)?.name ?? null}
       onChange={reload}
+      /*
+       * THE SETTLEMENT PROPOSAL TO THE CLIENT (Stephan, 18 Nov, S22 · Raptor H20), drawn on the firm's letterhead and
+       * attached to a message addressed to the CLIENT -- the same compose box, so it is filed to this account, charged
+       * as correspondence about it (item 1(a)), and the client's reply lands here to be pinned as the acceptance.
+       */
+      onSendProposal={async (s, figures) => {
+        const values = letterContext.values as Record<string, string>
+        const doc = settlementProposalLetter({ breakdown: figures, money: formatMoney, reason: s.proposalNote })
+        const bytes = await letterPdfBytes({ doc, scope: 'collections', values, filled: true, name: 'The settlement proposal' })
+        const debtor = values.debtor_name || [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ')
+        const ref = account.caseNumber ?? account.accountNumber ?? ''
+        startCompose()
+        setSimulation({
+          file: {
+            filename: letterFilename('Settlement proposal', account.caseNumber ?? null),
+            contentType: 'application/pdf', size: bytes.length, content: toBase64(bytes),
+          },
+          values,
+          subject: `Settlement proposal for your approval: ${debtor}${ref ? ` (${ref})` : ''}`,
+          body: `Good day\n\n${debtor} has offered to settle account ${ref} with a single payment of ${formatMoney(s.amount)}, `
+            + `in full and final settlement of the balance. The attached proposal sets out what is outstanding, what the `
+            + `settlement would pay you after our commission, and what would be written off.\n\n`
+            + `Please reply to this email to let us know whether you accept, and by which date the debtor must pay. `
+            + `We may not accept the offer without your written approval.\n\nKind regards`,
+          missing: [],
+          note: `The settlement proposal is attached. It goes to the client, from ${mailbox ?? 'your mailbox'}, and is charged R25 under item 1(a) as correspondence about this account. Their reply comes back to this account -- pin it as the acceptance when you record the approval.`,
+        })
+        setComposeTo(client?.email ?? '')
+      }}
     />
   )
   /* A DEBTOR'S ARRANGEMENT OFFER FROM THE DEBTOR PORTAL (Raptor H16), first in the side column while one waits. */
@@ -2692,6 +2726,8 @@ function AccountPage() {
           inReplyTo={replyTo?.messageId ?? null}
           contextNote={signingEmail
             ? `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). The acknowledgement of debt has already been issued and charged under item 4(a); this is the covering message.`
+            : simulation?.note
+            ? simulation.note
             : simulation
             ? `The payment simulation is attached. Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). It is a simulation, so nothing is recorded as an arrangement until you record one.`
             : `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}

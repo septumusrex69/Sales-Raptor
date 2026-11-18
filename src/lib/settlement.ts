@@ -112,3 +112,71 @@ export function settlementMergeValues(
   if (!isQuotable(s)) return null
   return { amount: money(s.amount), expiry: longDate(s.expiresOn), saving: money(s.saving) }
 }
+
+/**
+ * WHAT A SETTLEMENT WOULD PAY, worked out by the engine (Stephan, 18 Nov, S22 · Raptor H20): "an automatic
+ * calculation ... the capital outstanding ... our fees ... how much capital will be settled minus commission and how
+ * much the client will get out if the settlement has been approved."
+ *
+ * EVERY FIGURE IS preview_allocation's (read back by `settlement_breakdown`): what allocate_payment would post if the
+ * offer arrived today. NOTHING IS ADDED UP HERE except the totals of what the engine handed over -- the client is
+ * told what the payover will pay them, and a second calculation is a second answer. Interest still runs until the
+ * money arrives, so it is TODAY's split and the letter says so.
+ */
+export interface SettlementBreakdown {
+  amount: number
+  /** Owed today, before the offer. `fees` are the firm's Annexure B fees left to take. */
+  capital: number
+  interest: number
+  fees: number
+  /** The item 9 fee this receipt raises -- already inside `toFees`, shown so nobody counts it twice. */
+  receiptFee: number
+  toFees: number
+  toInterest: number
+  toCapital: number
+  commission: number
+  commissionVat: number
+  /** Null where the client has no rate on file; the letter then names commission without a percentage. */
+  commissionRate: number | null
+  toClient: number
+  /** The firm's share: interest, fees and commission (VAT on commission is SARS's, shown apart). */
+  bfTakes: number
+  /** More than the account can take -- held as the debtor's credit. Should be nought on a real settlement. */
+  excess: number
+  capitalAfter: number
+  interestAfter: number
+  feesAfter: number
+  asAt: string
+}
+
+export function toBreakdown(row: Record<string, unknown>): SettlementBreakdown {
+  const n = (v: unknown) => (v === null || v === undefined ? 0 : Number(v))
+  return {
+    amount: n(row.amount),
+    capital: n(row.capital), interest: n(row.interest), fees: n(row.fees),
+    receiptFee: n(row.receipt_fee),
+    toFees: n(row.to_fees), toInterest: n(row.to_interest), toCapital: n(row.to_capital),
+    commission: n(row.commission), commissionVat: n(row.commission_vat),
+    commissionRate: row.commission_rate === null || row.commission_rate === undefined ? null : Number(row.commission_rate),
+    toClient: n(row.to_client), bfTakes: n(row.bf_takes), excess: n(row.excess),
+    capitalAfter: n(row.capital_after), interestAfter: n(row.interest_after), feesAfter: n(row.fees_after),
+    asAt: String(row.as_at ?? ''),
+  }
+}
+
+const cents = (x: number) => Math.round(x * 100) / 100
+
+/** What is owed today, before the offer: the three parts the engine reported, added. */
+export function owedToday(b: SettlementBreakdown): number {
+  return cents(b.capital + b.interest + b.fees)
+}
+
+/**
+ * WHAT IS GIVEN UP, AND BY WHOM. The client gives up capital; the firm gives up fees and interest. Read off the
+ * engine's own "left after" figures, so the two halves add to what the debtor is excused.
+ */
+export function writtenOff(b: SettlementBreakdown): { byClient: number; byFirm: number; total: number } {
+  const byClient = cents(b.capitalAfter)
+  const byFirm = cents(b.feesAfter + b.interestAfter)
+  return { byClient, byFirm, total: cents(byClient + byFirm) }
+}

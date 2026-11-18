@@ -60,6 +60,46 @@
 - **Fixes:** the hero's photo credit; `schema.sql` had lost the end of `trust_creditors_on_run` (repaired, matches
   staging).
 
+## S22 -- A SETTLEMENT OFFER RAISES A TICKET, AND THE CLIENT GETS A PROPOSAL LETTER (Raptor · Handover 20, 18 Nov; branch `claude/loving-rubin-rbyjsn` from `claude/sales-raptor-review-p1pzx2` at 2b21ff6)
+
+S22 is still running; this is its first piece, written down now so it is not lost. Handover 21 comes at the end.
+
+- **Asked by Stephan** while logging one on Bonnitta Pharmacy (BNP0015, Tebogo Maseko, R500 against R882.11): "It should
+  definitely create a ticket for the client liaison and notify the liaison ... This is a high priority", plus "an
+  automatic calculation" and "a settlement proposal letter for the client": capital outstanding, our fees, what the
+  settlement pays, less commission, and what the client gets.
+- **The ticket** (staging migration `h20_settlement_ticket`, mirrored at the end of schema.sql; bodies md5-verified:
+  `raise_settlement_ticket` 6183bbf6..., `settlement_ticket` a5a5f55c..., `settlement_breakdown` 4d7d3cc7...): a new
+  ticket kind `settlement` on `account_queries` (+ `settlement_id`). A trigger on `account_settlements` raises it when
+  an offer is put up -- owner = the client's liaison (`companies.account_owner_id`), stage liaison, due today -- and
+  notifies the liaison "High priority: a settlement needs <client>'s approval ..." linked to `/queries/<id>`. It
+  **closes itself** when the offer is approved, declined, withdrawn or paid (the answer lives on the Settlement card,
+  with its proof), and the person who put the offer up is told when the client approves or declines. Never charged;
+  not on the Escalate menu; on no client-portal list. Backfilled: **T-1097 (BNP0015)** and **T-1096 (RVC0010)**,
+  both on Stephan. Probed in a rolled-back transaction first (raised, notified, withdrawn, closed).
+- **The figures** (`settlement_breakdown`) are preview_allocation's, read back for the offer -- never a second
+  calculation. Migration `h20_preview_for_settlement` lets `preview_allocation` answer `settlement.approve` as well as
+  `finance.view` (a dry run posts nothing). BNP0015's R500: fees R139.87 (incl. the R57.50 receipt fee), interest
+  R110.13, capital R250.00, commission R62.50 + VAT R9.38, **client receives R178.12**; written off R275.82 capital by
+  the client, R168.34 fees and interest by the firm.
+- **The screen**: the Settlement card shows "If the client accepts" (client receives / we take / written off) to
+  whoever holds `settlement.approve`, and **Send the proposal to the client** opens the account's compose box addressed
+  to `companies.email` (Bonnitta has none -- the liaison types it) with the one-page PDF attached
+  (`src/lib/settlementProposalLetter.ts`). Charged item 1(a) like any correspondence about the account; the client's
+  reply files to the account and is pinned as the acceptance. Notifications tab: a **Settlements** switch.
+- **Found, not fixed -- for Stephan:** RVC0010's offer (R2 500 "instead of R3 217.70") is MORE than the engine can
+  take (R1 833.56 capital + interest; the rest would be the debtor's credit). The card refuses to send that proposal
+  and says why; the gap between the balance the offer was measured from and what the engine can take wants a look.
+- Checks: new `check-settlement-ticket` (37; five breaks each caught, incl. a U+2212 minus the PDF cannot print --
+  found by drawing BNP0015's letter); `check-debtor-tickets` expectation widened (it pinned 'debtor' as the LAST kind);
+  `check-sales-lists` passes with the new switch; e2e settlement 27/0. `e2e/query-ticket` fails one assertion ("our
+  own reference") on the preview branch without this change too -- predates S22.
+- **Also discussed, nothing built:** going live with ~20 TB of case files (mostly PDFs, ~150 000 cases, +3-4 TB a
+  year). Recommended: case data in Supabase; PDFs in an object store (Cloudflare R2 suggested) indexed by a table in
+  Raptor; 3-2-1 backups (AWS Glacier Deep Archive with object lock + offline drives). Swordfish is hosted at
+  **Teraco**; plan is a Swordfish database backup for the written data and the PDFs copied off (direct transfer and/or
+  drives). Waiting on Stephan: where the files sit, how PDFs map to cases, live vs archive, OCR, retention, accounts.
+
 ## START HERE (S21) -- both sessions' open work, in one list (Raptor · Handover 19, 9 Nov)
 
 1. ~~Connect the five Settings tabs that do not save~~ -- **done** by `claude/trusting-newton-wowy32` (section "SETTINGS

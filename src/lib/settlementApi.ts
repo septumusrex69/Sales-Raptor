@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { toSettlement, type Settlement } from './settlement'
+import { toSettlement, toBreakdown, type Settlement, type SettlementBreakdown } from './settlement'
 
 /**
  * A SETTLEMENT, THE CALLS. The rules are in settlement.ts and, decisively, in the database:
@@ -120,4 +120,11 @@ export async function closeSettlementOffer(
 export async function closeAsSettled(id: string): Promise<void> {
   const { error } = await supabase.rpc('close_as_settled', { p_id: id })
   if (error) throw new Error(error.message)
+}
+
+/** What the offer would pay, by the engine, today -- for the card and the proposal letter. */
+export async function fetchSettlementBreakdown(id: string): Promise<SettlementBreakdown> {
+  const { data, error } = await supabase.rpc('settlement_breakdown', { p_settlement: id })
+  if (error) throw new Error(error.message)
+  return toBreakdown((data ?? {}) as Record<string, unknown>)
 }

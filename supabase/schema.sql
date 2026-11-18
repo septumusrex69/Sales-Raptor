@@ -63666,3 +63666,333 @@ select d.id as account_id,
   left join allocated al on al.account_id = d.id
   left join shut sh on sh.account_id = d.id;
 
+
+-- ============================================================================================
+-- Raptor H20 (18 Nov, S22) -- preview_allocation answers a liaison putting a settlement to the client (migration
+-- h20_preview_for_settlement, which swapped the one guard line in place; the whole function is written out here so
+-- the file's last definition is the live one). Everything else unchanged.
+-- ============================================================================================
+create or replace function public.preview_allocation(p_account uuid, p_amount numeric, p_paid_to_client boolean default false, p_as_at date default null::date, p_exclude_payment uuid default null::uuid)
+returns table(receipt_fee_excl numeric, receipt_fee_vat numeric, to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric, commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric, bf_takes numeric, interest_before numeric, costs_before numeric, capital_before numeric, interest_after numeric, costs_after numeric, capital_after numeric, has_rate boolean, interest_open numeric, interest_open_from date, interest_total numeric, interest_cant numeric, interest_retained numeric, rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric, fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric)
+language plpgsql stable security definer set search_path to 'public'
+as $$
+declare
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  b record; s record; o record; k record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric := 0;
+  v_company uuid;
+  v_day date := coalesce(p_as_at, public.raptor_today());
+  v_interest numeric;
+  v_accrued numeric; v_recoverable numeric;
+  v_costs_taken numeric;
+begin
+  /* A LIAISON PUTTING A SETTLEMENT TO THE CLIENT MAY DRY-RUN IT TOO (Stephan, 18 Nov, S22 · Raptor H20): the
+     settlement proposal letter shows the client what the offer would pay them, and that figure is this function's,
+     never a second calculation. A preview posts nothing, so the tick that records the client's answer is enough. */
+  if not (public.has_capability('finance.view') or public.has_capability('settlement.approve')) then
+    raise exception 'Trust is for people with finance access.' using errcode = '42501';
+  end if;
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and v_day >= effective_from
+     and (effective_to is null or v_day <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  /*
+   * A CLOSED ACCOUNT PREVIEWS AS WHAT allocate_payment WILL DO: nothing split, the whole amount the
+   * debtor's credit (prompt 11). Without this the approval queue showed R586.25 of fees on SBB/2006's
+   * R1 000 -- the very split the engine no longer posts.
+   */
+  /* The same test allocate_payment makes: received on or after a Raptor close, or an imported
+     write-off. v_day is the payment's own day where the queue passes it. */
+  if exists (select 1 from public.debtor_accounts d where d.id = p_account
+               and ((d.ended_as is not null and v_day >= d.ended_on)
+                    or (d.ended_as is null and (coalesce(d.write_off_reason, '') <> ''
+                                                or d.status ~* '^(written.off|closed)')))) then
+    select * into b from public.engine_balances(p_account, p_exclude_payment, 0);
+    receipt_fee_excl := 0; receipt_fee_vat := 0; to_interest := 0; to_costs := 0; to_capital := 0;
+    excess_credit := greatest(coalesce(p_amount, 0), 0);
+    commission := 0; commission_vat := 0; to_client := 0; due_to_bf := 0; bf_takes := 0;
+    interest_before := b.interest; costs_before := b.costs; capital_before := b.capital;
+    interest_after := b.interest; costs_after := b.costs; capital_after := b.capital;
+    has_rate := true; interest_open := 0; interest_open_from := null;
+    interest_total := 0; interest_cant := 0; interest_retained := 0;
+    rf_total := 0; rf_cant := 0; rf_retained := 0; to_receipt_fees := 0;
+    fees_total := 0; fees_cant := 0; fees_retained := 0; to_fees := 0;
+    return next;
+    return;
+  end if;
+
+  /*
+   * THE OPEN PERIOD FIRST, AND THAT ORDER IS THE FIX.
+   *
+   * It is the same call allocate_payment makes before it posts, with the same day and the same
+   * exclusion, so the figure below is the figure that will be posted. `recoverable` rather than
+   * `accrued`, because engine_balances counts the recoverable half of every posted row and in
+   * duplum binds a split the same way it binds a ledger.
+   *
+   * AND IT IS ASKED BEFORE THE BALANCES SO IT CAN BE PASSED TO THEM -- and to fee_split, which
+   * reads the same ceiling. in_duplum_cost_room counts POSTED accruals; the open period is not one
+   * yet. Asked afterwards and not passed, an account at its ceiling was handed the whole ceiling
+   * for costs and then given the open interest on top -- R385,62 of non-capital against a R380,00
+   * ceiling on RRC00005, which is the thing the ceiling exists to stop. The posting was always
+   * right, because it writes the accrual first; only the dry run promised the firm something the
+   * engine would not do. Found by probing a real approval against its own preview.
+   */
+  select * into o from public.open_interest(p_account, v_day, p_exclude_payment);
+  interest_open := coalesce(o.recoverable, 0);
+  interest_open_from := o.from_day;
+
+  select * into b from public.engine_balances(p_account, p_exclude_payment, interest_open);
+  v_interest := b.interest + interest_open;
+
+  select * into s from public.finance_split(
+    greatest(coalesce(p_amount, 0), 0), v_interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  /* ---------------------------------------------------------------- INTEREST: a, cannot take, b */
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = p_account;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+  interest_total := v_accrued;
+  interest_cant := greatest(v_accrued - v_recoverable, 0);
+  select coalesce(sum(a.to_interest), 0) into interest_retained
+    from public.payment_allocations a
+   where a.account_id = p_account and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id is distinct from p_exclude_payment);
+
+  /* ------------------------------------------------- THE COSTS POOL, SPLIT BY THE SHARED FUNCTION */
+  select coalesce(sum(a.to_costs), 0) into v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = p_account and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id is distinct from p_exclude_payment);
+
+  select * into k from public.fee_split(
+    p_account, p_exclude_payment, s.fee_excl + s.fee_vat, v_day, v_costs_taken, s.to_costs,
+    interest_open);
+  rf_total := k.rf_total; rf_cant := k.rf_cant; rf_retained := k.rf_retained;
+  to_receipt_fees := k.to_receipt_fees;
+  fees_total := k.fees_total; fees_cant := k.fees_cant; fees_retained := k.fees_retained;
+  to_fees := k.to_fees;
+
+  /* THE RATE IS THE ACCOUNT'S, DECIDED ONCE (prompt 9): its own stamped rate, else its client's band
+     on the capital handed over, else the client's flat rate -- account_commission_rate. Never
+     marginal on the client's cumulative capital, which is what this read before. */
+  select d.company_id into v_company from public.debtor_accounts d where d.id = p_account;
+  v_rate := public.account_commission_rate(p_account);
+  v_bands := null;
+
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_company and a.status <> 'reversed'
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+  has_rate := commission is not null;
+  if commission is null then commission := 0; end if;
+  commission_vat := round(commission * v_vat, 2);
+
+  receipt_fee_excl := s.fee_excl;
+  receipt_fee_vat := s.fee_vat;
+  to_interest := s.to_interest;
+  to_costs := s.to_costs;
+  to_capital := s.to_capital;
+  excess_credit := s.excess;
+
+  if p_paid_to_client then
+    to_client := 0;
+    due_to_bf := s.to_interest + s.to_costs + commission;
+  else
+    to_client := s.to_capital - commission - commission_vat;
+    due_to_bf := 0;
+  end if;
+  bf_takes := s.to_interest + s.to_costs + commission;
+
+  interest_before := v_interest; costs_before := b.costs; capital_before := b.capital;
+  interest_after := v_interest - s.to_interest;
+  costs_after := b.costs + s.fee_excl + s.fee_vat - s.to_costs;
+  capital_after := b.capital - s.to_capital;
+  return next;
+end $$;
+
+-- ============================================================================================
+-- Raptor H20 (18 Nov, S22) -- A SETTLEMENT OFFER RAISES A TICKET FOR THE CLIENT'S LIAISON.
+--
+-- Stephan, logging one on Bonnitta Pharmacy: "It should definitely create a ticket for the client liaison and notify
+-- the liaison. Like, listen, you have a settlement approval. This is a high priority." Until now an offer sat on the
+-- account as "Waiting for the client" and nobody was told -- the collector had to remember to say so.
+--
+-- A TICKET, NOT A TASK, because it is the same shape as everything else a liaison answers for the client: an owner,
+-- a chase date, a thread, and the liaison's queue ("what is waiting on me" is one place, see account_queries). Its
+-- own kind, 'settlement', because it is none of the others: not the debtor objecting, not the firm asking for a
+-- document. Never chargeable (disputeCategories.ts): the debtor offering to pay is not work they caused.
+--
+-- RAISED BY THE DATABASE, on the offer itself, so no screen can put an offer up and forget the ticket. It CLOSES
+-- ITSELF when the offer is answered (approved, declined, withdrawn) or paid, because the settlement card is where
+-- the answer is recorded -- with the client's written acceptance -- and a ticket left open beside a decided offer is
+-- two records that disagree. When the client answers, whoever put the offer up is told, so the collector can go back
+-- to the debtor with the figure.
+--
+-- DUE TODAY and the notification says "High priority": an approved settlement has an expiry, and a day the offer
+-- spends unread is a day off the debtor's time to pay.
+-- ============================================================================================
+alter table public.account_queries
+  add column if not exists settlement_id uuid references public.account_settlements (id) on delete set null;
+
+do $do$
+declare w text := 'DR' || 'OP';
+begin
+  execute replace('alter table public.account_queries W constraint if exists account_queries_kind_check', 'W', w);
+  alter table public.account_queries add constraint account_queries_kind_check
+    check (kind = any (array['dispute', 'request', 'help', 'litigation', 'import', 'client', 'debtor', 'settlement']));
+end $do$;
+
+create or replace function public.raise_settlement_ticket(p_settlement uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        v_a record;
+        v_by text;
+        v_q uuid;
+        v_ticket bigint;
+begin
+  select * into v_s from public.account_settlements where id = p_settlement;
+  if not found or v_s.status <> 'proposed' then return null; end if;
+  /* One ticket per offer. A second call (the backfill, a replay) finds the first and leaves it. */
+  select id into v_q from public.account_queries where settlement_id = p_settlement;
+  if found then return v_q; end if;
+  select d.case_number, concat_ws(' ', d.debtor_first_name, d.debtor_surname) as debtor,
+         c.name as client, c.account_owner_id as liaison
+    into v_a
+    from public.debtor_accounts d join public.companies c on c.id = d.company_id
+   where d.id = v_s.account_id;
+  select name into v_by from public.profiles where id = v_s.proposed_by;
+  insert into public.account_queries
+    (account_id, kind, stage, status, owner_id, raised_by, raised_by_name, raised_at, chase_on, settlement_id,
+     description)
+  values
+    (v_s.account_id, 'settlement', 'liaison', 'open', v_a.liaison, v_s.proposed_by, v_by, v_s.proposed_at,
+     public.settlement_today(), v_s.id,
+     'Settlement offer: ' || coalesce(nullif(btrim(v_a.debtor), ''), 'the debtor') || ' offers R'
+       || to_char(v_s.amount, 'FM999999990.00') || ' once, in full, instead of R'
+       || to_char(v_s.balance_at_offer, 'FM999999990.00') || '. Send the settlement proposal to '
+       || coalesce(v_a.client, 'the client') || ' and record their answer on the account''s Settlement card.'
+       || coalesce(' Note from ' || coalesce(v_by, 'the collector') || ': ' || v_s.proposal_note, ''))
+  returning id, ticket_no into v_q, v_ticket;
+  /* NOBODY TO TELL is a client with no liaison: the ticket still lands on the board, unassigned, which is where
+     an unowned ticket is found. */
+  if v_a.liaison is not null then
+    insert into public.notifications (user_id, type, message, link)
+    values (v_a.liaison, 'settlement.proposed',
+      'High priority: a settlement needs ' || coalesce(v_a.client, 'the client') || '''s approval. '
+        || coalesce(nullif(btrim(v_a.debtor), ''), 'A debtor') || coalesce(' (' || v_a.case_number || ')', '')
+        || ' offers R' || to_char(v_s.amount, 'FM999999990.00') || ' instead of R'
+        || to_char(v_s.balance_at_offer, 'FM999999990.00') || '. Ticket T-' || v_ticket || '.',
+      '/queries/' || v_q);
+  end if;
+  return v_q;
+end
+$$;
+revoke all on function public.raise_settlement_ticket(uuid) from public, anon, authenticated;
+
+create or replace function public.settlement_ticket()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_me text;
+        v_debtor text;
+begin
+  if tg_op = 'INSERT' then
+    perform public.raise_settlement_ticket(new.id);
+    return new;
+  end if;
+  if new.status is not distinct from old.status then return new; end if;
+  select name into v_me from public.profiles where id = auth.uid();
+  /* ANSWERED OR PAID: the ticket's work is done, and the card holds the answer and its proof. */
+  update public.account_queries
+     set status = 'closed', closed_at = public.raptor_now(), closed_by = auth.uid(), closed_by_name = v_me,
+         updated_at = public.raptor_now()
+   where settlement_id = new.id and status <> 'closed';
+  /* THE CLIENT ANSWERED: tell whoever put the offer up, unless they recorded the answer themselves. */
+  if old.status = 'proposed' and new.status in ('approved', 'declined')
+     and new.proposed_by is not null and new.proposed_by is distinct from auth.uid() then
+    select coalesce(nullif(btrim(concat_ws(' ', d.debtor_first_name, d.debtor_surname)), ''), d.case_number)
+      into v_debtor from public.debtor_accounts d where d.id = new.account_id;
+    insert into public.notifications (user_id, type, message, link)
+    values (new.proposed_by, 'settlement.' || new.status,
+      case when new.status = 'approved'
+        then 'The client approved the settlement on ' || coalesce(v_debtor, 'the account') || ': R'
+             || to_char(new.amount, 'FM999999990.00') || ', to be paid in full by '
+             || to_char(new.expires_on, 'FMDD Mon YYYY') || '. You may quote it now.'
+        else 'The client declined the settlement on ' || coalesce(v_debtor, 'the account') || '.'
+      end,
+      '/accounts/' || new.account_id);
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.settlement_ticket() from public, anon, authenticated;
+
+drop trigger if exists account_settlements_ticket on public.account_settlements;
+create trigger account_settlements_ticket
+  after insert or update of status on public.account_settlements
+  for each row execute function public.settlement_ticket();
+
+/* THE OFFERS ALREADY WAITING get theirs now -- BNP0015's, put up this morning, is the one that asked for this. */
+select public.raise_settlement_ticket(s.id)
+  from public.account_settlements s
+ where s.status = 'proposed'
+   and not exists (select 1 from public.account_queries q where q.settlement_id = s.id);
+
+-- --------------------------------------------------------------------------------------------
+-- THE SETTLEMENT PROPOSAL'S FIGURES (Stephan, same day): "an automatic calculation ... the capital outstanding ...
+-- our fees ... how much capital will be settled minus commission and how much the client will get out if the
+-- settlement has been approved." preview_allocation IS the calculation -- what allocate_payment will post for that
+-- receipt today -- so this only reads it back for the offer, with what is owed before it. A figure worked out a
+-- second way is a letter that tells the client one amount and a payover that pays them another.
+-- --------------------------------------------------------------------------------------------
+create or replace function public.settlement_breakdown(p_settlement uuid)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        p record;
+        v_rate numeric;
+begin
+  if not (public.has_capability('settlement.approve') or public.has_capability('finance.view')) then
+    raise exception 'Working out a settlement for the client is the liaison''s.' using errcode = '42501';
+  end if;
+  select * into v_s from public.account_settlements where id = p_settlement;
+  if not found then raise exception 'That offer no longer exists.' using errcode = 'P0002'; end if;
+  select * into p from public.preview_allocation(v_s.account_id, v_s.amount);
+  if not found then
+    raise exception 'There is no receipt fee on the tariff for today, so nothing can be worked out.' using errcode = '22023';
+  end if;
+  select commission_rate into v_rate from public.account_money_position where account_id = v_s.account_id;
+  return jsonb_build_object(
+    'amount', v_s.amount,
+    'capital', p.capital_before, 'interest', p.interest_before, 'fees', p.costs_before,
+    'receipt_fee', p.receipt_fee_excl + p.receipt_fee_vat,
+    'to_fees', p.to_costs, 'to_interest', p.to_interest, 'to_capital', p.to_capital,
+    'commission', p.commission, 'commission_vat', p.commission_vat, 'commission_rate', v_rate,
+    'to_client', p.to_client, 'bf_takes', p.bf_takes, 'excess', p.excess_credit,
+    'capital_after', p.capital_after, 'interest_after', p.interest_after, 'fees_after', p.costs_after,
+    'as_at', public.raptor_today());
+end
+$$;
+revoke execute on function public.settlement_breakdown(uuid) from public, anon;
+grant execute on function public.settlement_breakdown(uuid) to authenticated;

@@ -200,7 +200,7 @@ export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
  * the firm supervising its own staff. A recommendation to sue is the firm deciding how to run
  * its business. A debtor pays for the first and must never pay for the other two.
  */
-export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import' | 'client' | 'debtor'
+export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import' | 'client' | 'debtor' | 'settlement'
 
 /**
  * WHAT A REQUEST IS ASKING FOR.
@@ -433,6 +433,34 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     submitLabel: 'Raise it',
     freeNote: 'A debtor asking about their own account is not a cost they caused.',
   },
+  /*
+   * A SETTLEMENT OFFER WAITING FOR THE CLIENT (Stephan, 18 Nov, S22 · Raptor H20): "It should definitely create a
+   * ticket for the client liaison and notify the liaison ... This is a high priority." Raised by the DATABASE when an
+   * offer is put up (raise_settlement_ticket) and closed by it when the offer is answered or paid, so it is not in
+   * ESCALATION_KIND_ORDER: nobody raises one from the Escalate menu, they put the offer up on the Settlement card.
+   * The answer is recorded THERE, with the client's acceptance attached -- this ticket is the liaison's reminder and
+   * the thread for talking to the client, not a second place to approve it.
+   *
+   * NEVER ITEM 3. A debtor offering to pay is the conversation the firm wants, not an objection that cost anybody
+   * time. What IS charged is the email to the client carrying the proposal -- item 1(a), by the compose box, as on
+   * any other correspondence about the account.
+   *
+   * RUST, THE LOUD TINT, because it is the one ticket with a clock the debtor is waiting on: an offer the client has
+   * not seen is a debtor with money ready and nobody to take it.
+   */
+  settlement: {
+    label: 'A settlement offer for the client to approve',
+    blurb: 'Raised by Raptor when an offer is put up on the account’s Settlement card.',
+    chargeable: false,
+    needsCategory: false,
+    prompt: 'What has the debtor offered?',
+    placeholder: 'Offers R500.00 once, in full, instead of R882.11.',
+    goesTo: 'liaison',
+    cardLabel: 'Settlement · high priority',
+    cardTint: 'bg-[var(--tint-rust)] text-negative-700',
+    submitLabel: 'Raise it',
+    freeNote: 'A debtor offering to settle is not a cost they caused.',
+  },
 }
 
 /**
@@ -507,6 +535,7 @@ export function escalationNote(kind: EscalationKind, description: string): strin
     case 'request': return `Information requested: ${description}`
     case 'help': return `Escalated for help: ${description}`
     case 'litigation': return `Recommended for litigation: ${description}`
+    case 'settlement': return description
     default: return `Dispute raised: ${description}`
   }
 }
