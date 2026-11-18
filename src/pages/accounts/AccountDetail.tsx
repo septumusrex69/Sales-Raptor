@@ -3521,6 +3521,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
    */
   onEmailSimulation?: React.ComponentProps<typeof RepaymentCalculator>['onEmail']
 }) {
+  /* WHO MADE A PROMISE, by name, for the card (Raptor H20) -- created_by is a profile id. */
+  const { users: promiseMakers } = useAppStore()
   /*
    * The arrangement is chosen first, and the amount follows from it.
    *
@@ -3804,6 +3806,17 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                 {[describeArrangement(p), p.method,
                   p.instalmentsKept > 0 ? `${p.instalmentsKept} paid so far` : null]
                   .filter(Boolean).join(' · ')}
+              </p>
+              {/*
+                WHEN IT WAS MADE AND BY WHOM, ON THE CARD (Raptor H20, 18 Nov). Stephan, of a promise brought across from
+                Swordfish: "Will we also see the PTP details like first creation date and all that". It was only on the
+                timeline, months down, and a collector ringing about the 5 December payment wants to know whose
+                arrangement it is and how long it has run.
+              */}
+              <p className="text-[11px] text-slate-400 mt-0.5" data-testid="promise-made">
+                Made {formatDate(p.createdAt)}
+                {(() => { const who = promiseMakers.find((u) => u.id === p.createdBy)?.name; return who ? ` by ${who}` : '' })()}
+                {p.source === 'swordfish' ? ' · brought across from Swordfish' : ''}
               </p>
               {/*
                 THE 48 HOURS, ON THE ROW, WHILE THEY ARE RUNNING.

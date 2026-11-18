@@ -442,7 +442,9 @@ export function buildTimeline(
       date: dayOf(p.createdAt),
       at: p.createdAt,
       title: 'Arrangement made',
-      detail: [`${describeArrangement(p)} · first payment ${p.dueOn}`, p.method, p.notes]
+      /* "NEXT", NOT "FIRST", once instalments have been paid (Raptor H20): dueOn is always the NEXT one due, and a promise
+         brought across from Swordfish read "first payment 5 Dec" on an arrangement paid eight times since April. */
+      detail: [`${describeArrangement(p)} · ${p.instalmentsKept > 0 ? 'next' : 'first'} payment ${p.dueOn}`, p.method, p.notes]
         .filter(Boolean).join(' · '),
       amount: p.amount,
       status: 'open',

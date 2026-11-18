@@ -181,6 +181,8 @@ export type PromiseStatus = 'open' | 'defaulted' | 'kept' | 'broken' | 'cancelle
 export interface PromiseToPay {
   id: string
   accountId: string
+  /** Where it was taken: 'manual' in Raptor, 'swordfish' when brought across (shown on the card, Raptor H20). */
+  source: string
   /** Per instalment where this recurs, not the total. */
   amount: number
   dueOn: string
@@ -219,6 +221,7 @@ const toPromise = (r: any): PromiseToPay => ({
   status: r.status,
   resolvedAt: r.resolved_at,
   notes: r.notes,
+  source: r.source ?? 'manual',
   createdBy: r.created_by,
   createdAt: r.created_at,
   arrangement: (r.arrangement ?? 'once_off') as Arrangement,

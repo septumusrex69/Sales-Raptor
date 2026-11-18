@@ -9,6 +9,7 @@
  *
  *   node --experimental-strip-types scripts/qa/check-timeline.mjs
  */
+import { readFileSync } from 'node:fs'
 import { buildTimeline, filterTimeline, groupByDay } from '../../src/lib/accountTimeline.ts'
 import { feeIsTheOnlyRecord, IMPORTED_FEE_SOURCES } from '../../src/lib/accountBalance.ts'
 import { styleFor } from '../../src/pages/accounts/timelineStyle.ts'
@@ -391,5 +392,19 @@ check('a contact nobody has acted on says nothing', untouched === 0, String(unto
  * files silent that way, about 800 assertion sites reported as nothing.
  */
 if (failed === 0) console.log(`${passed} passed, 0 failed`)
+/*
+ * "NEXT PAYMENT", NOT "FIRST", ONCE INSTALMENTS HAVE BEEN PAID (Raptor H20). DCR2181's arrangement, brought across from
+ * Swordfish and kept eight times since April, read "first payment 5 Dec". Seen failing with the old wording put back.
+ */
+{
+  const base = { id: 'prx', accountId: 'a', amount: 1000, dueOn: '2026-12-05', method: null, status: 'open', resolvedAt: null, notes: null, createdBy: null, createdAt: '2026-04-14T08:46:00Z', arrangement: 'monthly', dayOfMonth: 5, onLastDay: false, dayOfWeek: null }
+  const made = (p) => buildTimeline({ ...ledgers, payments: [], fees: [], accruals: [] }, [], [p]).find((e) => e.id === 'promise:prx')?.detail ?? ''
+  check('an arrangement already paid on says its NEXT payment', /next payment 2026-12-05/.test(made({ ...base, instalmentsKept: 8 })), true, made({ ...base, instalmentsKept: 8 }))
+  check('...and a new one still says its first', /first payment 2026-12-05/.test(made({ ...base, instalmentsKept: 0 })), true, made({ ...base, instalmentsKept: 0 }))
+  const card = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')
+  check('the promise card says when it was made, by whom, and whether it came from Swordfish',
+    /data-testid="promise-made"/.test(card) && /Made \{formatDate\(p\.createdAt\)\}/.test(card) && /brought across from Swordfish/.test(card), true)
+}
+
 console.log(failed === 0 ? '\nAll checks passed.\n' : `\n${failed} check(s) failed.\n`)
 process.exit(failed ? 1 : 0)
