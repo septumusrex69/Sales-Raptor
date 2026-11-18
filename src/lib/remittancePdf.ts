@@ -197,7 +197,7 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
   const COL2 = 486
   logo(cover, CX - 4, photoY - 22, 340)
   text(cover, 'Remittance advice', COL2, photoY - 57, { size: 24, font: bold, color: NAVY })
-  text(cover, '& tax invoice', COL2, photoY - 82, { size: 10, color: SLATE })
+  text(cover, '& Tax Invoice', COL2, photoY - 82, { size: 10, color: SLATE })
   box(cover, CX, photoY - 126, CR - CX, 1.2, GOLD)
 
   const cy = photoY - 150
