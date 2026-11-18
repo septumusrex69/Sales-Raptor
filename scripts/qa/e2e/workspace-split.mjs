@@ -248,10 +248,11 @@ try {
     t.ok('the trust rail is on the page', (await rail.count()) > 0)
     /* S21: Client ledger in; Bank statement and Backdated payments off the menu (Stephan, 9 Nov). */
     /* S21: five, the order a payment travels (Stephan: "it's still a little bit complicated"). */
-    for (const item of ['Overview', 'Payments in', 'To sort', 'Payover runs', 'Client ledger']) {
+    /* 18 Nov: Find a payment back, sixth. */
+    for (const item of ['Overview', 'Payments in', 'To sort', 'Payover runs', 'Client ledger', 'Find a payment']) {
       t.ok(`...listing ${item}`, (await rail.getByRole('link', { name: item }).count()) > 0)
     }
-    for (const gone of ['Bank statement', 'Backdated payments', 'Payments out', 'Clients owe us', 'Find a payment', 'Trust ledger']) {
+    for (const gone of ['Bank statement', 'Backdated payments', 'Payments out', 'Clients owe us', 'Trust ledger']) {
       t.check(`...and not ${gone}`, await rail.getByRole('link', { name: gone }).count(), 0)
     }
     t.ok('...and its settings', (await rail.getByRole('link', { name: 'Trust settings' }).count()) > 0)

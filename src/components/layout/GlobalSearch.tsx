@@ -4,12 +4,7 @@ import { Search, X } from 'lucide-react'
 import { formatLeadNumber } from '../../data/mockData'
 import { useAppStore } from '../../store/AppStore'
 import { departmentOf, matchesPerson } from '../../lib/departments'
-import { asksTheBook, matchesAny, paymentPath, paymentQuery, SEARCH_PAUSE_MS } from '../../lib/globalSearch'
-import { findPayments } from '../../lib/trust'
-import { parseRandAmount } from '../../lib/findPaymentAmount'
-import { rand } from '../../lib/money'
-import { useAuth } from '../../store/AuthContext'
-import { can } from '../../lib/capabilities.ts'
+import { asksTheBook, matchesAny, SEARCH_PAUSE_MS } from '../../lib/globalSearch'
 import { supabase } from '../../lib/supabase'
 
 /* What the database's global_search returns for the debtor book, tickets and requests. */
@@ -50,33 +45,11 @@ export function GlobalSearch() {
     return () => { live = false; window.clearTimeout(timer) }
   }, [query])
   /*
-   * PAYMENTS, FOR WHOEVER HOLDS THE TRUST ACCOUNT (S21 · Raptor H19) -- the one place to find a payment now
-   * (globalSearch.ts, paymentQuery). find_payments refuses anybody without finance.view, so nobody else is asked.
+   * NO PAYMENTS HERE (Raptor H19, 18 Nov). The firm: "it will make the results endless ... keep the search bar for
+   * accounts names and so on and under the trust we add the search for payments." Every amount and every word off a
+   * proof of payment matched something, and the debtors and clients this bar is for were buried under them. Payments
+   * are found on Trust -> Find a payment (/trust/find), which has room for an amount, a date range and words.
    */
-  const { currentUser } = useAuth()
-  const mayFindPayments = can(currentUser, 'finance.view')
-  const [payments, setPayments] = useState<Result[]>([])
-  useEffect(() => {
-    setPayments([])
-    const pq = mayFindPayments ? paymentQuery(query, parseRandAmount) : null
-    if (!pq) return
-    let live = true
-    const timer = window.setTimeout(() => {
-      findPayments({ amount: pq.amount, from: null, to: null, words: pq.words })
-        .then((rows) => {
-          if (!live) return
-          setPayments(rows.slice(0, 6).map((p) => ({
-            id: `${p.kind}-${p.id}`,
-            label: `${rand(p.amount)} · ${[p.caseNumber, p.debtor].filter(Boolean).join(' · ') || p.depositor || p.bankWords || 'No account yet'}`,
-            sub: `${p.onDay} · ${p.state}${p.client ? ` · ${p.client}` : ''}`,
-            path: paymentPath(p),
-            kind: 'Payment',
-          })))
-        })
-        .catch((e: unknown) => console.error('[GlobalSearch] payments', e instanceof Error ? e.message : e))
-    }, SEARCH_PAUSE_MS)
-    return () => { live = false; window.clearTimeout(timer) }
-  }, [query, mayFindPayments])
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
@@ -146,8 +119,7 @@ export function GlobalSearch() {
     return out.slice(0, 8)
   }, [query, leads, contacts, companies, deals, users, teams])
   /* The book first: a debtor, a ticket or a request is what most searches in this firm are for. */
-  /* Payments after the book: somebody typing an amount is looking for money, and a name finds the debtor first. */
-  const shown = useMemo(() => [...book, ...payments, ...results], [book, payments, results])
+  const shown = useMemo(() => [...book, ...results], [book, results])
 
   return (
     <div ref={ref} className="relative w-full max-w-sm">
@@ -160,7 +132,7 @@ export function GlobalSearch() {
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
-          placeholder={mayFindPayments ? 'Search debtors, clients, people, payments, amounts…' : 'Search debtors, clients, people, numbers, references, tickets…'}
+          placeholder="Search debtors, clients, people, numbers, references, tickets…"
           data-testid="global-search"
           className="bg-transparent text-sm outline-none flex-1 min-w-0 placeholder:text-slate-400"
         />

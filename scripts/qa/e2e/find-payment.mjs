@@ -38,12 +38,11 @@ const server = await startServer()
 const browser = await chromium.launch()
 try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
-  /* S21: off the Trust menu -- the search bar at the top finds payments now (check-search-payments) -- and the page
-     still opens at its address, for links already sent. */
+  /* 18 Nov: back on the Trust menu -- the search bar at the top no longer finds payments (check-search-payments). */
   await page.goto(`http://127.0.0.1:${PORT}/trust/find`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('find-payment-form').waitFor({ timeout: 20000 })
-  t.check('Find a payment is not on the Trust menu any more', await page.getByRole('navigation', { name: 'Trust menu' }).getByRole('link', { name: 'Find a payment', exact: true }).count(), 0)
-  t.ok('...and still opens at its address', /\/trust\/find$/.test(page.url()))
+  t.check('Find a payment is on the Trust menu', await page.getByRole('navigation', { name: 'Trust menu' }).getByRole('link', { name: 'Find a payment', exact: true }).count(), 1)
+  t.ok('...and opens at its address', /\/trust\/find$/.test(page.url()))
 
   await page.getByRole('button', { name: 'Find' }).click()
   t.ok('an empty search asks for something instead of searching', /Type an amount, a day or some words/.test(await page.getByTestId('find-payment-error').innerText())

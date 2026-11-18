@@ -178,7 +178,8 @@ const businessTargets = railTargets(businessLayout)
 /* FIVE since the same day (S21; Stephan: "it's still a little bit complicated"): Overview, Payments in, To sort, Payover
    runs, Client ledger -- the order a payment travels. Payments out is the foot of Payover runs, Clients owe us a Client
    ledger filter, Find a payment the search bar at the top, the Trust ledger under Trust settings. */
-check('the trust rail has its five, settings and the door (S21)', trustTargets.length, 7)
+/* SIX since 18 Nov: Find a payment back, last -- the top bar's results were endless with payments in them. */
+check('the trust rail has its six, settings and the door', trustTargets.length, 8)
 /* FIVE AND THE DOOR: overview, income (drawn only for whoever holds business.income), expenses,
    drawings, back office -- and the door to the trust. */
 check('the business rail has its five and the door', businessTargets.length, 6)

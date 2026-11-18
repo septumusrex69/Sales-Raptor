@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, BookOpen, Briefcase, CircleGauge, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, BookOpen, Briefcase, CircleGauge, Search, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -32,8 +32,12 @@ import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceR
  * FIVE, IN THE ORDER A PAYMENT TRAVELS (S21 · Raptor H19). Stephan, 9 Nov: "I think it's still a little bit
  * complicated, everything." In: approve it (Payments in). No home yet: To sort. Waiting to go to a client: Payover
  * runs, which now ends with paying out (the bank file, refunds, the firm's transfer). Gone to the client: Client ledger,
- * which also filters the clients who owe us. Finding a payment is the search bar at the top. The Trust ledger is under
- * Trust settings -- the accountant's view, not the day's work. Every old address still opens or redirects.
+ * which also filters the clients who owe us. The Trust ledger is under Trust settings -- the accountant's view, not the
+ * day's work. Every old address still opens or redirects.
+ *
+ * FIND A PAYMENT IS BACK, SIXTH (18 Nov). It had gone into the search bar at the top, and every amount and name off a
+ * proof of payment flooded that bar's results. The firm: "keep the search bar for accounts names and so on and under
+ * the trust we add the search for payments." Last, because it is a lookup, not a step a payment travels through.
  */
 const ITEMS: RailItem[] = [
   { to: '/trust', label: 'Overview', icon: CircleGauge, end: true },
@@ -41,6 +45,7 @@ const ITEMS: RailItem[] = [
   { to: '/trust/exceptions', label: 'To sort', icon: TriangleAlert },
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
   { to: '/trust/client-ledger', label: 'Client ledger', icon: BookOpen },
+  { to: '/trust/find', label: 'Find a payment', icon: Search },
 ]
 
 export function TrustLayout() {

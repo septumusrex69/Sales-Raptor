@@ -1,12 +1,13 @@
 /**
- * One search for payments: the bar at the top (S21 · Raptor H19). Stephan, 9 Nov: "the search a payment. Like, is it
- * necessary to do it there". Five places to look became one.
+ * Payments are found on Trust, not in the bar at the top (Raptor H19, 18 Nov). The firm: "it will make the results
+ * endless ... keep the search bar for accounts names and so on and under the trust we add the search for payments."
+ *
+ * This reverses S21 (9 Nov), which had made the top bar the one place to find a payment. The other two places S21
+ * closed -- the Client ledger's own box and Payments in's History tab -- stay closed: Find a payment is the one place.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-search-payments.mjs
  */
 import { readFileSync } from 'node:fs'
-import { paymentPath, paymentQuery } from '../../src/lib/globalSearch.ts'
-import { parseRandAmount } from '../../src/lib/findPaymentAmount.ts'
 
 let pass = 0
 const failures = []
@@ -14,22 +15,14 @@ const check = (name, a, b) => { if (JSON.stringify(a) === JSON.stringify(b)) pas
 const ok = (name, v) => check(name, v, true)
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8')
 
-check('an amount is read as an amount', paymentQuery('R1 500,00', parseRandAmount), { amount: 1500, words: null })
-check('...written with a point', paymentQuery('1500.50', parseRandAmount), { amount: 1500.5, words: null })
-check('a case number is words', paymentQuery('DRC0001', parseRandAmount), { amount: null, words: 'DRC0001' })
-check('a name off the proof of payment is words', paymentQuery('mokoena', parseRandAmount), { amount: null, words: 'mokoena' })
-check('two letters ask nothing', paymentQuery('mo', parseRandAmount), null)
-check('an ID or phone number is not an amount', paymentQuery('8001015009087', parseRandAmount), null)
-check('a payment on an account opens the account (where it can be reversed)', paymentPath({ accountId: 'a1' }), '/accounts/a1')
-check('a bank line with no account yet opens suspense', paymentPath({ accountId: null }), '/trust/exceptions#suspense')
-
 const bar = read('src/components/layout/GlobalSearch.tsx')
-ok('the top search asks find_payments, only for whoever holds the trust account',
-  /const mayFindPayments = can\(currentUser, 'finance\.view'\)/.test(bar) && /findPayments\(\{ amount: pq\.amount/.test(bar))
-ok('...and draws them after the book', /\[\.\.\.book, \.\.\.payments, \.\.\.results\]/.test(bar))
+ok('the top search does not ask find_payments', !/findPayments/.test(bar))
+ok('...and does not offer payments in its placeholder', !/payments, amounts/.test(bar))
+ok('...and still searches the book (accounts, tickets, requests)', /supabase\.rpc\('global_search'/.test(bar))
+ok('Find a payment is on the Trust menu', /\{ to: '\/trust\/find', label: 'Find a payment'/.test(read('src/pages/trust/TrustLayout.tsx')))
+ok('...and its route opens', /<Route path="find" element=\{<FindPayment \/>\}/.test(read('src/App.tsx')))
 ok('the Client ledger has no search box of its own', !/function PaymentSearch/.test(read('src/pages/trust/ClientLedger.tsx')))
 ok('Payments in has no History tab', !/payments-tab-history/.test(read('src/pages/finance/FinancePayments.tsx')))
-ok('Find a payment is off the Trust menu', !/label: 'Find a payment'/.test(read('src/pages/trust/TrustLayout.tsx')))
 
 for (const f of failures) console.error(`  ✗ ${f}`)
 console.log(`check-search-payments: ${pass} passed, ${failures.length} failed`)
