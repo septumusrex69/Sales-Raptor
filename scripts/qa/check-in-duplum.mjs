@@ -422,6 +422,25 @@ ok('...while the fact a collector needs survives', /belowTheInterest = true/.tes
 ok('the letter does not refuse an offer as never settling',
   !/never be settled/.test(read('src/lib/repaymentLetter.ts')))
 
+/*
+ * THE STATEMENT ADDS UP TO ITS FOOT ON AN IN DUPLUM ACCOUNT (Raptor H20, 18 Nov). Stephan, on DCR2181: "the induplum
+ * must show as well or else the balances are not balancing" -- the lines ran to R4 286,61 under a foot of R2 986,74.
+ * Seen failing with the in-duplum line taken out of buildStatement.
+ */
+{
+  const { buildStatement } = await import('../../src/lib/accountBalance.ts')
+  const s = buildStatement({
+    capitalHandedOver: 1000, handoverDate: '2022-01-01', vatRate: 0.15, interestRateAnnual: 24, accrueTo: '2026-11-18',
+    ledgers: { payments: [{ id: 'p1', date: '2024-06-01', amount: 300 }], fees: [{ date: '2022-02-01', description: 'Letter', exclVat: 100, vat: 15, billed: true, annexureItem: null }], interest: [], paidOut: [] },
+  })
+  check('an account past the ceiling is in duplum', s.breakdown.cappedBy, 'in duplum')
+  const line = s.lines.find((l) => l.kind === 'in-duplum')
+  check('the statement carries an in duplum line for what the ceiling withholds', line?.credit, s.breakdown.withheld)
+  check('...last, so the running balance ends on the balance owing', s.lines.at(-1)?.balance, s.breakdown.balance)
+  check('...and debits less credits are the balance owing',
+    Math.round(s.lines.reduce((t, l) => t + l.debit - l.credit, 0) * 100) / 100, s.breakdown.balance)
+}
+
 console.log(`\ncheck-in-duplum: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

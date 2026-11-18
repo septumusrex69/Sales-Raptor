@@ -721,6 +721,12 @@ export type StatementKind =
   | 'payment'
   /** What the client gave up when the account was settled; the line that brings it to nil. */
   | 'settlement-discount'
+  /**
+   * WHAT IN DUPLUM TAKES OFF (Raptor H20, 18 Nov). Stephan, reading DCR2181's statement: "the induplum must show as well
+   * or else the balances are not balancing." The lines ran to R4 286,61 and the foot said R2 986,74 -- the R1 299,87 the
+   * ceiling withholds was only in the note. A credit, last, so the running balance ends on the figure at the foot.
+   */
+  | 'in-duplum'
   /** A refund, a move to another account, or a release to the client of the debtor's credit (S18). */
   | 'paid-out'
 
@@ -984,6 +990,23 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
   }
 
   /*
+   * IN DUPLUM IS A LINE, NOT ONLY A NOTE -- see the 'in-duplum' kind. NCA s103(5): interest, fees and costs may not
+   * exceed the capital, so what is above it is taken off here, as one credit dated the day the statement is drawn (the
+   * ceiling is judged on the balance as it stands, not on any one day before), and the running balance lands on what
+   * computeBalance says is owed. The note at the foot still says which part was interest and which was fees.
+   */
+  if (breakdown.cappedBy === 'in duplum' && breakdown.withheld > 0) {
+    const last = pending.reduce((d, l) => (l.date > d ? l.date : d), input.handoverDate ?? '')
+    pending.push({
+      date: input.accrueTo ?? last,
+      kind: 'in-duplum',
+      description: 'In duplum — interest and fees above the capital are not recoverable (NCA s103(5))',
+      debit: 0,
+      credit: breakdown.withheld,
+    })
+  }
+
+  /*
    * Date order, and within a date a fixed order of kinds. Two lines on the same day have no
    * inherent sequence, and letting them fall out in whatever order the ledgers were read in
    * would make the running balance jitter between one rendering and the next — the same
@@ -996,6 +1019,8 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     'settlement-discount': 5,
     /* After the payment that made the credit, on its day: it is the credit leaving. */
     'paid-out': 5,
+    /* Last of all: it is what the ceiling takes off everything above it. */
+    'in-duplum': 6,
   }
   /*
    * Day, then kind, then the clock.
