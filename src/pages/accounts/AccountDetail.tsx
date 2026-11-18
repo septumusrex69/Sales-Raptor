@@ -106,7 +106,7 @@ import type { AccountSms } from '../../lib/smsView'
 import { clockNow, clockToday } from '../../lib/clock.ts'
 /* The same four helpers the mailbox answers its own mail with. Written once, so a reply-all from
    an account and a reply-all from the mailbox cannot disagree about who is on a thread. */
-import { forwardBody, forwardSubject, recipientLine, replyAllTo } from '../../lib/emailRules'
+import { forwardBody, forwardSubject, forwardTextHtml, recipientLine, replyAllTo, replyQuoteHtml } from '../../lib/emailRules'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import { CallButton } from './CallButton'
 import { feeCeiling, scheduleFor } from '../../lib/annexureB'
@@ -2703,6 +2703,22 @@ function AccountPage() {
              cannot travel in the body. */
           appendHtml={signingEmail?.appendHtml}
           appendNote={signingEmail?.note}
+          /*
+           * A REPLY CARRIES THE MESSAGE IT ANSWERS UNDERNEATH, EDITABLE, LIKE OUTLOOK (S22 · Raptor H20) -- the same as
+           * the mailbox. An account email keeps the text of the message, so the text is what goes under Outlook's
+           * header; nothing is pasted into the box above, which is what the old "> " quoting got wrong.
+           */
+          {...(replyTo && !forwardOf && !signingEmail && !simulation ? {
+            quoteKind: 'reply' as const,
+            quotedHtml: replyQuoteHtml({
+              fromName: replyTo.direction === 'in' ? replyTo.sentByName : (currentUser?.name ?? null),
+              fromAddress: replyTo.direction === 'in' ? replyTo.debtorAddress : (replyTo.ourAddress ?? mailbox ?? ''),
+              subject: replyTo.subject,
+              occurredAt: replyTo.occurredAt,
+              to: replyTo.toRecipients.map((r) => r.address).filter(Boolean),
+              cc: replyTo.ccRecipients.map((r) => r.address).filter(Boolean),
+            }, forwardTextHtml(replyTo.body ?? '')),
+          } : {})}
           /*
            * THE SIMULATION, ALREADY DRAWN AND ALREADY ON THE MESSAGE. It cannot come through the
            * template picker like every other attachment: a stored letter is merged against the

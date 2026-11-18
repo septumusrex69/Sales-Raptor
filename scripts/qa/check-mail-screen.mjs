@@ -438,7 +438,8 @@ ok('...below the box rather than inside it',
 ok('...as text, never as markup', /whitespace-pre-wrap break-words">\{quoted\.trim\(\)\}/.test(composer))
 /* In its own scroller, or a long chain pushes Send off the bottom of the screen. */
 ok('...and a long chain cannot push Send off the screen', /max-h-48 overflow-y-auto/.test(composer))
-ok('the reply is given the message it is answering', /quoted=\{bodies\[replying\.id\]/.test(page))
+/* S22: underneath, in the editable box, like Outlook -- see check-outlook-reply. */
+ok('the reply is given the message it is answering', /quoteKind="reply"/.test(page) && /quotedHtml=\{replyQuote\?\.id === replying\.id/.test(page))
 
 /*
  * FILES, which the mailbox could not send at all -- forwarding a debtor's proof of payment meant

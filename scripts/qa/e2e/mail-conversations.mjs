@@ -67,6 +67,17 @@ try {
   browser = await chromium.launch()
   const { page } = await signedInPage(browser, PROFILE, handlers, [])
   await page.setViewportSize({ width: 1280, height: 900 })
+  /* S22: the bodies, so the conversation under the open message and the quoted reply have something to show. The
+     client's message is a TABLE, the case Stephan raised -- a corrections sheet he needed to fill in and send back. */
+  await page.route('**/api/email/attachment*', (route) => {
+    const sent = JSON.parse(route.request().postData() ?? '{}')
+    const m = ALL.find((x) => x.id === sent.mailId)
+    const html = m?.id === T(2)
+      ? '<p>Please fill in the last column.</p><table><tr><th>Your reference</th><th>Fill this in</th></tr><tr><td>DCR2181</td><td>&nbsp;</td></tr></table>'
+      : ''
+    return route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ text: m?.snippet ?? '', html, details: [], images: [], imagesSkipped: 0, calendar: '' }) })
+  })
   for (let i = 0; i < 60; i += 1) {
     try { await page.goto(`http://localhost:${PORT}/mail`, { timeout: 2000 }); break }
     catch { await new Promise((r) => setTimeout(r, 500)) }
@@ -98,6 +109,36 @@ try {
   await items.first().click()
   await page.waitForTimeout(400)
   t.check('a tap opens the oldest in place', await items.first().getAttribute('aria-current'), 'true')
+
+  /* 3b. S22 -- LIKE OUTLOOK: the rest of the conversation under the open message, and a reply that quotes it. */
+  await page.getByText('Camille on Re: RE: Statement for October').first().click()
+  const below = page.getByTestId('conversation-below')
+  await below.waitFor({ timeout: 10000 })
+  t.check('the rest of the trail is stacked under the open message', await below.getByTestId('trail-message').count(), 3)
+  t.ok('...newest first, the one just before it opened by itself',
+    (await below.getByTestId('trail-message').first().getAttribute('data-testid')) === 'trail-message'
+    && (await below.locator('button[aria-expanded="true"]').count()) === 1)
+  await below.scrollIntoViewIfNeeded()
+  await t.shot(page, 'mail-conversation-below')
+
+  /* Reply to the client's message with the table: the original goes underneath, editable. */
+  await page.getByText('Karoo Tiles Accounts on RE: Statement for October').first().click().catch(() => {})
+  await page.waitForTimeout(600)
+  await page.getByRole('button', { name: 'Reply', exact: true }).first().click()
+  await page.waitForTimeout(600)
+  const without = page.getByRole('button', { name: /reply without matching it/i })
+  if (await without.count()) { await without.click(); await page.waitForTimeout(600) }
+  const original = page.getByTestId('forward-original')
+  await original.waitFor({ timeout: 10000 })
+  await page.waitForFunction(() => /Fill this in/.test(document.querySelector('[data-testid="forward-original"]')?.innerHTML ?? ''), null, { timeout: 10000 })
+  const quoted = await original.innerHTML()
+  t.ok('the reply carries the original underneath, under Outlook\u2019s From / Sent / Subject', /From:<\/b>/.test(quoted) && /Sent:<\/b>/.test(quoted) && /Subject:<\/b>/.test(quoted))
+  t.ok('...as its table, not its text', /<table[\s\S]*Fill this in[\s\S]*DCR2181/.test(quoted))
+  t.check('...in a box that can be typed in', await original.getAttribute('contenteditable'), 'true')
+  t.ok('...and the window says Reply, not Forward', !(await page.getByText('Forward', { exact: true }).count()))
+  await t.shot(page, 'mail-reply-quoted')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
 
   /* 4. Remembered. */
   await page.reload()

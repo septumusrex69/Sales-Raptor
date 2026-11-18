@@ -142,10 +142,10 @@ function tableRows(rows: CorrectionRow[], labelFor: LabelFor): string {
   return rows.flatMap((row) => row.problems.map((p) => `
     <tr>
       <td style="padding:6px 10px;border:1px solid #d9dee6;white-space:nowrap">${esc(row.reference ?? '\u2014')}</td>
-      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(row.name ?? '\u2014')}</td>
-      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.key ? labelFor(p.key) : '\u2014')}</td>
+      <td style="padding:6px 10px;border:1px solid #d9dee6;white-space:nowrap">${esc(row.name ?? '\u2014')}</td>
+      <td style="padding:6px 10px;border:1px solid #d9dee6;white-space:nowrap">${esc(p.key ? labelFor(p.key) : '\u2014')}</td>
       <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(givenFor(row, p.key))}</td>
-      <td style="padding:6px 10px;border:1px solid #d9dee6">${esc(p.message)}</td>
+      <td width="260" style="padding:6px 10px;border:1px solid #d9dee6;width:260px">${esc(p.message)}</td>
       ${ANSWER_CELL}
     </tr>`).join(''))
     .join('')
@@ -166,10 +166,13 @@ function table(heading: string, intro: string, rows: CorrectionRow[], labelFor: 
   <thead>
     <tr style="background:#1b2a4a;color:#ffffff;text-align:left">
       <th style="padding:6px 10px;border:1px solid #1b2a4a">Your reference</th>
-      <th style="padding:6px 10px;border:1px solid #1b2a4a">Debtor</th>
-      <th style="padding:6px 10px;border:1px solid #1b2a4a">Field</th>
+      <!-- NOT WRAPPED, AND THE EXPLANATION GIVEN A WIDTH (S22): Stephan's screen drew "Debtor" as "D e bt or" and
+           "Du Toit" a letter a line -- the long "What we need" sentence took every spare pixel and the short columns
+           were squeezed to nothing. A name and a field label are short and must stay on one line. -->
+      <th style="padding:6px 10px;border:1px solid #1b2a4a;white-space:nowrap">Debtor</th>
+      <th style="padding:6px 10px;border:1px solid #1b2a4a;white-space:nowrap">Field</th>
       <th style="padding:6px 10px;border:1px solid #1b2a4a">What your sheet says</th>
-      <th style="padding:6px 10px;border:1px solid #1b2a4a">What we need</th>
+      <th width="260" style="padding:6px 10px;border:1px solid #1b2a4a;width:260px">What we need</th>
       <!-- A width ATTRIBUTE as well as the style. Outlook lays tables out with Word, which
            ignores min-width on a cell -- and an empty column collapsed to its heading is not a
            box anybody can see to type in. -->

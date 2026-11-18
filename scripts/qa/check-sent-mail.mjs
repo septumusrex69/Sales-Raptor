@@ -182,7 +182,7 @@ const box = readFileSync(new URL('../../src/components/ComposeEmailModal.tsx', i
  * that is what it asks now.
  */
 ok('the typed note and the original are joined on send',
-  /bodyHtml: [^\n]*\(quotedHtml \? \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(box))
+  /bodyHtml: emailBodyHtml\(body\)[\s\S]{0,80}\(quotedHtml \? QUOTE_MARK \+ \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(box))
 ok('...and the note is rendered rather than concatenated raw',
   /bodyHtml: emailBodyHtml\(body\)/.test(box))
 /* A forward may go out with nothing typed above it -- the original IS the message. Before this,

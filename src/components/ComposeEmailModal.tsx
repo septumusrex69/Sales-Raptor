@@ -14,7 +14,7 @@ import { DICTATION_LANGUAGES, storedLanguage } from '../lib/dictation'
 import { useAuth } from '../store/AuthContext'
 import { FIRM_UNSET, emailBodyCss, fetchFirmSettings, type FirmSettings } from '../lib/firmSettings'
 import { emailBodyHtml, emailBodyStyle } from '../lib/emailStyle.ts'
-import { composeBody, signatureHtml } from '../lib/emailSignature.ts'
+import { QUOTE_MARK, composeBody, signatureHtml } from '../lib/emailSignature.ts'
 import { normaliseRecipients, notAddresses, recipientList } from '../lib/recipientSuggest.ts'
 import { useAppStore } from '../store/AppStore'
 import { fetchAttachment } from '../lib/userMail'
@@ -71,6 +71,7 @@ export function ComposeEmailModal({
   onClose,
   onSent,
   quotedLoading = false,
+  quoteKind = 'forward',
   draftKey: draftKeyProp,
   forwardOf,
 }: {
@@ -225,6 +226,11 @@ export function ComposeEmailModal({
   onSent: (subject: string, bodyText: string, emailMessageId?: string, from?: string, filedInSent?: boolean) => void
   /** The forwarded original is still being fetched (S15): the box opens at once and says so. */
   quotedLoading?: boolean
+  /**
+   * WHAT THE ORIGINAL UNDERNEATH IS (S22): a message passed on, or the one being answered. Only the words change --
+   * both ride in the same editable box, because a reply sometimes means filling in the client's own table.
+   */
+  quoteKind?: 'forward' | 'reply'
   /** Which draft this box is (mailDrafts.ts). Derived from what the box is when not given. */
   draftKey?: string
   /** The message a forward is of, so its draft is told apart from a forward of another. */
@@ -510,7 +516,9 @@ export function ComposeEmailModal({
      */
     const missingField = !address.trim() ? 'who it goes to'
       : !subject.trim() ? 'a subject'
-      : (!body.trim() && !quotedHtml) ? 'a message' : null
+      /* A REPLY NEEDS SOMETHING SAID OR SOMETHING CHANGED (S22): typed above, or the original edited -- filling in
+         the client's own table is the answer. The original sent back untouched with nothing added is a blank reply. */
+      : (!body.trim() && (!quotedHtml || (quoteKind === 'reply' && quoteTick === 0))) ? 'a message' : null
     if (missingField) {
       setError(`This needs ${missingField} before it can go.`)
       return
@@ -553,7 +561,10 @@ export function ComposeEmailModal({
           /* The typed prose, then whatever Raptor added (a signing button), then the original on
              a forward. In that order because the button is about the message above it and the
              quoted history is underneath everything. */
-          bodyHtml: emailBodyHtml(body) + (appendHtml ?? '') + (quotedHtml ? (quoteRef.current?.innerHTML ?? quotedHtml) : ''),
+          /* QUOTE_MARK in front of the original (S22): the server signs THERE, between the note and the quote, the way
+             Outlook does -- not under a client's whole quoted chain. */
+          bodyHtml: emailBodyHtml(body) + (appendHtml ?? '')
+            + (quotedHtml ? QUOTE_MARK + (quoteRef.current?.innerHTML ?? quotedHtml) : ''),
           ...(files.length > 0
             ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
             : {}),
@@ -613,7 +624,7 @@ export function ComposeEmailModal({
       reply to a debtor's three paragraphs was typed through a letterbox, and the quoted original
       below it would have been unreadable.
     */
-    <Modal title={title ?? (quotedHtml ? 'Forward' : initialSubject && (to ?? address) ? `Reply to ${to ?? address}` : 'New Email')} onClose={onClose} width={760}>
+    <Modal title={title ?? (quotedHtml && quoteKind === 'forward' ? 'Forward' : initialSubject && (to ?? address) ? `Reply to ${to ?? address}` : 'New Email')} onClose={onClose} width={760}>
       {/*
         noValidate: THE BROWSER MAY NOT BE THE ONE TO REFUSE.
 
@@ -711,18 +722,21 @@ export function ComposeEmailModal({
               email. It's not necessary to have like a separate box for that." The box is drawn round both; the
               textarea inside it has no frame of its own, and the signature sits under what is typed as it will in
               the inbox. On a forward it goes under the original instead -- where composeBody puts it. */}
-          <div className={`${inputClass} !p-0 overflow-hidden cursor-text min-h-[18rem] focus-within:ring-2 focus-within:ring-brand-500/40 focus-within:border-brand-500`} data-testid="message-box"
+          <div className={`${inputClass} !p-0 overflow-hidden cursor-text ${quotedHtml || quotedLoading ? 'min-h-[9rem]' : 'min-h-[18rem]'} focus-within:ring-2 focus-within:ring-brand-500/40 focus-within:border-brand-500`} data-testid="message-box"
             onClick={(e) => { if (e.target === e.currentTarget) bodyRef.current?.focus() }}>
           <textarea ref={bodyRef} className="block w-full resize-none overflow-hidden border-0 bg-transparent px-3 pt-2 text-sm outline-none" rows={2} value={body} lang={lang}
             style={emailBodyCss(firm) as CSSProperties}
             spellCheck={spellCheckEnabled()} onChange={(e) => { touch(); setBody(e.target.value) }} required={!quotedHtml}
-            placeholder={quotedHtml ? 'Anything you want to say above the forwarded message — optional' : undefined}
+            placeholder={quotedHtml
+              ? (quoteKind === 'reply' ? 'Your reply — or just fill in the message below and send it' : 'Anything you want to say above the forwarded message — optional')
+              : undefined}
             /* ONLY ONCE SOMEBODY IS ADDRESSED (the firm, 23 Oct: a forward "starts typing with
                message. It doesn't say who do I want to send it to"). A forward has a subject and no
                address; To and Message both asked for focus and the later one won, as Subject once
                did above. */
             autoFocus={!!initialSubject && !!address} />
-          {!quotedHtml && <SignatureInline user={currentUser} firm={firm} />}
+          {/* ABOVE THE ORIGINAL ON A REPLY OR A FORWARD TOO (S22), where composeBody now signs -- as Outlook does. */}
+          <SignatureInline user={currentUser} firm={firm} />
           </div>
         </FormField>
         {/*
@@ -738,7 +752,10 @@ export function ComposeEmailModal({
             </p>
             <div ref={quoteRef} contentEditable={!quotedLoading} suppressContentEditableWarning data-testid="forward-original"
               onInput={() => { touch(); setQuoteTick((n) => n + 1) }}
-              className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50/50 p-3 text-sm text-slate-700 [overflow-wrap:anywhere] focus:outline-none focus:ring-2 focus:ring-brand-200" />
+              /* CELLS DRAWN, ON SCREEN ONLY (S22): a table that arrives without its own borders ran its cells
+                 together here ("Your referenceFill this in"), and an empty cell to fill in was invisible. These are
+                 classes on the box, not styles in the message -- what goes out is exactly the markup. */
+              className="max-h-[28rem] overflow-auto rounded-lg border border-slate-200 bg-slate-50/50 p-3 text-sm text-slate-700 [overflow-wrap:anywhere] focus:outline-none focus:ring-2 focus:ring-brand-200 [&_table]:border-collapse [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:min-w-[4rem] [&_th]:border [&_th]:border-slate-300 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left" />
           </div>
         )}
         {/* SAID FOR THE SAME REASON the quoted original is said: something is going out under
@@ -746,7 +763,6 @@ export function ComposeEmailModal({
         {appendHtml && appendNote && (
           <p className="-mt-2 mb-3 text-xs text-slate-500">{appendNote}</p>
         )}
-        {quotedHtml && <SignatureInline user={currentUser} firm={firm} afterOriginal />}
 
         {/*
           THE SAME MICROPHONE AS THE REST OF RAPTOR. It has been on the diary and the account

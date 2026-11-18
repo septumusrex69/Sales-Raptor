@@ -101,7 +101,8 @@ ok('...INSIDE the message box, under the text', compose.indexOf('data-testid="me
   && compose.indexOf('<SignatureInline user={currentUser} firm={firm} />') > compose.indexOf('data-testid="message-box"'))
 ok('...with no label and no preview panel of its own', !/How the email ends/.test(compose) && !/SignaturePreview/.test(compose))
 ok('...sandboxed, so stored HTML never runs', /sandbox="allow-same-origin"/.test(compose) && !/allow-scripts/.test(compose))
-ok('...and under the original on a forward', /\{quotedHtml && <SignatureInline user=\{currentUser\} firm=\{firm\} afterOriginal \/>\}/.test(compose))
+/* S22 (Stephan: "do it like Outlook"): ABOVE the original on a reply or a forward, where composeBody now signs. */
+ok('...and above the original on a reply or a forward', !/afterOriginal \/>/.test(compose) && /QUOTE_MARK \+ \(quoteRef/.test(compose))
 /* The gap the send puts between the message and the signature is the preview's gap: composeBody's own. */
 check('composeBody leaves two breaks before the signature', composeBody('Body', 'Sig'), 'Body<br><br>Sig')
 

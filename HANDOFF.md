@@ -138,6 +138,27 @@ S22 is still running; this is its first piece, written down now so it is not los
   Checks: `check-settlement-ticket` 71; `check-promise-rules-s10` / `check-workflow-hold-clock` read the generalised
   hold. Not done: a run already held by a dispute gets no settlement hold (one open hold per run), so if the dispute
   is answered while a settlement is live, that run resumes.
+- **Mail like Outlook (same day).** Stephan, replying to a client's corrections table: "If I open an email and I scroll
+  down, I want to see all relevant emails pertaining to that email ... I can't respond and edit something on the
+  response ... Can you do it like Outlook, please?" Built:
+  1. **The conversation under the open message** (`ConversationBelow` / `TrailMessage` in MailPage, always on, not
+     only in conversation mode): every other message of the trail stacked below, newest first, the one just before
+     it opened by itself and the rest opening in place to the whole message (fetched, sanitised, sandboxed frame,
+     pictures held back). Same rule as the list (`useConversationTrail`, extracted from ConversationTrail).
+  2. **A reply carries the original underneath, editable** -- mailbox (`replyQuote`, fetched like a forward) and the
+     account page (the stored text) -- under Outlook's header (`replyQuoteHtml`: From / Sent / To / Cc / Subject), in
+     the box forwards already used. This REVERSES the earlier "the box starts empty" rule on purpose: the removed
+     thing was "> " quoting pasted into the typing box; nothing is pasted there now. A reply needs something typed
+     OR the original edited (filling in the table counts).
+  3. **The signature goes between the note and the quote**, as Outlook does: `QUOTE_MARK` (an HTML comment) in front
+     of the quote, and `composeBody` signs there. Forwards too.
+  4. **The corrections email's table** no longer squeezes "Debtor"/"Field" to a letter a line (nowrap, and "What we
+     need" given a width) -- seen in Stephan's screenshot.
+  Checks: new `check-outlook-reply` (23; signature-placement and pane-placement breaks caught); five older checks
+  moved to the new rule (`check-compose-cc-signature`, `check-mail-drafts`, `check-mail-screen`, `check-sent-mail`,
+  `check-signing-email`); e2e `mail-conversations` +6 (trail stacked below; reply quotes the table, editable, titled
+  Reply). e2e mail 151, compose-send 12, compose-cc-signature 34, forward-attachment 10 green. `e2e/record-email`
+  ("reply all opens the composer with a Cc line") fails the same on the branch before this change -- predates it.
 - **Stephan, 18 Nov: "push everything just through and push to main ... I don't want to approve shit."** Build and
   push without asking. NOT pushed to `Main`: it is the live site and production's database has not been rebuilt for
   this code (START HERE item 1), so code first would break it. The prompts themselves are his to switch off (Auto mode).
