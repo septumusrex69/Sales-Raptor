@@ -81,10 +81,10 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
     note: 'The number YOU know this debt by. It goes on every letter, so the debtor recognises it.',
   },
   /*
-   * THE SWORDFISH REFERENCE IS OURS, NOT THE CLIENT'S (Raptor H20, 18 Nov). Stephan, importing Dr DR Roux's accounts
+   * THE SWORDFISH REFERENCE IS OURS, NOT THE CLIENT'S (Raptor H20, 18 Nov). Stephan, importing a client's Swordfish accounts
    * with both columns filled in: "the swordfish reference must be taken over to raptor as our ref not the client".
-   * "Swordfish Reference" used to be an old heading for "Your reference", so DCR2181 was filed as the CLIENT's
-   * reference, the client's own 277 was dropped, and the account was numbered DCR0001 beside it. Since 9 Nov the case
+   * "Swordfish Reference" used to be an old heading for "Your reference", so our reference was filed as the CLIENT's
+   * reference, the client's own was dropped, and the account was numbered afresh beside it. Since 9 Nov the case
    * number IS the client-code reference and an account brought across keeps the one it had (CLAUDE.md), so this column
    * becomes the case number -- the reference every notice quotes -- and "Your reference" stays the client's.
    *

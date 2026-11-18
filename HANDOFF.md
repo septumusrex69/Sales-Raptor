@@ -1,14 +1,87 @@
-# Raptor · Handover 20 — where Raptor stands
+# Raptor · Handover 21 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 20**, written by **S21** (branch `claude/new-session-84tmki`, 9 - 17 Nov), which started from
-> Handover 19. Everything S21 built is on the preview branch `claude/sales-raptor-review-p1pzx2`, and so are the
-> builder's runs R-30, R-32, R-34 and R-35 that landed while it ran. The next session is **S22**; it starts from
-> Handover 20, writes Handover 21, and its commits start **`Raptor H20: ...`**.
+> **Raptor Handover 21**, written by **S22** (the session titled "Rinda Test 1", branch
+> `claude/affectionate-brahmagupta-bvhts3`, 18 Nov), which started from Handover 20. Everything S22 built is on the
+> preview branch `claude/sales-raptor-review-p1pzx2` (fast-forwarded from S22's branch after each change, at Stephan's
+> say-so). The next session is **S23** ("Rinda Test 4"); it starts from Handover 21, writes Handover 22, and its
+> commits start **`Raptor H21: ...`**. (S22's first commit, 88e3b73b, says "Raptor H19" by mistake; it was H20 work.)
 > **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
 
-## START HERE (S22) -- what is open (Raptor · Handover 20, 17 Nov)
+## START HERE (S23) -- what is open (Raptor · Handover 21, 18 Nov)
+
+**Handover 20's list below is still open in full** -- above all the production database rebuild, which waits for
+Stephan's explicit "go ahead with the production rebuild", and putting the preview code on `Main` after it. S22 did
+not touch production, `Main` or the live site.
+
+1. **Client DCR (a dental practice; its name is on staging, not here -- the repo is public) is a live test of bringing Swordfish accounts across by hand, and it is half compared.**
+   Stephan wants to see whether Raptor's figures and actions match Swordfish's. Staging now holds:
+   - **DCR2181** (open): handover 9 Apr 2024, default 9 Mar 2024; 12 Swordfish
+     payments (10 live = R10 000, 2 reversed "Rerun"), all `paid_over_in_swordfish`; 153 Swordfish actions
+     (R1 416,82 charged); in duplum. Balance in Raptor **R2 986,74** (capital 6 493,37 + interest 5 360,95 + actions
+     1 416,82 + receipt fees 1 015,47 - in duplum 1 299,87 - paid 10 000). **Stephan has not yet given Swordfish's
+     balance for DCR2181** -- ask for it; that is the comparison. Interest is Raptor's own (24%, from handover) and the
+     receipt fees are computed: Swordfish's actual receipt fees were in neither file he sent.
+   - Promise: R1 000 monthly on the **15th**, next 15 Dec 2026, until paid up, made 14 Apr 2026 by Itumeleng Masalesa
+     (source 'swordfish', 8 kept, counted_after 3 Nov). The "Promise to pay" workflow started (staging; Stephan: it
+     does not reach debtors now); the Handover run from the sheet import is held.
+   - **DCR1970**: written off and prescribed in Swordfish; 14 payments R8 904,60, no
+     charged actions. Raptor works it out R1 209,92 in credit; **closed as paid in full** at Stephan's request "just so
+     we see if everything is matching".
+   - **Offered, not answered:** DCR2181's diary date is 18 Nov (the day the sheet was loaded), so the client line says
+     "We will follow the account up on 18 November 2026" -- ask whether to move it (e.g. to 15 Dec).
+   - How it was loaded: S22 cancelled the two R28,75 handover-email fees, then wrote the payments and actions in one
+     transaction with the importer's own rules (`csv.ts`, `codeForLegacyName`, `isQuarantinedLegacyName`), checked
+     counts and the R1 416,82 total before commit. The files Stephan sent (Swordfish "Payments with Pay ref" CSV and an
+     Actions xlsx, plus the contract PDF and handover sheet) were uploads in S22's session and are gone -- **never commit
+     them; the repo is public.**
+2. **Why it was done by hand, and the choice Stephan made.** The handover sheet opens accounts as handed over TODAY
+   with no history; the full Swordfish import (Settings -> Data Import, four exports) replays history but creates its
+   own client and accounts. Stephan chose "recalculate on these accounts": move the dates back, add Swordfish's payments
+   and actions. **There is no tool for this** -- if he wants it for more clients, a "Swordfish history onto existing
+   accounts" import is the thing to build (payments file + actions file, matched on the Swordfish reference; it must
+   mark payments `paid_over_in_swordfish`, keep reversals, and set handover/default dates). Ask before building.
+3. **`all_payments()` is on staging and in schema.sql but unused.** Stephan asked for a Trust -> "All Payments" page
+   shaped like Swordfish's All Payments export, then said "Leave the All payments for now". The read-only function
+   (finance.view, paged, searchable) is ready for that page. Pick it up only when he asks.
+4. **Offered, not answered:** hide the new "Swordfish reference" column from the client's downloadable handover
+   template after the cut-over (keep reading it on import).
+5. **Pushing to `claude/sales-raptor-review-p1pzx2` prints "Changes must be made through a pull request"** -- the push
+   still lands (a protection rule being bypassed). Stephan was told; he has not said to switch to pull requests.
+6. **DCR2181's sheet said 4 Sep 2024 as a real Excel date**, Swordfish says 2024/04/09; Stephan chose 9 Apr. The sheet
+   was not misread -- whoever filled it swapped day and month. Worth a sentence if he imports more by sheet.
+
+### What S22 built (all on the preview branch; checks named are the ones that hold each)
+
+- **Top search bar: no payments** (Stephan: "it will make the results endless"); **Trust -> Find a payment back on
+  the menu**, sixth (`check-search-payments`, `e2e/find-payment`, `e2e/workspace-split`, `check-workspace-split`).
+  Reverses S21's "payments from the top search bar".
+- **Payover run -> a payment: no separate "Receipt fee charged" line**; the fee stays inside "Half A -> costs, incl the
+  receipt fee" and in the audit history (`e2e/run-late-lines`). The account's "If the debtor pays" preview keeps its
+  line -- Stephan: "leave that there".
+- **Remittance advice PDF cover: "& Tax Invoice"** (capitals).
+- **Handover sheet: a "Swordfish reference" column** (`our_reference`; old headings Swordfish Reference, Our reference,
+  Raptor reference, BF reference) becomes the case number and `swordfish_reference` -- "Swordfish Reference" used to be
+  read as the CLIENT's reference, which numbered DCR's accounts DCR0001/2 and dropped the client's own references. Approve
+  refuses a reference not in the client's series or already on the book, before writing (`check-handover-sheet`).
+  Staging fixed: DCR0001 -> DCR2181, DCR0002 -> DCR1970.
+- **Statement: in duplum is a line** -- a credit for what the ceiling withholds, last, so the running balance ends on the
+  balance owing ("the balances are not balancing") (`check-in-duplum`).
+- **Statement: only chargeable actions, even at R0.00** -- a R0 row with no action code and no Annexure B item is left
+  off (Swordfish housekeeping: Account File Uploaded, Account Sub Status Changed, Debtor Details Changed, Custom Field
+  Value Changed, Account frozen/unfrozen). Only an explicit `actionCode === null` hides; undefined behaves as before.
+  The timeline keeps them (`check-in-duplum`).
+- **Promise card: "Made 14 Apr 2026 by Itumeleng Masalesa · brought across from Swordfish"**; timeline "next payment"
+  not "first" once instalments are kept (`check-timeline`); **"What the client sees"**: "...and has paid 8 of them so
+  far. The next is due on 15 December 2026" -- still no promised amount (`check-client-position`).
+- **Client DCR** created on staging from its signed contract (30% commission; the contact details Stephan gave, not the
+  contract's; the name changed as he asked). The bank account holder was set to the new name -- Stephan was asked
+  whether the bank holds it under the contract's name; no answer.
+  The signed contract PDF was NOT uploaded to the Mandate card (no storage access from the session).
+- **Staging migration `raptor_h20_all_payments`** (mirrored into schema.sql; see item 3).
+
+## START HERE (S22) -- what was open (Raptor · Handover 20, 17 Nov)
 
 1. **PRODUCTION'S DATABASE IS REHEARSED AND WAITING FOR STEPHAN'S WORD.** He asked (9 Nov) for production to "look
    exactly the same" as staging and chose **code + database structure** -- production keeps its people, the real book

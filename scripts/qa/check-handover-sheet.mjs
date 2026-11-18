@@ -296,9 +296,9 @@ try {
 
 /* --------------------------------------- the Swordfish reference is OURS (Raptor H20) */
 /*
- * Stephan, 18 Nov, importing Dr DR Roux with both columns filled in: "the swordfish reference must be taken over to raptor
+ * Stephan, 18 Nov, importing a client's Swordfish accounts with both columns filled in: "the swordfish reference must be taken over to raptor
  * as our ref not the client". "Swordfish Reference" was an alias of "Your reference": DCR2181 went in as the client's
- * reference, the client's 277 was dropped, and the account was numbered DCR0001. Seen failing with the alias put back
+ * reference, the client's own reference was dropped, and the account was numbered afresh. Seen failing with the alias put back
  * under client_reference, and with case_number taken out of toAccountRow.
  */
 {
@@ -307,13 +307,13 @@ try {
   const idx = aliasIndex()
   check('"Swordfish Reference" is read as our reference', idx.get(headingKey('Swordfish Reference'))?.key, 'our_reference')
   check('..."Your reference" is still the client\'s', idx.get(headingKey('Your reference'))?.key, 'client_reference')
-  const d = toDebtorInput({ our_reference: 'dcr2181', client_reference: '277', name: 'Du Toit', capital: '6493.37' }, '2024-04-09', 24, '2026-11-18')
-  check('the Swordfish reference rides through as ours', d.ourReference, 'DCR2181')
-  check('...is the account number where the sheet has none', d.accountNumber, 'DCR2181')
-  check('...and the client keeps their own reference', d.clientReference, '277')
+  const d = toDebtorInput({ our_reference: 'abc1234', client_reference: '901', name: 'Example', capital: '1000' }, '2024-04-09', 24, '2026-11-18')
+  check('the Swordfish reference rides through as ours', d.ourReference, 'ABC1234')
+  check('...is the account number where the sheet has none', d.accountNumber, 'ABC1234')
+  check('...and the client keeps their own reference', d.clientReference, '901')
   const row = toAccountRow(d, 'c1', 'h1', 0.3)
-  check('the account opens on it as its case number', row.case_number, 'DCR2181')
-  check('...and records it as the Swordfish reference', row.swordfish_reference, 'DCR2181')
+  check('the account opens on it as its case number', row.case_number, 'ABC1234')
+  check('...and records it as the Swordfish reference', row.swordfish_reference, 'ABC1234')
   const fresh = toAccountRow(toDebtorInput({ client_reference: '9', name: 'New', capital: '100' }, null, 24, '2026-11-18'), 'c1', 'h1', 0.3)
   ok('a new account carries no case number, so the database numbers it on', !('case_number' in fresh))
   const draft = readFileSync(new URL('../../src/lib/handoverDraft.ts', import.meta.url), 'utf8')
