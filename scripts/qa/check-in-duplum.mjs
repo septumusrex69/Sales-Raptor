@@ -441,6 +441,30 @@ ok('the letter does not refuse an offer as never settling',
     Math.round(s.lines.reduce((t, l) => t + l.debit - l.credit, 0) * 100) / 100, s.breakdown.balance)
 }
 
+/*
+ * ONLY CHARGEABLE ACTIONS ARE ON THE STATEMENT, EVEN AT R0.00 (Raptor H20, 18 Nov). Stephan: "Only actions that has a
+ * charge even if R0.00 must reflect on the statement the others do not." Swordfish's housekeeping -- "Account File
+ * Uploaded", "Account Sub Status Changed" -- has no action code and no charge. Seen failing with the skip removed.
+ */
+{
+  const { buildStatement } = await import('../../src/lib/accountBalance.ts')
+  const fee = (o) => ({ date: '2026-10-05', description: 'x', exclVat: 0, vat: 0, billed: false, annexureItem: null, ...o })
+  const s = buildStatement({
+    capitalHandedOver: 1000, handoverDate: '2026-10-01', vatRate: 0.15,
+    ledgers: { payments: [], interest: [], paidOut: [], fees: [
+      fee({ description: 'Account File Uploaded', legacyName: 'Account File Uploaded', actionCode: null }),
+      fee({ description: 'Account Sub Status Changed', legacyName: 'Account Sub Status Changed', actionCode: null }),
+      fee({ description: 'SMS', legacyName: 'SMS', actionCode: 'sms' }),
+      fee({ description: 'Letter', exclVat: 21, vat: 3.15, legacyName: 'Mystery', actionCode: null }),
+    ] },
+  })
+  const words = s.lines.map((l) => l.description).join(' | ')
+  ok('housekeeping is left off the statement', !/File Uploaded|Sub Status/.test(words))
+  ok('...a chargeable action at R0.00 still shows', s.lines.some((l) => l.kind === 'fee-no-charge'))
+  ok('...and anything carrying money shows, code or not', s.lines.some((l) => l.debit === 24.15))
+  check('...so the lines still add up to the foot', s.lines.at(-1)?.balance, s.breakdown.balance)
+}
+
 console.log(`\ncheck-in-duplum: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

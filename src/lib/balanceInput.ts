@@ -61,6 +61,7 @@ export interface LedgerRows {
     paymentId?: string | null
     cancelledAt?: string | null
     legacyName?: string | null
+    actionCode?: string | null
   }[]
   accruals: { accruedOn: string; days: number; amountAccrued: number }[]
   /**
@@ -172,6 +173,8 @@ export function balanceInputFor(input: {
            reads, and without them every cancelled fee reads as live. */
         cancelledAt: f.cancelledAt,
         legacyName: f.legacyName,
+        /* Housekeeping (no action, no charge) is left off the statement -- see buildStatement. */
+        actionCode: f.actionCode,
       })),
       /*
        * WHAT THE DEBT EARNED, NOT WHAT MAY BE TAKEN.

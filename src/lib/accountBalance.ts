@@ -87,6 +87,12 @@ export interface LedgerLines {
     /** What Swordfish called the action. Null on anything Raptor raised. Read only by
         `feeStands`, which is the one place it means anything. */
     legacyName?: string | null
+    /**
+     * THE ANNEXURE B ACTION, where there is one. A row with none (and no item) and no charge is not a chargeable action --
+     * "Account Sub Status Changed", "Account File Uploaded" -- and the statement leaves it off (Raptor H20).
+     * Optional: undefined behaves as before.
+     */
+    actionCode?: string | null
   }[]
   /** Every interest accrual period. */
   interest: { from: string; days: number; amount: number }[]
@@ -876,6 +882,19 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
 
   for (const f of costRows) {
     if (stopAt && f.date > stopAt) continue
+    /*
+     * HOUSEKEEPING IS NOT ON THE STATEMENT (Raptor H20, 18 Nov). Stephan: "Please do not show Account status changed and
+     * account files uploaded on the statement." Swordfish logged its own record-keeping as R0 actions -- a sub-status
+     * changed, a file uploaded, a field edited, the account frozen -- and the import keeps them as history (they are on
+     * the timeline). They are not work done for the debt, so unlike an SMS past the ceiling (`fee-no-charge`, which has
+     * an action code) they are left off. Stephan, the rule in his words: "Only actions that has a charge even if R0.00
+     * must reflect on the statement, the others do not." So: a chargeable action -- one with an Annexure B action code
+     * or item -- shows even at nought; a nought with neither is not an action and is left off. Anything carrying money
+     * shows whatever it is, so the lines still add up to the foot.
+     */
+    /* `=== null`, NOT falsy: null is "this row has no action", read off the ledger; undefined is a caller that did not
+       say (a projection, a fixture), and it behaves exactly as before rather than losing its no-charge lines. */
+    if (f.actionCode === null && !f.annexureItem && roundToCents(f.exclVat + f.vat) === 0) continue
     /*
      * AN ACTION PAST THE CEILING IS SHOWN AT NOUGHT RATHER THAN DROPPED. See `fee-no-charge`: the
      * work happened and the client is entitled to see it, even though it earned nothing. It adds
