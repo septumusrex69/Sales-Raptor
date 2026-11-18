@@ -14,6 +14,11 @@ import { ruleRateFor, type ClientCommission } from './commissionRule.ts'
 export interface NewDebtorInput {
   /** Our reference. Optional — suggestReference proposes the next in the client's series. */
   accountNumber: string
+  /**
+   * THE REFERENCE THE ACCOUNT ALREADY HAD WITH US, IN SWORDFISH (Raptor H20) -- DCR2181. Written as the case number
+   * and as swordfish_reference. Absent for a new account, which the database numbers on in the client's series.
+   */
+  ourReference?: string
   /** The client's own reference for this debtor. */
   clientReference: string
   firstName: string
@@ -331,6 +336,11 @@ export function toAccountRow(
     company_id: companyId,
     handover_id: handoverId,
     account_number: input.accountNumber.trim() || null,
+    /* Only when the account already had a reference with us: the trigger numbers it otherwise, and a null here would
+       override nothing. approveDraft has checked it is in the client's series and free. */
+    ...(input.ourReference?.trim()
+      ? { case_number: input.ourReference.trim().toUpperCase(), swordfish_reference: input.ourReference.trim().toUpperCase() }
+      : {}),
     client_reference: input.clientReference.trim() || null,
     debtor_first_name: input.firstName.trim() || null,
     debtor_surname: input.surname.trim(),

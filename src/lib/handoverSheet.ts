@@ -77,8 +77,23 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   /* ---------------------------------------------------------------- the account */
   {
     key: 'client_reference', label: 'Your reference', group: 'The account', kind: 'text',
-    required: true, was: ['Client Reference', 'Client Prefix', 'Swordfish Reference'],
+    required: true, was: ['Client Reference', 'Client Prefix'],
     note: 'The number YOU know this debt by. It goes on every letter, so the debtor recognises it.',
+  },
+  /*
+   * THE SWORDFISH REFERENCE IS OURS, NOT THE CLIENT'S (Raptor H20, 18 Nov). Stephan, importing Dr DR Roux's accounts
+   * with both columns filled in: "the swordfish reference must be taken over to raptor as our ref not the client".
+   * "Swordfish Reference" used to be an old heading for "Your reference", so DCR2181 was filed as the CLIENT's
+   * reference, the client's own 277 was dropped, and the account was numbered DCR0001 beside it. Since 9 Nov the case
+   * number IS the client-code reference and an account brought across keeps the one it had (CLAUDE.md), so this column
+   * becomes the case number -- the reference every notice quotes -- and "Your reference" stays the client's.
+   *
+   * OPTIONAL, and only for an account already ours. A new account leaves it empty and is numbered on in the series.
+   */
+  {
+    key: 'our_reference', label: 'Swordfish reference', group: 'The account', kind: 'text',
+    was: ['Swordfish Reference', 'Swordfish Ref', 'Our reference', 'Raptor reference', 'BF reference'],
+    note: 'Only for an account coming across from Swordfish: the reference it had there, e.g. DCR2181. It stays the account\u2019s reference in Raptor. Leave it empty for a new account.',
   },
   {
     key: 'account_number', label: 'Account number', group: 'The account', kind: 'text',

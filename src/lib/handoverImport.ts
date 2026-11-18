@@ -1178,7 +1178,10 @@ export function toDebtorInput(
    */
   const phone = (k: string) => { const raw = v(k); return raw ? repairPhone(raw) ?? raw : raw }
   return {
-    accountNumber: v('account_number'),
+    /* An account brought across from Swordfish keeps its reference (our_reference, handoverSheet.ts): it is the case
+       number, and the account number too where the sheet has none -- the 9 Nov convention for an account that is ours. */
+    accountNumber: v('account_number') || v('our_reference').toUpperCase(),
+    ourReference: v('our_reference').toUpperCase(),
     clientReference: v('client_reference'),
     firstName: v('first_name'),
     surname: v('name'),

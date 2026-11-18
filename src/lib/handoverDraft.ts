@@ -571,7 +571,28 @@ export async function approveDraft(input: {
     ? null
     : (Number.isFinite(Number(rawRate)) ? Number(rawRate) : null)
 
-  const needing = going.filter((r) => !(r.values.account_number ?? '').trim()).length
+  const needing = going.filter((r) => !(r.values.account_number ?? '').trim() && !(r.values.our_reference ?? '').trim()).length
+  /*
+   * A SWORDFISH REFERENCE IS CHECKED BEFORE ANYTHING IS WRITTEN (Raptor H20). It becomes the case number, so it must be
+   * in this client's series (DCR + digits for DCR) and must not already be an account -- and the batch is refused, with
+   * the references named, rather than the database quietly numbering the account on or refusing it half way through.
+   */
+  {
+    const code = ((client?.code as string | null) ?? '').trim().toUpperCase()
+    const taken = new Set(onBook.map((r) => r.trim().toUpperCase()))
+    const seenOurs = new Set<string>()
+    const bad: string[] = []
+    for (const r of going) {
+      const ours = (r.values.our_reference ?? '').trim().toUpperCase()
+      if (!ours) continue
+      if (!code) bad.push(`${ours}: this client has no code, so no reference can be checked against its series`)
+      else if (!new RegExp(`^${code}[0-9]+$`).test(ours)) bad.push(`${ours} is not in ${code}'s series (${code} and a number)`)
+      else if (taken.has(ours)) bad.push(`${ours} is already an account on this client's book`)
+      else if (seenOurs.has(ours)) bad.push(`${ours} is on the sheet twice`)
+      seenOurs.add(ours)
+    }
+    if (bad.length) throw new Error(`The Swordfish reference cannot become the Raptor reference: ${bad.join('; ')}.`)
+  }
   const generated = nextReferences(onBook, (client?.code as string | null) ?? null, needing)
 
   let created = 0
