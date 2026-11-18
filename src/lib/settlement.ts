@@ -39,6 +39,12 @@ export interface Settlement {
   closedReason: string | null
   /** Money in the trust account towards it, received from the offer to its expiry. */
   paidToward: number
+  /**
+   * WHAT THE DEBTOR OFFERED (S22). `amount` is what the client agreed; where the two differ, the client made a counter
+   * offer. Null on a row read through account_settlement, which does not carry it -- the approve box then treats the
+   * amount as the offer.
+   */
+  offeredAmount?: number | null
 }
 
 export function toSettlement(row: Record<string, unknown>): Settlement {
@@ -64,6 +70,7 @@ export function toSettlement(row: Record<string, unknown>): Settlement {
     closedAt: s(row.closed_at),
     closedReason: s(row.closed_reason),
     paidToward: n(row.paid_toward),
+    offeredAmount: row.offered_amount === null || row.offered_amount === undefined ? null : Number(row.offered_amount),
   }
 }
 
@@ -125,6 +132,12 @@ export function settlementMergeValues(
  */
 export interface SettlementBreakdown {
   amount: number
+  /** What the debtor offered; differs from `amount` on a counter offer. */
+  offered: number
+  /** True where the figures were frozen when the offer was put up (S22) -- what the client is told is what is paid. */
+  frozen: boolean
+  /** Where the offer was made as a percentage discount. */
+  discountPct: number | null
   /** Owed today, before the offer. `fees` are the firm's Annexure B fees left to take. */
   capital: number
   interest: number
@@ -153,6 +166,9 @@ export function toBreakdown(row: Record<string, unknown>): SettlementBreakdown {
   const n = (v: unknown) => (v === null || v === undefined ? 0 : Number(v))
   return {
     amount: n(row.amount),
+    offered: row.offered === null || row.offered === undefined ? n(row.amount) : n(row.offered),
+    frozen: row.frozen === true,
+    discountPct: row.discount_pct === null || row.discount_pct === undefined ? null : Number(row.discount_pct),
     capital: n(row.capital), interest: n(row.interest), fees: n(row.fees),
     receiptFee: n(row.receipt_fee),
     toFees: n(row.to_fees), toInterest: n(row.to_interest), toCapital: n(row.to_capital),

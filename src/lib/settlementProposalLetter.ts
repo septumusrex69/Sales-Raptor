@@ -82,8 +82,10 @@ export function settlementProposalLetter({ breakdown: b, money, reason }: Settle
       ],
     } as unknown as Block,
     h(1, 'SETTLEMENT PROPOSAL FOR YOUR APPROVAL'),
-    p(`{{debtor_name}} has offered to settle this account with a single payment of ${money(b.amount)}, in full and `
-      + `final settlement of the ${money(owed)} outstanding today. We may not accept it without your written approval.`),
+    p(`{{debtor_name}} has offered to settle this account with a single payment of ${money(b.amount)}`
+      + (b.discountPct ? ` (a ${b.discountPct}% discount)` : '')
+      + `, in full and final settlement of the ${money(owed)} outstanding. We may not accept it without your written `
+      + 'approval.'),
     ...(reason && reason.trim() ? [p(`What the debtor told us: ${reason.trim()}`)] : []),
 
     h(2, 'What is outstanding today'),
@@ -96,7 +98,9 @@ export function settlementProposalLetter({ breakdown: b, money, reason }: Settle
 
     /* THE DATE IS ON THE HEADING, not in a paragraph of its own -- the figures move daily with interest, and the
        client has to know which day's they are reading before the first one. */
-    h(2, `If you accept ${money(b.amount)} (figures as at ${longDate(b.asAt)})`),
+    h(2, b.frozen
+      ? `If you accept ${money(b.amount)} (figures fixed on ${longDate(b.asAt)})`
+      : `If you accept ${money(b.amount)} (figures as at ${longDate(b.asAt)})`),
     table([
       pair('The debtor pays, once, in full', money(b.amount), true),
       /* THE RECEIPT FEE IS INSIDE THE FEES LINE, and said so -- it is raised on this very payment, and a client
@@ -122,10 +126,18 @@ export function settlementProposalLetter({ breakdown: b, money, reason }: Settle
 
     /* TODAY'S FIGURES AND IT SAYS SO: interest runs daily until the money reaches trust, so the split moves by a few
        rand while the client decides. What they receive is always worked out the same way, on the day it arrives. */
-    p('Interest runs until the payment reaches our trust account, so the split may move slightly; what you receive is '
-      + 'worked out the same way on the day it arrives and paid to you on the next payover. Please reply to this email '
-      + 'in writing to say whether you accept, and by which date the debtor must pay. If the full amount is not '
-      + 'received by then, the offer lapses and the full balance is owing again.'),
+    /* FIXED, AND IT SAYS SO (Stephan, 18 Nov): "if the debtor proposes this, then we keep it like that" -- the old
+       line that interest was still running read as though the figure might change under the client. It cannot: the
+       split was frozen when the offer was made, and the engine pays exactly it. An offer from before the freeze
+       existed still says the older, truer thing. */
+    p((b.frozen
+      ? 'These figures were fixed when the offer was made and will not change: if the debtor pays the full amount by '
+        + `the agreed date, you receive exactly ${money(b.toClient)}, on the next payover. If not, the offer lapses and `
+        + 'the account carries on as if it had never been made. '
+      : 'Interest runs until the payment reaches our trust account, so the split may move slightly; what you receive '
+        + 'is worked out the same way on the day it arrives and paid to you on the next payover. ')
+      + 'Please reply to this email in writing to say whether you accept, would accept a different amount, or decline '
+      + '\u2014 and if you accept, by which date the debtor must pay.'),
     /* SIGNED OFF IN TWO LINES, NOT ON A SIGNATURE RULE: it is a question put to the client by email, not a document
        anybody signs, and the rule's height is what pushed the sign-off onto a second page by itself. */
     { kind: 'paragraph', spans: [{ text: 'Yours faithfully' }], keepWithNext: true } as Block,

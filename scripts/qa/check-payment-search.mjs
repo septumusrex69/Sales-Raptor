@@ -80,7 +80,7 @@ const preview = lastFn('preview_allocation')
 const previewClosed = preview.indexOf('d.ended_as is not null and v_day >= d.ended_on')
 ok('the queue previews it the same way, on the same day test', previewClosed >= 0
   && /excess_credit := greatest\(coalesce\(p_amount, 0\), 0\);/.test(preview)
-  && previewClosed < preview.indexOf('finance_split('))
+  && previewClosed < preview.indexOf('payment_split('))
 
 /* WITHDRAWING WITH PAYMENTS ON IT: KEEP BY DEFAULT, OR REFUND (prompt 11; the firm, 12 Oct: "by
    default, keep it on the account"). The refund is the existing machinery in one transaction. */

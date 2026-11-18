@@ -35,6 +35,9 @@ import {
 import { repaymentPlan, settlementLadder } from '../../../src/lib/repaymentPlan.js'
 import { repaymentLetter, repaymentLetterRefusal } from '../../../src/lib/repaymentLetter.js'
 
+/** The workflows whose sends are never charged, by what starts them. See planSend.paidUp. */
+export const FREE_TRIGGERS = new Set(['settlement_accepted', 'settlement_countered', 'settlement_declined'])
+
 /**
  * ONE STEP OF ONE RUN, DECIDED AND ACTED ON.
  *
@@ -142,7 +145,7 @@ export async function runOneStep(
 
   /* ---------- everything planSend needs, in as few round trips as this will go ---------- */
 
-  const [nodeRes, accountRes, firmRes] = await Promise.all([
+  const [nodeRes, accountRes, firmRes, versionRes] = await Promise.all([
     admin.from('workflow_nodes')
       .select('id, phase_id, key, kind, label, description, day, deadline_days, deadline_unit, channel, template_id, template_company_id, after_minutes, needs_release, statutory, assign_to, x, y, ordinal, anchor, anchor_offset, anchor_unit')
       .eq('id', step.node_id).maybeSingle(),
@@ -150,6 +153,8 @@ export async function runOneStep(
       .select('*, companies(name, account_owner_id)')
       .eq('id', run.account_id).maybeSingle(),
     admin.from('firm_settings').select('*').maybeSingle(),
+    /* What started this run -- read for one thing: the client's answer to a settlement is never charged (below). */
+    admin.from('workflow_versions').select('trigger_kind').eq('id', run.version_id).maybeSingle(),
   ])
   const nodeRow = nodeRes.data
   const account = accountRes.data
@@ -516,7 +521,10 @@ export async function runOneStep(
     values,
     dueOn: step.due_on,
     /* NO FEE ON A PAID ACCOUNT (S15) -- see planSend.paidUp. */
-    paidUp: account.ended_as === 'paid_up' || account.ended_as === 'settled',
+    paidUp: account.ended_as === 'paid_up' || account.ended_as === 'settled'
+      /* NOR ON THE CLIENT'S ANSWER TO A SETTLEMENT (S22 · Raptor H20; Stephan chose free): a fee raised on the letter
+         that quotes a fixed settlement figure would put a second number on the account the letter does not show. */
+      || FREE_TRIGGERS.has(String((versionRes.data as { trigger_kind?: string } | null)?.trigger_kind ?? '')),
     /* Lifts the wait-for-a-person refusal and nothing else. Every other guard still applies to
        whoever pressed the button -- a release cannot supply a missing listing reference. */
     released: Boolean(releasedBy),

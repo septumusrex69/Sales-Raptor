@@ -94,6 +94,39 @@ S22 is still running; this is its first piece, written down now so it is not los
   found by drawing BNP0015's letter); `check-debtor-tickets` expectation widened (it pinned 'debtor' as the LAST kind);
   `check-sales-lists` passes with the new switch; e2e settlement 27/0. `e2e/query-ticket` fails one assertion ("our
   own reference") on the preview branch without this change too -- predates S22.
+- **Round two, same day (migration `h20_settlement_rounds`, mirrored; all 12 function bodies md5-verified against
+  staging, comments stripped).** Stephan's four asks, each choice his (asked with options):
+  1. **Frozen at the offer.** `account_settlements` gains `offered_amount`, `snap_capital/interest/costs`,
+     `discount_pct`; a BEFORE INSERT trigger (`settlement_freeze`) snapshots what can be collected
+     (`settlement_snapshot`, the engine's own reading) and refuses an offer -- or a counter -- at or above it.
+     Nothing is posted: interest still accrues, and a lapsed offer leaves the ledger exactly as if never made.
+     BNP0015 and RVC0010 were frozen as they stood on 18 Nov.
+  2. **Pro rata when paid.** `payment_split` replaces the direct `finance_split` call in BOTH `allocate_payment` and
+     `preview_allocation`: a payment that pays an approved, frozen settlement **in one payment** before its expiry
+     is split pro rata over the snapshot (`settlement_split`; the item 9 fee **inside** the figure, joining our fees
+     before the split); everything else stays 50/50. Stamped `engine_version = 'v2-settlement'`. A settlement paid
+     in pieces goes 50/50 piece by piece (the call script's "one payment, in full"; also "as if never proposed" if
+     it lapses). Proved on BNP0015 in a rolled-back transaction: breakdown = queue preview = posting, **client
+     R198.40** (was R178.12 under 50/50); a R300 part payment posted 50/50.
+  3. **Discount %**: `propose_settlement_discount` works the figure out on the snapshot (BNP0014 10% = R681.47 of
+     R757.19 in the probe); `settlement_quote` shows the propose box what can be collected.
+  4. **The debtor is told the client's answer**: three trigger kinds and one-step workflows (`settlement-accepted`,
+     `-countered`, `-declined`), started by `settlement_ticket` on the answer, each emailing a letter
+     (`letter-settlement-{accepted,countered,declined}-{individual,company}`, built in `build.mjs`, seeded by the new
+     `scripts/letters/seed-settlement-answers.mjs`, md5s match). A different figure at approval IS the counter
+     offer; the debtor accepts it **by paying it**. **Free** (`FREE_TRIGGERS` in step.ts). The card nudges the
+     account's workflows after the answer, so the email goes at once rather than at the morning run.
+  The client proposal now says the figures are **fixed** and drops the "interest runs" caveat, names a discount,
+  and asks accept / different amount / decline. NOT done: re-approving a lapsed offer (status stays approved) sends
+  no new letter; two declines on one account in the same live run window send one letter.
+- Checks round two: `check-settlement-ticket` 62 (engine-path, free-letter and freeze breaks each caught);
+  `check-letters` 18 workflow letters (confirmations told apart from payment letters by name, not prefix);
+  `check-moved-overpayment`, `check-payment-search` markers moved to `payment_split`; `check-workflow-triggers`
+  knows the three kinds. Full fast QA green (24 143); e2e settlement, payments-in, library, workflow-builder,
+  workflow-start all green.
+- **Permission prompts:** Stephan asked why SQL keeps asking. The fix is his: **Auto** mode in the mode dropdown
+  (cloud sessions ignore bypass). A session may not grant itself permissions (the classifier refused it), and the
+  committed `.claude/settings.json` is shared with Ryno's sessions, so Supabase writes were not allowed there.
 - **Also discussed, nothing built:** going live with ~20 TB of case files (mostly PDFs, ~150 000 cases, +3-4 TB a
   year). Recommended: case data in Supabase; PDFs in an object store (Cloudflare R2 suggested) indexed by a table in
   Raptor; 3-2-1 backups (AWS Glacier Deep Archive with object lock + offline drives). Swordfish is hosted at

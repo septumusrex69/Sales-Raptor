@@ -120,10 +120,70 @@ ok('...and asks the liaison’s tick or finance’s',
 ok('preview_allocation answers the liaison too',
   /has_capability\('finance\.view'\) or public\.has_capability\('settlement\.approve'\)/.test(preview))
 
+/* ---------------- S22, round two: frozen, pro rata, discount, the debtor told ---------------- */
+
+const split = lastFn(sql, 'payment_split')
+const forPay = lastFn(sql, 'settlement_for_payment')
+const ssplit = lastFn(sql, 'settlement_split')
+const freeze = lastFn(sql, 'settlement_freeze')
+const alloc = lastFn(sql, 'allocate_payment')
+const disc = lastFn(sql, 'propose_settlement_discount')
+const trig2 = lastFn(sql, 'settlement_ticket')
+const bd2 = lastFn(sql, 'settlement_breakdown')
+ok('the engine posts through payment_split, not finance_split directly',
+  /public\.payment_split\(v_acct\.id, v_day, p_payment_id,/.test(alloc) && !/public\.finance_split\(/.test(alloc))
+ok('...and so does the preview the approval queue shows',
+  /public\.payment_split\(p_account, v_day, p_exclude_payment,/.test(preview) && !/public\.finance_split\(/.test(preview))
+ok('...and a settlement allocation is stamped as one', /when s\.settlement is not null then 'v2-settlement' else 'v2-5050-split'/.test(alloc))
+ok('payment_split chooses the pro-rata split only for a settlement it pays',
+  /settlement_for_payment\(p_account, p_payment, p_day, p_exclude_payment\)/.test(split)
+  && /if v_s\.id is not null then[\s\S]*settlement_split\([\s\S]*else[\s\S]*finance_split\(/.test(split))
+ok('...never on a moved overpayment (no receipt fee there)', /if coalesce\(p_fee_rate, 0\) > 0 then/.test(split))
+ok('a settlement is paid only by an approved, frozen offer, before its expiry',
+  /s\.status = 'approved'/.test(forPay) && /s\.snap_capital is not null/.test(forPay) && /and s\.expires_on/.test(forPay))
+ok('...in ONE payment of the whole figure, nothing else received towards it',
+  /round\(coalesce\(p_amount, 0\), 2\) >= s\.amount/.test(forPay) && /not exists \([\s\S]*account_payments/.test(forPay))
+ok('the split is pro rata over the snapshot, the receipt fee inside the figure',
+  /v_pool := p_snap_interest \+ p_snap_costs \+ fee_excl \+ fee_vat \+ p_snap_capital/.test(ssplit)
+  && /v_share := case when v_pool > 0 then p_amount \/ v_pool/.test(ssplit)
+  && /fee_excl := round\(least\(p_amount \* p_fee_rate, p_fee_cap_excl\), 2\)/.test(ssplit))
+ok('...capital takes the odd cent, so the parts add to the amount', /to_capital := least\(greatest\(v_amt - to_interest - to_costs, 0\)/.test(ssplit))
+ok('the offer is frozen on the way in, and keeps what the debtor offered',
+  /tg_op = 'INSERT'[\s\S]*new\.offered_amount := coalesce\(new\.offered_amount, new\.amount\)[\s\S]*settlement_snapshot\(new\.account_id\)/.test(freeze))
+ok('...and an offer (or counter) at or above what can be collected is refused',
+  /new\.amount >= new\.snap_capital \+ new\.snap_interest \+ new\.snap_costs then\s*raise exception/.test(freeze))
+ok('the freeze runs before insert and on a changed amount',
+  /create trigger account_settlements_freeze\s+before insert or update of amount on public\.account_settlements/.test(sql))
+ok('a discount is worked out on the snapshot, by the database',
+  /settlement_snapshot\(p_account\)/.test(disc) && /round\(v_total \* \(1 - p_pct \/ 100\), 2\)/.test(disc))
+ok('the breakdown reads the same pro-rata split on the snapshot', /settlement_split\(v_s\.amount, v_s\.amount, v_s\.snap_interest/.test(bd2))
+ok('...with the client’s commission on the capital it pays', /finance_commission\(r\.to_capital, public\.account_commission_rate\(v_s\.account_id\)/.test(bd2))
+ok('the answer starts the debtor’s letter: declined, countered (a different figure) or accepted',
+  /new\.status = 'declined' then 'settlement_declined'/.test(trig2)
+  && /new\.amount <> coalesce\(new\.offered_amount, new\.amount\) then 'settlement_countered'/.test(trig2)
+  && /else 'settlement_accepted'/.test(trig2) && /insert into public\.workflow_runs/.test(trig2))
+const kindsCheck = sql.slice(sql.lastIndexOf('add constraint workflow_versions_trigger_kind_check'))
+ok('the three trigger kinds are allowed', ['settlement_accepted', 'settlement_countered', 'settlement_declined'].every((k) => kindsCheck.slice(0, 600).includes(`'${k}'`)))
+ok('each has a one-step workflow pointing at its emails', /'email-settlement-' \|\| a\.answer \|\| '-individual'/.test(sql) && /'email-settlement-' \|\| a\.answer \|\| '-company'/.test(sql))
+const step = read('api/_lib/workflow/step.ts')
+ok('the debtor’s letters are never charged', /FREE_TRIGGERS = new Set\(\['settlement_accepted', 'settlement_countered', 'settlement_declined'\]\)/.test(step)
+  && /paidUp: account\.ended_as === 'paid_up' \|\| account\.ended_as === 'settled'\s*(\/\*[\s\S]*?\*\/\s*)?\|\| FREE_TRIGGERS\.has\(String\(\(versionRes\.data/.test(step))
+const att = JSON.parse(read('scripts/letters/attachments.json'))
+check('every answer email attaches its own letter',
+  ['accepted', 'countered', 'declined'].flatMap((a) => ['individual', 'company'].map((w) => att[`email-settlement-${a}-${w}`] === `letter-settlement-${a}-${w}`)),
+  [true, true, true, true, true, true])
+const frozenDoc = JSON.stringify(settlementProposalLetter({ breakdown: { ...b, frozen: true, discountPct: 10 }, money }).blocks)
+ok('a frozen proposal promises the exact figure and drops the interest caveat',
+  /you receive exactly R 178\.12/.test(frozenDoc) && !/Interest runs until/.test(frozenDoc) && /figures fixed on/.test(frozenDoc))
+ok('...and names the discount', /\(a 10% discount\)/.test(frozenDoc))
+ok('...and asks for a counter offer as one of the answers', /would accept a different amount, or decline/.test(frozenDoc))
+
 /* ---------------- the screen ---------------- */
 
 const panel = read('src/components/accounts/SettlementPanel.tsx')
 const page = read('src/pages/accounts/AccountDetail.tsx')
+ok('recording the answer sends the debtor’s letter now', /onDone=\{answered\}/.test(panel) && /nudgeWorkflowsForAccount\(accountId\)/.test(panel))
+ok('a discount can be proposed', /proposeSettlementDiscount\(accountId, p, note\)/.test(panel))
 ok('the card shows the figures to whoever records the answer', /s\.state === 'proposed' && canApprove && \(\s*<ProposalFigures/.test(panel))
 ok('...and refuses to send an offer the account cannot take', /onSend && !refusal/.test(panel))
 ok('the page attaches the letter and addresses the client', /settlementProposalLetter\(/.test(page) && /setComposeTo\(client\?\.email/.test(page))

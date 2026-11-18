@@ -12,5 +12,11 @@
   "email-paid-up-individual": "letter-paid-up-individual",
   "email-paid-up-company": "letter-paid-up-company",
   "email-settlement-confirmation-individual": "letter-settlement-individual",
-  "email-settlement-confirmation-company": "letter-settlement-company"
+  "email-settlement-confirmation-company": "letter-settlement-company",
+  "email-settlement-accepted-individual": "letter-settlement-accepted-individual",
+  "email-settlement-accepted-company": "letter-settlement-accepted-company",
+  "email-settlement-countered-individual": "letter-settlement-countered-individual",
+  "email-settlement-countered-company": "letter-settlement-countered-company",
+  "email-settlement-declined-individual": "letter-settlement-declined-individual",
+  "email-settlement-declined-company": "letter-settlement-declined-company"
 }

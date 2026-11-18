@@ -271,6 +271,85 @@ const settled = (who) => doc([
 out['letter-settlement-individual'] = settled('individual')
 out['letter-settlement-company'] = settled('company')
 
+/* ------------------------------------------------- the client's answer to an offer (S22 · Raptor H20) */
+/*
+ * THE DEBTOR IS TOLD WHAT THE CLIENT SAID. Stephan, 18 Nov: "once it's been approved, an email goes out to the
+ * debtor ... your settlement has been accepted, or your settlement has been rejected, or a counter offer was made."
+ * Three letters, each sent by its own one-step workflow the moment the liaison records the client's answer, by
+ * email only and never charged (step.ts: a fee on top of a fixed settlement figure would muddy the figure).
+ *
+ * ACCEPTED AND COUNTER QUOTE {{settlement_amount}} AND {{settlement_expiry}}, which answer only off an approved,
+ * unlapsed offer -- exactly the moment these go. A COUNTER IS ACCEPTED BY PAYING IT (Stephan's choice, same day):
+ * no second round of yes, so the letter says paying in full by the date is the acceptance.
+ *
+ * DECLINED QUOTES NO OFFER FIGURE -- nothing on the account answers a declined amount, and the debtor knows what
+ * they offered. It says what is owing now and what they can still do.
+ */
+const settlementAnswer = (who, answer) => {
+  const you = who === 'individual' ? 'you' : 'the company'
+  const dear = who === 'individual' ? 'Dear {{debtor_name}}' : 'Dear Sirs / Madams'
+  const lapse = 'If the full amount is not received by then, the offer lapses and the full balance is owing again, '
+    + 'with interest, as if no offer had been made.'
+  if (answer === 'declined') {
+    return doc([
+      headerStrip('By email'), ...addressee(who),
+      h(1, 'YOUR SETTLEMENT OFFER WAS NOT ACCEPTED'),
+      p(`${dear} — we act on behalf of {{client_name}}, the creditor. We put ${who === 'individual' ? 'your' : 'the company’s'} `
+        + 'offer to settle this account to {{client_name}}, and it has not been accepted.'),
+      { kind: 'table', borders: 'rows', widths: [40, 60], rows: [
+        row('Creditor', '{{client_name}}'),
+        row('Our case reference', '{{case_number}}'),
+        row(cell([t('Outstanding today', { bold: true })]), cell([t('{{balance}}', { bold: true })])),
+      ] },
+      h(2, `What ${you} can still do`, { numbered: true }),
+      { kind: 'list', ordered: false, items: [
+        [t('Pay the balance. ', { bold: true }), t('Payment of {{balance}} settles the account in full.')],
+        [t('Propose a payment arrangement. ', { bold: true }), t('Send it in writing with amounts and dates. '
+          + 'Nothing is agreed until we confirm it in writing.')],
+        [t('Make a new offer. ', { bold: true }), t('A higher offer may be put to the creditor again.')],
+      ] },
+      ...howToPay(),
+      ...signOff('We look forward to hearing from ' + (who === 'individual' ? 'you.' : 'the company.'), 'Sent by email.'),
+    ])
+  }
+  const countered = answer === 'countered'
+  return doc([
+    headerStrip('By email'), ...addressee(who),
+    h(1, countered ? 'SETTLEMENT COUNTER-OFFER FROM THE CREDITOR' : 'YOUR SETTLEMENT OFFER HAS BEEN ACCEPTED'),
+    p(countered
+      ? `${dear} — we act on behalf of {{client_name}}, the creditor. {{client_name}} could not accept the amount `
+        + `${who === 'individual' ? 'you' : 'the company'} offered, but will accept the amount below in full and final `
+        + 'settlement of this account.'
+      : `${dear} — we act on behalf of {{client_name}}, the creditor. {{client_name}} has accepted `
+        + `${who === 'individual' ? 'your' : 'the company’s'} offer to settle this account for the amount below, in full `
+        + 'and final settlement.'),
+    { kind: 'table', borders: 'rows', widths: [40, 60], rows: [
+      row('Creditor', '{{client_name}}'),
+      row('Our case reference', '{{case_number}}'),
+      row(cell([t(countered ? 'The creditor will accept' : 'Accepted in full and final settlement', { bold: true })]),
+        cell([t('{{settlement_amount}}', { bold: true })])),
+      row(cell([t('To be paid in full by', { bold: true })]), cell([t('{{settlement_expiry}}', { bold: true })])),
+    ] },
+    h(2, 'What happens now', { numbered: true }),
+    { kind: 'list', ordered: false, items: [
+      [t('One payment, in full. ', { bold: true }), t('Pay {{settlement_amount}} into our trust account by '
+        + '{{settlement_expiry}}, using {{case_number}} as the reference. A part payment does not settle the account.')],
+      ...(countered ? [[t('Paying is your acceptance. ', { bold: true }), t('There is nothing to sign: payment of '
+        + 'the full amount by that date accepts this offer.')]] : []),
+      [t('Then the account is closed. ', { bold: true }), t('When the payment is received, the rest of the balance '
+        + 'is written off, the account is closed, and we send a letter confirming the settlement.')],
+      [t('If it is not paid in time. ', { bold: true }), t(lapse)],
+    ] },
+    ...howToPay(),
+    ...signOff(countered ? 'We hope this allows the account to be settled.' : 'Thank you for your offer.', 'Sent by email.'),
+  ])
+}
+for (const who of ['individual', 'company']) {
+  for (const answer of ['accepted', 'countered', 'declined']) {
+    out[`letter-settlement-${answer}-${who}`] = settlementAnswer(who, answer)
+  }
+}
+
 /* ------------------------------------------------- listing notice, day 39 */
 const listing = (who) => doc([
   headerStrip(), ...addressee(who),

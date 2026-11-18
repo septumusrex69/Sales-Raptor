@@ -128,3 +128,20 @@ export async function fetchSettlementBreakdown(id: string): Promise<SettlementBr
   if (error) throw new Error(error.message)
   return toBreakdown((data ?? {}) as Record<string, unknown>)
 }
+
+/** Put the offer up as a DISCOUNT on what can be collected -- the figure is worked out by the database (S22). */
+export async function proposeSettlementDiscount(accountId: string, pct: number, note?: string): Promise<string> {
+  const { data, error } = await supabase.rpc('propose_settlement_discount', {
+    p_account: accountId, p_pct: pct, p_note: note ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return String(data)
+}
+
+/** What can be collected today -- the figure an offer, and a discount, are measured against. Null if unreadable. */
+export async function fetchSettlementQuote(accountId: string): Promise<number | null> {
+  const { data, error } = await supabase.rpc('settlement_quote', { p_account: accountId })
+  if (error) throw new Error(error.message)
+  const row = (data as { total?: number | string | null }[] | null)?.[0]
+  return row && row.total !== null && row.total !== undefined ? Number(row.total) : null
+}
