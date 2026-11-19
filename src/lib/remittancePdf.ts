@@ -221,9 +221,11 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
   /* ---------------- the inner pages' frame ---------------- */
 
   /** Header and title; returns the y below the subtitle, where the page's content starts. */
-  const innerPage = (title: string, subtitle: string): { pg: PDFPage; y: number } => {
+  const innerPage = (title: string, subtitle: string, kicker?: string): { pg: PDFPage; y: number } => {
     const pg = doc.addPage([PW, PH])
     logo(pg, M - 4, PH - 26, 216)
+    /* "TAX INVOICE" over the invoice number on the summary page (Stephan, 19 Nov: "specify the words Tax Invoice"). */
+    if (kicker) textRight(pg, kicker, PW - M, PH - 30, { size: 11, font: bold, color: NAVY })
     textRight(pg, adv.run.invoiceNumber, PW - M, PH - 46, { size: 9.5, font: bold, color: STATUS })
     textRight(pg, issued, PW - M, PH - 61, { size: 7, color: SLATE })
     box(pg, M, PH - 96, PW - 2 * M, 1.2, GOLD)
@@ -236,7 +238,7 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
 
   /* ---------------- 2. your collection summary ---------------- */
   {
-    const { pg, y: top } = innerPage('Your collection summary', `${clientLine}  |  ${period}`)
+    const { pg, y: top } = innerPage('Your collection summary', `${clientLine}  |  ${period}`, 'TAX INVOICE')
 
     /*
      * THE THREE FIGURES, SIDE BY SIDE. Prompt 7's own order, and the last one is the only figure
@@ -304,8 +306,13 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
     const RX = M + LW + 40
     const RW = PW - M - RX
     const ptop = headY + 10
-    box(pg, RX, y, RW, ptop - y, FILL)
-    text(pg, 'Payment & invoice details', RX + 14, ptop - 22, { size: 9.5, font: bold, color: NAVY })
+    /* THE CLIENT'S NAME AND ADDRESS, which a tax invoice owes the recipient (Stephan, 19 Nov). */
+    const addrLines = adv.client.address
+      ? wrap(safe(adv.client.address), bold, 8.5, RW - 28).slice(0, 3)
+      : ['Address not on file']
+    const boxBottom = Math.min(y, ptop - 127 - 11 * (addrLines.length + 1) - 12)
+    box(pg, RX, boxBottom, RW, ptop - boxBottom, FILL)
+    text(pg, 'Tax invoice & payment details', RX + 14, ptop - 22, { size: 9.5, font: bold, color: NAVY })
     const pair = (label: string, value: string, yy: number) => {
       text(pg, label, RX + 14, yy, { size: 6.5, color: SLATE })
       text(pg, value, RX + 14, yy - 11, { size: 8.5, font: bold, color: INK })
@@ -313,6 +320,13 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
     pair('EFT reference', reference ?? adv.run.invoiceNumber, ptop - 46)
     pair('Our VAT number', adv.firm.vatNumber ?? 'Not on file', ptop - 73)
     pair('Your VAT number', adv.client.vatNumber ?? 'Not on file', ptop - 100)
+    text(pg, 'Invoice to', RX + 14, ptop - 127, { size: 6.5, color: SLATE })
+    let ay = ptop - 138
+    for (const l of [safe(adv.client.name), ...addrLines]) {
+      text(pg, clip(l, bold, 8.5, RW - 28), RX + 14, ay, { size: 8.5, font: bold, color: INK })
+      ay -= 11
+    }
+    y = Math.min(y, boxBottom)
 
     /* Under both columns, the width of the page: the footnote, then where to find us. */
     y -= 20
@@ -334,10 +348,10 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
    */
   const COLLECT: Col[] = [
     { head: 'Your ref', width: 52 }, { head: 'Our ref', width: 58 }, { head: 'Debtor', width: 148 },
-    { head: 'Status', width: 80 }, { head: 'Handover', width: 58 },
-    { head: 'Amount', width: 70, right: true }, { head: 'Paid', width: 62 },
+    { head: 'Status', width: 80 }, { head: 'Handover', width: 58 }, { head: 'Paid', width: 62 },
     { head: 'Capital', width: 70, right: true }, { head: 'Comm.', width: 62, right: true },
-    { head: 'VAT', width: 48, right: true }, { head: 'Outstanding', width: 70, right: true },
+    { head: 'VAT', width: 48, right: true }, { head: 'Pay over', width: 70, right: true },
+    { head: 'Outstanding', width: 70, right: true },
   ]
   const DIRECT: Col[] = [
     { head: 'Your ref', width: 52 }, { head: 'Our ref', width: 58 }, { head: 'Debtor', width: 170 },
@@ -369,18 +383,16 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
       cols: COLLECT,
       /* A late capture's paid date carries the asterisk the footnote explains. */
       rows: adv.collections.map((c) => [
-        c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver, c.handoverAmount,
-        c.lateCapture ? `${c.paid} *` : c.paid, c.capitalReceived, c.commission, c.vat, c.capitalOutstanding,
+        c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver,
+        c.lateCapture ? `${c.paid} *` : c.paid, c.capitalReceived, c.commission, c.vat, c.payOver, c.capitalOutstanding,
       ]),
       flags: adv.collections.map((c) => c.reversal),
-      totals: [7, 8, 9],
+      totals: [6, 7, 8, 9],
       statusCol: 3,
-      /* THE PER-LINE VAT SENTENCE, under each collection (the firm, 10 Oct: "the VAT also needs to
-         be there"). The figures are the row's own, so the sentence and the columns cannot differ. */
-      subLines: adv.collections.map((c) => (c.lateNote ? `${c.vatLine} · ${c.lateNote}` : c.vatLine)),
-      footnotes: [
-        `${late ? '* Late: from an earlier cycle, approved after that cycle\u2019s payover had gone. ' : ''}Handover amount refers to the original account balance.`,
-      ],
+      /* NO COMMISSION SENTENCE UNDER THE ROW (Stephan, 19 Nov: "the description of commission ... should not be
+         there"); the Comm., VAT and Pay over columns say it. Only a late or correction line keeps its note. */
+      subLines: adv.collections.some((c) => c.lateNote) ? adv.collections.map((c) => c.lateNote ?? '') : undefined,
+      footnotes: late ? ['* Late: from an earlier cycle, approved after that cycle\u2019s payover had gone.'] : [],
     })
   }
   if (adv.direct.length) {

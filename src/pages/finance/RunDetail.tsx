@@ -13,7 +13,9 @@ import {
   releaseRunEarly,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
-import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice, lateOf } from '../../lib/remittanceAdvice'
+import { adviceBody, adviceCsv, adviceFromRun, adviceSchedule, adviceSubject, buildRemittanceAdvice, clientAddress, lateOf } from '../../lib/remittanceAdvice'
+import { XLSX_MIME } from '../../lib/xlsxWrite'
+import { saveFile } from '../../lib/fileSave'
 import { firmDay } from '../../lib/dateLabels'
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
@@ -90,7 +92,7 @@ const STATUS_TONE: Record<RunStatus, string> = {
 export function RunDetail() {
   const { id = '' } = useParams()
   const [run, setRun] = useState<RunRow | null>(null)
-  const [client, setClient] = useState<{ name: string; code: string | null; rate: number | null; vatNumber: string | null; email: string | null } | null>(null)
+  const [client, setClient] = useState<{ name: string; code: string | null; rate: number | null; vatNumber: string | null; email: string | null; address: string | null } | null>(null)
   const [blockers, setBlockers] = useState<{ kind: string; detail: string; amount: number | null }[]>([])
   const [rows, setRows] = useState<RunPayment[]>([])
   const [open, setOpen] = useState<RunPayment | null>(null)
@@ -127,17 +129,18 @@ export function RunDetail() {
     try {
       const { data, error: e } = await supabase
         .from('payover_runs')
-        .select('*, companies(name, code, commission_rate, vat_number, email), early:profiles!payover_runs_early_by_fkey(name), released:profiles!payover_runs_released_by_fkey(name)')
+        .select('*, companies(name, code, commission_rate, vat_number, email, address, city, province), early:profiles!payover_runs_early_by_fkey(name), released:profiles!payover_runs_released_by_fkey(name)')
         .eq('id', id)
         .maybeSingle()
       if (e) throw new Error(e.message)
       if (!data) throw new Error('That payover run is no longer here.')
-      const d = data as unknown as RunRow & { companies: { name: string; code: string | null; commission_rate: number | null; vat_number: string | null; email: string | null } }
+      const d = data as unknown as RunRow & { companies: { name: string; code: string | null; commission_rate: number | null; vat_number: string | null; email: string | null; address: string | null; city: string | null; province: string | null } }
       setRun(d)
       setClient({
         name: d.companies?.name ?? '', code: d.companies?.code ?? null,
         rate: d.companies?.commission_rate ?? null,
         vatNumber: d.companies?.vat_number ?? null, email: d.companies?.email ?? null,
+        address: d.companies ? clientAddress(d.companies) : null,
       })
       const { data: b } = await supabase.rpc('payover_run_blockers', { p_run: id })
       setBlockers(((b ?? []) as Record<string, unknown>[]).map((x) => ({
@@ -277,6 +280,19 @@ export function RunDetail() {
             {advice && (
               <FileActions name={`${advice.run.invoiceNumber}.pdf`} testId="run-statement"
                 label={<span className="font-medium text-slate-700">Statement</span>} fetchFile={statementPdf} />
+            )}
+            {/* THE STATEMENT AS A SPREADSHEET, for administrators (Stephan, 19 Nov): the same rows the schedule carries. */}
+            {advice && currentUser?.role === 'Administrator' && (
+              <span className="inline-flex items-center gap-1.5" data-testid="run-statement-data">
+                <button type="button" onClick={() => void saveFile(new Blob([adviceSchedule(advice) as BlobPart], { type: XLSX_MIME }), `${advice.run.invoiceNumber}.xlsx`)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50">
+                  Excel
+                </button>
+                <button type="button" onClick={() => void saveFile(new Blob([adviceCsv(advice)], { type: 'text/csv;charset=utf-8' }), `${advice.run.invoiceNumber}.csv`)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50">
+                  CSV
+                </button>
+              </span>
             )}
             {scheduled && (
               <>

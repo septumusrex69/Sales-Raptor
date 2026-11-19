@@ -132,6 +132,12 @@ export interface RunPayment {
   correctionOf: string | null
   correctionFoundOn: string | null
   accountStatus: string | null
+  /**
+   * WHAT THE REMITTANCE'S STATUS COLUMN SAYS (Stephan, 19 Nov): the account's sub-status, or where it has none,
+   * its write-off reason. Read beside payover_run_payments from debtor_accounts; absent reads as null.
+   */
+  subStatus?: string | null
+  writeOffReason?: string | null
   handoverDate: string | null
   capitalHandedOver: number
   /* DERIVED, NEVER THE STATUS COLUMN. The old FileFish report printed "Paid in Full" beside
@@ -294,6 +300,19 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     supabase.rpc('payover_run_corrections', { p_run: runId }).then((r) => r.data ?? [], () => []),
   ])
   if (error) throw new Error(error.message)
+  /* AND EACH ACCOUNT'S SUB-STATUS AND WRITE-OFF REASON (19 Nov), for the remittance's Status column, read beside it
+     for the same reason as the dates. A failure costs the column its words, never the run. */
+  const accountIds = [...new Set(((data ?? []) as { account_id?: string | null }[])
+    .map((r) => r.account_id).filter((x): x is string => Boolean(x)))]
+  const statusOf = new Map<string, { sub_status: string | null; write_off_reason: string | null }>()
+  for (let i = 0; i < accountIds.length; i += 200) {
+    const { data: accts } = await supabase.from('debtor_accounts')
+      .select('id, sub_status, write_off_reason').in('id', accountIds.slice(i, i + 200))
+      .then((r) => r, () => ({ data: null }))
+    for (const a of (accts ?? []) as { id: string; sub_status: string | null; write_off_reason: string | null }[]) {
+      statusOf.set(a.id, a)
+    }
+  }
   const dateOf = new Map(((dates ?? []) as { allocation_id: string; captured_on: string | null; approved_on: string | null }[])
     .map((d) => [d.allocation_id, d]))
   const corrOf = new Map(((corrections ?? []) as { allocation_id: string; corrects_received_on: string | null; found_received_on: string | null }[])
@@ -329,6 +348,8 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     correctionOf: corrOf.get(String(r.allocation_id))?.corrects_received_on ?? null,
     correctionFoundOn: corrOf.get(String(r.allocation_id))?.found_received_on ?? null,
     accountStatus: s(r.account_status),
+    subStatus: statusOf.get(String(r.account_id))?.sub_status ?? null,
+    writeOffReason: statusOf.get(String(r.account_id))?.write_off_reason ?? null,
     handoverDate: s(r.handover_date),
     capitalHandedOver: n(r.capital_handed_over),
     paidInFull: Boolean(r.paid_in_full),

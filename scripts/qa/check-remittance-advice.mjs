@@ -41,7 +41,7 @@ const FIRM = {
   name: 'Bredell Ferreira', address: '239 Bronkhorst Street', phone: '012 348 2156',
   email: 'info@bredellferreira.co.za', vatNumber: '4350289080',
 }
-const CLIENT = { name: 'Dr CA Roux', code: 'FF0092', vatNumber: '4000000000' }
+const CLIENT = { name: 'Dr CA Roux', code: 'FF0092', vatNumber: '4000000000', address: '1 Test Street, Pretoria' }
 const RUN = {
   invoiceNumber: 'PO-FF0092-2412', periodStart: '2024-11-11', periodEnd: '2024-12-10',
   issuedOn: '2024-12-11',
@@ -343,11 +343,26 @@ const vatAdv = build([line()])
 check('every collection carries it', vatAdv.collections.map((c) => SP(c.vatLine)),
   ['Commission 30% R 150.00 + VAT 15% R 22.50 = R 172.50 deducted'])
 const vatPdfSrc = readFileSync(new URL('../../src/lib/remittancePdf.ts', import.meta.url), 'utf8')
-ok('the PDF draws it under each collection (S20: with the late note after it)', /subLines: adv\.collections\.map\(\(c\) => \(c\.lateNote \? `\$\{c\.vatLine\} \u00b7 \$\{c\.lateNote\}` : c\.vatLine\)\)/.test(vatPdfSrc)
-  && /const sub = sec\.subLines\?\.\[i\]/.test(vatPdfSrc))
-ok('...and keeps the OUTSTANDING column', /\{ head: 'VAT', width: 48, right: true \}, \{ head: 'Outstanding', width: 70, right: true \}/.test(vatPdfSrc))
+/* ---------------- Stephan, 19 Nov: no Amount column, no commission sentence, a Pay over column, and the status
+   is the sub-status or else the write-off reason ---------------- */
+ok('the PDF no longer draws the commission sentence under a collection', !/c\.vatLine/.test(vatPdfSrc)
+  && /subLines: adv\.collections\.some\(\(c\) => c\.lateNote\)/.test(vatPdfSrc))
+ok('...has no Amount column', !/head: 'Amount'/.test(vatPdfSrc))
+ok('...and draws Pay over after VAT, with Outstanding still last', /\{ head: 'VAT', width: 48, right: true \}, \{ head: 'Pay over', width: 70, right: true \},\s*\{ head: 'Outstanding', width: 70, right: true \}/.test(vatPdfSrc))
+ok('...totalling Capital, Comm., VAT and Pay over', /totals: \[6, 7, 8, 9\]/.test(vatPdfSrc))
 const vatAdvSrc = readFileSync(new URL('../../src/lib/remittanceAdvice.ts', import.meta.url), 'utf8')
-ok('the spreadsheet carries it too', /\{ n: c\.vat \}, \{ n: c\.capitalOutstanding \}, c\.vatLine,/.test(vatAdvSrc))
+ok('the spreadsheet matches: Pay over in, Handover amount and the sentence out', /\{ n: c\.vat \}, \{ n: c\.payOver \}, \{ n: c\.capitalOutstanding \},/.test(vatAdvSrc)
+  && !/head\('Handover amount'\)/.test(vatAdvSrc) && !/head\('Commission and VAT'\)/.test(vatAdvSrc))
+check('a collection pays over capital less commission and VAT', vatAdv.collections.map((c) => c.payOver), [327.5])
+check('the status is the sub-status', advStatus({ paidInFull: false, accountStatus: 'Active: Activated', subStatus: 'Promise To Pay', writeOffReason: null }), 'Promise To Pay')
+check('...else the write-off reason', advStatus({ paidInFull: false, accountStatus: 'Closed: Written off', subStatus: '  ', writeOffReason: 'Prescribed' }), 'Prescribed')
+check('...else the account status as before', advStatus({ paidInFull: false, accountStatus: 'Active: Activated', subStatus: null, writeOffReason: null }), 'Activated')
+check('...and a sub-status may not say paid in full while capital is owed', advStatus({ paidInFull: false, accountStatus: 'x', subStatus: 'Paid in Full', writeOffReason: null }), 'In progress')
+check('it reaches the line', build([line({ subStatus: 'Arrangement Made' })]).collections[0].status, 'Arrangement Made')
+
+check('a client with no address is reported, never printed blank',
+  buildRemittanceAdvice({ firm: FIRM, client: { ...CLIENT, address: null }, run: RUN, lines: [line()] }).problems.some((p) => /no address on file/.test(p)), true)
+ok('the summary page says TAX INVOICE and carries the client\'s address', /'TAX INVOICE'\)/.test(vatPdfSrc) && /'Invoice to'/.test(vatPdfSrc))
 
 /* ---------------- R-21: two payments on one account read in the order they came off its balance ---------------- */
 // Boitshoko Mose, as Finance saw it: both paid 22 Oct, the database returned the later posting first.

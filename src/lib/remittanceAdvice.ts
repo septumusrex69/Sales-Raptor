@@ -45,6 +45,21 @@ export interface RemittanceClient {
   name: string
   code: string | null
   vatNumber: string | null
+  /** The client's address on the tax invoice (Stephan, 19 Nov). Absent or null reads as not on file. */
+  address?: string | null
+}
+
+/**
+ * A CLIENT'S ADDRESS IN ONE LINE, from the company's address, city and province. A part the address already
+ * contains is not repeated -- many addresses on file were typed whole, city and all.
+ */
+export function clientAddress(c: { address?: string | null; city?: string | null; province?: string | null }): string | null {
+  const parts: string[] = []
+  for (const raw of [c.address, c.city, c.province]) {
+    const p = (raw ?? '').trim()
+    if (p && !parts.some((q) => q.toLowerCase().includes(p.toLowerCase()))) parts.push(p)
+  }
+  return parts.length ? parts.join(', ') : null
 }
 
 export interface RemittanceRun {
@@ -98,11 +113,19 @@ export interface CollectionRow {
   commission: number
   vat: number
   capitalOutstanding: number
+  /**
+   * WHAT THIS LINE PAYS OVER TO THE CLIENT (Stephan, 19 Nov: "the amount on the specific account that is paid over
+   * to the client"): capital received less commission and its VAT -- the line's own to_client. Negative on a reversal.
+   */
+  payOver: number
   reversal: boolean
   lateCapture: boolean
   /** S20: "Late: received 20 Sep 2026, approved 12 Nov 2026", or null on a line in its own cycle. */
   lateNote: string | null
-  /** The line's VAT sentence, under the row (the firm, 10 Oct: "the VAT also needs to be there"). */
+  /**
+   * The line's VAT sentence. Kept on the model, no longer printed on the advice or the schedule (Stephan, 19 Nov:
+   * "the description of commission ... should not be there") -- the Comm., VAT and Pay over columns carry it.
+   */
   vatLine: string
 }
 
@@ -200,11 +223,19 @@ export function advDate(iso: string | null): string {
 /**
  * What a debtor's position is allowed to say on a client's statement.
  *
+ * THE ACCOUNT'S SUB-STATUS FIRST, AND WHERE IT HAS NONE ITS WRITE-OFF REASON (Stephan, 19 Nov: "the status should be
+ * the sub status of an account and if there is no sub status then the write off reason"). Only where the account has
+ * neither does it fall back to the rules below.
+ *
  * DERIVED, and the only phrase that can be earned rather than stored is "Paid in full". Everything
  * else falls back to the account's own words, cleaned of the internal prefix a client has no use
  * for: "Active: Unfrozen" is how a row got into the table, not a thing to print on an invoice.
  */
-export function advStatus(row: Pick<RunPayment, 'paidInFull' | 'accountStatus'>): string {
+export function advStatus(row: Pick<RunPayment, 'paidInFull' | 'accountStatus'>
+  & Partial<Pick<RunPayment, 'subStatus' | 'writeOffReason'>>): string {
+  const own = (row.subStatus ?? '').trim() || (row.writeOffReason ?? '').trim()
+  /* The same refusal as below: stored words may not say "paid in full" while capital is still owed. */
+  if (own) return !row.paidInFull && /paid\s*in\s*full/i.test(own) ? 'In progress' : own
   if (row.paidInFull) return 'Paid in full'
   const raw = (row.accountStatus ?? '').trim()
   if (!raw) return 'In progress'
@@ -233,6 +264,7 @@ export function buildRemittanceAdvice(input: {
   if (!firm.vatNumber) problems.push('The firm has no VAT number on file, and a tax invoice must carry one.')
   if (!firm.address) problems.push('The firm has no address on file.')
   if (!client.vatNumber) problems.push(`${client.name} has no VAT number on file.`)
+  if (!client.address) problems.push(`${client.name} has no address on file.`)
   if (!client.code) problems.push(`${client.name} has no client code, so the invoice number is provisional.`)
 
   /*
@@ -257,6 +289,7 @@ export function buildRemittanceAdvice(input: {
       commission: l.commission,
       vat: l.commissionVat,
       capitalOutstanding: l.capitalAfter,
+      payOver: l.toClient,
       reversal: l.lineKind === 'reversal',
       lateCapture: l.lateCapture,
       lateNote: lateOf(l),
@@ -414,6 +447,24 @@ export function adviceBody(adv: RemittanceAdvice): string {
  * columns: they are separated by a heading row instead, which is what somebody scrolling expects.
  */
 export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
+  return buildXlsx('Remittance', adviceRows(adv))
+}
+
+/**
+ * THE SAME SCHEDULE AS CSV, for an administrator whose system takes CSV rather than Excel (Stephan, 19 Nov).
+ * Row for row the spreadsheet: amounts to the cent with no currency sign, so a column still sums. A reference
+ * opened in Excel from a CSV can lose a leading zero -- the .xlsx is the one that keeps it.
+ */
+export function adviceCsv(adv: RemittanceAdvice): string {
+  const cell = (c: Cell): string => {
+    const s = c == null ? '' : typeof c === 'string' ? c : 'n' in c ? c.n.toFixed(2) : c.v
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  return adviceRows(adv).map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n'
+}
+
+/** The schedule's rows, once, for the spreadsheet and the CSV alike. */
+export function adviceRows(adv: RemittanceAdvice): Cell[][] {
   const head = (t: string): Cell => ({ v: t, style: 'head' })
   const rows: Cell[][] = []
 
@@ -425,14 +476,14 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
     rows.push([head('Collections by us')])
     rows.push([
       head('Your ref'), head('Our ref'), head('Debtor'), head('Status'), head('Handed over'),
-      head('Handover amount'), head('Paid'), head('Capital received'), head('Commission'),
-      head('VAT'), head('Capital outstanding'), head('Commission and VAT'), head('Note'),
+      head('Paid'), head('Capital received'), head('Commission'),
+      head('VAT'), head('Pay over'), head('Capital outstanding'), head('Note'),
     ])
     for (const c of adv.collections) {
       rows.push([
         c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver,
-        { n: c.handoverAmount }, c.paid, { n: c.capitalReceived }, { n: c.commission },
-        { n: c.vat }, { n: c.capitalOutstanding }, c.vatLine,
+        c.paid, { n: c.capitalReceived }, { n: c.commission },
+        { n: c.vat }, { n: c.payOver }, { n: c.capitalOutstanding },
         [c.reversal ? 'reversal' : '', c.lateNote ?? '']
           .filter(Boolean).join(' · '),
       ])
@@ -467,7 +518,7 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
   rows.push([head('How we got there')])
   for (const w of adv.workings) rows.push([w.label, { n: w.amount }])
 
-  return buildXlsx('Remittance', rows)
+  return rows
 }
 
 /** Where one send's copies live: the client's folder, then the invoice, then this send. */
@@ -493,13 +544,13 @@ export interface AdviceRunRow {
  */
 export function adviceFromRun(
   run: AdviceRunRow,
-  client: { name: string; code: string | null; vatNumber: string | null; rate: number | null },
+  client: { name: string; code: string | null; vatNumber: string | null; rate: number | null; address?: string | null },
   firm: RemittanceFirm,
   lines: RunPayment[],
 ): RemittanceAdvice {
   return buildRemittanceAdvice({
     firm,
-    client: { name: client.name, code: client.code, vatNumber: client.vatNumber },
+    client: { name: client.name, code: client.code, vatNumber: client.vatNumber, address: client.address ?? null },
     run: {
       invoiceNumber: run.invoice_number,
       periodStart: run.period_start, periodEnd: run.period_end,

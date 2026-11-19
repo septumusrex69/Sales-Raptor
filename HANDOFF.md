@@ -9,6 +9,21 @@
 > **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
 
+## Raptor · Handover 21 -- remittance advice changes (19 Nov, branch `claude/adoring-davinci-tw7876`, NOT yet on the preview branch)
+
+Asked by Stephan and built from the preview branch; waiting for his say-so to fast-forward `claude/sales-raptor-review-p1pzx2`:
+- **Collections table:** no Amount (handover amount) column; no commission sentence under each row (a late or
+  correction note still shows); new **Pay over** column (capital - commission - VAT = the line's `to_client`), totalled.
+  The .xlsx schedule matches.
+- **Status column** = the account's sub-status, else its write-off reason, else the old derived status
+  (`advStatus`; still refuses "paid in full" while capital is owed). Read beside `payover_run_payments` from
+  `debtor_accounts` in `fetchRunPayments` -- no database change.
+- **Summary page:** "TAX INVOICE" over the invoice number; the box is "Tax invoice & payment details" with
+  **Invoice to**: the client's name and address (companies.address, city, province via `clientAddress`). A client
+  with no address is listed in `problems`.
+- **Run page:** Excel and CSV downloads of the statement beside the PDF, for role Administrator only (`adviceCsv`).
+- Held by `check-remittance-advice`.
+
 ## START HERE (S23) -- what is open (Raptor · Handover 21, 18 Nov)
 
 **Handover 20's list below is still open in full** -- above all the production database rebuild, which waits for

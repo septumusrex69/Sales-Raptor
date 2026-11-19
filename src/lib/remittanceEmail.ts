@@ -37,7 +37,7 @@
 import { supabase } from './supabase'
 import { emailBodyHtml } from './emailStyle'
 import {
-  adviceBody, adviceCopyPaths, adviceFromRun, adviceSchedule, adviceSubject,
+  adviceBody, adviceCopyPaths, adviceFromRun, clientAddress, adviceSchedule, adviceSubject,
   type AdviceRunRow, type RemittanceAdvice,
 } from './remittanceAdvice'
 import { remittancePdf } from './remittancePdf'
@@ -168,18 +168,19 @@ export async function loadRunAdvice(runId: string): Promise<{
   advice: RemittanceAdvice; run: { id: string; companyId: string; status: string }; to: string | null; client: string
 }> {
   const { data, error } = await supabase.from('payover_runs')
-    .select('*, companies(name, code, commission_rate, vat_number, email)').eq('id', runId).maybeSingle()
+    .select('*, companies(name, code, commission_rate, vat_number, email, address, city, province)').eq('id', runId).maybeSingle()
   if (error) throw new Error(error.message)
   if (!data) throw new Error('That payover run is no longer here.')
   const d = data as unknown as AdviceRunRow & { id: string; company_id: string; status: string
-    companies: { name: string; code: string | null; commission_rate: number | null; vat_number: string | null; email: string | null } | null }
+    companies: { name: string; code: string | null; commission_rate: number | null; vat_number: string | null; email: string | null; address: string | null; city: string | null; province: string | null } | null }
   const { data: fs } = await supabase.from('firm_settings')
     .select('firm_name, physical_address, phone, email, vat_number').limit(1).maybeSingle()
   const f = fs as { firm_name: string; physical_address: string | null; phone: string | null; email: string | null; vat_number: string | null } | null
   if (!f) throw new Error('The firm settings could not be read.')
   const lines = await fetchRunPayments(runId)
   const client = { name: d.companies?.name ?? '', code: d.companies?.code ?? null,
-    vatNumber: d.companies?.vat_number ?? null, rate: d.companies?.commission_rate ?? null }
+    vatNumber: d.companies?.vat_number ?? null, rate: d.companies?.commission_rate ?? null,
+    address: d.companies ? clientAddress(d.companies) : null }
   return {
     advice: adviceFromRun(d, client,
       { name: f.firm_name, address: f.physical_address, phone: f.phone, email: f.email, vatNumber: f.vat_number }, lines),
