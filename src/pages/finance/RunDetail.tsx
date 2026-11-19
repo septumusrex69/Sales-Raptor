@@ -13,6 +13,7 @@ import {
   releaseRunEarly,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
+import { ptcDueToBf } from '../../lib/paymentsQueue'
 import { adviceBody, adviceCsv, adviceFromRun, adviceSchedule, adviceSubject, buildRemittanceAdvice, clientAddress, lateOf } from '../../lib/remittanceAdvice'
 import { XLSX_MIME } from '../../lib/xlsxWrite'
 import { saveFile } from '../../lib/fileSave'
@@ -433,6 +434,21 @@ export function RunDetail() {
           */}
           <table className="w-full list-table whitespace-nowrap">
             <thead>
+              {/*
+                THE WHOLE SPLIT, HERE (Stephan, 19 Nov: the split set-up on Payments in goes "on the payment run tab").
+                The same groups the approval queue carried -- interest and fees, capital, commission, the final split --
+                read off what was written at approval (payover_run_payments), never re-worked. Payments in keeps the
+                review; this is where a payment's money is seen going to the client and to BF.
+              */}
+              <tr className="text-left text-[10.5px] uppercase tracking-wide text-slate-400">
+                <th colSpan={7} />
+                <SplitHead span={2}>Payment</SplitHead>
+                <SplitHead span={2} note="incl. VAT">Interest and fees</SplitHead>
+                <SplitHead span={3}>Capital</SplitHead>
+                <SplitHead span={2}>Commission</SplitHead>
+                <SplitHead span={4}>Final split</SplitHead>
+                {mayReverse && <th />}
+              </tr>
               <tr className="border-b border-slate-100 text-left text-slate-400">
                 {/* THE THREE DATES (S20; Stephan: "show the dates"): paid / received, captured, approved. The one that
                     put the payment in this cycle is a trust receipt's Paid (its bank date) and a PTC's Captured. */}
@@ -443,10 +459,19 @@ export function RunDetail() {
                 <th className="px-2 py-2 font-medium">Debtor</th>
                 <th className="px-2 py-2 font-medium">Your ref</th>
                 <th className="px-2 py-2 font-medium">Note</th>
+                <th className="border-l border-slate-100 px-2 py-2 text-right font-medium">Amount</th>
+                <th className="px-2 py-2 font-medium">Route</th>
+                <th className="border-l border-slate-100 px-2 py-2 text-right font-medium">Interest</th>
+                <th className="px-2 py-2 text-right font-medium" title="Fees and costs, the receipt fee included">Fees</th>
+                <th className="border-l border-slate-100 px-2 py-2 text-right font-normal text-slate-400">Before</th>
                 <th className="px-2 py-2 text-right font-medium">Capital received</th>
-                <th className="px-2 py-2 text-right font-medium">Commission</th>
+                <th className="px-2 py-2 text-right font-normal text-slate-400">Capital outstanding</th>
+                <th className="border-l border-slate-100 px-2 py-2 text-right font-medium">Commission</th>
                 <th className="px-2 py-2 text-right font-medium">VAT</th>
-                <th className="px-3 py-2 text-right font-normal text-slate-400">Capital outstanding</th>
+                <th className="border-l border-slate-100 px-2 py-2 text-right font-medium">To client</th>
+                <th className="px-2 py-2 text-right font-medium">BF keeps</th>
+                <th className="px-2 py-2 text-right font-medium">Debtor credit</th>
+                <th className="px-3 py-2 text-right font-medium">PTC due to BF</th>
                 {mayReverse && <th className="px-3 py-2" />}
               </tr>
             </thead>
@@ -468,14 +493,29 @@ export function RunDetail() {
                       r.lineKind === 'reversal' && 'reversed after the last run',
                       lateOf(r)].filter(Boolean).join(' \u00b7 ')}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums">
-                    {r.lineKind === 'carried' ? rand(r.carriedAmount) : rand(r.toCapital)}
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums">{r.lineKind === 'carried' ? '\u2014' : rand(r.commission)}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{r.lineKind === 'carried' ? '\u2014' : rand(r.commissionVat)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">
-                    {r.lineKind === 'carried' ? '\u2014' : rand(r.capitalAfter)}
-                  </td>
+                  {/* A BROUGHT-FORWARD LINE IS NOT A PAYMENT: its one figure stays under Capital received, as before. */}
+                  {(() => {
+                    const carried = r.lineKind === 'carried'
+                    const dash = '\u2014'
+                    const ptc = r.paidToClient
+                    const cell = 'px-2 py-2 text-right tabular-nums'
+                    return (<>
+                      <td className={`${cell} border-l border-slate-50 font-medium`}>{carried ? dash : rand(r.paymentAmount)}</td>
+                      <td className="px-2 py-2 text-[11.5px] text-slate-500">{carried ? '' : ptc ? 'Paid client (PTC)' : 'Into trust'}</td>
+                      <td className={`${cell} border-l border-slate-50`}>{carried ? dash : rand(r.toInterest)}</td>
+                      <td className={cell}>{carried ? dash : rand(r.toCosts)}</td>
+                      <td className={`${cell} border-l border-slate-50 text-slate-400`}>{carried ? dash : rand(r.capitalAfter + r.toCapital)}</td>
+                      <td className={cell}>{carried ? rand(r.carriedAmount) : rand(r.toCapital)}</td>
+                      <td className={`${cell} text-slate-400`}>{carried ? dash : rand(r.capitalAfter)}</td>
+                      <td className={`${cell} border-l border-slate-50`}>{carried ? dash : rand(r.commission)}</td>
+                      <td className={cell}>{carried ? dash : rand(r.commissionVat)}</td>
+                      <td className={`${cell} border-l border-slate-50 font-medium`}>{carried ? dash : rand(r.toClient)}</td>
+                      <td className={`${cell} font-medium`}>{carried ? dash : rand(r.toInterest + r.toCosts + r.commission + r.commissionVat)}</td>
+                      <td className={`${cell} text-slate-400`}>{carried ? dash : rand(r.excessCredit)}</td>
+                      {/* THE LEDGER'S FIGURE, as the approval queue showed it (ptcDueToBf: the VAT on commission included). */}
+                      <td className={`${cell} pr-3`}>{carried || !ptc ? dash : rand(ptcDueToBf(r))}</td>
+                    </>)
+                  })()}
                   {/* REVERSE FROM THE RUN (prompt 11). The run is never edited: on a run that has gone
                       out, the box says the reversal becomes a negative line on the next one. */}
                   {mayReverse && (
@@ -491,7 +531,7 @@ export function RunDetail() {
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={mayReverse ? 12 : 11} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
+                <tr><td colSpan={mayReverse ? 21 : 20} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
               )}
             </tbody>
           </table>
@@ -929,5 +969,14 @@ function ClientPaidUs({ run, payments, onRecorded, onError }: {
         </div>
       )}
     </div>
+  )
+}
+
+/** A group heading over the run's split columns -- the approval queue's groups, carried here with the split. */
+function SplitHead({ span, children, note }: { span: number; children: string; note?: string }) {
+  return (
+    <th colSpan={span} className="border-l border-slate-100 px-2 pt-2 font-medium">
+      {children}{note && <span className="ml-1 normal-case tracking-normal text-slate-300">{note}</span>}
+    </th>
   )
 }

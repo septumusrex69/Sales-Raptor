@@ -24,7 +24,15 @@ Asked by Stephan and built from the preview branch; waiting for his say-so to fa
 - **Run page:** Excel and CSV downloads of the statement beside the PDF, for role Administrator only (`adviceCsv`).
 - **Debtor's account page:** "Statement as Excel / CSV" beside the Statement, Administrators only. The same lines
   the statement PDF prints (`statementRows` in `accountSummaryLetter.ts`, over `oneInterestLinePerMonth`); CSV through
-  the shared `cellsToCsv` in `xlsxWrite.ts`.
+  the shared `cellsToCsv` in `xlsxWrite.ts`. It lives in `statementSheet.ts`, NOT `accountSummaryLetter.ts`: the server's workflow
+  sender imports the latter, and `check-api-imports` refuses xlsxWrite's browser-only import on that path.
+- **The split moved from Payments in to the payover run** (Stephan: "put this part on the payment run tab and on the
+  payment in we leave the review part"). The approval queue keeps the Payment and Review groups; clicking the debtor still
+  opens one payment's breakdown (the formula warning sends people there). The run page's table now has Payment,
+  Interest and fees, Capital, Commission and Final split groups (`SplitHead`), read off `payover_run_payments`; PTC due
+  to BF uses `ptcDueToBf()` (VAT included, as the ledger books it), never the raw `due_to_bf`. Held by
+  `check-allocation-rules`, `check-payments-queue`, `e2e/payments-in`, `e2e/run-late-lines`.
+  **Not asked yet:** the queue's "Projected on approval" batch summary (BF share, to clients) is still on Payments in.
 - Held by `check-remittance-advice`.
 
 ## START HERE (S23) -- what is open (Raptor · Handover 21, 18 Nov)

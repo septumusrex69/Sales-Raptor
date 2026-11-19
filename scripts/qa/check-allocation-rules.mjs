@@ -439,8 +439,13 @@ ok('...and keeps no copy of its own',
   const headRow = thead.slice(thead.indexOf('</tr>') + 5)
   const lead = [...groupRow.matchAll(/colSpan=\{(\d+)\}/g)].map((m) => Number(m[1]))
   const groups = [...groupRow.matchAll(/<GroupHead span=\{(\d+)\}(?: note="[^"]*")?>([^<]+)</g)].map((m) => [m[2], Number(m[1])])
-  check('the approval queue: the six column groups, in the order the money is spent',
-    groups.map(([n]) => n), ['Payment', 'Interest and fees', 'Capital', 'Commission', 'Final split', 'Review'])
+  /* THE SPLIT MOVED TO THE PAYOVER RUN (Stephan, 19 Nov): the queue keeps the payment and the review. */
+  check('the approval queue: the payment and the review, the split gone to the run',
+    groups.map(([n]) => n), ['Payment', 'Review'])
+  const runScreen = readFileSync(new URL('../../src/pages/finance/RunDetail.tsx', import.meta.url), 'utf8')
+  check('the payover run: the split\'s groups, in the order the money is spent',
+    [...runScreen.matchAll(/<SplitHead span=\{\d+\}(?: note="[^"]*")?>([^<]+)</g)].map((m) => m[1]),
+    ['Payment', 'Interest and fees', 'Capital', 'Commission', 'Final split'])
   const cols = (headRow.match(/<th\b/g) ?? []).length + (headRow.match(/<Th\b/g) ?? []).length
   check('the approval queue: the group spans cover every column',
     lead.reduce((a, b) => a + b, 0) + groups.reduce((a, [, n]) => a + n, 0), cols)
@@ -535,8 +540,9 @@ ok('and what makes it so is a missing column, not a version string',
 ok('capital outstanding is on both screens',
   queueScreen.includes('Capital outstanding') && checkScreen.includes('Capital outstanding'))
 /* "THE RETAINED COLLECTION COMMISSION, JUST CALL THAT COMMISSION" -- the firm's own words. */
-ok('the commission column is called Commission',
-  queueScreen.includes('>Commission<') && !queueScreen.includes('Retained col. commission'))
+ok('the commission column is called Commission (on the run, where the split now is)',
+  readFileSync(new URL('../../src/pages/finance/RunDetail.tsx', import.meta.url), 'utf8').includes('>Commission</th>')
+  && !queueScreen.includes('Retained col. commission'))
 /*
  * AND THE CHECK SCREEN CHANGES NOTHING. Financial records are immutable once a payment has been
  * processed -- the four ledgers have no update or delete policy and Postgres refuses -- so a

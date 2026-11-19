@@ -137,24 +137,15 @@ try {
   t.ok('the queue is headed with its count', /Approval queue/.test(await page.getByTestId('queue-heading').innerText())
     && await page.getByText('3 pending').isVisible())
 
-  /* ---- the PTC figure ---- */
-  const ptc = page.locator('[data-payment="nandi-ptc"]')
-  const ptcText = money(await ptc.innerText())
-  t.ok('the PTC row shows R3 271.50 due to BF', ptcText.includes('R3271.50'))
-  t.check('...and never the engine’s R2 946.64', ptcText.includes('R2946.64'), false)
-  t.ok('...and names the R4 728.50 the client already holds', ptcText.includes('R4728.50heldbyclient'))
-  const direct = money(await page.locator('[data-payment="nandi"]').innerText())
-  t.ok('Nandi into trust: to client R4 728.50 and BF keeps R3 271.50',
-    direct.includes('R4728.50') && direct.includes('R3271.50'))
-  const low = money(await page.locator('[data-payment="lowveld"]').innerText())
-  t.ok('Lowveld: R962.50, R547.08 and a R490.42 credit', low.includes('R962.50') && low.includes('R547.08') && low.includes('R490.42'))
-  t.ok('...badged capital paid off, never settled', /Capital paid off/.test(await page.locator('[data-payment="lowveld"]').innerText())
-    && !/\bSettled\b/.test(await page.locator('[data-payment="lowveld"]').innerText()))
-
-  /* "INCL. VAT" ONCE ON THE GROUP, not on every heading under it (the firm, 8 Oct). */
+  /* ---- THE SPLIT IS NOT ON THE QUEUE ANY MORE (Stephan, 19 Nov): it moved to the payover run; the queue reviews. ---- */
   const head = (await page.locator('[data-testid="queue-scroll"] thead').innerText()).replace(/\s+/g, ' ')
-  t.ok('the group heading says incl. VAT once', /Interest and fees ?· incl\. VAT/i.test(head) && /Final split ?· incl\. VAT/i.test(head))
-  t.check('...and no column heading repeats it', /incl\. VAT/i.test(head.replace(/· incl\. VAT/gi, '')), false)
+  t.ok('the queue has the Payment and Review groups and no split groups',
+    /Payment/i.test(head) && /Review/i.test(head) && !/Final split|Interest and fees|Commission/i.test(head))
+  const ptcText = money(await page.locator('[data-payment="nandi-ptc"]').innerText())
+  t.check('...so a row no longer carries the PTC due', ptcText.includes('R3271.50'), false)
+  t.check('...nor ever the engine’s R2 946.64', ptcText.includes('R2946.64'), false)
+  t.ok('Lowveld is still badged capital paid off, never settled', /Capital paid off/.test(await page.locator('[data-payment="lowveld"]').innerText())
+    && !/\bSettled\b/.test(await page.locator('[data-payment="lowveld"]').innerText()))
 
   /* ---- R-32: the bank statement's description beside the reference ---- */
   t.ok('the Review group has a Bank statement column', /Reference ?Bank statement ?Actions/i.test(head))
@@ -177,8 +168,6 @@ try {
   const h = (await rows.first().boundingBox())?.height ?? 0
   t.ok(`a row is a line, not a card (${Math.round(h)}px)`, h >= 40 && h <= 64)
   const scroller = page.getByTestId('queue-scroll')
-  t.ok('the figures scroll sideways at iPad width',
-    await scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 100))
   const name = rows.first().locator('td').nth(1)
   const before = (await name.boundingBox())?.x
   await scroller.evaluate((el) => { el.scrollLeft = el.scrollWidth })

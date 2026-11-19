@@ -374,12 +374,10 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
             <tr className="text-slate-400">
               <th colSpan={2} className={`${STICKY_HEAD} left-0 z-20`} />
               <GroupHead span={3}>Payment</GroupHead>
-              {/* "INCL. VAT" ONCE, ON THE GROUP, not on every column under it (the firm, 8 Oct: the long
-                  headings did not sit with the rest). Every figure under these two groups includes it. */}
-              <GroupHead span={4} note="incl. VAT">Interest and fees</GroupHead>
-              <GroupHead span={3}>Capital</GroupHead>
-              <GroupHead span={3}>Commission</GroupHead>
-              <GroupHead span={4} note="incl. VAT">Final split</GroupHead>
+              {/* THE SPLIT MOVED TO THE PAYOVER RUN (Stephan, 19 Nov: "put this part on the payment run tab and on the
+                  payment in we leave the review part"). Interest and fees, capital, commission and the final split are
+                  columns on each run's page now; here a payment is checked and approved. One payment's split is still a
+                  press away -- the debtor opens the breakdown, which the formula warning above sends people to. */}
               <GroupHead span={4}>Review</GroupHead>
             </tr>
             <tr>
@@ -395,12 +393,6 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                 Debtor
               </th>
               <Th first>Received</Th><Th right>Amount</Th><Th>Route</Th>
-              <Th first right>Interest</Th><Th right>Receipt fee</Th>
-              <Th right>Earlier fees</Th><Th right>Unused → capital</Th>
-              <Th first right>Outstanding before</Th><Th right>Paid</Th><Th right>Remaining</Th>
-              <Th first right>Rate</Th><Th right>Amount</Th><Th right>VAT on commission</Th>
-              <Th first right>To client</Th><Th right>BF keeps</Th>
-              <Th right>Debtor credit</Th><Th right>PTC due to BF</Th>
               <Th first>Exceptions</Th><Th>Reference</Th><Th>Bank statement</Th><Th>Actions</Th>
             </tr>
           </thead>
@@ -451,30 +443,6 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                       </span>
                     )}
                   </Td>
-                  <Td first right>{rand(f.interestPaid)}</Td>
-                  <Td right>{rand(f.receiptFeePaid)}</Td>
-                  <Td right>{rand(f.earlierFeesPaid)}</Td>
-                  <Td right muted>{rand(f.halfAUnused)}</Td>
-                  <Td first right muted>{rand(f.capitalBefore)}</Td>
-                  <Td right>{rand(f.capitalPaid)}</Td>
-                  <Td right muted>{rand(f.capitalAfter)}</Td>
-                  {/* NO RATE IS NOT A ZERO. Approving still writes the allocation, marked
-                      needs_rate, and the exceptions screen carries it -- but a confident 0.00
-                      here would read as "this client pays us nothing". */}
-                  <Td first right muted>{f.commissionRate !== null ? pct(f.commissionRate) : <span className="text-amber-700">no rate</span>}</Td>
-                  <Td right>{r.hasRate ? rand(f.commission) : '—'}</Td>
-                  <Td right muted>{rand(f.commissionVat)}</Td>
-                  <Td first right emph>
-                    {rand(f.toClient)}
-                    {/* ON A PTC THE CLIENT ALREADY HAS ITS SHARE, and nought paid over has to say
-                        so or it reads as a client who gets nothing. */}
-                    {f.route === 'ptc' && (
-                      <span className="block text-[10.5px] font-normal text-slate-400">{rand(f.clientShare)} held by client</span>
-                    )}
-                  </Td>
-                  <Td right emph>{rand(f.bfShare)}</Td>
-                  <Td right muted>{f.credit > 0 ? rand(f.credit) : rand(0)}</Td>
-                  <Td right>{f.ptcDueToBf !== null ? rand(f.ptcDueToBf) : <span className="text-slate-300">—</span>}</Td>
                   <Td first><Badges list={exceptions} /></Td>
                   <Td muted>
                     <span className="block max-w-[12rem] truncate" title={r.details ?? ''}>

@@ -27,8 +27,8 @@ const RUN = {
   paid_at: null, eft_reference: null, company_id: 'c-klr',
   companies: { name: 'Karoo Linen Rentals', code: 'KLR', commission_rate: 0.2, vat_number: null, email: 'accounts@example.com' },
 }
-const line = (o) => ({ line_kind: 'trust', paid_to_client: false, payment_amount: 1000, to_capital: 500, commission: 100,
-  commission_vat: 15, capital_after: 4000, client_reference: 'KLR-1', ...o })
+const line = (o) => ({ line_kind: 'trust', paid_to_client: false, payment_amount: 1000, to_interest: 300, to_costs: 200,
+  to_capital: 500, commission: 100, commission_vat: 15, to_client: 385, capital_after: 4000, client_reference: 'KLR-1', ...o })
 const LINES = [
   line({ line_id: 'l-own', allocation_id: 'a-own', payment_id: 'p-own', account_id: 'acc-1', case_number: 'RAP-1',
     debtor: 'On Time', received_at: '2026-10-19T22:00:00+00:00', late_capture: false }),
@@ -71,6 +71,12 @@ try {
     t.ok('...its Paid day is the Johannesburg day (20 Sep), not the UTC one', /20 Sep/.test(await late.getByTestId('run-line-paid').innerText()))
     t.ok('...and its Approved column says 12 Nov', /12 Nov/.test(await late.getByTestId('run-line-approved').innerText()))
     t.ok('the line in its own cycle says nothing about being late', !/Late/.test(await own.innerText()))
+    /* THE SPLIT MOVED HERE FROM PAYMENTS IN (Stephan, 19 Nov). */
+    const heads = (await page.locator('thead').first().innerText()).replace(/\s+/g, ' ')
+    t.ok('the run carries the split\'s groups', ['Interest and fees', 'Capital', 'Commission', 'Final split'].every((g) => new RegExp(g, 'i').test(heads)))
+    const ownText = (await own.innerText()).replace(/\s+/g, ' ').replace(/\u00a0/g, ' ')
+    t.ok(`...and a line its split: R 1 000.00 paid, R 300.00 interest, R 200.00 fees, R 385.00 to the client, R 615.00 BF keeps (${ownText.slice(0, 200)})`,
+      ['R 1 000.00', 'R 300.00', 'R 200.00', 'R 385.00', 'R 615.00', 'R 4 500.00'].every((x) => ownText.includes(x)))
     t.check('an Administrator with payover.pay sees Mark paid', await page.getByRole('button', { name: 'Mark paid' }).count(), 1)
     /* Raptor H20 (Stephan, 18 Nov): one payment opened shows no separate receipt fee line; the fee stays inside
        Half A's costs, whose line still says so. */

@@ -366,7 +366,7 @@ ok('the summary page says TAX INVOICE and carries the client\'s address', /'TAX 
 
 /* ---------------- Stephan, 19 Nov: the debtor's statement as Excel or CSV too, for administrators ---------------- */
 {
-  const { statementRows, statementCsv } = await import('../../src/lib/accountSummaryLetter.ts')
+  const { statementRows, statementCsv } = await import('../../src/lib/statementSheet.ts')
   const input = {
     breakdown: { interest: 120, fees: 57.5, receiptFees: 0, vat: 7.5, payments: 500, balance: 677.5, withheld: 0, cappedBy: null },
     handedOver: 1000, asAt: '2026-11-19', money: rand, debtor: 'A Debtor', client: 'A Client', reference: 'DCR0001',
