@@ -28,7 +28,7 @@ import { paymentReference } from './paymentsOut.ts'
 import type { RunPayment } from './payover'
 import { inRunningOrder } from './runOrder.ts'
 import { rand } from './money.js'
-import { buildXlsx, type Cell } from './xlsxWrite.js'
+import { buildXlsx, cellsToCsv, type Cell } from './xlsxWrite.js'
 import { clockNow } from './clock.js'
 import { lateLineNote } from './paymentDates.ts'
 import { firmDay } from './dateLabels.ts'
@@ -456,11 +456,7 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
  * opened in Excel from a CSV can lose a leading zero -- the .xlsx is the one that keeps it.
  */
 export function adviceCsv(adv: RemittanceAdvice): string {
-  const cell = (c: Cell): string => {
-    const s = c == null ? '' : typeof c === 'string' ? c : 'n' in c ? c.n.toFixed(2) : c.v
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  return adviceRows(adv).map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n'
+  return cellsToCsv(adviceRows(adv))
 }
 
 /** The schedule's rows, once, for the spreadsheet and the CSV alike. */

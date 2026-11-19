@@ -364,6 +364,26 @@ check('a client with no address is reported, never printed blank',
   buildRemittanceAdvice({ firm: FIRM, client: { ...CLIENT, address: null }, run: RUN, lines: [line()] }).problems.some((p) => /no address on file/.test(p)), true)
 ok('the summary page says TAX INVOICE and carries the client\'s address', /'TAX INVOICE'\)/.test(vatPdfSrc) && /'Invoice to'/.test(vatPdfSrc))
 
+/* ---------------- Stephan, 19 Nov: the debtor's statement as Excel or CSV too, for administrators ---------------- */
+{
+  const { statementRows, statementCsv } = await import('../../src/lib/accountSummaryLetter.ts')
+  const input = {
+    breakdown: { interest: 120, fees: 57.5, receiptFees: 0, vat: 7.5, payments: 500, balance: 677.5, withheld: 0, cappedBy: null },
+    handedOver: 1000, asAt: '2026-11-19', money: rand, debtor: 'A Debtor', client: 'A Client', reference: 'DCR0001',
+    lines: [
+      { date: '2026-09-01', kind: 'capital', description: 'Capital handed over', debit: 1000, credit: 0, balance: 1000 },
+      { date: '2026-10-01', kind: 'payment', description: 'Payment, thank you', debit: 0, credit: 500, balance: 500 },
+    ],
+  }
+  const rows = statementRows(input)
+  const csv = statementCsv(input)
+  ok('the statement sheet ends on every movement, as the PDF does', rows.at(-1)[1] === 'Payment, thank you' && rows.at(-1)[3].n === 500 && rows.at(-1)[2] === null)
+  ok('...carries the balance owing as a number', rows.some((r) => r[0]?.v === 'Balance now owing' && r[1]?.n === 677.5))
+  ok('...and the CSV is the same rows, figures to the cent', csv.includes('1 Oct 2026,"Payment, thank you",,500.00,500.00\r\n'))
+  const docsSrc = readFileSync(new URL('../../src/components/collections/AccountDocuments.tsx', import.meta.url), 'utf8')
+  ok('the account page offers it to administrators only', /const isAdmin = currentUser\?\.role === 'Administrator'/.test(docsSrc) && /\{isAdmin && \(/.test(docsSrc))
+}
+
 /* ---------------- R-21: two payments on one account read in the order they came off its balance ---------------- */
 // Boitshoko Mose, as Finance saw it: both paid 22 Oct, the database returned the later posting first.
 const second = line({ lineId: 'b', accountId: 'bm', debtor: 'Boitshoko Mose', toCapital: 307.11, capitalAfter: 288.39 })

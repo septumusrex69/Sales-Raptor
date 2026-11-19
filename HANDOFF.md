@@ -22,6 +22,9 @@ Asked by Stephan and built from the preview branch; waiting for his say-so to fa
   **Invoice to**: the client's name and address (companies.address, city, province via `clientAddress`). A client
   with no address is listed in `problems`.
 - **Run page:** Excel and CSV downloads of the statement beside the PDF, for role Administrator only (`adviceCsv`).
+- **Debtor's account page:** "Statement as Excel / CSV" beside the Statement, Administrators only. The same lines
+  the statement PDF prints (`statementRows` in `accountSummaryLetter.ts`, over `oneInterestLinePerMonth`); CSV through
+  the shared `cellsToCsv` in `xlsxWrite.ts`.
 - Held by `check-remittance-advice`.
 
 ## START HERE (S23) -- what is open (Raptor · Handover 21, 18 Nov)

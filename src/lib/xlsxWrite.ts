@@ -316,3 +316,16 @@ export function downloadBytes(filename: string, bytes: Uint8Array, contentType: 
      (the firm, 19 Oct). See fileSave.ts. */
   void saveFile(new Blob([bytes as BlobPart], { type: contentType }), filename)
 }
+
+/**
+ * THE SAME ROWS AS CSV (Stephan, 19 Nov: the statements "in excel or CSV format"). A figure is written to the cent with
+ * no currency sign, so a column still sums; a heading cell is just its words. A reference opened in Excel from a CSV can
+ * lose a leading zero -- the .xlsx built from the same rows is the one that keeps it.
+ */
+export function cellsToCsv(rows: Cell[][]): string {
+  const cell = (c: Cell): string => {
+    const s = c == null ? '' : typeof c === 'string' ? c : 'n' in c ? c.n.toFixed(2) : c.v
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n'
+}

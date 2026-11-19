@@ -3,7 +3,10 @@ import { Loader2, Mail } from 'lucide-react'
 import { FileActions } from '../ui/FileActions'
 import { letterPdfBytes } from '../../lib/letterAttachment.ts'
 import { letterFilename, toBase64 } from '../../lib/letterPdf.ts'
-import { summaryOfAccount, statementOfAccount } from '../../lib/accountSummaryLetter.ts'
+import { summaryOfAccount, statementOfAccount, statementCsv, statementXlsx } from '../../lib/accountSummaryLetter.ts'
+import { XLSX_MIME } from '../../lib/xlsxWrite.ts'
+import { saveFile } from '../../lib/fileSave.ts'
+import { useAuth } from '../../store/AuthContext'
 import { fetchLibrary } from '../../lib/templateLibrary.ts'
 import { renderTemplate } from '../../lib/messageTemplates'
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
@@ -72,6 +75,9 @@ export function AccountDocuments({
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  /* THE STATEMENT AS EXCEL OR CSV is for administrators (Stephan, 19 Nov), as on the payover run. */
+  const { currentUser } = useAuth()
+  const isAdmin = currentUser?.role === 'Administrator'
 
   /* Nothing to draw and nothing to say about it: an account with no figures has no summary. */
   if (!breakdown || !values) return null
@@ -79,6 +85,20 @@ export function AccountDocuments({
   function build(kind: AccountDocKind) {
     const input = { breakdown: breakdown as BalanceBreakdown, handedOver, asAt, money, status, lines }
     return kind === 'summary' ? summaryOfAccount(input) : statementOfAccount(input)
+  }
+
+  /* The spreadsheet's file name: the PDF's, with its own extension. */
+  function sheetOf(ext: 'xlsx' | 'csv') {
+    const v = values as Record<string, string>
+    const input = {
+      breakdown: breakdown as BalanceBreakdown, handedOver, asAt, money, status, lines,
+      debtor: v.debtor_name ?? null, client: v.client_name ?? null, reference: v.case_number ?? reference ?? null,
+    }
+    const name = letterFilename(TITLES.statement, reference ?? null).replace(/\.pdf$/i, '') + `.${ext}`
+    const blob = ext === 'xlsx'
+      ? new Blob([statementXlsx(input) as BlobPart], { type: XLSX_MIME })
+      : new Blob([statementCsv(input)], { type: 'text/csv;charset=utf-8' })
+    void saveFile(blob, name)
   }
 
   /*
@@ -175,6 +195,15 @@ export function AccountDocuments({
         {/* PREVIEW ON THE PAGE (Stephan, 4 Nov: "I need a place where you can preview the statement"). Open and
             Download hand the PDF to the device -- on the iPad, a new tab and out of Raptor. This draws the same
             bytes in place with pdf.js (PreviewPdf), filled for this account, before it is emailed or handed over. */}
+        {isAdmin && (
+          <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-1.5 py-0.5" data-testid="account-doc-statement-data">
+            <span className="pl-1 text-xs font-medium text-slate-600">Statement as</span>
+            <button type="button" onClick={() => sheetOf('xlsx')}
+              className="rounded px-1.5 py-1 text-xs font-medium text-navy-950 hover:bg-slate-100">Excel</button>
+            <button type="button" onClick={() => sheetOf('csv')}
+              className="rounded px-1.5 py-1 text-xs font-medium text-navy-950 hover:bg-slate-100">CSV</button>
+          </span>
+        )}
         <PreviewPdf doc={build('statement')} scope="collections" values={values} name={TITLES.statement}
           label="Preview the statement" startFilled testId="account-doc-statement-preview" />
       </div>
