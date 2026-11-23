@@ -9,6 +9,35 @@
 > **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
 
+## Raptor · Handover 21 -- receipt fee and in duplum (23 Nov, session "Rinda Test 5", branch `claude/wizardly-turing-d3kwf6`, NOT yet on the preview branch)
+
+Staging only; production and `Main` untouched. Stephan compared DCR1970's Raptor statement (-R51,36) with Swordfish's
+(R36,98) and ruled:
+
+- **"The 10% receipt fee is on the actual payment, the final one will be on the balance outstanding."** Already the
+  engine's rule (finance_split: least(payment, interest + costs + capital)). The BROWSER's copy (`computedReceiptFees`,
+  used for every payment with no item 9 row -- the whole migrated book) walked "what was owed" with POSTED interest only,
+  and imported accounts have none posted, so DCR1970's R500 on 26 Sep 2023 was charged R29,22 (owed taken as R254, not
+  R1 071,26) and the payment that settled it nothing. Now the walk works out interest to the payment's day with
+  accrueToDate. DCR1970 now: R57,50 and R78,48 (10% of R682,40 owed incl. interest to 24 Oct 2023).
+- **"If the account reaches induplum then the receipt fee should show R0.00 however the induplum amount will increase.
+  The cap still needs to obide by the induplum rule."** Statement: a receipt fee above the ceiling is drawn at what was
+  charged (R0,00) with "(Rx withheld — in duplum)"; `breakdown.withheldReceiptFees` is that part of `withheld`; the
+  in duplum credit line is `withheld - withheldReceiptFees` so the lines still add up. Attribution is newest fee first
+  (`receiptFeesWithheld`). Engine (staging migration `s23_receipt_fee_takes_in_duplum_room`, mirrored): payment_split
+  splits on the fee that fits the room (fee_split's measure) and returns `fee_full_*`; allocate_payment writes the item 9
+  ROW at the full fee; fee_split measures the new fee against the room (rf_cant = withheld part); preview_allocation
+  passes the open interest. Reverses S18's "the new receipt fee takes no room". `expected_from_promises` still calls
+  finance_split directly (a projection, uncapped) -- left alone.
+- **Still different from Swordfish on DCR1970, and said to Stephan:** interest (Raptor charges 24% on the balance incl.
+  fees, month by month; ~R2/month more than Swordfish) and Raptor runs interest on the small balance left after the last
+  payment to 18 Nov 2026, the day S22 closed it paid up (Swordfish closed it 25 Oct 2023). Swordfish's R3,81 "final
+  collection commission" is a projection of the settlement fee; Raptor quotes it only while a balance is open.
+- **DCR actions were reloaded** from Stephan's updated action report (206 rows with names, costs excl VAT; R757,00 on
+  DCR1970, R1 232,00 on DCR2181), the R28,75 handover-email fees removed at his request, and the comments loaded as notes
+  (19 written by people as `swordfish`, 184 Swordfish machine lines as `system`). No Swordfish Action ID in that file:
+  reloading it would duplicate -- clear first.
+
 ## START HERE (S23) -- what is open (Raptor · Handover 21, 18 Nov)
 
 **Handover 20's list below is still open in full** -- above all the production database rebuild, which waits for

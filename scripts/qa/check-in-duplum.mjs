@@ -435,7 +435,11 @@ ok('the letter does not refuse an offer as never settling',
   })
   check('an account past the ceiling is in duplum', s.breakdown.cappedBy, 'in duplum')
   const line = s.lines.find((l) => l.kind === 'in-duplum')
-  check('the statement carries an in duplum line for what the ceiling withholds', line?.credit, s.breakdown.withheld)
+  /* LESS THE RECEIPT FEE (Raptor H21, 23 Nov): the R300 payment's R34,50 fee is the last fee, so it is the one the
+     ceiling pushes out -- drawn at R0.00 on its own line rather than charged and credited back here. */
+  check('the statement carries an in duplum line for what the ceiling withholds, less the receipt fee drawn at R0.00',
+    line?.credit, Math.round((s.breakdown.withheld - s.breakdown.withheldReceiptFees) * 100) / 100)
+  check('...and that receipt fee is still inside the in duplum amount', s.breakdown.withheldReceiptFees, 34.5)
   check('...last, so the running balance ends on the balance owing', s.lines.at(-1)?.balance, s.breakdown.balance)
   check('...and debits less credits are the balance owing',
     Math.round(s.lines.reduce((t, l) => t + l.debit - l.credit, 0) * 100) / 100, s.breakdown.balance)
@@ -463,6 +467,29 @@ ok('the letter does not refuse an offer as never settling',
   ok('...a chargeable action at R0.00 still shows', s.lines.some((l) => l.kind === 'fee-no-charge'))
   ok('...and anything carrying money shows, code or not', s.lines.some((l) => l.debit === 24.15))
   check('...so the lines still add up to the foot', s.lines.at(-1)?.balance, s.breakdown.balance)
+}
+
+/*
+ * THE RECEIPT FEE AT THE CEILING SHOWS R0.00 AND THE IN DUPLUM AMOUNT CARRIES IT (Raptor H21, 23 Nov). Stephan: "If the
+ * account reaches induplum then the receipt fee should show R0.00 howevr the induplum amount will increase. The cap
+ * still needs to obide by the induplum rule." Seen failing with receiptFeesWithheld returning an empty map.
+ */
+{
+  const { buildStatement } = await import('../../src/lib/accountBalance.ts')
+  const base = {
+    capitalHandedOver: 1000, handoverDate: '2022-01-01', vatRate: 0.15, interestRateAnnual: 24, accrueTo: '2026-11-18',
+    ledgers: { payments: [{ id: 'p1', date: '2024-06-01', amount: 500 }], fees: [], interest: [], paidOut: [] },
+  }
+  const s = buildStatement(base)
+  const fee = s.lines.find((l) => l.kind === 'receipt-fee')
+  check('a receipt fee taken after the ceiling is drawn at R0.00', fee?.debit, 0)
+  check('...and says what was withheld', /R57[.,]50 withheld — in duplum/.test(fee?.description ?? ''), true)
+  check('...the in duplum amount carries the whole fee', s.breakdown.withheldReceiptFees, 57.5)
+  check('...which is inside what the account reports as withheld',
+    s.breakdown.withheld >= s.breakdown.withheldReceiptFees, true)
+  check('...and the statement still adds up to the balance owing',
+    Math.round(s.lines.reduce((t, l) => t + l.debit - l.credit, 0) * 100) / 100, s.breakdown.balance)
+  check('...with the balance no higher than the ceiling allows', s.breakdown.balance, 1500)
 }
 
 console.log(`\ncheck-in-duplum: ${pass} passed, ${failures.length} failed`)

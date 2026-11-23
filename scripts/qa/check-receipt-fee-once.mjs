@@ -182,7 +182,7 @@ ok('...and the payment ids, or nothing can be matched', /id: p\.id,/.test(detail
 const bal = read('src/lib/accountBalance.ts')
 check('the split is written once', (bal.match(/function splitFeeLedger/g) ?? []).length, 1)
 check('...and read by both the balance and the statement',
-  (bal.match(/splitFeeLedger\(ledgers, /g) ?? []).length, 2)
+  (bal.match(/splitFeeLedger\(input, /g) ?? []).length, 2)
 
 /* ---------------- and the statement opens where a statement opens ---------------- */
 
@@ -266,6 +266,34 @@ ok('...and says the message did go', /The email went out, but it was not recorde
 ok('...and what to do about it', /Add it by hand before the client is invoiced/.test(page))
 /* AND THE HAPPY PATH STILL REFETCHES, or the charge really would not appear until a reload. */
 ok('a sent message still refreshes the account', /\}\)\s*\n\s*\.then\(reload\)/.test(page))
+
+/*
+ * THE RECEIPT FEE IS 10% OF THE PAYMENT; THE ONE THAT SETTLES IS 10% OF WHAT WAS OUTSTANDING -- INTEREST INCLUDED
+ * (Raptor H21, 23 Nov). Stephan: "The 10% receipt fee is on the actual payment the FInal one will be on the balance
+ * outstanding." DCR1970, against Swordfish: an imported account has no posted interest, and the walk that measured
+ * "outstanding" read only posted interest, so it took R254 to be owed before a R500 payment when R1 071,26 was -- the
+ * fee came out at R29,22 instead of R57,50 and the payment that settled the account was charged nothing. Seen failing
+ * with the open interest left out of owedBefore.
+ */
+{
+  const { buildStatement } = await import('../../src/lib/accountBalance.ts')
+  const s = buildStatement({
+    capitalHandedOver: 1000, handoverDate: '2023-01-01', vatRate: 0.15, interestRateAnnual: 24, accrueTo: '2024-12-31',
+    ledgers: {
+      payments: [
+        { id: 'a', date: '2024-01-15', amount: 500 },
+        { id: 'b', date: '2024-02-15', amount: 2000 },
+      ],
+      fees: [], interest: [], paidOut: [],
+    },
+  })
+  const fees = s.lines.filter((l) => l.kind === 'receipt-fee').map((l) => l.debit)
+  /* A year of 2% a month on R1 000 is well over R250, so R500 is an instalment, not a settlement. */
+  check('an instalment on an imported account is charged on the whole payment', fees[0], 57.5)
+  const before = s.lines[s.lines.findIndex((l) => l.kind === 'payment' && l.date === '2024-02-15') - 1]?.balance
+  ok('...and the payment that settles it is charged on what was outstanding, interest to the day included',
+    fees[1] > Math.round(before * 0.1 * 1.15 * 100) / 100 && fees[1] < 2000 * 0.1 * 1.15)
+}
 
 console.log(`\ncheck-receipt-fee-once: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

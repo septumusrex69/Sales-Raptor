@@ -188,6 +188,13 @@ export interface BalanceBreakdown {
   withheldFees: number
   withheldInterest: number
   /**
+   * THE PART OF `withheldFees` THAT IS RECEIPT FEES (Stephan, 23 Nov): "If the account reaches induplum then the
+   * receipt fee should show R0.00 however the induplum amount will increase." Already inside `withheld` and
+   * `withheldFees`; the statement draws those receipt fees at what is left of them instead of crediting them back
+   * in the in duplum line.
+   */
+  withheldReceiptFees: number
+  /**
    * Interest since the last posted accrual, computed to `accrueTo` and already included in
    * `interest` above. Kept separate so a statement can label the line as still running rather
    * than present it as charged.
@@ -312,7 +319,8 @@ export function feeIsTheOnlyRecord(fee: { source?: string | null }): boolean {
   return IMPORTED_FEE_SOURCES.includes(fee.source ?? '')
 }
 
-function splitFeeLedger(ledgers: LedgerLines, capital: number, vatRate: number) {
+function splitFeeLedger(input: BalanceInput, vatRate: number) {
+  const { ledgers } = input
   /*
    * FILTERED HERE AND NOWHERE ELSE, because computeBalance and buildStatement both read this and
    * they have to agree -- a statement whose lines do not add up to the figure at its foot is the
@@ -335,50 +343,117 @@ function splitFeeLedger(ledgers: LedgerLines, capital: number, vatRate: number) 
     ledgers.fees.filter((f) => f.annexureItem === '9')
       .map((f) => f.paymentId).filter((id): id is string => !!id),
   )
-  return { receiptRows, costRows, covered, computed: computedReceiptFees(ledgers, capital, vatRate, receiptRows, costRows, covered) }
+  return { receiptRows, costRows, covered, computed: computedReceiptFees(input, vatRate, covered, receiptRows, costRows) }
 }
 
 /**
- * THE ITEM 9 FEE ON EACH PAYMENT THAT HAS NO ROW OF ITS OWN, CAPPED AT WHAT IT TOOK TO SETTLE.
+ * THE ITEM 9 FEE ON EACH PAYMENT THAT HAS NO ROW OF ITS OWN: 10% OF THE PAYMENT, OR OF THE BALANCE IT SETTLES.
  *
- * Stephan, 5 Nov: "If an account is only 300 Rand, you can't allocate the 600 Rand receipt fee ...
- * take all of the money to close the account and then calculate that receipt fee on what was
- * outstanding the moment the account was settled." The engine does this in finance_split (S18): the
- * base is the payment or what was owed just before it, whichever is less. This is the same rule for
- * the payments the engine has not posted yet, so the account page and the approval queue quote one
- * fee on an overpayment rather than two.
+ * Stephan, 23 Nov (Raptor H21), comparing DCR1970 with Swordfish: "The 10% receipt fee is on the actual payment, the
+ * final one will be on the balance outstanding." Which is the 5 Nov rule restated ("If an account is only 300 Rand,
+ * you can't allocate the 600 Rand receipt fee") and what finance_split already does: the base is the payment or what
+ * was owed just before it, whichever is less.
  *
- * WHAT IS OWED BEFORE A PAYMENT is walked here from the dated ledger: capital, posted interest, fees
- * and receipt fees on or before its day, less the payments before it. ONE KNOWN DIFFERENCE from the
- * engine: interest still in the open period is not in the walk (it is worked out after the fees, out
- * of them), so on an account with open interest the cap here can sit lower than the engine's by 10%
- * of that interest. It only touches a payment big enough to clear the account, and only until that
- * payment is approved -- then the posted row wins (`covered`).
+ * WHAT WAS OWED NOW INCLUDES THE INTEREST, and leaving it out was the fault. The walk used to add only POSTED interest,
+ * and an imported account has none posted -- all of it is worked out as the statement is drawn. So DCR1970 was taken to
+ * owe R254 before a R500 payment when it owed R1 071,26: the fee came out at R29,22 instead of R57,50, the account then
+ * looked paid off, and the payment that really settled it was charged nothing. The interest to the payment's day is
+ * now worked out by the same accrueToDate the open period uses, over the same dated movements -- and only where it can
+ * matter, a payment bigger than what was owed before any open interest, because interest only ever adds to that.
+ *
+ * IN DUPLUM STILL BINDS IT, applied once in computeBalance against the same ceiling as every other fee: Stephan, same
+ * day, "If the account reaches induplum then the receipt fee should show R0.00 however the induplum amount will
+ * increase." See `receiptFeesWithheld`.
  */
 function computedReceiptFees(
-  ledgers: LedgerLines, capital: number, vatRate: number,
-  receiptRows: LedgerLines['fees'], costRows: LedgerLines['fees'], covered: Set<string>,
+  input: BalanceInput, vatRate: number, covered: Set<string>,
+  receiptRows: LedgerLines['fees'], costRows: LedgerLines['fees'],
 ): Map<LedgerLines['payments'][number], number> {
+  const { ledgers, capitalHandedOver: capital } = input
   const out = new Map<LedgerLines['payments'][number], number>()
-  const dated: { date: string; order: number; amount: number; pay?: LedgerLines['payments'][number] }[] = [
-    ...ledgers.interest.map((i) => ({ date: i.from, order: 0, amount: i.amount })),
-    ...costRows.map((f) => ({ date: f.date, order: 0, amount: f.exclVat + f.vat })),
-    ...receiptRows.map((f) => ({ date: f.date, order: 0, amount: f.exclVat + f.vat })),
-    ...ledgers.payments.map((p) => ({ date: p.date, order: 1, amount: -p.amount, pay: p })),
-    ...(ledgers.paidOut ?? []).map((o) => ({ date: o.date, order: 2, amount: o.amount })),
-  ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.order - b.order))
-  let owed = capital
-  for (const m of dated) {
-    if (!m.pay) { owed += m.amount; continue }
-    const p = m.pay
-    if (!(p.id && covered.has(p.id))) {
-      const fee = p.receiptFeeExclVat != null
-        ? receiptFeeOn(p, vatRate)
-        : receiptFeeOn({ ...p, amount: Math.min(p.amount, Math.max(roundToCents(owed), 0)) }, vatRate)
-      out.set(p, fee)
-      owed += fee
+  /* Every movement that is not interest, as it becomes known: fees from the ledger now, each payment (net of its fee)
+     as the walk reaches it. */
+  const moves: { date: string; amount: number }[] = [
+    ...costRows.map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
+    ...receiptRows.map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
+    ...(ledgers.paidOut ?? []).map((o) => ({ date: o.date, amount: o.amount })),
+  ]
+  const anchor = lastCoveredDay(ledgers.interest) ?? (input.handoverDate ? dayBefore(input.handoverDate) : null)
+  const owedBefore = (day: string, withOpenInterest: boolean) => {
+    const posted = ledgers.interest.filter((i) => i.from < day).reduce((t, i) => t + i.amount, 0)
+    const known = moves.filter((m) => m.date <= day)
+    let owed = capital + posted + known.reduce((t, m) => t + m.amount, 0)
+    if (withOpenInterest && anchor && day > anchor && (input.interestRateAnnual ?? 0) > 0) {
+      const open = accrueToDate({
+        openingBalance: roundToCents(capital + posted
+          + known.filter((m) => m.date <= anchor).reduce((t, m) => t + m.amount, 0)),
+        annualRate: input.interestRateAnnual ?? 0,
+        coveredTo: anchor,
+        asAt: day,
+        movements: known.filter((m) => m.date > anchor),
+      })
+      owed += open?.amount ?? 0
     }
-    owed -= p.amount
+    return roundToCents(owed)
+  }
+  const payments = [...ledgers.payments].sort((a, b) => a.date.localeCompare(b.date))
+  for (const p of payments) {
+    let fee = 0
+    if (!(p.id && covered.has(p.id))) {
+      if (p.receiptFeeExclVat != null) fee = receiptFeeOn(p, vatRate)
+      else {
+        let base = p.amount
+        if (p.amount > owedBefore(p.date, false)) base = Math.min(p.amount, Math.max(owedBefore(p.date, true), 0))
+        fee = receiptFeeOn({ ...p, amount: base }, vatRate)
+      }
+      out.set(p, fee)
+    }
+    moves.push({ date: p.date, amount: fee - p.amount })
+  }
+  return out
+}
+
+/**
+ * WHICH RECEIPT FEES THE IN DUPLUM CEILING TAKES, AND HOW MUCH OF EACH.
+ *
+ * THE FIRM'S RULE (Stephan, 23 Nov): once the account reaches in duplum the receipt fee shows R0.00,
+ * and what it would have been is added to the in duplum amount instead. So the fee is not dropped --
+ * it still counts in `withheld`, which is the figure the account reports as above the ceiling -- but
+ * its own line says what the debtor is actually charged, and the in duplum credit line on the
+ * statement no longer carries it (it would be taking off a charge the page never added).
+ *
+ * THE LAST FEES ARE THE ONES PUSHED OUT. `withheldFees` is how much fee, in total, sits above the
+ * ceiling after interest has taken its share first (the firm's order). Which fees those are is read
+ * newest first: the ceiling is reached on a day, and the fees after that day are the ones that do
+ * not fit. On one day a receipt fee goes before the costs, because it is drawn under the payment, last.
+ * Costs pushed out stay where they were (their line, and the in duplum credit); only receipt fees are
+ * drawn at what is left of them.
+ */
+type ReceiptItem = LedgerLines['payments'][number] | LedgerLines['fees'][number]
+function receiptFeesWithheld(
+  input: BalanceInput,
+  split: ReturnType<typeof splitFeeLedger>,
+  withheldFees: number,
+): Map<ReceiptItem, number> {
+  const out = new Map<ReceiptItem, number>()
+  if (withheldFees <= 0) return out
+  const stopAt = input.writtenOffAt ?? input.settledOn ?? null
+  const within = (date: string) => !stopAt || date <= stopAt
+  const items: { date: string; rank: number; at: string; amount: number; key?: ReceiptItem }[] = [
+    ...split.costRows.filter((f) => within(f.date))
+      .map((f) => ({ date: f.date, rank: 0, at: f.at ?? f.date, amount: roundToCents(f.exclVat + f.vat) })),
+    ...split.receiptRows.filter((f) => within(f.date))
+      .map((f) => ({ date: f.date, rank: 1, at: f.at ?? f.date, amount: roundToCents(f.exclVat + f.vat), key: f })),
+    ...input.ledgers.payments.filter((p) => split.computed.has(p))
+      .map((p) => ({ date: p.date, rank: 1, at: p.date, amount: split.computed.get(p) ?? 0, key: p })),
+  ].filter((i) => i.amount > 0)
+  items.sort((a, b) => b.date.localeCompare(a.date) || b.rank - a.rank || b.at.localeCompare(a.at))
+  let left = roundToCents(withheldFees)
+  for (const i of items) {
+    if (left <= 0) break
+    const take = Math.min(i.amount, left)
+    if (i.key) out.set(i.key, roundToCents(take))
+    left = roundToCents(left - take)
   }
   return out
 }
@@ -420,7 +495,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const interest = roundToCents(
     ledgers.interest.filter((i) => within(i.from)).reduce((t, i) => t + i.amount, 0),
   )
-  const split = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
+  const split = splitFeeLedger(input, input.vatRate ?? 0.15)
   const { receiptRows, costRows, computed } = split
   /* `fees` IS ITEMS 1-7 ONLY now, which is what the account's own "What is left to take" panel
      has always called it. Item 9 is counted below, once. */
@@ -574,6 +649,10 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   // the rate, which would overstate it by the rate squared.
   const receiptFeeVat = roundToCents(receiptFees - receiptFees / (1 + vatRate))
 
+  const withheldReceiptFees = cappedBy === 'in duplum'
+    ? roundToCents([...receiptFeesWithheld(input, split, withheldFees).values()].reduce((t, v) => t + v, 0))
+    : 0
+
   return {
     capital,
     interest: roundToCents(interest + open.amount),
@@ -590,6 +669,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     withheld,
     withheldFees,
     withheldInterest,
+    withheldReceiptFees,
     interestAccruing: open.amount,
     interestAccruingDays: open.days,
     interestAccruingFrom: open.from,
@@ -780,8 +860,14 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
   /* THE SAME SPLIT THE BALANCE USED. The statement printed the item 9 ROW as an ordinary fee and
      then printed the computed receipt fee under the payment as well -- the same fee on two lines,
      and a running balance that ended at the doubled figure. */
-  const split = splitFeeLedger(ledgers, input.capitalHandedOver, input.vatRate ?? 0.15)
+  const split = splitFeeLedger(input, input.vatRate ?? 0.15)
   const { receiptRows, costRows, covered, computed } = split
+  /* THE RECEIPT FEES IN DUPLUM TOOK (Stephan, 23 Nov) -- drawn at what is left of them, R0.00 once the ceiling is
+     reached, with what was withheld said on the line. The same figure computeBalance counted into `withheld`. */
+  const rfWithheld = breakdown.cappedBy === 'in duplum'
+    ? receiptFeesWithheld(input, split, breakdown.withheldFees) : new Map<ReceiptItem, number>()
+  const receiptFeeLine = (fee: number, kept: number, description: string) =>
+    kept < fee ? `${description} (${money(roundToCents(fee - kept))} withheld — in duplum)` : description
 
   type Pending = Omit<StatementLine, 'balance'> & { at?: string }
   const pending: Pending[] = []
@@ -945,12 +1031,13 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
       continue
     }
     if (charged <= 0) continue
+    const kept = roundToCents(charged - (rfWithheld.get(f) ?? 0))
     pending.push({
       date: f.date,
       kind: 'receipt-fee',
       at: f.at,
-      description: feeLabel(f.description, f.segments),
-      debit: charged,
+      description: receiptFeeLine(charged, kept, feeLabel(f.description, f.segments)),
+      debit: kept,
       credit: 0,
     })
   }
@@ -968,11 +1055,12 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     if (p.id && covered.has(p.id)) continue
     const fee = computed.get(p) ?? 0
     if (fee > 0) {
+      const kept = roundToCents(fee - (rfWithheld.get(p) ?? 0))
       pending.push({
         date: p.date,
         kind: 'receipt-fee',
-        description: 'Receipt fee on payment',
-        debit: fee,
+        description: receiptFeeLine(fee, kept, 'Receipt fee on payment'),
+        debit: kept,
         credit: 0,
       })
     }
@@ -1014,14 +1102,17 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
    * ceiling is judged on the balance as it stands, not on any one day before), and the running balance lands on what
    * computeBalance says is owed. The note at the foot still says which part was interest and which was fees.
    */
-  if (breakdown.cappedBy === 'in duplum' && breakdown.withheld > 0) {
+  /* LESS THE RECEIPT FEES ALREADY DRAWN AT WHAT IS LEFT OF THEM: they never reached the running balance, so taking
+     them off again here would take them off twice. They are still in `withheld`, the account's in duplum amount. */
+  const inDuplumCredit = roundToCents(breakdown.withheld - breakdown.withheldReceiptFees)
+  if (breakdown.cappedBy === 'in duplum' && inDuplumCredit > 0) {
     const last = pending.reduce((d, l) => (l.date > d ? l.date : d), input.handoverDate ?? '')
     pending.push({
       date: input.accrueTo ?? last,
       kind: 'in-duplum',
       description: 'In duplum — interest and fees above the capital are not recoverable (NCA s103(5))',
       debit: 0,
-      credit: breakdown.withheld,
+      credit: inDuplumCredit,
     })
   }
 
@@ -1092,6 +1183,7 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     note: breakdown.cappedBy === 'in duplum'
       ? `At the in duplum ceiling. Interest takes it first, so ${money(breakdown.withheldFees)} of `
         + `Annexure B fees is not recoverable`
+        + `${breakdown.withheldReceiptFees > 0 ? ` (${money(breakdown.withheldReceiptFees)} of it receipt fees, shown at what was charged)` : ''}`
         + `${breakdown.withheldInterest > 0 ? `, and ${money(breakdown.withheldInterest)} of interest with it` : ''}`
         + `${breakdown.settlementFee === 0 ? ', and the receipt fee on a settlement falls away too' : ''}.`
       : input.settledOn

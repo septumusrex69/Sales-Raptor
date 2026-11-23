@@ -242,7 +242,24 @@ ok('the receipt fee is priced on the payment’s own date',
  * send -- and the cap would be reached by collecting, which is backwards.
  */
 ok('...and does not eat into the item 1-7 cap',
-  /counts_toward_fee_cap[\s\S]{0,400}?s\.fee_excl, v_vat \* 100, s\.fee_vat, false,/.test(allocate))
+  /counts_toward_fee_cap[\s\S]{0,400}?s\.fee_full_excl, v_vat \* 100, s\.fee_full_vat, false,/.test(allocate))
+/*
+ * AND IN DUPLUM BINDS IT (S23 · Raptor H21, 23 Nov). Stephan: "If the account reaches induplum then the receipt fee
+ * should show R0.00 howevr the induplum amount will increase. The cap still needs to obide by the induplum rule."
+ * payment_split splits the money on the fee that fits under the ceiling; the item 9 ROW records the full fee, so the
+ * part above the ceiling is the in duplum amount (fee_split's rf_cant, computeBalance's withheld) and not money taken.
+ * Seen failing with the second, capped split taken out of payment_split.
+ */
+const paySplit = lastFn('payment_split')
+ok('payment_split measures the in duplum room the fee may take',
+  /public\.in_duplum_cost_room\(p_account, p_interest_pending\)/.test(paySplit)
+  && /exit when r\.fee_excl \+ r\.fee_vat <= v_room;/.test(paySplit))
+ok('...and splits the money again on the fee that fits, rounded down',
+  /v_cap := floor\(v_room \/ \(1 \+ coalesce\(p_vat, 0\)\) \* 100\) \/ 100;/.test(paySplit))
+ok('...while the item 9 row and fee_split are given the full fee, so the rest is the in duplum amount',
+  /public\.fee_split\(\s*v_acct\.id, p_payment_id, s\.fee_full_excl \+ s\.fee_full_vat/.test(allocate))
+ok('fee_split measures this payment\'s fee against the room like every other fee',
+  /when r\.sk = 1 then least\(greatest\(\(select mm from room\) - r\.raised_before, 0\), r\.incl\)/.test(lastFn('fee_split')))
 
 /*
  * `due_to_bf` EXCLUDES THE COMMISSION VAT. The single most contested line in the spec: prompt 2's
