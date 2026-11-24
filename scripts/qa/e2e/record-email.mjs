@@ -109,14 +109,22 @@ try {
 
   await replyAll.click()
   await page.waitForTimeout(600)
+  /*
+   * THE Cc LINE TAKES SEVERAL PEOPLE (S21 · Raptor H19): each one chosen is a chip with its own X, and the box beside
+   * them is for the next. So the person who was copied is a CHIP, not text in the box -- read the chips, and "editable"
+   * means the chip can be taken off before Send.
+   */
   const box = page.locator('[data-modal-open]').first()
-  void box
-  const cc = page.getByLabel(/^Cc/i).first()
-  t.ok('reply all opens the composer with a Cc line', await cc.isVisible())
-  t.ok(`...carrying the person who was copied (${await cc.inputValue()})`,
-    (await cc.inputValue()).includes(LEAD_CC.address))
+  const skipMatch = box.getByRole('button', { name: /reply without matching it/i })
+  if (await skipMatch.count()) await skipMatch.click()
+  const chips = box.locator('[data-testid="recipient-chip"]')
+  await chips.first().waitFor({ timeout: 8000 }).catch(() => {})
+  t.ok('reply all opens the composer with a Cc line',
+    await box.getByText(/^Cc$/).first().isVisible().catch(() => false))
+  const ccText = (await chips.allInnerTexts()).join(' ')
+  t.ok(`...carrying the person who was copied (${ccText})`, ccText.includes(LEAD_CC.address))
   t.ok('...and it is editable, so it can be checked before Send',
-    await cc.isEditable())
+    await chips.filter({ hasText: LEAD_CC.address }).getByRole('button', { name: /^Take .* off$/ }).first().isVisible().catch(() => false))
   const to = page.getByLabel(/^To/i).first()
   t.check('...and it answers the sender', await to.inputValue(), LEAD_EMAIL)
   await t.shot(page, '51-record-email-reply-all')

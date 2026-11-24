@@ -11,6 +11,26 @@
 > brief open it by that name.
 
 
+## S23 so far (24 Nov, branch `claude/pensive-clarke-2pmrho`, from the preview branch at e45cfb8)
+
+- **S22b merged.** `claude/loving-rubin-rbyjsn` is merged onto the preview branch's tip (on S23's branch; the preview
+  branch itself not moved -- nobody said to). `schema.sql`: both sides only appended; stacked in staging's migration
+  order (S22b's four settlement migrations, then `raptor_h20_all_payments`, then `s23_receipt_fee_takes_in_duplum_room`).
+- **A mirror bug found and fixed.** The 23 Nov receipt-fee migration had copied `allocate_payment` and
+  `preview_allocation` into `schema.sql` from a file without S22b's edits -- so the file lost `payment_split`,
+  `settlement.approve` and `'v2-settlement'` while staging had them (staging was right all along). Both are now
+  staging's bodies verbatim (raw prosrc md5 `f8106d89...`, `dbdf9e35...`); every function the two merged blocks define
+  matches staging with comments stripped. **For the production rebuild this matters:** the statements are read from
+  `schema.sql`, so a rebuild from the unmerged preview branch would have shipped an engine with no settlement split.
+- **Item 6's three stale tests fixed (the app was right each time):** e2e/query-ticket (the case number is the
+  database trigger's, so the browser sends no account_number); e2e/record-email (Cc is chips since S21 -- the copied
+  person is read off the chip and its X); e2e/change-requests (the "Parked" shelf; and the Big Boss may tick an answer,
+  S18/R-26).
+- **The Management API token is dead:** `api.supabase.com` answers 401 "Invalid access token" through the proxy, so
+  `scripts/production-rebuild/q.sh` cannot run. The Supabase connector works (used for everything above). Before the
+  rebuild, Stephan saves a fresh token as the network secret for `api.supabase.com` (environment settings -> Network
+  secrets), or the rebuild is driven through the connector.
+
 ## HOW STEPHAN WANTS TO WORK NOW (18 Nov, S22)
 
 *"I don't want to approve all this SQL stuff all the time. So push everything just through ... I don't want to approve

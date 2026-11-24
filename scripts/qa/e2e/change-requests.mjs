@@ -158,7 +158,7 @@ try {
   t.check('the list opens on Needs a decision -- the shelves say whose move it is -- with All last', JSON.stringify([await shelves.evaluateAll((els) => els.map((e) => e.textContent.replace(/ \(\d+\)/, ''))),
     await page.getByTestId('requests-shelf').getByRole('radio', { checked: true }).innerText(),
     await cards.evaluateAll((els) => els.map((e) => e.dataset.number))]),
-  JSON.stringify([['Needs a decision', 'With Claude', 'To test', 'Done', 'Declined', 'All'], 'Needs a decision (2)', ['8', '7']]))
+  JSON.stringify([['Needs a decision', 'With Claude', 'To test', 'Done', 'Parked', 'Declined', 'All'], 'Needs a decision (2)', ['8', '7']]))
   t.check('...each row says where it is, and who it waits on', JSON.stringify(await cards.evaluateAll((els) => els.map((e) =>
     `${e.querySelector('[data-testid="request-status"]')?.textContent}|${e.querySelector('[data-testid="request-feedback"]')?.textContent ?? ''}`))),
   JSON.stringify(['Approved|', 'Reviewed|Needs feedback from Alianna']))
@@ -275,8 +275,13 @@ try {
     && queued.some((b) => typeof b.build_requested_at === 'string' && b.build_requested_by === ADMIN.id))
   t.ok('...and says so on its history', adminWrites.some((w) => w.table === 'event' && w.body.kind === 'comment' && w.body.body === 'Asked Claude to build this.'))
   await ad.getByTestId('request-ask').click()
-  t.ok('an Administrator sees the options, waiting for the person who asked', /Waiting for .+ to choose/.test(await ad.getByTestId('request-choices').innerText())
-    && (await ad.getByTestId('request-choice-send').count()) === 0)
+  /*
+   * THE BIG BOSS MAY TICK IT TOO (S18, Stephan on R-26: "Maybe I should be able to also approve this or change this
+   * ... or put other"). He decides what gets built, so mayAnswer gives him the boxes; the history says it was his.
+   */
+  t.ok('the Big Boss is offered the options and may answer for the person who asked',
+    /Red[\s\S]*Orange[\s\S]*Other/.test(await ad.getByTestId('request-choices').innerText())
+    && (await ad.getByTestId('request-choice-send').count()) === 1)
   await ad.getByTestId('request-compose-words').fill('Red or orange?')
   await ad.getByTestId('request-compose-choices').fill('Red')
   t.ok('one option is not a choice', await ad.getByTestId('request-compose-send').isDisabled())

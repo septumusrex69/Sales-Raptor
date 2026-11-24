@@ -320,8 +320,13 @@ try {
   t.check('...as the one that was refused',
     accountsOpened[0]?.client_reference, 'GPS3/10104')
   t.check('...with the corrected amount', Number(accountsOpened[0]?.capital_handed_over), 1150)
-  /* Our own reference, generated rather than read off a sheet that never had one. */
-  t.ok('...and our own reference', /^NBP\d{5}$/.test(accountsOpened[0]?.account_number ?? ''))
+  /*
+   * OUR OWN REFERENCE IS THE DATABASE'S (S21 · Raptor H19): the case number is the client code and a running number,
+   * assigned by the BEFORE INSERT trigger debtor_accounts_case_number (next_case_number). The browser must not invent
+   * one -- the old NBP00001-style number made here would start a second series beside the case numbers.
+   */
+  t.ok('...and our own reference is left to the database', accountsOpened[0]?.account_number == null
+    && !('case_number' in (accountsOpened[0] ?? {})))
 
   await t.shot(page, 'query-ticket-imported')
   /* THE PAGE IS STILL A PAGE AFTERWARDS. Every assertion above can pass while the screen behind
