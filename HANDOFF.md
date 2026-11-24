@@ -1,14 +1,86 @@
-# Raptor · Handover 20 — where Raptor stands
+# Raptor · Handover 21 — where Raptor stands
 
 > **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 20**, written by **S21** (branch `claude/new-session-84tmki`, 9 - 17 Nov), which started from
-> Handover 19. Everything S21 built is on the preview branch `claude/sales-raptor-review-p1pzx2`, and so are the
-> builder's runs R-30, R-32, R-34 and R-35 that landed while it ran. The next session is **S22**; it starts from
-> Handover 20, writes Handover 21, and its commits start **`Raptor H20: ...`**.
+> **Raptor Handover 21**, written by **S22** (branch `claude/loving-rubin-rbyjsn`, 17 - 24 Nov), which started from
+> Handover 20. S22's branch starts from the preview branch `claude/sales-raptor-review-p1pzx2` at `2b21ff6` and adds
+> its own commits on top; **it is not yet merged into the preview branch** -- merge it (no conflicts expected unless
+> another session touched `schema.sql`) before or as S23 begins. The next session is **S23**; it starts from
+> Handover 21, writes Handover 22, and its commits start **`Raptor H21: ...`**.
 > **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
 
-## START HERE (S22) -- what is open (Raptor · Handover 20, 17 Nov)
+## HOW STEPHAN WANTS TO WORK NOW (18 Nov, S22)
+
+*"I don't want to approve all this SQL stuff all the time. So push everything just through ... I don't want to approve
+shit. I just want you to build it."* So: **build, test on staging, commit and push without asking.** Ask only where
+the answer changes money or the law, and then as options with a recommendation (he answers those quickly). The
+approval prompts are the session's permission mode -- he can pick **Auto** in the mode dropdown; a session cannot
+grant itself permissions (the classifier refused it), and the committed `.claude/settings.json` is shared with
+Ryno's sessions, so do not widen it there. **`Main` is the live site: do not push app code to it until production's
+database has been rebuilt (item 1 below)** -- code before database breaks the live site. He knows this and was told.
+
+## START HERE (S23) -- what is open (Raptor · Handover 21, 24 Nov)
+
+1. **PRODUCTION REBUILD, THEN `Main` -- still waiting for the words "go ahead with the production rebuild".** Nothing
+   changed on production in S22. The rebuild and its rehearsal are as Handover 20 item 1 says (below), **but
+   `schema.sql` grew a lot in S22** (three settlement migrations, two engine functions rewritten, the mail work needed
+   none), so: re-take the backup, reload the statements, dry-run, rebuild the allow-list, then the real run. Then the
+   code onto `Main`, the production env vars, the Resend webhook. Also seed on production what S22 seeded on staging
+   as data: `scripts/letters/seed-settlement-answers.mjs` (six letters + six emails) BEFORE the three settlement
+   workflows are created -- the rebuild's replay creates the workflows from `schema.sql`, which looks the templates up
+   by seed_key, so seed first or re-point the nodes after. And ask about copying the firm's own templates/workflows/
+   letterhead (Handover 20 item 3).
+2. **The 20 TB going-live data plan -- waiting on Stephan.** Discussed 17-20 Nov, nothing built. Where it stands:
+   - Case data into Supabase; PDFs in object storage indexed by a Raptor table; 3-2-1 backups.
+   - **POPIA does not require South Africa** (s72 allows offshore with a binding data-processing agreement; the 2024
+     National Data and Cloud Policy binds only government security data). Stephan proposed **tiering** -- live files
+     in the cloud, closed files archived -- and S22 recommended: archive **6 months after an account closes**, keep
+     **7 years after the last entry** (LPC rule 54.9.2; FICA is 5), then destroy (POPIA s14) on an approved list.
+     With the split, staying in SA is cheap: Azure South Africa North (Cool) for live + Azure Archive, about
+     **R1,800-2,500/month** for ~4 TB live + ~16 TB archive, plus offline drives in the safe. Overseas: Backblaze B2 or
+     R2 + Glacier Deep Archive, about R800-1,400/month. Prices partly estimated; get quotes before he commits.
+   - Swordfish is hosted at **Teraco**. Plan: a Swordfish **database backup** for the written data, the PDFs copied
+     off (direct transfer from Teraco and/or drives -- the drives become the offline copy).
+   - **Needed from Stephan:** the Swordfish export/backup and its database type; how the PDFs map to cases (folder
+     names?); how much of the 20 TB is open vs closed accounts; SA or overseas; 6 months or other before archiving.
+   - **To build when he says go:** a documents table with a storage tier, the monthly archive job, a "Get this back"
+     restore, restore on reopen, the 7-year destruction list, and the import tool (test on ~1 000 cases on staging).
+3. **Settlements -- built in S22, on staging; Camille/Rinda should test the whole cycle** (detail in the S22 section
+   below): offer (amount or **discount %**) -> **ticket + high-priority notification to the client's liaison** ->
+   **proposal letter to the client** (frozen figures, pro-rata split, what the client receives) -> client's answer
+   recorded (accepted / **counter offer** / declined) -> **debtor emailed the matching letter, free** -> paid in one
+   payment -> **pro-rata posting** (`v2-settlement`) -> close as settled. While an offer is live the account's other
+   workflows **pause**, and go back if it is declined, withdrawn or lapses. Open questions for Stephan: re-approving a
+   lapsed offer sends no new letter (should it?); a run a dispute already held gets no settlement hold; the RVC0010
+   balance gap (offer R2 500 "instead of R3 217.70" but only R1 833.56 collectable -- why does the account's balance
+   carry R1 384 the engine cannot take?); the proposal letter's wording is S22's draft from his description -- he may
+   send the firm's own to match.
+4. **Mail like Outlook -- built in S22, on staging; Stephan should try it**: the rest of the conversation stacked under
+   an open message; replies carry the original underneath, editable (fill in a client's table), under Outlook's
+   header; signature between the note and the quote; the corrections email's squashed columns fixed. Account-page
+   replies quote the stored TEXT (account emails keep no HTML), so a table there is not a table.
+5. **Swordfish suspense import** -- still waiting on his export file and answers (Handover 20 item 4).
+6. **Known failing tests that predate S22**: `e2e/query-ticket` ("our own reference" -- expects the old RAP- format);
+   `e2e/record-email` ("reply all opens the composer with a Cc line"); `e2e/change-requests` two failures (Handover 20
+   item 6). Fix the tests where the app is right.
+7. **Still open from Handover 20** (not touched by S22): `/api/email/sync` timing out at 300 s; one wording for a
+   payment's status across Trust; item 6 correspondence fees on accounts closed paid up (R-35); and everything Handover
+   20 carried from 19 (Camille testing backdated corrections, S20's open questions, mail folder -> client address
+   auto-filing, R-23/R-24, debtor offers under Disputes, the ideas list).
+
+### What S22 built (each has its notes in the S22 section below)
+
+| Piece | Staging migration(s) / files | Check |
+|---|---|---|
+| Settlement ticket + liaison notification; proposal letter with the engine's figures | `h20_preview_for_settlement`, `h20_settlement_ticket`; `settlementProposalLetter.ts` | `check-settlement-ticket` |
+| Frozen at the offer, pro-rata posting, discount %, debtor told the answer (free), counter offers | `h20_settlement_rounds`; `payment_split` in `allocate_payment` + `preview_allocation`; letters via `seed-settlement-answers.mjs` | `check-settlement-ticket`, `check-letters` |
+| Offer pauses the workflows; declined / withdrawn / lapsed gives them back | `h20_settlement_holds`; `settlement_lapsed_resume` in the morning sweep | `check-settlement-ticket`, `check-workflow-hold-clock` |
+| Mail like Outlook | `ConversationBelow`, `replyQuoteHtml`, `QUOTE_MARK` | `check-outlook-reply`, e2e `mail-conversations` |
+
+Every staging function body was md5-verified against `schema.sql` (comments stripped). Full fast QA green at the end
+of S22: **24 176 checks across 398 files**.
+
+## START HERE (S22) -- what was open when S22 began (Raptor · Handover 20, 17 Nov; superseded by the list above)
 
 1. **PRODUCTION'S DATABASE IS REHEARSED AND WAITING FOR STEPHAN'S WORD.** He asked (9 Nov) for production to "look
    exactly the same" as staging and chose **code + database structure** -- production keeps its people, the real book
