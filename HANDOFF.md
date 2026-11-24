@@ -9,6 +9,17 @@
 > **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
 
+## Raptor · Handover 21 -- the staging clock jump, faster (24 Nov, session "Rinda Test 5")
+
+Stephan: "the clock move is taking long". Measured on staging: a month's jump (11 Jan -> 11 Feb 2027) took ~9 minutes,
+~18 s per staging day. Each day re-decides the same ~54 due/held steps on 14 accounts, one after another, and each step
+is 3-4 rounds of reads at ~250 ms a round trip (1-13 ms inside the database -- the time is the queue of round trips).
+Now, in a JUMP only (`skipSends`), the sweep decides up to `JUMP_ACCOUNTS` (6) accounts at once; one account's steps
+stay strictly in order (email before the SMS that refers to it). A real morning, which sends, is unchanged and still
+one step at a time. Check: check-workflow-transport. **Not done, worth doing if it is still slow:** the per-step reads
+of profiles / message_templates / firm_settings / workflow_nodes could be read once per sweep; 35 of the 45 held steps
+are waiting for a person and cannot change during a jump, so a jump could skip re-asking them.
+
 ## Raptor · Handover 21 -- receipt fee and in duplum (23 Nov, session "Rinda Test 5", branch `claude/wizardly-turing-d3kwf6`, NOT yet on the preview branch)
 
 Staging only; production and `Main` untouched. Stephan compared DCR1970's Raptor statement (-R51,36) with Swordfish's

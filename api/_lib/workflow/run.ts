@@ -147,6 +147,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.status(200).json({ ok: true, ...result, handout })
 }
 
+/* How many accounts a staging clock jump decides at once -- see the sweep. Each step already fans out about a dozen
+   reads, so six accounts is around seventy requests in flight: well inside what the database answers in parallel, and
+   most of the line the jump was waiting in. */
+const JUMP_ACCOUNTS = 6
+
 export interface SweepOptions {
   accountIds: string[]
   /** The firm's day, yyyy-mm-dd -- firmClock's, so the staging clock's on staging. */
@@ -290,8 +295,8 @@ export async function sweep(admin: SupabaseClient, options: SweepOptions) {
    */
   const startedAt = Date.now()
   let left = 0
-  for (const step of steps) {
-    if (Date.now() - startedAt > budgetMs) { left += 1; continue }
+  const decide = async (step: DueStep) => {
+    if (Date.now() - startedAt > budgetMs) { left += 1; return }
     try {
       const what = await runOneStep(admin, step, today, undefined, { now, skipSends })
       outcome[what.result] += 1
@@ -308,6 +313,39 @@ export async function sweep(admin: SupabaseClient, options: SweepOptions) {
       outcome.failed += 1
       outcome.notes.push(`${step.id}: ${e instanceof Error ? e.message : String(e)}`)
     }
+  }
+
+  /*
+   * A CLOCK JUMP DECIDES SEVERAL ACCOUNTS AT ONCE; A REAL MORNING STILL GOES ONE STEP AT A TIME.
+   *
+   * THE FIRM, 24 Nov (Raptor H21): "the clock move is taking long." Measured: a month's jump took nine minutes,
+   * eighteen seconds a staging day -- every day re-decides the same fifty-odd due and held steps, and each step is three
+   * or four rounds of reads at about a quarter of a second each, one step after another. Inside the database those
+   * reads take one to thirteen milliseconds; the time is the round trips, queued in a line.
+   *
+   * IN A JUMP NOTHING IS SENT (skipSends), so there is no mailbox, gateway or rate limit for parallel steps to trip
+   * over, and different accounts share nothing a step writes. So the accounts are worked JUMP_ACCOUNTS at a time --
+   * and the steps of ONE account still strictly in the order above, because that order is the email before the SMS
+   * that says "we have emailed you". A real morning keeps the single line it has always had: there a step is a
+   * send, and two sends from one collector's mailbox at once is a question nobody has asked the provider.
+   */
+  if (skipSends) {
+    const byAccount = new Map<string, DueStep[]>()
+    for (const step of steps) {
+      const key = step.workflow_runs.account_id
+      const list = byAccount.get(key)
+      if (list) list.push(step)
+      else byAccount.set(key, [step])
+    }
+    const queue = [...byAccount.values()]
+    const worker = async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) {
+        for (const step of next) await decide(step)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(JUMP_ACCOUNTS, queue.length) }, worker))
+  } else {
+    for (const step of steps) await decide(step)
   }
 
   return {
