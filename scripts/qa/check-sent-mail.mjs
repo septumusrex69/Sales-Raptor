@@ -182,13 +182,14 @@ const box = readFileSync(new URL('../../src/components/ComposeEmailModal.tsx', i
  * that is what it asks now.
  */
 ok('the typed note and the original are joined on send',
-  /bodyHtml: [^\n]*\(quotedHtml \? \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(box))
+  /bodyHtml: emailBodyHtml\(body\)[\s\S]{0,80}\(quotedHtml \? QUOTE_MARK \+ \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''\)/.test(box))
 ok('...and the note is rendered rather than concatenated raw',
   /bodyHtml: emailBodyHtml\(body\)/.test(box))
 /* A forward may go out with nothing typed above it -- the original IS the message. Before this,
    "send" did nothing at all and said nothing about why. */
+/* S22: a REPLY may too, once its original has been edited (a client's table filled in) -- see check-outlook-reply. */
 ok('a forward can go with no covering note',
-  /\(!body\.trim\(\) && !quotedHtml\)/.test(box))
+  /\(!body\.trim\(\) && \(!quotedHtml \|\| \(quoteKind === 'reply' && quoteTick === 0\)\)\)/.test(box))
 ok('...but an ordinary message still needs words', /required=\{!quotedHtml\}/.test(box))
 
 const page = readFileSync(new URL('../../src/pages/mail/MailPage.tsx', import.meta.url), 'utf8')

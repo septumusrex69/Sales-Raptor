@@ -1,6 +1,6 @@
 import { dropDraft, listDrafts, type MailDraft } from '../../lib/mailDrafts'
 import { groupConversations, type Conversation } from '../../lib/mailConversations'
-import { ConversationTrail } from '../../components/email/ConversationTrail'
+import { ConversationTrail, useConversationTrail } from '../../components/email/ConversationTrail'
 import {
   createMailFolder, fetchMailFolders, folderNameProblem, moveMailToFolder, removeMailFolder, updateMailFolder,
   type MailFolder,
@@ -13,6 +13,7 @@ import {
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
   Filter, Info, UserPlus, Folder, FolderInput, FolderPlus, Settings2, MessagesSquare,
+  Send,
 } from 'lucide-react'
 import { Avatar } from '../../components/ui/Avatar'
 import { Card } from '../../components/ui/Card'
@@ -35,7 +36,7 @@ import { agoLabel, relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
-  bumpUnread, companyFromDomain, forwardQuoteHtml, forwardSubject, forwardTextHtml, recipientLine,
+  bumpUnread, companyFromDomain, forwardQuoteHtml, forwardSubject, forwardTextHtml, recipientLine, replyQuoteHtml,
   recipientSummary,
   replyAllTo, splitPersonName,
 } from '../../lib/emailRules'
@@ -358,6 +359,13 @@ export function MailPage() {
    */
   const [linkThenReply, setLinkThenReply] = useState(false)
   const [replying, setReplying] = useState<MailItem | null>(null)
+  /*
+   * THE MESSAGE BEING ANSWERED, UNDER THE REPLY, LIKE OUTLOOK (S22 · Raptor H20). Stephan: "I can't respond and edit
+   * something on the response ... Can you do it like Outlook, please?" The original goes underneath in the same
+   * editable box a forward uses -- so the client's own table can be filled in and sent back. The box opens at once
+   * and the original fills in when it arrives, as startForward does; a body already read is used straight away.
+   */
+  const [replyQuote, setReplyQuote] = useState<{ id: string; html: string | null; loading: boolean } | null>(null)
   /** Whether the open reply is answering everybody. Decides the Cc the composer opens with. */
   const [replyAll, setReplyAll] = useState(false)
   /*
@@ -1273,6 +1281,34 @@ export function MailPage() {
     }
   }
 
+  useEffect(() => {
+    if (!replying) { setReplyQuote(null); return }
+    const m = replying
+    const quote = (html: string | null | undefined, text: string | null | undefined, images: InlineImage[] | undefined,
+      complete: boolean) => replyQuoteHtml({
+      fromName: m.fromName, fromAddress: m.fromAddress, subject: m.subject, occurredAt: m.occurredAt,
+      to: (m.toRecipients?.length ? m.toRecipients : [{ address: m.toAddress, name: m.toName }])
+        .map((r) => r.address ?? '').filter(Boolean),
+      cc: (m.ccRecipients ?? []).map((r) => r.address ?? '').filter(Boolean),
+    }, html?.trim()
+      /* Somebody else's markup, so through the reading pane's own deny-list -- see startForward. */
+      ? sanitizeEmailFragment(html, { images, showPictures: true }).html
+      : forwardTextHtml(text ?? m.snippet ?? '', complete))
+    if (htmlBodies[m.id] !== undefined || bodies[m.id] !== undefined) {
+      setReplyQuote({ id: m.id, html: quote(htmlBodies[m.id], bodies[m.id], bodyImages[m.id], bodies[m.id] !== undefined), loading: false })
+      return
+    }
+    setReplyQuote({ id: m.id, html: null, loading: true })
+    const token = session?.access_token
+    if (!token) { setReplyQuote({ id: m.id, html: quote(null, m.snippet, undefined, false), loading: false }); return }
+    let live = true
+    fetchMailBody(m.id, token)
+      .then((full) => { if (live) setReplyQuote({ id: m.id, html: quote(full.html, full.text, full.images, !!full.text), loading: false }) })
+      .catch(() => { if (live) setReplyQuote({ id: m.id, html: quote(null, m.snippet, undefined, false), loading: false }) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per message answered; the bodies are read, not watched
+  }, [replying?.id])
+
   /**
    * DONE, OR NOT DONE AFTER ALL, for one message (S16).
    *
@@ -1930,6 +1966,10 @@ export function MailPage() {
                   onCreateLead={() => setCreatingLead(m)}
                   onFolder={() => setFoldering([m])}
                   sticky
+                  below={currentUser ? (
+                    <ConversationBelow mail={m} onPage={threadOf.get(m.id)?.members ?? []} userId={currentUser.id}
+                      mine={mine} token={session?.access_token ?? null} onOpen={openFromTrail} />
+                  ) : null}
                   fetchAttachment={(f) => attachmentOf(m, f)} />
               </div>
             )}
@@ -2237,13 +2277,11 @@ export function MailPage() {
            * has not been fetched -- 240 characters of it is still the difference between knowing
            * what you are answering and guessing.
            */
-          quoted={bodies[replying.id] ?? replying.snippet ?? undefined}
-          /*
-           * The box starts empty, on purpose, exactly as it does on the account page. A debtor's
-           * reply already carries their own client's quoted chain, so quoting it again opens the
-           * message with two layers of "> " before the agent has typed a word — and the message
-           * being answered is on the page behind this modal anyway.
-           */
+          /* THE ORIGINAL UNDERNEATH, EDITABLE, LIKE OUTLOOK (S22) -- see replyQuote above. The box above still starts
+             empty: nothing is pasted into what somebody types, which is what the old "> " quoting got wrong. */
+          quoteKind="reply"
+          quotedHtml={replyQuote?.id === replying.id && !replyQuote.loading ? (replyQuote.html ?? undefined) : undefined}
+          quotedLoading={replyQuote?.id === replying.id && replyQuote.loading}
           inReplyTo={replying.messageId}
           /*
            * Three different truths, and the agent should know which one applies before typing.
@@ -2946,12 +2984,105 @@ function EmailFrame({ html }: { html: string }) {
   )
 }
 
+/**
+ * THE REST OF THE CONVERSATION, UNDER THE OPEN MESSAGE, LIKE OUTLOOK'S READING PANE (S22 · Raptor H20).
+ *
+ * Stephan: "If I open an email and I scroll down, I want to see all relevant emails pertaining to that email in the
+ * scroll down." So every other message of the trail is stacked below this one, newest first -- the order you read
+ * back through a conversation in -- each as a heading (who, when, the first line) that opens in place to the whole
+ * message. The one just before this message opens by itself; the rest wait to be asked, because each body is read
+ * from the mailbox server and a thirty-message trail would be thirty fetches nobody asked for.
+ *
+ * ALWAYS, not only in conversation mode: the mode groups the LIST; this is about reading one message. The trail is
+ * the same rule as the list's (useConversationTrail): the subject without its Re:/Fw:, among people in common. Bodies
+ * go through the reading pane's own sanitiser into the same sandboxed frame, pictures held back as there.
+ */
+function ConversationBelow({ mail, onPage, userId, mine, token, onOpen }: {
+  mail: MailItem
+  onPage: MailItem[]
+  userId: string
+  mine: (string | null | undefined)[]
+  token: string | null
+  onOpen: (m: MailItem) => void
+}) {
+  const { trail, loading } = useConversationTrail(mail, onPage, userId, mine)
+  const others = useMemo(() => trail.filter((m) => m.id !== mail.id)
+    .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)), [trail, mail.id])
+  /* The message just before the open one opens by itself: it is nearly always the one this answers. */
+  const firstEarlier = others.find((m) => Date.parse(m.occurredAt) <= Date.parse(mail.occurredAt)) ?? others[0]
+  const [opened, setOpened] = useState<Set<string>>(new Set())
+  useEffect(() => { setOpened(new Set(firstEarlier ? [firstEarlier.id] : [])) }, [mail.id, firstEarlier?.id])
+  if (others.length === 0) {
+    return loading ? <p className="mt-6 flex items-center gap-1.5 text-[12px] text-slate-400"><Loader2 size={12} className="animate-spin" /> Reading the rest of the conversation…</p> : null
+  }
+  return (
+    <section className="mt-8 mb-2" data-testid="conversation-below">
+      <p className="mb-2 flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide text-slate-500">
+        Earlier and later in this conversation · {others.length}
+        {loading && <Loader2 size={11} className="ml-1 animate-spin text-slate-400" />}
+      </p>
+      <ol className="space-y-2">
+        {others.map((m) => (
+          <TrailMessage key={m.id} mail={m} token={token} open={opened.has(m.id)}
+            onToggle={() => setOpened((s) => { const n = new Set(s); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n })}
+            onOpen={() => onOpen(m)} />
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+/** One message of the trail below the open one: its heading, and the whole message once opened. */
+function TrailMessage({ mail, token, open, onToggle, onOpen }: {
+  mail: MailItem; token: string | null; open: boolean; onToggle: () => void; onOpen: () => void
+}) {
+  const [full, setFull] = useState<{ text: string; html: string; images: InlineImage[] } | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (!open || full || !token) return
+    let live = true
+    fetchMailBody(mail.id, token)
+      .then((b) => { if (live) setFull({ text: b.text, html: b.html, images: b.images }) })
+      .catch(() => { if (live) setFailed(true) })
+    return () => { live = false }
+  }, [open, full, token, mail.id])
+  const safe = useMemo(() => (full?.html?.trim() ? sanitizeEmailHtml(full.html, { images: full.images, showPictures: false }) : null), [full])
+  const who = mail.isSent ? `You \u2192 ${mail.toName || mail.toAddress || ''}` : (mail.fromName || mail.fromAddress)
+  return (
+    <li className="rounded-lg border border-slate-200 bg-white" data-testid="trail-message">
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        className="w-full flex items-baseline gap-2 px-3 py-2 text-left text-[13px] hover:bg-slate-50">
+        {mail.isSent && <Send size={12} className="shrink-0 self-center text-slate-400" aria-label="Sent" />}
+        <span className="shrink-0 max-w-[14rem] truncate font-medium text-slate-800">{who}</span>
+        {!open && <span className="min-w-0 flex-1 truncate text-slate-400">{mail.snippet ?? ''}</span>}
+        {open && <span className="flex-1" />}
+        <span className="shrink-0 tabular-nums text-[12px] text-slate-400">
+          {new Date(mail.occurredAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 px-3 py-3">
+          {!full && !failed && <p className="flex items-center gap-1.5 text-[12px] text-slate-400"><Loader2 size={12} className="animate-spin" /> Reading the message…</p>}
+          {failed && <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{mail.snippet}<span className="block text-xs text-gold-600 mt-1">The mailbox could not be reached; this is the part Raptor saved.</span></p>}
+          {full && safe && <EmailFrame html={safe.html} />}
+          {full && !safe && <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{full.text || mail.snippet}</p>}
+          <button type="button" onClick={onOpen} className="mt-2 text-xs font-medium text-[var(--c-steel)] hover:underline">
+            Open this message
+          </button>
+        </div>
+      )}
+    </li>
+  )
+}
+
 function MailBody({
   mail, body, html, showPictures, onShowPictures,
   images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onDone,
-  onLink, onCreateLead, fetchAttachment, sticky, onFolder,
+  onLink, onCreateLead, fetchAttachment, sticky, onFolder, below,
 }: {
+  /** The rest of the conversation, under the message and above the floating bar (S22). */
+  below?: ReactNode
   /** Into one of the person's own folders, or out of them (R-13, S19). */
   onFolder?: () => void
   mail: MailItem
@@ -3299,6 +3430,8 @@ function MailBody({
           </p>
         </>
       )}
+
+      {below}
 
       {sticky && <MessageActions {...bar} />}
 

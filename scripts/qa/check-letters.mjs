@@ -54,6 +54,11 @@ const WANTED = [
   /* S15: and the settlement confirmation, attached by the "Settlement letter" workflow ("yes make
      settlement letter"). */
   'letter-settlement-individual', 'letter-settlement-company',
+  /* S22 · Raptor H20: the client's answer to an offer, each attached by its own one-step workflow (Stephan, 18 Nov:
+     "your settlement has been accepted, or ... rejected, or a counter offer was made"). */
+  'letter-settlement-accepted-individual', 'letter-settlement-accepted-company',
+  'letter-settlement-countered-individual', 'letter-settlement-countered-company',
+  'letter-settlement-declined-individual', 'letter-settlement-declined-company',
 ]
 /*
  * AND THE FOUR THAT ARE NOT NOTICES. They live in the same file and are a different animal:
@@ -73,7 +78,7 @@ const BY_HAND = [
   'letter-affordability-individual', 'letter-affordability-company',
 ]
 
-check('the twelve letters the workflow attaches are all there',
+check('the eighteen letters the workflow attaches are all there',
   Object.keys(letters).filter((k) => !BY_HAND.includes(k)).sort(), [...WANTED].sort())
 /* AND THE FOUR SIGNED DOCUMENTS ARE BUILT. Asserted here as well as in check-aod and
    check-affordability, because this is the file that knows what letters.json should contain. */
@@ -167,9 +172,14 @@ for (const key of WANTED) {
  */
 /* THE NOTICES THAT ASK FOR MONEY. The paid-up confirmation asks for none, so it names no account at all
    -- printing the trust account on a letter saying nothing is owing would invite a payment nobody owes. */
-const DEMANDS = WANTED.filter((key) => !key.startsWith('letter-paid-up-') && !key.startsWith('letter-settlement-'))
+/* THE CONFIRMATIONS are named exactly: the S22 answers to an offer (accepted / countered / declined) share the
+   letter-settlement- prefix but DO ask for money -- an accepted settlement is a payment to make by a date -- so a
+   prefix test would have kept the trust account off the one letter that most needs it. */
+const CONFIRMATION = (key) => key.startsWith('letter-paid-up-')
+  || key === 'letter-settlement-individual' || key === 'letter-settlement-company'
+const DEMANDS = WANTED.filter((key) => !CONFIRMATION(key))
 ok('the paid-up and settlement confirmations name no bank account',
-  WANTED.filter((k) => k.startsWith('letter-paid-up-') || k.startsWith('letter-settlement-')).every((k) => !/\{\{firm_(business_)?bank/.test(JSON.stringify(letters[k] ?? {}))))
+  WANTED.filter(CONFIRMATION).every((k) => !/\{\{firm_(business_)?bank/.test(JSON.stringify(letters[k] ?? {}))))
 const bankFields = DEMANDS.map((key) => {
   const text = spansOf(letters[key]).map((s) => s.text).join(' ')
   return [...new Set([...text.matchAll(/\{\{(firm_bank[a-z_]*)\}\}/g)].map((m) => m[1]))].sort().join(',')

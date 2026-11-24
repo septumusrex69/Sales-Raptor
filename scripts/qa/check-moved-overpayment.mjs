@@ -56,7 +56,8 @@ const alloc = liveFn('allocate_payment')
 ok('a moved payment is charged no receipt fee',
   /if v_pay\.moved_from_allocation_id is not null then v_fee_rate := 0; end if;/.test(alloc))
 ok('...set before the split is worked out', alloc.indexOf('v_fee_rate := 0') >= 0
-  && alloc.indexOf('v_fee_rate := 0') < alloc.indexOf('public.finance_split('))
+  /* payment_split since S22: it chooses the 50/50 split or a settlement's pro-rata one. */
+  && alloc.indexOf('v_fee_rate := 0') < alloc.indexOf('public.payment_split('))
 ok('...and writes no nil fee row', /if v_fee_rate > 0 then\s*insert into public\.account_fees/.test(alloc))
 
 /* ---- 3. not counted twice ---- */

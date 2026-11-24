@@ -42,7 +42,7 @@ check('the compose box saves as it is typed, after a pause', /saveDraft\(\{ key:
 check('...offers it back when the same box opens', /findDraft\(draftKey\)/.test(compose) && /data-testid="draft-restore"/.test(compose), true)
 check('...and drops it once sent, before saying so', compose.indexOf('dropDraft(draftKey)\n      onSent(') > 0, true)
 check('the forwarded original is shown, and editable', /contentEditable=\{!quotedLoading\}/.test(compose), true)
-check('...and what is SENT is what the box holds', /quotedHtml \? \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''/.test(compose), true)
+check('...and what is SENT is what the box holds', /quotedHtml \? QUOTE_MARK \+ \(quoteRef\.current\?\.innerHTML \?\? quotedHtml\) : ''/.test(compose), true)
 check('Send waits while the original is still on its way', /disabled=\{submitting \|\| fetchingForward \|\| quotedLoading\}/.test(compose), true)
 const modal = strip(fs.readFileSync('src/components/ui/Modal.tsx', 'utf8'))
 check('Backspace outside a box you type in never means Back inside a dialog',

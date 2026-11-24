@@ -9,14 +9,13 @@ import { conversationSubject, inConversation } from '../../lib/mailConversations
  * messages on this page at once, and the rest of the mailbox (sent replies, older pages) read in behind them. A tap
  * opens one in place. Nothing is drawn for a message with no trail: a strip saying "1 message" is furniture.
  */
-export function ConversationTrail({ mail, onPage, userId, mine, onOpen }: {
-  mail: MailItem
-  /** The trail's messages already in the list. */
-  onPage: MailItem[]
-  userId: string
-  mine: (string | null | undefined)[]
-  onOpen: (m: MailItem) => void
-}) {
+/**
+ * THE TRAIL A MESSAGE BELONGS TO, oldest first -- the messages on the page at once, the rest of the mailbox read in
+ * behind them. One rule for both views of it: the strip above the open message, and the messages stacked under it
+ * (S22, Outlook's reading pane). `loading` while the mailbox is still being read.
+ */
+export function useConversationTrail(mail: MailItem, onPage: MailItem[], userId: string,
+  mine: (string | null | undefined)[]): { trail: MailItem[]; loading: boolean } {
   const [found, setFound] = useState<MailItem[] | null>(null)
   const core = conversationSubject(mail.subject)
   useEffect(() => {
@@ -44,8 +43,21 @@ export function ConversationTrail({ mail, onPage, userId, mine, onOpen }: {
     return [...byId.values()].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
   }, [mail, onPage, found, mine])
 
+  return { trail, loading: found === null }
+}
+
+export function ConversationTrail({ mail, onPage, userId, mine, onOpen }: {
+  mail: MailItem
+  /** The trail's messages already in the list. */
+  onPage: MailItem[]
+  userId: string
+  mine: (string | null | undefined)[]
+  onOpen: (m: MailItem) => void
+}) {
+  const { trail, loading } = useConversationTrail(mail, onPage, userId, mine)
+
   if (trail.length < 2) {
-    return found === null && onPage.length > 1
+    return loading && onPage.length > 1
       ? <p className="mb-3 flex items-center gap-1.5 text-[12px] text-slate-400"><Loader2 size={12} className="animate-spin" /> Reading the conversation…</p>
       : null
   }
@@ -53,7 +65,7 @@ export function ConversationTrail({ mail, onPage, userId, mine, onOpen }: {
     <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60" data-testid="conversation-trail">
       <p className="flex items-center gap-1.5 px-3 pt-2 text-[11.5px] font-medium uppercase tracking-wide text-slate-500">
         <MessagesSquare size={13} /> In this conversation · {trail.length}
-        {found === null && <Loader2 size={11} className="ml-1 animate-spin text-slate-400" />}
+        {loading && <Loader2 size={11} className="ml-1 animate-spin text-slate-400" />}
       </p>
       <ol className="py-1">
         {trail.map((m) => {

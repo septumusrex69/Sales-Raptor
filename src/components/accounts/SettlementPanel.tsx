@@ -8,12 +8,15 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { firmToday } from '../../lib/dateLabels'
 import {
-  SETTLEMENT_STATE_LABEL, isPaidInFull, type Settlement,
+  SETTLEMENT_STATE_LABEL, isPaidInFull, writtenOff, type Settlement, type SettlementBreakdown,
 } from '../../lib/settlement'
 import {
-  approveSettlement, closeAsSettled, closeSettlementOffer, fetchPinnableEmails, fetchSettlementProof,
-  proposeSettlement, type PinnableEmail, type SettlementProof,
+  approveSettlement, closeAsSettled, closeSettlementOffer, fetchPinnableEmails, fetchSettlementBreakdown,
+  fetchSettlementProof, fetchSettlementQuote, proposeSettlement, proposeSettlementDiscount, type PinnableEmail,
+  type SettlementProof,
 } from '../../lib/settlementApi'
+import { nudgeWorkflowsForAccount } from '../../lib/accountRun'
+import { settlementProposalRefusal } from '../../lib/settlementProposalLetter'
 import { documentUrl, uploadDocument } from '../../lib/accountWorkspace'
 
 /**
@@ -30,7 +33,7 @@ import { documentUrl, uploadDocument } from '../../lib/accountWorkspace'
  * refusal is the database's, and this panel only spares somebody the trip.
  */
 export function SettlementPanel({
-  accountId, settlement, balance, open, canApprove, canClose, userId, nameOf, onChange,
+  accountId, settlement, balance, open, canApprove, canClose, userId, nameOf, onChange, onSendProposal,
 }: {
   accountId: string
   settlement: Settlement | null
@@ -45,6 +48,12 @@ export function SettlementPanel({
   userId: string | null
   nameOf: (id: string | null) => string | null
   onChange: () => void
+  /**
+   * OPEN THE COMPOSE BOX WITH THE PROPOSAL LETTER ATTACHED (S22 · Raptor H20). The account page owns the compose box
+   * -- it is the one path that sends from the liaison's mailbox, files the message and raises item 1(a) -- so this
+   * panel hands it the offer and the engine's figures and the page draws and attaches the letter.
+   */
+  onSendProposal?: (s: Settlement, b: SettlementBreakdown) => Promise<void>
 }) {
   const [dialog, setDialog] = useState<'propose' | 'approve' | 'declined' | 'withdrawn' | 'settle' | null>(null)
   const s = settlement
@@ -52,6 +61,11 @@ export function SettlementPanel({
   if (!s && !open) return null
 
   const done = () => { setDialog(null); onChange() }
+  /* THE CLIENT'S ANSWER GOES TO THE DEBTOR NOW (S22): recording it starts the accepted / counter / declined
+     workflow in the database, and this sends its day-0 email straight away instead of at the morning run --
+     the debtor has a date to pay by, and a day's silence is a day off it. Fire and forget: the sweep is the
+     backstop. */
+  const answered = () => { done(); void nudgeWorkflowsForAccount(accountId).catch(() => {}) }
   const paid = isPaidInFull(s)
   const mayWithdraw = !!s && (canApprove || (s.state === 'proposed' && s.proposedBy === userId))
 
@@ -103,6 +117,9 @@ export function SettlementPanel({
             <Row label="Received towards it" value={`${rand(s.paidToward)} of ${rand(s.amount)}`} />
           )}
 
+          {s.state === 'proposed' && canApprove && (
+            <ProposalFigures settlement={s} onSend={onSendProposal} />
+          )}
           {s.state === 'proposed' && (
             <p className="text-[11px] text-slate-400">
               Put up by {nameOf(s.proposedBy) ?? 'somebody'} on {formatDate(s.proposedAt)}
@@ -156,16 +173,64 @@ export function SettlementPanel({
         <ProposeModal accountId={accountId} balance={balance} onClose={() => setDialog(null)} onDone={done} />
       )}
       {dialog === 'approve' && s && (
-        <ApproveModal settlement={s} onClose={() => setDialog(null)} onDone={done}
+        <ApproveModal settlement={s} onClose={() => setDialog(null)} onDone={answered}
           userId={userId} userName={nameOf(userId)} />
       )}
       {(dialog === 'declined' || dialog === 'withdrawn') && s && (
-        <CloseOfferModal settlement={s} as={dialog} onClose={() => setDialog(null)} onDone={done} />
+        <CloseOfferModal settlement={s} as={dialog} onClose={() => setDialog(null)} onDone={dialog === 'declined' ? answered : done} />
       )}
       {dialog === 'settle' && s && (
         <SettleModal settlement={s} onClose={() => setDialog(null)} onDone={done} />
       )}
     </Card>
+  )
+}
+
+/**
+ * WHAT THE OFFER WOULD PAY, BY THE ENGINE -- "an automatic calculation" (Stephan, 18 Nov). Shown to whoever records
+ * the client's answer, because it is what they will be asked: "what do I get out of it?" The figures are
+ * settlement_breakdown's, i.e. preview_allocation's, so the card, the letter and the payover say one thing.
+ */
+function ProposalFigures({ settlement, onSend }: {
+  settlement: Settlement
+  onSend?: (s: Settlement, b: SettlementBreakdown) => Promise<void>
+}) {
+  const [b, setB] = useState<SettlementBreakdown | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setB(null); setError(null)
+    fetchSettlementBreakdown(settlement.id)
+      .then((r) => { if (alive) setB(r) })
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)) })
+    return () => { alive = false }
+  }, [settlement.id, settlement.amount])
+  if (error) return <p className="text-[11px] text-[var(--c-rust-deep)]">{error}</p>
+  if (!b) return <p className="text-[11px] text-slate-400"><Loader2 size={11} className="inline animate-spin" /> Working out what it would pay…</p>
+  const off = writtenOff(b)
+  const refusal = settlementProposalRefusal(b)
+  return (
+    <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2 space-y-1" data-testid="settlement-figures">
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">If the client accepts</p>
+      <Row label="The client receives" value={rand(b.toClient)} strong
+        note={`${rand(b.toCapital)} to capital, less ${rand(b.commission + b.commissionVat)} commission and VAT`} />
+      <Row label="We take" value={rand(b.bfTakes)} note="fees, interest and commission" />
+      <Row label="Written off" value={rand(off.total)}
+        note={`${rand(off.byClient)} capital by the client, ${rand(off.byFirm)} fees and interest by us`} />
+      {refusal && <p className="text-[11px] text-[var(--c-rust-deep)]" data-testid="settlement-excess">{refusal}</p>}
+      {onSend && !refusal && (
+        <button type="button" disabled={busy} data-testid="settlement-send-proposal"
+          onClick={async () => {
+            setBusy(true); setError(null)
+            try { await onSend(settlement, b) } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+            finally { setBusy(false) }
+          }}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--c-steel)] hover:underline disabled:opacity-50">
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />} Send the proposal to the client
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -218,35 +283,78 @@ const parseAmount = (text: string) => {
   return Number.isFinite(n) ? n : NaN
 }
 
+/**
+ * PUT AN OFFER UP -- AS A FIGURE, OR AS A DISCOUNT (Stephan, 18 Nov: "Settlement should also be able to be proposed,
+ * for example, like 10% settlement discount"). The discount is worked out by the DATABASE on what can actually be
+ * collected (settlement_quote / propose_settlement_discount), not on the balance shown here, which can count fees
+ * the engine cannot take; the box shows that figure so the collector quotes nothing they have not seen.
+ */
 function ProposeModal({ accountId, balance, onClose, onDone }: {
   accountId: string; balance: number | undefined; onClose: () => void; onDone: () => void
 }) {
+  const [mode, setMode] = useState<'amount' | 'discount'>('amount')
   const [amount, setAmount] = useState('')
+  const [pct, setPct] = useState('')
   const [note, setNote] = useState('')
+  const [collectable, setCollectable] = useState<number | null>(null)
   const { busy, error, run } = useCall(onDone)
-  const n = parseAmount(amount)
-  const owed = balance ?? 0
-  const valid = n > 0 && n < owed
+  useEffect(() => {
+    let live = true
+    void fetchSettlementQuote(accountId).then((q) => { if (live) setCollectable(q) }).catch(() => {})
+    return () => { live = false }
+  }, [accountId])
+  /* What the offer is measured against: what can be collected where the database has said, else the balance. */
+  const owed = collectable ?? balance ?? 0
+  const p = parseAmount(pct)
+  const n = mode === 'discount' ? Math.round(owed * (1 - p / 100) * 100) / 100 : parseAmount(amount)
+  const valid = mode === 'discount' ? p > 0 && p < 100 && owed > 0 : n > 0 && n < owed
+  const tab = (m: 'amount' | 'discount', label: string) => (
+    <button type="button" onClick={() => setMode(m)} aria-pressed={mode === m}
+      className={`rounded-lg border px-2.5 py-1 text-[12.5px] ${mode === m ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600'}`}>
+      {label}
+    </button>
+  )
   return (
     <Modal title="Put an offer up for approval" subtitle="The client decides. Nobody quotes it until they do." onClose={onClose}>
       <div className="space-y-3">
-        <p className="text-sm text-slate-600">Balance today: <span className="font-medium tabular-nums">{rand(owed)}</span></p>
-        <FormField label="What the debtor offers to pay, once, in full" required>
-          <input className={inputClass} inputMode="decimal" value={amount} autoFocus
-            onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 18000" />
-        </FormField>
-        {amount.trim() !== '' && !valid && (
+        <p className="text-sm text-slate-600">
+          Can be collected today: <span className="font-medium tabular-nums">{rand(owed)}</span>
+          {collectable !== null && balance !== undefined && Math.abs(collectable - balance) >= 0.01 && (
+            <span className="block text-[11px] text-slate-400">The balance on the account reads {rand(balance)}; the offer is measured against what can actually be collected.</span>
+          )}
+        </p>
+        <div className="flex gap-2">{tab('amount', 'An amount')}{tab('discount', 'A discount %')}</div>
+        {mode === 'amount' ? (
+          <FormField label="What the debtor offers to pay, once, in full" required>
+            <input className={inputClass} inputMode="decimal" value={amount} autoFocus
+              onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 18000" />
+          </FormField>
+        ) : (
+          <FormField label="Discount on what can be collected" required>
+            <input className={inputClass} inputMode="decimal" value={pct} autoFocus data-testid="settlement-discount"
+              onChange={(e) => setPct(e.target.value)} placeholder="e.g. 10" />
+          </FormField>
+        )}
+        {mode === 'amount' && amount.trim() !== '' && !valid && (
           <p className="text-xs text-[var(--c-rust-deep)]">
-            {n >= owed ? 'That is the whole balance or more — a payment in full, not a settlement.' : 'Type an amount.'}
+            {n >= owed ? 'That is all that can be collected or more — a payment in full, not a settlement.' : 'Type an amount.'}
           </p>
         )}
-        {valid && <p className="text-xs text-slate-500">Written off if accepted: <span className="tabular-nums">{rand(owed - n)}</span></p>}
+        {valid && (
+          <p className="text-xs text-slate-500">
+            {mode === 'discount' && <>The debtor would pay <span className="font-medium tabular-nums">{rand(n)}</span>. </>}
+            Written off if accepted: <span className="tabular-nums">{rand(Math.round((owed - n) * 100) / 100)}</span>, shared
+            between the client and us in proportion to what each is owed.
+          </p>
+        )}
         <FormField label="Note for the liaison">
           <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. Offered on the call; can pay from a pension payout" />
         </FormField>
         <Footer busy={busy} error={error} ready={valid} label="Put it up" onClose={onClose}
-          onGo={() => run(() => proposeSettlement(accountId, n, owed, note))} />
+          onGo={() => run(() => mode === 'discount'
+            ? proposeSettlementDiscount(accountId, p, note)
+            : proposeSettlement(accountId, n, owed, note))} />
       </div>
     </Modal>
   )
@@ -323,12 +431,23 @@ function ApproveModal({ settlement, onClose, onDone, userId, userName }: {
   return (
     <Modal title="Record the client’s approval" subtitle="The figure becomes one collectors may quote, until the expiry." onClose={onClose}>
       <div className="space-y-3">
-        <FormField label="The figure the client accepts" required>
+        {/* A DIFFERENT FIGURE IS THE CLIENT'S COUNTER OFFER (S22): the debtor is sent the counter-offer letter, and
+            paying it in full by the date is their acceptance (Stephan's choice). */}
+        <FormField label="The figure the client accepts — change it if they made a counter offer" required>
           <input className={inputClass} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </FormField>
         <p className="text-xs text-slate-500">
           Against {rand(settlement.balanceAtOffer)} on {formatDate(settlement.balanceAsAt)}
           {n > 0 && n < settlement.balanceAtOffer ? ` — ${rand(settlement.balanceAtOffer - n)} written off` : ''}.
+          {settlement.state === 'proposed' && n > 0 && Math.abs(n - (settlement.offeredAmount ?? settlement.amount)) >= 0.005 && (
+            <span className="block font-medium text-[var(--c-gold-deep)]" data-testid="settlement-counter">
+              A counter offer: the debtor offered {rand(settlement.offeredAmount ?? settlement.amount)}. They are sent the
+              counter-offer letter, and paying {rand(n)} in full by the date accepts it.
+            </span>
+          )}
+          {settlement.state === 'proposed' && !(n > 0 && Math.abs(n - (settlement.offeredAmount ?? settlement.amount)) >= 0.005) && (
+            <span className="block">The debtor is emailed that their offer was accepted, with the letter, free.</span>
+          )}
         </p>
         <FormField label="Must be paid by" required>
           <input type="date" className={inputClass} min={today} value={expires} onChange={(e) => setExpires(e.target.value)} />

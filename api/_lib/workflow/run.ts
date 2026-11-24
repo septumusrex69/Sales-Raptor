@@ -188,6 +188,17 @@ export async function sweep(admin: SupabaseClient, options: SweepOptions) {
   const expired = await expireDefaultedPromises(admin, accountIds, now)
 
   /*
+   * A SETTLEMENT THAT LAPSED UNPAID GIVES THE ACCOUNT BACK TO ITS WORKFLOWS (S22 · Raptor H20). Stephan: "if it's been
+   * breached ... it should go back to the previous workflow it was in." Lapsed is derived -- an approved offer past its
+   * expiry -- so there is no moment in the database to hook; this is the moment. BEFORE redateResumedRuns below, so
+   * the steps it lets go are moved on by the days they were paused rather than sent in a bunch.
+   */
+  const { data: lapsedResumed, error: lapsedError } = await admin.rpc('settlement_lapsed_resume', {
+    p_accounts: accountIds && accountIds.length > 0 ? accountIds : null,
+  })
+  if (lapsedError) console.error('settlement_lapsed_resume:', lapsedError.message)
+
+  /*
    * DATE WHATEVER HAS NOT BEEN DATED, NEXT. A run created by the allocation trigger has no steps
    * at all until this happens -- so on a handover, planning and sending are the same pass and the
    * debtor hears from the firm within minutes rather than the next morning.
@@ -325,6 +336,7 @@ export async function sweep(admin: SupabaseClient, options: SweepOptions) {
        statutory sequence go again, and "whose 48 hours ran out on Tuesday" is a question asked
        long afterwards by somebody holding a file. */
     expired: expired.length,
+    settlementsLapsed: typeof lapsedResumed === 'number' ? lapsedResumed : 0,
     promisesKept: settled.filter((x) => x.action === 'keep').length,
     promisesMissed: settled.filter((x) => x.action === 'miss').length,
     /* REPORTED, because a pause moving dates is a thing somebody will be asked about. "Nine

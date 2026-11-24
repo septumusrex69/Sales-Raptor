@@ -163,7 +163,8 @@ ok('...and a written dispute leaves its acknowledgement alone',
 /* AND THE FIRST PROMISE STILL STOPS EVERYTHING ELSE, once per run ever -- the firm's own rule, and
    the thing the exclusion above must not have quietly widened. */
 ok('...while a promise still stops the sequences it is not answering',
-  /h\.cause = 'promise'/.test(hold) && /r\.state = 'running'/.test(hold))
+  /p_cause not in \('promise', 'settlement'\) or not exists \([\s\S]*?h\.cause = p_cause\)/.test(hold) && /r\.state = 'running'/.test(hold))
+/* S22: once per run is now written for both causes it applies to -- a promise and a settlement offer. */
 
 /*
  * AND A RESUME LIFTS ONLY THE HOLD IT IS ABOUT.

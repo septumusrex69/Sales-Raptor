@@ -50,7 +50,8 @@ const pending = lastFn('workflow_first_notice_pending')
 ok('a section 129 whose first notice has not gone is recognised',
   /n\.statutory/.test(pending) && /s\.state in \('sent', 'failed', 'skipped'\)/.test(pending))
 const hold = lastFn('workflow_hold_account')
-ok('...and a promise does not pause it yet', /and not \(p_cause = 'promise' and public\.workflow_first_notice_pending\(r\.id\)\)/.test(hold))
+ok('...and a promise does not pause it yet', /and not \(p_cause in \('promise', 'settlement'\) and public\.workflow_first_notice_pending\(r\.id\)\)/.test(hold))
+/* S22: a settlement offer follows the promise here -- the first notice still goes before anything pauses. */
 const after = lastFn('workflow_hold_after_first_notice')
 ok('once the day-1 notices are out, the promise pauses it',
   /s\.state in \('pending', 'held'\) and s\.due_on <= new\.due_on/.test(after)

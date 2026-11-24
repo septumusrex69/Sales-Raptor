@@ -23,6 +23,9 @@ export const NOTIFICATION_KINDS: NotificationKind[] = [
   { kind: 'handover', label: 'Accounts handed out', blurb: 'Accounts given to you from a batch, and a batch with problems or referrals.' },
   { kind: 'client', label: 'A client given to you', blurb: 'You are made the liaison on a client.' },
   { kind: 'query', label: 'Disputes and queries', blurb: 'A dispute or query given to you to answer.' },
+  /* S22 · Raptor H20: an offer put up for the client (to the liaison, high priority) and the client's answer (to whoever
+     put it up). Its own switch because muting disputes must not silence a debtor with money waiting. */
+  { kind: 'settlement', label: 'Settlements', blurb: 'A settlement offer waiting for your client’s approval, and the client’s answer to one you put up.' },
   { kind: 'workflow', label: 'Notice workflows', blurb: 'A notice step held and waiting on you.' },
   { kind: 'diary', label: 'Diary cover', blurb: 'Somebody else worked one of your accounts and moved its diary date.' },
   { kind: 'debtor', label: 'Debtor portal', blurb: 'A debtor’s question, arrangement offer or proof of payment.' },

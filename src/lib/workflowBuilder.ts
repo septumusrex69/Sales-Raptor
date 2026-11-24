@@ -37,6 +37,7 @@ export type TriggerKind =
   | 'handover' | 'allocated' | 'promise_due' | 'promise_broken' | 'arrangement_broken'
   | 'payment_received' | 'dispute_alleged' | 'dispute_logged' | 'no_contact' | 'trace_returned'
   | 'callback' | 'by_hand' | 'account_paid_up' | 'account_settled'
+  | 'settlement_accepted' | 'settlement_countered' | 'settlement_declined'
 
 export interface TriggerMeta {
   /** What the firm would call it, on the button. */
@@ -79,6 +80,11 @@ export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
   /* S15: AND THE SETTLEMENT LETTER, where the client agreed a settlement and it was paid ("yes make
      settlement letter"). settle_account starts one or the other, never both. */
   account_settled: { label: 'An agreed settlement is paid and closed', dayZero: 'the day it was closed' },
+  /* S22 · Raptor H20: THE CLIENT'S ANSWER TO A SETTLEMENT OFFER, to the debtor. Started by the database when the
+     liaison records it on the Settlement card -- a different figure from the debtor's is a counter offer. */
+  settlement_accepted: { label: 'The client accepts a settlement offer', dayZero: 'the day the answer was recorded' },
+  settlement_countered: { label: 'The client makes a counter offer', dayZero: 'the day the answer was recorded' },
+  settlement_declined: { label: 'The client declines a settlement offer', dayZero: 'the day the answer was recorded' },
   callback: { label: 'A callback is asked for', dayZero: 'the day it was asked for' },
   by_hand: { label: 'Somebody starts it on a file', dayZero: 'the day somebody started it' },
 }
@@ -87,7 +93,8 @@ export const TRIGGERS: Record<TriggerKind, TriggerMeta> = {
 export const TRIGGER_ORDER: TriggerKind[] = [
   'handover', 'allocated', 'promise_due', 'promise_broken', 'arrangement_broken',
   'payment_received', 'dispute_alleged', 'dispute_logged', 'no_contact', 'trace_returned',
-  'callback', 'account_paid_up', 'account_settled', 'by_hand',
+  'callback', 'settlement_accepted', 'settlement_countered', 'settlement_declined',
+  'account_paid_up', 'account_settled', 'by_hand',
 ]
 
 /**

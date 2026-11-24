@@ -72,7 +72,7 @@ ok('a missing field is named rather than counted', /setError\(`This needs \$\{mi
 ok('...and the three it can be are the three the form requires',
   /!address\.trim\(\) \? 'who it goes to'/.test(submit)
   && /!subject\.trim\(\) \? 'a subject'/.test(submit)
-  && /\(!body\.trim\(\) && !quotedHtml\) \? 'a message'/.test(submit))
+  && /\(!body\.trim\(\) && \(!quotedHtml \|\| \(quoteKind === 'reply' && quoteTick === 0\)\)\) \? 'a message'/.test(submit))
 
 /*
  * THE EXPIRED SESSION, which is the one that could not be guessed from the screen. An iPad left on

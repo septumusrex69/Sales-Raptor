@@ -102,7 +102,9 @@ const diary = Object.keys(DIARY_KINDS)
 const NOT_IN_THE_DIARY = ['handover', 'allocated', 'arrangement_broken', 'payment_received',
   'dispute_alleged', 'dispute_logged', 'trace_returned', 'by_hand',
   /* S15: closing an account paid up raises no work, only the letter. */
-  'account_paid_up', 'account_settled']
+  'account_paid_up', 'account_settled',
+  /* S22: the client's answer to a settlement offer raises no diary work either -- only the letter to the debtor. */
+  'settlement_accepted', 'settlement_countered', 'settlement_declined']
 for (const t of TRIGGER_ORDER) {
   if (NOT_IN_THE_DIARY.includes(t)) continue
   ok(`"${t}" is the diary's own word for it`, diary.includes(t))

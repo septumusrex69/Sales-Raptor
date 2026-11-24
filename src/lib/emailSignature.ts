@@ -63,8 +63,19 @@ export function signatureHtml(
  * Empty `style` leaves the HTML exactly as it was. A send must never fail, or change shape, over
  * a font.
  */
+/**
+ * WHERE THE QUOTED ORIGINAL BEGINS, in a reply or a forward (S22 · Raptor H20). Stephan: "Can you do it like Outlook,
+ * please?" Outlook signs between what you wrote and the message underneath; appended at the very end, the signature
+ * sat below a client's whole quoted chain where nobody would find it. The compose box puts this comment in front of
+ * the quote and composeBody signs there. An HTML comment, so a mail reader shows nothing for it.
+ */
+export const QUOTE_MARK = '<!--raptor-quote-->'
+
 export function composeBody(bodyHtml: string, signature: string, style?: string | null): string {
-  const joined = signature ? `${bodyHtml}<br><br>${signature}` : bodyHtml
+  const at = signature ? bodyHtml.indexOf(QUOTE_MARK) : -1
+  const joined = !signature ? bodyHtml
+    : at >= 0 ? `${bodyHtml.slice(0, at)}<br><br>${signature}${bodyHtml.slice(at)}`
+    : `${bodyHtml}<br><br>${signature}`
   return style ? `<div style="${style}">${joined}</div>` : joined
 }
 

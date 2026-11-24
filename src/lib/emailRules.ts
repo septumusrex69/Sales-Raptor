@@ -187,6 +187,46 @@ export function forwardQuoteHtml(
 }
 
 /**
+ * THE MESSAGE BEING ANSWERED, UNDER A REPLY, THE WAY OUTLOOK QUOTES IT (S22 · Raptor H20).
+ *
+ * Stephan, replying to the import-corrections table a client had sent back: "I can't respond and edit something on
+ * the response, because sometimes you need to do things like that. Outlook doesn't do it like this. Can you do it
+ * like Outlook, please?" So a reply carries the original underneath -- its markup, tables and all -- in the same
+ * editable box a forward uses, under Outlook's own header: From, Sent, To, Cc, Subject.
+ *
+ * THE "> " QUOTING THAT WAS REMOVED IS NOT THIS. That pasted the plain text into the typing box with a "> " on every
+ * line, so a debtor's reply arrived in the composer as two layers of chevrons. This is the original as it was
+ * written, below a rule, and nothing is pasted into the box above.
+ *
+ * The markup comes in ALREADY SANITISED, as forwardQuoteHtml's does -- see the note there.
+ */
+export function replyQuoteHtml(
+  original: {
+    fromName: string | null; fromAddress: string; subject: string | null; occurredAt: string
+    to?: string[]; cc?: string[]
+  },
+  safeHtml: string,
+): string {
+  const who = original.fromName?.trim() || original.fromAddress
+  const when = new Intl.DateTimeFormat('en-ZA', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(original.occurredAt))
+  const list = (xs?: string[]) => (xs ?? []).filter(Boolean).map(escapeHtml).join('; ')
+  return [
+    '<div style="border-top:1px solid #d9dee6;margin-top:16px;padding-top:10px">',
+    '<div style="font-family:Calibri,Arial,sans-serif;font-size:12px;color:#374151;margin-bottom:10px">',
+    `<b>From:</b> ${escapeHtml(who)} &lt;${escapeHtml(original.fromAddress)}&gt;<br>`,
+    `<b>Sent:</b> ${escapeHtml(when)}<br>`,
+    ...(list(original.to) ? [`<b>To:</b> ${list(original.to)}<br>`] : []),
+    ...(list(original.cc) ? [`<b>Cc:</b> ${list(original.cc)}<br>`] : []),
+    `<b>Subject:</b> ${escapeHtml((original.subject ?? '').trim() || '(no subject)')}`,
+    '</div>',
+    safeHtml,
+    '</div>',
+  ].join('')
+}
+
+/**
  * A PLAIN-TEXT ORIGINAL AS MARKUP FOR forwardQuoteHtml (S15), so a forward of a text-only message rides
  * underneath in the same editable box as one written in HTML. Escaped -- it is somebody else's words -- with
  * its lines kept as lines. Where only the stored preview was available it says so, as forwardBody does.

@@ -1,13 +1,93 @@
 # Raptor · Handover 21 — where Raptor stands
 
-> **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top). This file is
-> **Raptor Handover 21**, written by **S22** (the session titled "Rinda Test 1", branch
-> `claude/affectionate-brahmagupta-bvhts3`, 18 Nov), which started from Handover 20. Everything S22 built is on the
-> preview branch `claude/sales-raptor-review-p1pzx2` (fast-forwarded from S22's branch after each change, at Stephan's
-> say-so). The next session is **S23** ("Rinda Test 4"); it starts from Handover 21, writes Handover 22, and its
-> commits start **`Raptor H21: ...`**. (S22's first commit, 88e3b73b, says "Raptor H19" by mistake; it was H20 work.)
+> **Every session, commit, handover, brief and reply says "Raptor · Handover N"** (CLAUDE.md, top).
+> **Raptor Handover 21** was written TWICE, by two sessions both called S22 that ran side by side from Handover 20:
+> **S22a** ("Rinda Test 1", branch `claude/affectionate-brahmagupta-bvhts3`, 18 Nov; its work was fast-forwarded onto
+> the preview branch, followed by "Rinda Test 5"'s receipt-fee change of 23 Nov) and **S22b** (branch
+> `claude/loving-rubin-rbyjsn`, 17-24 Nov: settlements and mail like Outlook). S23 (branch
+> `claude/pensive-clarke-2pmrho`, 24 Nov) merged S22b onto the preview branch; both lists are kept below -- S22b's
+> START HERE first, as it is the later one. The next handover is **Handover 22**; commits start **`Raptor H21: ...`**.
 > **"Handover", not "handoff"** (Stephan, 28 Oct); the file keeps its name `HANDOFF.md` because checks and Ryno's
 > brief open it by that name.
+
+
+## HOW STEPHAN WANTS TO WORK NOW (18 Nov, S22)
+
+*"I don't want to approve all this SQL stuff all the time. So push everything just through ... I don't want to approve
+shit. I just want you to build it."* So: **build, test on staging, commit and push without asking.** Ask only where
+the answer changes money or the law, and then as options with a recommendation (he answers those quickly). The
+approval prompts are the session's permission mode -- he can pick **Auto** in the mode dropdown; a session cannot
+grant itself permissions (the classifier refused it), and the committed `.claude/settings.json` is shared with
+Ryno's sessions, so do not widen it there. **`Main` is the live site: do not push app code to it until production's
+database has been rebuilt (item 1 below)** -- code before database breaks the live site. He knows this and was told.
+
+## START HERE (S23) -- what is open (Raptor · Handover 21, 24 Nov)
+
+1. **PRODUCTION REBUILD, THEN `Main` -- still waiting for the words "go ahead with the production rebuild".** Nothing
+   changed on production in S22. The rebuild and its rehearsal are as Handover 20 item 1 says (below), **but
+   `schema.sql` grew a lot in S22** (three settlement migrations, two engine functions rewritten, the mail work needed
+   none), so: re-take the backup, reload the statements, dry-run, rebuild the allow-list, then the real run. Then the
+   code onto `Main`, the production env vars, the Resend webhook. Also seed on production what S22 seeded on staging
+   as data: `scripts/letters/seed-settlement-answers.mjs` (six letters + six emails) BEFORE the three settlement
+   workflows are created -- the rebuild's replay creates the workflows from `schema.sql`, which looks the templates up
+   by seed_key, so seed first or re-point the nodes after. And ask about copying the firm's own templates/workflows/
+   letterhead (Handover 20 item 3).
+2. **The 20 TB going-live data plan -- waiting on Stephan.** Discussed 17-20 Nov, nothing built. Where it stands:
+   - Case data into Supabase; PDFs in object storage indexed by a Raptor table; 3-2-1 backups.
+   - **POPIA does not require South Africa** (s72 allows offshore with a binding data-processing agreement; the 2024
+     National Data and Cloud Policy binds only government security data). Stephan proposed **tiering** -- live files
+     in the cloud, closed files archived -- and S22 recommended: archive **6 months after an account closes**, keep
+     **7 years after the last entry** (LPC rule 54.9.2; FICA is 5), then destroy (POPIA s14) on an approved list.
+     With the split, staying in SA is cheap: Azure South Africa North (Cool) for live + Azure Archive, about
+     **R1,800-2,500/month** for ~4 TB live + ~16 TB archive, plus offline drives in the safe. Overseas: Backblaze B2 or
+     R2 + Glacier Deep Archive, about R800-1,400/month. Prices partly estimated; get quotes before he commits.
+   - Swordfish is hosted at **Teraco**. Plan: a Swordfish **database backup** for the written data, the PDFs copied
+     off (direct transfer from Teraco and/or drives -- the drives become the offline copy).
+   - **Needed from Stephan:** the Swordfish export/backup and its database type; how the PDFs map to cases (folder
+     names?); how much of the 20 TB is open vs closed accounts; SA or overseas; 6 months or other before archiving.
+   - **To build when he says go:** a documents table with a storage tier, the monthly archive job, a "Get this back"
+     restore, restore on reopen, the 7-year destruction list, and the import tool (test on ~1 000 cases on staging).
+3. **Settlements -- built in S22, on staging; Camille/Rinda should test the whole cycle** (detail in the S22 section
+   below): offer (amount or **discount %**) -> **ticket + high-priority notification to the client's liaison** ->
+   **proposal letter to the client** (frozen figures, pro-rata split, what the client receives) -> client's answer
+   recorded (accepted / **counter offer** / declined) -> **debtor emailed the matching letter, free** -> paid in one
+   payment -> **pro-rata posting** (`v2-settlement`) -> close as settled. While an offer is live the account's other
+   workflows **pause**, and go back if it is declined, withdrawn or lapses. Open questions for Stephan: re-approving a
+   lapsed offer sends no new letter (should it?); a run a dispute already held gets no settlement hold; the RVC0010
+   balance gap (offer R2 500 "instead of R3 217.70" but only R1 833.56 collectable -- why does the account's balance
+   carry R1 384 the engine cannot take?); the proposal letter's wording is S22's draft from his description -- he may
+   send the firm's own to match.
+4. **Mail like Outlook -- built in S22, on staging; Stephan should try it**: the rest of the conversation stacked under
+   an open message; replies carry the original underneath, editable (fill in a client's table), under Outlook's
+   header; signature between the note and the quote; the corrections email's squashed columns fixed. Account-page
+   replies quote the stored TEXT (account emails keep no HTML), so a table there is not a table.
+5. **Swordfish suspense import** -- still waiting on his export file and answers (Handover 20 item 4).
+6. **Known failing tests that predate S22**: `e2e/query-ticket` ("our own reference" -- expects the old RAP- format);
+   `e2e/record-email` ("reply all opens the composer with a Cc line"); `e2e/change-requests` two failures (Handover 20
+   item 6). Fix the tests where the app is right.
+7. **Still open from Handover 20** (not touched by S22): `/api/email/sync` timing out at 300 s; one wording for a
+   payment's status across Trust; item 6 correspondence fees on accounts closed paid up (R-35); and everything Handover
+   20 carried from 19 (Camille testing backdated corrections, S20's open questions, mail folder -> client address
+   auto-filing, R-23/R-24, debtor offers under Disputes, the ideas list).
+
+### What S22 built (each has its notes in the S22 section below)
+
+| Piece | Staging migration(s) / files | Check |
+|---|---|---|
+| Settlement ticket + liaison notification; proposal letter with the engine's figures | `h20_preview_for_settlement`, `h20_settlement_ticket`; `settlementProposalLetter.ts` | `check-settlement-ticket` |
+| Frozen at the offer, pro-rata posting, discount %, debtor told the answer (free), counter offers | `h20_settlement_rounds`; `payment_split` in `allocate_payment` + `preview_allocation`; letters via `seed-settlement-answers.mjs` | `check-settlement-ticket`, `check-letters` |
+| Offer pauses the workflows; declined / withdrawn / lapsed gives them back | `h20_settlement_holds`; `settlement_lapsed_resume` in the morning sweep | `check-settlement-ticket`, `check-workflow-hold-clock` |
+| Mail like Outlook | `ConversationBelow`, `replyQuoteHtml`, `QUOTE_MARK` | `check-outlook-reply`, e2e `mail-conversations` |
+
+Every staging function body was md5-verified against `schema.sql` (comments stripped). Full fast QA green at the end
+of S22: **24 176 checks across 398 files**.
+
+## START HERE (S22) -- what was open when S22 began (Raptor · Handover 20, 17 Nov; superseded by the list above)
+
+---
+
+# The other Handover 21 (S22a, "Rinda Test" sessions)
+
 
 ## Raptor · Handover 21 -- receipt fee and in duplum (23 Nov, session "Rinda Test 5", branch `claude/wizardly-turing-d3kwf6`, NOT yet on the preview branch)
 
@@ -161,6 +241,117 @@ not touch production, `Main` or the live site.
 - **Business -> Income: "Our share of collections"** -- the firm's share of what was collected, month and year.
 - **Fixes:** the hero's photo credit; `schema.sql` had lost the end of `trust_creditors_on_run` (repaired, matches
   staging).
+
+## S22 -- A SETTLEMENT OFFER RAISES A TICKET, AND THE CLIENT GETS A PROPOSAL LETTER (Raptor · Handover 20, 18 Nov; branch `claude/loving-rubin-rbyjsn` from `claude/sales-raptor-review-p1pzx2` at 2b21ff6)
+
+S22 is still running; this is its first piece, written down now so it is not lost. Handover 21 comes at the end.
+
+- **Asked by Stephan** while logging one on Bonnitta Pharmacy (BNP0015, Tebogo Maseko, R500 against R882.11): "It should
+  definitely create a ticket for the client liaison and notify the liaison ... This is a high priority", plus "an
+  automatic calculation" and "a settlement proposal letter for the client": capital outstanding, our fees, what the
+  settlement pays, less commission, and what the client gets.
+- **The ticket** (staging migration `h20_settlement_ticket`, mirrored at the end of schema.sql; bodies md5-verified:
+  `raise_settlement_ticket` 6183bbf6..., `settlement_ticket` a5a5f55c..., `settlement_breakdown` 4d7d3cc7...): a new
+  ticket kind `settlement` on `account_queries` (+ `settlement_id`). A trigger on `account_settlements` raises it when
+  an offer is put up -- owner = the client's liaison (`companies.account_owner_id`), stage liaison, due today -- and
+  notifies the liaison "High priority: a settlement needs <client>'s approval ..." linked to `/queries/<id>`. It
+  **closes itself** when the offer is approved, declined, withdrawn or paid (the answer lives on the Settlement card,
+  with its proof), and the person who put the offer up is told when the client approves or declines. Never charged;
+  not on the Escalate menu; on no client-portal list. Backfilled: **T-1097 (BNP0015)** and **T-1096 (RVC0010)**,
+  both on Stephan. Probed in a rolled-back transaction first (raised, notified, withdrawn, closed).
+- **The figures** (`settlement_breakdown`) are preview_allocation's, read back for the offer -- never a second
+  calculation. Migration `h20_preview_for_settlement` lets `preview_allocation` answer `settlement.approve` as well as
+  `finance.view` (a dry run posts nothing). BNP0015's R500: fees R139.87 (incl. the R57.50 receipt fee), interest
+  R110.13, capital R250.00, commission R62.50 + VAT R9.38, **client receives R178.12**; written off R275.82 capital by
+  the client, R168.34 fees and interest by the firm.
+- **The screen**: the Settlement card shows "If the client accepts" (client receives / we take / written off) to
+  whoever holds `settlement.approve`, and **Send the proposal to the client** opens the account's compose box addressed
+  to `companies.email` (Bonnitta has none -- the liaison types it) with the one-page PDF attached
+  (`src/lib/settlementProposalLetter.ts`). Charged item 1(a) like any correspondence about the account; the client's
+  reply files to the account and is pinned as the acceptance. Notifications tab: a **Settlements** switch.
+- **Found, not fixed -- for Stephan:** RVC0010's offer (R2 500 "instead of R3 217.70") is MORE than the engine can
+  take (R1 833.56 capital + interest; the rest would be the debtor's credit). The card refuses to send that proposal
+  and says why; the gap between the balance the offer was measured from and what the engine can take wants a look.
+- Checks: new `check-settlement-ticket` (37; five breaks each caught, incl. a U+2212 minus the PDF cannot print --
+  found by drawing BNP0015's letter); `check-debtor-tickets` expectation widened (it pinned 'debtor' as the LAST kind);
+  `check-sales-lists` passes with the new switch; e2e settlement 27/0. `e2e/query-ticket` fails one assertion ("our
+  own reference") on the preview branch without this change too -- predates S22.
+- **Round two, same day (migration `h20_settlement_rounds`, mirrored; all 12 function bodies md5-verified against
+  staging, comments stripped).** Stephan's four asks, each choice his (asked with options):
+  1. **Frozen at the offer.** `account_settlements` gains `offered_amount`, `snap_capital/interest/costs`,
+     `discount_pct`; a BEFORE INSERT trigger (`settlement_freeze`) snapshots what can be collected
+     (`settlement_snapshot`, the engine's own reading) and refuses an offer -- or a counter -- at or above it.
+     Nothing is posted: interest still accrues, and a lapsed offer leaves the ledger exactly as if never made.
+     BNP0015 and RVC0010 were frozen as they stood on 18 Nov.
+  2. **Pro rata when paid.** `payment_split` replaces the direct `finance_split` call in BOTH `allocate_payment` and
+     `preview_allocation`: a payment that pays an approved, frozen settlement **in one payment** before its expiry
+     is split pro rata over the snapshot (`settlement_split`; the item 9 fee **inside** the figure, joining our fees
+     before the split); everything else stays 50/50. Stamped `engine_version = 'v2-settlement'`. A settlement paid
+     in pieces goes 50/50 piece by piece (the call script's "one payment, in full"; also "as if never proposed" if
+     it lapses). Proved on BNP0015 in a rolled-back transaction: breakdown = queue preview = posting, **client
+     R198.40** (was R178.12 under 50/50); a R300 part payment posted 50/50.
+  3. **Discount %**: `propose_settlement_discount` works the figure out on the snapshot (BNP0014 10% = R681.47 of
+     R757.19 in the probe); `settlement_quote` shows the propose box what can be collected.
+  4. **The debtor is told the client's answer**: three trigger kinds and one-step workflows (`settlement-accepted`,
+     `-countered`, `-declined`), started by `settlement_ticket` on the answer, each emailing a letter
+     (`letter-settlement-{accepted,countered,declined}-{individual,company}`, built in `build.mjs`, seeded by the new
+     `scripts/letters/seed-settlement-answers.mjs`, md5s match). A different figure at approval IS the counter
+     offer; the debtor accepts it **by paying it**. **Free** (`FREE_TRIGGERS` in step.ts). The card nudges the
+     account's workflows after the answer, so the email goes at once rather than at the morning run.
+  The client proposal now says the figures are **fixed** and drops the "interest runs" caveat, names a discount,
+  and asks accept / different amount / decline. NOT done: re-approving a lapsed offer (status stays approved) sends
+  no new letter; two declines on one account in the same live run window send one letter.
+- Checks round two: `check-settlement-ticket` 62 (engine-path, free-letter and freeze breaks each caught);
+  `check-letters` 18 workflow letters (confirmations told apart from payment letters by name, not prefix);
+  `check-moved-overpayment`, `check-payment-search` markers moved to `payment_split`; `check-workflow-triggers`
+  knows the three kinds. Full fast QA green (24 143); e2e settlement, payments-in, library, workflow-builder,
+  workflow-start all green.
+- **Round three: an offer pauses the workflows, a failed one gives them back** (migration `h20_settlement_holds`,
+  mirrored; `workflow_hold_account`, `settlement_lapsed_resume`, `settlement_ticket` md5-verified). Stephan: "if it's
+  not been accepted or if it's been breached ... it should kind of go back to the previous workflow it was in." A
+  third hold cause, `settlement`: putting an offer up holds every running run (once per run, the promise rule, so
+  repeated offers cannot keep the notices stopped; never the settlement letters; a 129 whose first notice has not
+  gone still sends it). Declined or withdrawn -> `workflow_resume_account(..., 'settlement')` at once; approved ->
+  stays held to the expiry; lapsed unpaid -> `settlement_lapsed_resume`, called by the morning sweep
+  (`api/_lib/workflow/run.ts`) BEFORE `redateResumedRuns`, so paused steps move on rather than fire in a bunch;
+  paid -> the close stops everything. Only settlement holds are released, so a run a dispute stopped stays stopped.
+  Backfilled: RVC0010's Section 129 is held ("A settlement offer is with the client"). Probed rolled back: decline ->
+  129 running + declined letter; a second offer does not re-hold; approve holds to expiry; lapse sweep resumes.
+  Checks: `check-settlement-ticket` 71; `check-promise-rules-s10` / `check-workflow-hold-clock` read the generalised
+  hold. Not done: a run already held by a dispute gets no settlement hold (one open hold per run), so if the dispute
+  is answered while a settlement is live, that run resumes.
+- **Mail like Outlook (same day).** Stephan, replying to a client's corrections table: "If I open an email and I scroll
+  down, I want to see all relevant emails pertaining to that email ... I can't respond and edit something on the
+  response ... Can you do it like Outlook, please?" Built:
+  1. **The conversation under the open message** (`ConversationBelow` / `TrailMessage` in MailPage, always on, not
+     only in conversation mode): every other message of the trail stacked below, newest first, the one just before
+     it opened by itself and the rest opening in place to the whole message (fetched, sanitised, sandboxed frame,
+     pictures held back). Same rule as the list (`useConversationTrail`, extracted from ConversationTrail).
+  2. **A reply carries the original underneath, editable** -- mailbox (`replyQuote`, fetched like a forward) and the
+     account page (the stored text) -- under Outlook's header (`replyQuoteHtml`: From / Sent / To / Cc / Subject), in
+     the box forwards already used. This REVERSES the earlier "the box starts empty" rule on purpose: the removed
+     thing was "> " quoting pasted into the typing box; nothing is pasted there now. A reply needs something typed
+     OR the original edited (filling in the table counts).
+  3. **The signature goes between the note and the quote**, as Outlook does: `QUOTE_MARK` (an HTML comment) in front
+     of the quote, and `composeBody` signs there. Forwards too.
+  4. **The corrections email's table** no longer squeezes "Debtor"/"Field" to a letter a line (nowrap, and "What we
+     need" given a width) -- seen in Stephan's screenshot.
+  Checks: new `check-outlook-reply` (23; signature-placement and pane-placement breaks caught); five older checks
+  moved to the new rule (`check-compose-cc-signature`, `check-mail-drafts`, `check-mail-screen`, `check-sent-mail`,
+  `check-signing-email`); e2e `mail-conversations` +6 (trail stacked below; reply quotes the table, editable, titled
+  Reply). e2e mail 151, compose-send 12, compose-cc-signature 34, forward-attachment 10 green. `e2e/record-email`
+  ("reply all opens the composer with a Cc line") fails the same on the branch before this change -- predates it.
+- **Stephan, 18 Nov: "push everything just through and push to main ... I don't want to approve shit."** Build and
+  push without asking. NOT pushed to `Main`: it is the live site and production's database has not been rebuilt for
+  this code (START HERE item 1), so code first would break it. The prompts themselves are his to switch off (Auto mode).
+- **Permission prompts:** Stephan asked why SQL keeps asking. The fix is his: **Auto** mode in the mode dropdown
+  (cloud sessions ignore bypass). A session may not grant itself permissions (the classifier refused it), and the
+  committed `.claude/settings.json` is shared with Ryno's sessions, so Supabase writes were not allowed there.
+- **Also discussed, nothing built:** going live with ~20 TB of case files (mostly PDFs, ~150 000 cases, +3-4 TB a
+  year). Recommended: case data in Supabase; PDFs in an object store (Cloudflare R2 suggested) indexed by a table in
+  Raptor; 3-2-1 backups (AWS Glacier Deep Archive with object lock + offline drives). Swordfish is hosted at
+  **Teraco**; plan is a Swordfish database backup for the written data and the PDFs copied off (direct transfer and/or
+  drives). Waiting on Stephan: where the files sit, how PDFs map to cases, live vs archive, OCR, retention, accounts.
 
 ## START HERE (S21) -- both sessions' open work, in one list (Raptor · Handover 19, 9 Nov)
 

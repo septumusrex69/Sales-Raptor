@@ -40,7 +40,7 @@ ok('...not offered on the account page (only the portal raises it)', !ESCALATION
 ok('...and on no client list', clientSection('debtor') === null)
 const schema = stripSqlComments(read('supabase/schema.sql'))
 const lastKind = schema.lastIndexOf('add constraint account_queries_kind_check')
-ok('the table accepts it (the last definition of the kind check)', lastKind > 0 && /'debtor'\]\)\)/.test(schema.slice(lastKind, lastKind + 220)))
+ok('the table accepts it (the last definition of the kind check)', lastKind > 0 && /'debtor'(, '\w+')*\]\)\)/.test(schema.slice(lastKind, lastKind + 240)))
 
 /* ---------- the server ---------- */
 const api = read('api/_lib/debtorPortal.ts')
