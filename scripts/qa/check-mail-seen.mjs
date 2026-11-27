@@ -27,9 +27,11 @@ ok('each sync asks the folder which recent messages are \\Seen',
 ok('...and marks only those rows, only where still unread',
   /\.eq\('user_id', userId\)\.eq\('folder', path\)\.is\('read_at', null\)\.in\('uid', /.test(code))
 ok('...never un-reads anything', !/read_at: null\s*\}\)\s*\.eq\('user_id', userId\)/.test(code))
+/* ...and not on a call that stopped at the time budget (S23): the folder is not caught up, so a later call does it. */
 ok('...on an ordinary sync of a received folder, not Sent or a first read',
-  /if \(!isSent && !firstRead && sinceUid\) await catchUpReadFlags\(client, admin, conn\.user_id, path\)/.test(code)
-  && code.indexOf('await catchUpReadFlags(') < code.indexOf('return { logged, maxUid }'))
+  /if \(!more && !isSent && !firstRead && sinceUid\) await catchUpReadFlags\(client, admin, conn\.user_id, path\)/.test(code)
+  && code.indexOf('await catchUpReadFlags(') > -1
+  && code.indexOf('await catchUpReadFlags(') < code.indexOf('return { logged, maxUid, more }'))
 ok('...and a failure is logged, never thrown', /async function catchUpReadFlags[\s\S]*?\} catch \(e\) \{[\s\S]*?console\.log/.test(code))
 const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
 ok('...with an index over the unread rows it updates',

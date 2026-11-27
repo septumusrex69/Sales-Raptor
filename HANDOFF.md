@@ -26,6 +26,18 @@
   database trigger's, so the browser sends no account_number); e2e/record-email (Cc is chips since S21 -- the copied
   person is read off the chip and its X); e2e/change-requests (the "Parked" shelf; and the Big Boss may tick an answer,
   S18/R-26).
+- **Mail sync could not catch up after days away (Stephan, 24 Nov: "I have to refresh like 5 or 6 times").** The
+  watermarks were written once, after every folder; his Sent folder had ~700 new messages, so every sync hit the
+  300 s cap and was killed before the write (logs: INBOX "since 60547" and Sent "since 32782" for hours), and the
+  60 s claim went stale mid-run so refreshes ran a second sync beside it. Now each mark is saved as soon as its
+  folder is done, a call reads for `SYNC_BUDGET_MS` (45 s, inside the claim) and returns `more`, and the mail
+  screen calls again until caught up (max 20 rounds), redrawing the list each round. `last_synced_at` is written
+  only when everything is read. Checks: check-mail-folders +4 (budget and per-folder marks, each break caught),
+  check-mail-seen follows. Not yet seen on the live preview -- deploys with this branch.
+- **A meeting invitation looked accepted when nobody had answered.** The card's buttons read "Accepted / Tentative /
+  Declined" -- the words sent to the organiser -- so the gold "Accepted" read as a state. Stephan's ThriftGen invite
+  had `invite_response` null on every copy: nothing was sent. Buttons now say Accept / Tentative / Decline; only the
+  answer actually given wears the past tense and the tick.
 - **The Management API token is dead:** `api.supabase.com` answers 401 "Invalid access token" through the proxy, so
   `scripts/production-rebuild/q.sh` cannot run. The Supabase connector works (used for everything above). Before the
   rebuild, Stephan saves a fresh token as the network secret for `api.supabase.com` (environment settings -> Network

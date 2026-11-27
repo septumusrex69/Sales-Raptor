@@ -212,7 +212,7 @@ ok('...nor is "Sent Items"', !looksLikeJunk('INBOX.Sent Items'))
  * debtors for correspondence dealt with months ago.
  */
 ok('a first read files the row and stops', /if \(isSent \|\| firstRead\) \{/.test(sync))
-ok('...and the folder loop says which reads are first', /known == null,\s*\n\s*\)/.test(sync))
+ok('...and the folder loop says which reads are first', /known == null,\s*\n\s*deadline,\s*\n\s*\)/.test(sync))
 
 /*
  * ONE NEW FOLDER PER RUN. Reading a folder for the first time fetches and parses every message in
@@ -228,8 +228,26 @@ ok('...and a known folder is never held back by that', /if \(known == null && fi
  * the INBOX, which would then re-read its window on the next run.
  */
 ok('a folder that will not open is skipped, not fatal', /\$\{path\}: skipped --/.test(sync))
-/* And every mark is written in ONE update, or a failure between two writes strands one of them. */
-ok('the watermarks are saved together', /patch\.folder_uids = marks/.test(sync))
+/*
+ * EACH MARK IS SAVED AS SOON AS ITS FOLDER IS DONE (S23 · Raptor H21). It was one write at the very end, and a sync
+ * killed at Vercel's cap before that write kept nothing -- Stephan's inbox sat at the same mark for hours while every
+ * refresh re-fetched the same 700 sent messages. A mark written after its own folder is a true state on its own, so
+ * a failure later strands nothing; and a write that fails is still thrown, not swallowed.
+ */
+const conn = sync.slice(sync.indexOf('export async function syncConnection('))
+ok('each watermark is saved right after its folder',
+  /'INBOX', conn\.last_seen_uid[^\n]*\n\s*await saveMark\(\{ last_seen_uid: inboxResult\.maxUid \}\)/.test(conn)
+  && /if \(junkPath\) await saveMark\(\{ last_seen_uid_junk: junkResult\.maxUid \}\)/.test(conn)
+  && /if \(sentPath\) await saveMark\(\{ last_seen_uid_sent: sentResult\.maxUid \}\)/.test(conn)
+  && /folder_uids: marks/.test(conn))
+ok('...and a failed save is thrown', /if \(error\) throw new Error\(`Failed to save sync watermark/.test(conn))
+/* A call stops reading at the budget, before the next fetch, and says there is more. */
+ok('a sync stops at its time budget before the next fetch, and says so',
+  /if \(Date\.now\(\) > deadline\) \{ more = true; break \}\s*\n\s*const msg = await client\.fetchOne\(/.test(sync)
+  && /export const SYNC_BUDGET_MS = 45_000/.test(sync)
+  && /SYNC_CLAIM_SECONDS = 60/.test(sync))
+ok('...and last_synced_at is only written once everything is read',
+  /more \? \{ folder_uids: marks \} : \{ folder_uids: marks, last_synced_at:/.test(conn))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

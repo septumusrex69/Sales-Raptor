@@ -57,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const result = await syncConnection(admin, conn as EmailConnectionRow)
-    res.status(200).json({ ok: true, logged: result.logged })
+    res.status(200).json({ ok: true, logged: result.logged, more: result.more })
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Sync failed.' })
   } finally {

@@ -1355,7 +1355,9 @@ async function syncMailbox(
    * has since left. Whatever arrives in them AFTER this is ordinary new mail and is treated so.
    */
   firstRead = false,
-): Promise<{ logged: number; maxUid: number }> {
+  /** Stop before fetching another message once this time (ms since epoch) has passed; see SYNC_BUDGET_MS. */
+  deadline = Number.POSITIVE_INFINITY,
+): Promise<{ logged: number; maxUid: number; more: boolean }> {
   const isJunk = kind === 'junk'
   const isSent = kind === 'sent'
   let logged = 0
@@ -1383,7 +1385,11 @@ async function syncMailbox(
     console.log(`[emailSync] ${path}: found ${uids.length} new UID(s) since ${sinceUid ?? '(first sync)'}`)
 
     let maxUid = sinceUid ?? 0
+    let more = false
     for (const uid of uids) {
+      /* OUT OF TIME: stop BEFORE the next fetch, so maxUid is exactly the last message done and the next sync
+         starts at the one after it. The uids come back ascending, so nothing in between is skipped. */
+      if (Date.now() > deadline) { more = true; break }
       const msg = await client.fetchOne(String(uid), { source: true, flags: true }, { uid: true })
       if (!msg || !msg.source) {
         console.log(`[emailSync] ${path} UID ${uid}: fetchOne returned no message/source, skipped`)
@@ -1864,9 +1870,9 @@ async function syncMailbox(
      * Not on a folder's first read (its rows just arrived with the flag) and not for Sent (it
      * arrives read). Never fatal: a flag that could not be read is a bold row, not a failed sync.
      */
-    if (!isSent && !firstRead && sinceUid) await catchUpReadFlags(client, admin, conn.user_id, path)
+    if (!more && !isSent && !firstRead && sinceUid) await catchUpReadFlags(client, admin, conn.user_id, path)
 
-    return { logged, maxUid }
+    return { logged, maxUid, more }
   } finally {
     lock.release()
   }
@@ -1880,10 +1886,29 @@ async function syncMailbox(
  * strictly additive; a connection whose server has no such folder behaves
  * exactly as before.
  */
+/**
+ * HOW LONG ONE SYNC CALL MAY READ BEFORE IT SAVES AND HANDS BACK (S23 · Raptor H21, 24 Nov).
+ *
+ * Stephan, back after three or four days: mail "coming in really slow. I have to refresh like 5 or 6 times. Then more
+ * and more comes every time." The logs showed why. The watermarks were written ONCE, after every folder had been read,
+ * and his Sent folder had ~700 new messages: every sync read the inbox, ran into Vercel's 300-second cap somewhere in
+ * Sent, and was killed before the write -- so the next sync started from the same marks (INBOX "since 60547", Sent
+ * "since 32782", for hours) and fetched the same messages again. Only the dedup upsert made each run get a little
+ * further. Worse, the claim (SYNC_CLAIM_SECONDS, 60) went stale while the doomed run was still going, so each refresh
+ * started a SECOND sync of the same mailbox beside it.
+ *
+ * So: each mailbox's mark is saved the moment that mailbox is done, a call stops reading after this budget -- well
+ * inside the claim, so two never overlap -- and it says `more` so the mail screen asks again at once. Ten minutes of
+ * backlog is now a dozen short calls that each keep what they read, not five long ones that keep nothing.
+ */
+export const SYNC_BUDGET_MS = 45_000
+
 export async function syncConnection(
   admin: SupabaseClient,
   conn: EmailConnectionRow,
-): Promise<{ logged: number }> {
+  budgetMs = SYNC_BUDGET_MS,
+): Promise<{ logged: number; more: boolean }> {
+  const deadline = Date.now() + budgetMs
   const password = decrypt(conn.encrypted_password)
   const client = new ImapFlow({
     host: conn.imap_host,
@@ -1893,19 +1918,19 @@ export async function syncConnection(
     logger: false,
   })
 
+  /* Each mark written as soon as its folder is done, and checked: a swallowed error would leave a watermark stuck, so
+     every later sync re-fetches the same messages (caught downstream only by the dedup upsert). */
+  async function saveMark(patch: Record<string, unknown>) {
+    const { error } = await admin.from('email_connections').update(patch).eq('user_id', conn.user_id)
+    if (error) throw new Error(`Failed to save sync watermark: ${error.message}`)
+  }
+
   await client.connect()
   try {
-    /*
-     * THE INBOX'S FIRST READ IS HISTORY, like every other folder's.
-     *
-     * `firstRead` has been honoured for Archive and every custom folder since it was written --
-     * "a folder being read for the first time is history, not post" -- and the INBOX, the one
-     * folder that matters, was never given it. So a new mailbox poured its whole recent inbox into
-     * Needs matching: 127 for Camille, 60 for Vusi, and climbing as the sync worked through the
-     * rest. The firm asked for exactly this rule by hand, not knowing it was already written down.
-     */
     const inboxResult = await syncMailbox(
-      client, admin, conn, 'INBOX', conn.last_seen_uid, 'inbox', conn.last_seen_uid == null)
+      client, admin, conn, 'INBOX', conn.last_seen_uid, 'inbox', conn.last_seen_uid == null, deadline)
+    await saveMark({ last_seen_uid: inboxResult.maxUid })
+    let more = inboxResult.more
 
     const mailboxes = await client.list()
     const junkPath = findFolder(mailboxes, '\\Junk', ['junk', 'spam', 'junk email', 'bulk mail', 'inbox.junk', 'inbox.spam', 'inbox/junk', 'inbox/spam'])
@@ -1913,29 +1938,23 @@ export async function syncConnection(
     console.log(
       `[emailSync] mailboxes: ${mailboxes.map((m) => `${m.path}${m.specialUse ? ` (${m.specialUse})` : ''}`).join(', ')} -- junk: ${junkPath ?? '(none)'}, sent: ${sentPath ?? '(none)'}`,
     )
-    const junkResult = junkPath ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, 'junk') : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0 }
-    /*
-     * The Sent folder, so an agent can see what they sent — including mail sent from Outlook or a
-     * phone, which Raptor never saw. Messages Raptor sends are appended to this same folder by
-     * api/email/send.ts, so they come back through here rather than needing a second path.
-     */
-    const sentResult = sentPath ? await syncMailbox(client, admin, conn, sentPath, conn.last_seen_uid_sent, 'sent') : { logged: 0, maxUid: conn.last_seen_uid_sent ?? 0 }
+    const junkResult = junkPath
+      ? await syncMailbox(client, admin, conn, junkPath, conn.last_seen_uid_junk, 'junk', false, deadline)
+      : { logged: 0, maxUid: conn.last_seen_uid_junk ?? 0, more: false }
+    if (junkPath) await saveMark({ last_seen_uid_junk: junkResult.maxUid })
+    more ||= junkResult.more
+    const sentResult = sentPath
+      ? await syncMailbox(client, admin, conn, sentPath, conn.last_seen_uid_sent, 'sent', false, deadline)
+      : { logged: 0, maxUid: conn.last_seen_uid_sent ?? 0, more: false }
+    if (sentPath) await saveMark({ last_seen_uid_sent: sentResult.maxUid })
+    more ||= sentResult.more
 
-    /*
-     * AND EVERYTHING ELSE ON THE SERVER. See otherFolders: this mailbox has eighteen folders and
-     * the sync read three, so anything a rule filed into Archive, Blocked or "Spam Emails 2" was
-     * invisible here with nothing saying so.
-     *
-     * ONE NEW FOLDER PER RUN. Reading a folder for the first time means fetching and parsing
-     * every message in its window, and fifteen of those in one serverless request is a timeout —
-     * which leaves no watermark saved and does the whole thing again on the next run, for ever.
-     * Folders already known cost one SEARCH each and almost always return nothing. So the backlog
-     * is worked off a folder at a time over successive syncs, and nothing is ever half-read.
-     */
     const marks: Record<string, number> = { ...(conn.folder_uids ?? {}) }
     let firstReadsLeft = 1
     let otherLogged = 0
     for (const path of otherFolders(mailboxes.map((m) => m.path), [junkPath, sentPath])) {
+      /* Out of time: the folders not reached keep their marks and are read on the next call. */
+      if (Date.now() > deadline) { more = true; break }
       const known = marks[path]
       if (known == null && firstReadsLeft <= 0) continue
       if (known == null) firstReadsLeft -= 1
@@ -1944,32 +1963,21 @@ export async function syncConnection(
           client, admin, conn, path, known ?? null,
           looksLikeJunk(path) ? 'junk' : 'inbox',
           known == null,
+          deadline,
         )
         marks[path] = res.maxUid
         otherLogged += res.logged
+        more ||= res.more
       } catch (err) {
-        /*
-         * One unreadable folder must not cost the run. A server can refuse a SELECT on a folder
-         * that exists -- a shared mailbox nobody has rights to, a name with a character ImapFlow
-         * and the server disagree about -- and throwing here would lose the watermarks of every
-         * folder already read this run, including the INBOX.
-         */
         console.error(`[emailSync] ${path}: skipped -- ${err instanceof Error ? err.message : String(err)}`)
       }
     }
-    // Checked deliberately: a swallowed error here would leave a watermark stuck, so a
-    // future sync silently reprocesses the same already-logged messages from scratch (only
-    // caught downstream by the dedup upsert above, at the cost of a full re-fetch every time).
-    const patch: Record<string, unknown> = { last_seen_uid: inboxResult.maxUid, last_synced_at: new Date().toISOString() }
-    if (junkPath) patch.last_seen_uid_junk = junkResult.maxUid
-    if (sentPath) patch.last_seen_uid_sent = sentResult.maxUid
-    /* Written with the other watermarks in ONE update: two writes could leave a folder marked
-       as read while the INBOX's own mark was lost to a failure between them. */
-    patch.folder_uids = marks
-    const { error: watermarkError } = await admin.from('email_connections').update(patch).eq('user_id', conn.user_id)
-    if (watermarkError) throw new Error(`Failed to save sync watermark: ${watermarkError.message}`)
+    /* last_synced_at only once everything is read: the sweep skips a mailbox it believes is fresh, and one that
+       stopped short is not. */
+    await saveMark(more ? { folder_uids: marks } : { folder_uids: marks, last_synced_at: new Date().toISOString() })
+    if (more) console.log('[emailSync] stopped at the time budget; marks saved, more to read')
 
-    return { logged: inboxResult.logged + junkResult.logged + sentResult.logged + otherLogged }
+    return { logged: inboxResult.logged + junkResult.logged + sentResult.logged + otherLogged, more }
   } finally {
     await client.logout().catch(() => {})
   }

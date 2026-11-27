@@ -826,8 +826,20 @@ export function MailPage() {
     if (!token) return
     setSyncing(true)
     try {
-      await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
-      setCheckedAt(new Date().toISOString())
+      /*
+       * UNTIL IT IS CAUGHT UP, NOT ONCE (S23 · Raptor H21). A sync call now reads for SYNC_BUDGET_MS, keeps what it
+       * read and says `more` -- Stephan, back after days away, had to press refresh "5 or 6 times" because one long
+       * call was killed before it saved anything. So the screen asks again by itself and shows each round's mail as
+       * it lands. Capped, so a mailbox that somehow never finishes cannot keep a tab pulling for ever; the sweep
+       * carries on from the saved marks either way.
+       */
+      for (let round = 0; round < 20; round += 1) {
+        const res = await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+        const body = (await res.json().catch(() => ({}))) as { more?: boolean }
+        setCheckedAt(new Date().toISOString())
+        if (!res.ok || !body.more) break
+        await load(0)
+      }
     } catch {
       // Offline, or no mailbox connected. The list still shows what was already synced.
     } finally {
@@ -3558,6 +3570,9 @@ function RecipientLines({ mail, mine }: {
   )
 }
 
+/** What a button invites you to do; RESPONSE_WORD is what was done, and what the organiser is told. */
+const BUTTON_WORD: Record<InviteResponse, string> = { accepted: 'Accept', tentative: 'Tentative', declined: 'Decline' }
+
 function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
   ics?: string
   events: CalendarEvent[]
@@ -3659,8 +3674,11 @@ function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
                     ? 'border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}>
-              {r === 'accepted' && <Check size={13} />}
-              {RESPONSE_WORD[r]}
+              {answered === r && <Check size={13} />}
+              {/* A VERB UNTIL IT IS PRESSED (Stephan, 24 Nov: "I've not accepted this meeting. Tell me why it's been
+                  accepted"). The button read "Accepted" -- the word the organiser is sent -- so an invitation nobody had
+                  answered looked answered. Only the answer actually given wears the past tense and the tick. */}
+              {answered === r ? RESPONSE_WORD[r] : BUTTON_WORD[r]}
             </button>
           ))}
           <span className="text-[11px] text-slate-500">
