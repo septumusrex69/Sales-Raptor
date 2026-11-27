@@ -82,7 +82,9 @@ async function openPromiseForm(browser) {
     [(u) => u.includes('/rest/v1/message_templates'), () => ({ body: TEMPLATES })],
     [(u) => u.includes('/rest/v1/letterheads'), () => ({ body: [] })],
   ]
-  const { context, page } = await signedInPage(browser, PROFILE, handlers, [])
+  /* A FIXED DAY BEFORE THE OFFERS' FIRST DATES (5 Oct 2026). Read off the real clock, this file went stale the day
+     5 Oct passed: since S23 a due date before Raptor's today is refused and draws no simulation, which is right. */
+  const { context, page } = await signedInPage(browser, PROFILE, handlers, [], { now: '2026-09-15T09:00:00+02:00' })
   for (let i = 0; i < 60; i += 1) {
     try { await page.goto(`http://localhost:${PORT}/accounts/${ACCOUNT.id}`, { timeout: 2000 }); break }
     catch { await new Promise((r) => setTimeout(r, 500)) }
@@ -126,6 +128,29 @@ try {
     /* Case-insensitively: the heading is drawn uppercase by CSS, so innerText hands back
        "IF THEY PAY THIS" and an exact match would pass here while failing below. */
     t.ok('the calculator draws nothing before an offer is typed', !/If they pay this/i.test(body))
+    await context.close()
+  }
+
+  /* ---------- a date before Raptor's today (Stephan, 27 Nov: "I tried to make a PTP. It didn't want me to.") ---------- */
+  {
+    const { context, page } = await openPromiseForm(browser)
+    await page.locator('form select').first().selectOption('once_off')
+    await page.waitForTimeout(150)
+    await page.locator('form input[inputmode="decimal"]').first().fill('900')
+    const date = page.locator('form input[type="date"]').first()
+    /* The iPad's picker opens on the device's date, which on staging is not Raptor's -- so the box starts on Raptor's. */
+    await date.focus()
+    t.check("tapping the empty date box starts it on Raptor's today", await date.inputValue(), '2026-09-15')
+    await date.fill('2026-09-01')
+    await page.waitForTimeout(400)
+    t.ok('a past date is said in words, with the day it may start', /already passed\. Today is .*15.*Sep.*2026/i
+      .test(await page.getByTestId('promise-date-past').innerText().catch(() => '')))
+    t.ok('...the simulation is not drawn for it', !/If they pay this/i.test(await page.locator('body').innerText()))
+    t.ok('...and Record promise is held', await page.getByRole('button', { name: /^Record promise$/ }).isDisabled())
+    await date.fill('2026-09-20')
+    await page.waitForTimeout(400)
+    t.check('a date from today on clears it', await page.getByTestId('promise-date-past').count(), 0)
+    t.ok('...and the simulation comes back', /If they pay this/i.test(await page.locator('body').innerText()))
     await context.close()
   }
 

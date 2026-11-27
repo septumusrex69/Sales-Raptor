@@ -3613,7 +3613,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const value = Number(amount)
-    if (!arrangement || !(value > 0) || !dueOn || problem) return
+    if (!arrangement || !(value > 0) || !dueOn || pastDate || problem) return
     let message: string | null = null
     let issued: string | null = null
     const ok = await run(async () => {
@@ -3662,6 +3662,15 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
     ? promiseProblem(arrangement, Number(amount), balance, settlement)
     : null
   const over = arrangement === 'once_off' && settlement !== undefined && Number(amount) > settlement
+  /*
+   * A DATE BEFORE RAPTOR'S TODAY, SAID IN WORDS (S23 · Raptor H21). Stephan, 27 Nov, on staging at 12 Mar 2027: "I tried
+   * to make a PTP. It didn't want me to." The iPad's picker opens on the DEVICE's date (Nov 2026), the box's `min` is
+   * Raptor's clock, so every date near "now" was refused -- by Safari's bubble on Submit, saying only "must be greater
+   * than or equal to 2027-03-12" -- while the simulation below happily drew a schedule for the refused date. The box now
+   * starts on Raptor's today when tapped, and a past date is said here and holds both the simulation and the button.
+   */
+  const today = TODAY()
+  const pastDate = dueOn !== '' && dueOn < today
 
   return (
     <Card>
@@ -3744,9 +3753,17 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               )}
               <label className="block text-[11px] text-slate-500">
                 {arrangement === 'once_off' ? 'Due on' : 'First instalment due on'}
-                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY()}
-                  className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
+                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={today}
+                  onFocus={() => { if (!dueOn) setDueOn(today) }}
+                  aria-invalid={pastDate || undefined}
+                  className={`w-full text-sm rounded-lg border px-2 py-1.5 mt-0.5 ${
+                    pastDate ? 'border-negative-100 bg-negative-50' : 'border-slate-200'}`} />
               </label>
+              {pastDate && (
+                <p className="text-[11px] text-negative-700 leading-snug" data-testid="promise-date-past">
+                  That date has already passed. Today is {formatDate(today)} on Raptor's clock — pick that day or later.
+                </p>
+              )}
               {arrangement !== 'once_off' && dueOn && (
                 // Said back before it is saved: "monthly on the 31st" behaves differently in
                 // February, and a person should see which rule they have picked rather than
@@ -3777,7 +3794,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
             <RepaymentCalculator
               account={position}
               amount={Number(amount)}
-              schedule={arrangement && dueOn
+              schedule={arrangement && dueOn && !pastDate
                 ? {
                   arrangement,
                   dueOn,
@@ -3829,7 +3846,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               </span>
             </label>
           )}
-          <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || !!problem}
+          <button type="submit" disabled={busy || !arrangement || !(Number(amount) > 0) || !dueOn || pastDate || !!problem}
             className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
             {busy ? 'Saving...' : section129 && send129 ? 'Send the Section 129 and record the promise' : 'Record promise'}
           </button>

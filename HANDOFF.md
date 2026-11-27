@@ -42,6 +42,11 @@
   excess-credit (both time out waiting for a locator), leave, payments-out, people (date-dependent, known since
   Handover 19), upload-a-batch, debtor-portal (needs `--import ./scripts/qa/tsresolve.mjs`, known since R-30). Not
   looked into yet -- check each against the preview branch before blaming a change.
+- **A promise to pay could not be recorded on staging (Stephan, 27 Nov, TMS on 12 Mar 2027: "It didn't want me to").**
+  The due-date box's `min` is Raptor's clock, the iPad's picker opens on the device's date (Nov 2026), so every date
+  near "now" was refused by Safari's bubble while the simulation drew a schedule for it. The box now starts on Raptor's
+  today when tapped; a past date is said under it and holds the simulation and Record promise. e2e repayment-calculator
+  +6 (seen failing without the change) and pinned to 15 Sep 2026 -- it had gone stale when 5 Oct passed.
 - **The Management API token is dead:** `api.supabase.com` answers 401 "Invalid access token" through the proxy, so
   `scripts/production-rebuild/q.sh` cannot run. The Supabase connector works (used for everything above). Before the
   rebuild, Stephan saves a fresh token as the network secret for `api.supabase.com` (environment settings -> Network
