@@ -284,7 +284,20 @@ ok('a provider refusal fails it instead', /state: 'failed'/.test(runner))
  * AND ONE BAD ROW DOES NOT STOP THE MORNING. Two hundred accounts are worked in one pass; an
  * unreadable one must not cost the other hundred and ninety-nine their notices.
  */
-ok('one step throwing does not stop the run', /for \(const step of steps\)[\s\S]{0,200}?try \{/.test(runner))
+ok('one step throwing does not stop the run',
+  /const decide = async \(step: DueStep\) => \{[\s\S]{0,200}?try \{[\s\S]{0,900}?\} catch \(e\) \{/.test(runner))
+/*
+ * A CLOCK JUMP WORKS ACCOUNTS SIDE BY SIDE; A REAL MORNING STILL GOES ONE STEP AT A TIME (Raptor H21, 24 Nov: "the
+ * clock move is taking long"). Nothing is sent in a jump, so accounts are decided several at once -- but the steps of
+ * ONE account stay in order, because that order is the email before the SMS that refers to it. Seen failing with the
+ * per-account loop replaced by Promise.all over every step.
+ */
+ok('a jump decides accounts in parallel, grouped by account',
+  /if \(skipSends\) \{[\s\S]{0,400}?step\.workflow_runs\.account_id[\s\S]{0,600}?Promise\.all\(Array\.from\(\{ length: Math\.min\(JUMP_ACCOUNTS/.test(runner))
+ok('...each account\'s own steps strictly one after another',
+  /for \(const step of next\) await decide\(step\)/.test(runner))
+ok('...and a real morning, which sends, keeps the single line',
+  /\} else \{\s*for \(const step of steps\) await decide\(step\)\s*\}/.test(runner))
 
 /* ------------------------------------------------ the firm's own details */
 
