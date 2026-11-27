@@ -3699,7 +3699,11 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
       )}
 
       {open && !closed && (
-        <form onSubmit={submit} className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
+        /* noValidate: SAFARI'S OWN BUBBLE OUTLIVES THE FORM (Stephan, 27 Nov, iPad: "It's on every page"). It is drawn by
+           the browser over the page, not in it, so after a refused date it stayed on screen across every page the app
+           moved to without a reload. Every field is checked here already (pastDate, problem, the disabled button), and
+           said in words under the field. */
+        <form onSubmit={submit} noValidate className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
           {/*
             What kind of arrangement, before anything else. Choosing "once-off settlement" fills
             the amount in with what it actually takes to close the account today -- the balance
