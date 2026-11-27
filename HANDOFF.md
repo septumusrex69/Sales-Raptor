@@ -38,6 +38,10 @@
   Declined" -- the words sent to the organiser -- so the gold "Accepted" read as a state. Stephan's ThriftGen invite
   had `invite_response` null on every copy: nothing was sent. Buttons now say Accept / Tentative / Decline; only the
   answer actually given wears the past tense and the tick.
+- **Full `npm run qa` (with the browser), 24 Nov: 7 of 504 files fail**, none in mail/settlements: e2e bank-line-allocation,
+  excess-credit (both time out waiting for a locator), leave, payments-out, people (date-dependent, known since
+  Handover 19), upload-a-batch, debtor-portal (needs `--import ./scripts/qa/tsresolve.mjs`, known since R-30). Not
+  looked into yet -- check each against the preview branch before blaming a change.
 - **The Management API token is dead:** `api.supabase.com` answers 401 "Invalid access token" through the proxy, so
   `scripts/production-rebuild/q.sh` cannot run. The Supabase connector works (used for everything above). Before the
   rebuild, Stephan saves a fresh token as the network secret for `api.supabase.com` (environment settings -> Network
